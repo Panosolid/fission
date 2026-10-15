@@ -132,3 +132,34 @@ pub fn hand_half_cylinder(r: f64, h: f64) -> Body {
     b.shells.push(Shell { faces: vec![0, 1, 2, 3] });
     b
 }
+
+/// Tube (a cylinder with a coaxial round hole) from z = 0 to `h`, radii
+/// `r_in` < `r_out`. The inner circles start `twist` radians round from the
+/// outer ones, so their mesh points don't line up. Edges: 0 outer bottom,
+/// 1 outer top, 2 inner bottom, 3 inner top.
+pub fn hand_tube(r_in: f64, r_out: f64, h: f64, twist: f64) -> Body {
+    let mut b = Body::default();
+    let top = DVec3::new(0.0, 0.0, h);
+    let x_in = DVec3::new(twist.cos(), twist.sin(), 0.0);
+    let ring = |center, x_dir, radius| Curve::Circle { center, axis: DVec3::Z, x_dir, radius };
+    let vo0 = b.add_vertex(DVec3::X * r_out);
+    let vo1 = b.add_vertex(top + DVec3::X * r_out);
+    let vi0 = b.add_vertex(x_in * r_in);
+    let vi1 = b.add_vertex(top + x_in * r_in);
+    let ob = b.add_edge(ring(DVec3::ZERO, DVec3::X, r_out), vo0, vo0, 0.0, TAU);
+    let ot = b.add_edge(ring(top, DVec3::X, r_out), vo1, vo1, 0.0, TAU);
+    let ib = b.add_edge(ring(DVec3::ZERO, x_in, r_in), vi0, vi0, 0.0, TAU);
+    let it = b.add_edge(ring(top, x_in, r_in), vi1, vi1, 0.0, TAU);
+    let fwd = |edge| Loop { coedges: vec![Coedge { edge, reversed: false }] };
+    let rev = |edge| Loop { coedges: vec![Coedge { edge, reversed: true }] };
+    // Seen from below, the outer circle runs clockwise-from-above (reversed)
+    // and the hole the other way; from above, the opposite.
+    b.add_face(Surface::Plane { origin: DVec3::ZERO, normal: -DVec3::Z, x_dir: DVec3::X }, true, vec![rev(ob), fwd(ib)]);
+    b.add_face(Surface::Plane { origin: top, normal: DVec3::Z, x_dir: DVec3::X }, true, vec![fwd(ot), rev(it)]);
+    let wall = |x_dir, radius| Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir, radius };
+    b.add_face(wall(DVec3::X, r_out), true, vec![fwd(ob), rev(ot)]);
+    // The bore faces the axis: sense false, loops the other way round.
+    b.add_face(wall(x_in, r_in), false, vec![rev(ib), fwd(it)]);
+    b.shells.push(Shell { faces: vec![0, 1, 2, 3] });
+    b
+}

@@ -8,7 +8,7 @@
 
 use super::{check_length, finish, transform::check_in_model_space, KernelError};
 use crate::geom::{unit, Surface};
-use crate::tolerance::{orient2d, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
+use crate::tolerance::{side, segments_touch, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use crate::topology::{Body, Coedge, Loop, Shell};
 use glam::{DVec2, DVec3};
 
@@ -149,23 +149,6 @@ pub(crate) fn check_profile(profile: &Profile) -> Result<Vec<Vec<DVec2>>, Kernel
         l
     };
     Ok(std::iter::once(oriented(&profile.outer, true)).chain(profile.holes.iter().map(|h| oriented(h, false))).collect())
-}
-
-/// Sign of orient2d: 1, −1 or 0, exact.
-fn side(a: DVec2, b: DVec2, c: DVec2) -> i8 {
-    let o = orient2d(a, b, c);
-    (o > 0.0) as i8 - (o < 0.0) as i8
-}
-
-/// Whether closed segments ab and cd share any point (exact).
-fn segments_touch((a, b): (DVec2, DVec2), (c, d): (DVec2, DVec2)) -> bool {
-    let (o1, o2, o3, o4) = (side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b));
-    if o1 * o2 < 0 && o3 * o4 < 0 {
-        return true;
-    }
-    // Collinear point on the other segment: exact box test.
-    let on = |p: DVec2, q: DVec2, r: DVec2| r.cmpge(p.min(q)).all() && r.cmple(p.max(q)).all();
-    (o1 == 0 && on(a, b, c)) || (o2 == 0 && on(a, b, d)) || (o3 == 0 && on(c, d, a)) || (o4 == 0 && on(c, d, b))
 }
 
 fn point_segment_distance(p: DVec2, a: DVec2, b: DVec2) -> f64 {

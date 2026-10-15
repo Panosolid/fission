@@ -123,6 +123,23 @@ pub fn orient2d(a: DVec2, b: DVec2, c: DVec2) -> f64 {
     robust::orient2d(c2(a), c2(b), c2(c))
 }
 
+/// Sign of orient2d: 1, −1 or 0, exact.
+pub fn side(a: DVec2, b: DVec2, c: DVec2) -> i8 {
+    let o = orient2d(a, b, c);
+    (o > 0.0) as i8 - (o < 0.0) as i8
+}
+
+/// Whether closed segments ab and cd share any point (exact).
+pub fn segments_touch((a, b): (DVec2, DVec2), (c, d): (DVec2, DVec2)) -> bool {
+    let (o1, o2, o3, o4) = (side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b));
+    if o1 * o2 < 0 && o3 * o4 < 0 {
+        return true;
+    }
+    // Collinear point on the other segment: exact box test.
+    let on = |p: DVec2, q: DVec2, r: DVec2| r.cmpge(p.min(q)).all() && r.cmple(p.max(q)).all();
+    (o1 == 0 && on(a, b, c)) || (o2 == 0 && on(a, b, d)) || (o3 == 0 && on(c, d, a)) || (o4 == 0 && on(c, d, b))
+}
+
 /// Positive if d is below the plane through a, b, c (counter-clockwise seen
 /// from above), negative if above, exactly 0 if coplanar.
 pub fn orient3d(a: DVec3, b: DVec3, c: DVec3, d: DVec3) -> f64 {
