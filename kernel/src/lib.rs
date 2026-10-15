@@ -19,7 +19,7 @@ pub mod validate;
 pub(crate) mod fixtures;
 
 use display::DisplayMesh;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tessellate::{tessellate, TessOptions};
 use topology::Body;
 use wasm_bindgen::prelude::*;
@@ -70,35 +70,46 @@ pub fn make_box(width: f64, depth: f64, height: f64) -> Result<JsValue, JsError>
     to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
 }
 
-/// A profile from flat arrays, the way they cross from JavaScript: `outer`
-/// is [x0, y0, x1, y1, …]; `holes` holds every hole's corners flattened the
-/// same way, one after another, and `hole_corners` says how many each has.
-pub fn profile_from_flat(outer: &[f64], hole_corners: &[u32], holes: &[f64]) -> Result<ops::extrude::Profile, String> {
-    let pairs = |v: &[f64]| v.chunks_exact(2).map(|p| glam::DVec2::new(p[0], p[1])).collect::<Vec<_>>();
-    if !outer.len().is_multiple_of(2) || !holes.len().is_multiple_of(2) {
-        return Err("profile coordinates must come in x, y pairs".into());
-    }
-    let needed: u64 = hole_corners.iter().map(|&n| n as u64).sum();
-    if needed * 2 != holes.len() as u64 {
-        return Err(format!("hole corner counts add up to {needed}, but {} corners were given", holes.len() / 2));
-    }
-    let corners = pairs(holes);
-    let mut start = 0;
-    let holes = hole_corners
-        .iter()
-        .map(|&n| {
-            let hole = corners[start..start + n as usize].to_vec();
-            start += n as usize;
-            hole
-        })
-        .collect();
-    Ok(ops::extrude::Profile { outer: pairs(outer), holes })
+/// One loop of a profile as the app sends it: corners as flat
+/// [x0, y0, x1, y1, …] with one bulge per corner (or none: all straight),
+/// or a circle. In JavaScript: `{ path: { corners, bulges } }` or
+/// `{ circle: { center: [x, y], radius } }`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BoundaryIn {
+    Path { corners: Vec<f64>, bulges: Vec<f64> },
+    Circle { center: [f64; 2], radius: f64 },
 }
 
-/// Extrudes a polygon profile (see `profile_from_flat`) along +Z.
+/// A profile as the app sends it: `{ outer, holes: [...] }`.
+#[derive(Debug, Deserialize)]
+pub struct ProfileIn {
+    pub outer: BoundaryIn,
+    pub holes: Vec<BoundaryIn>,
+}
+
+/// The kernel's profile from the app's form; refuses coordinates that don't
+/// come in pairs. Everything else is checked by the extrude itself.
+pub fn profile_from_input(p: ProfileIn) -> Result<ops::extrude::Profile, String> {
+    use ops::extrude::Boundary;
+    let convert = |b: BoundaryIn| match b {
+        BoundaryIn::Path { corners, bulges } => {
+            if !corners.len().is_multiple_of(2) {
+                return Err("profile coordinates must come in x, y pairs".to_string());
+            }
+            let corners = corners.chunks_exact(2).map(|p| glam::DVec2::new(p[0], p[1])).collect();
+            Ok(Boundary::Path { corners, bulges })
+        }
+        BoundaryIn::Circle { center, radius } => Ok(Boundary::Circle { center: center.into(), radius }),
+    };
+    Ok(ops::extrude::Profile { outer: convert(p.outer)?, holes: p.holes.into_iter().map(convert).collect::<Result<_, _>>()? })
+}
+
+/// Extrudes a profile (see `ProfileIn`) along +Z by `distance`.
 #[wasm_bindgen]
-pub fn make_extrude(outer: Vec<f64>, hole_corners: Vec<u32>, holes: Vec<f64>, distance: f64) -> Result<JsValue, JsError> {
-    let profile = profile_from_flat(&outer, &hole_corners, &holes).map_err(|e| JsError::new(&e))?;
+pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsError> {
+    let input: ProfileIn = serde_wasm_bindgen::from_value(profile).map_err(|e| JsError::new(&format!("bad profile: {e}")))?;
+    let profile = profile_from_input(input).map_err(|e| JsError::new(&e))?;
     let body = ops::extrude::extrude(&profile, distance).map_err(|e| JsError::new(&e.to_string()))?;
     to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
 }
@@ -139,28 +150,41 @@ mod tests {
         // area = 10·10 − 7·7 = 51, so V = 51·2 = 102; the perimeter equals
         // the bounding square's, 40, so S = 2·51 + 40·2 = 182. Six corners:
         // 12 vertices, 6 + 6 + 6 = 18 edges, 6 sides + 2 caps = 8 faces.
-        let outer = [0.0, 0.0, 10.0, 0.0, 10.0, 3.0, 3.0, 3.0, 3.0, 10.0, 0.0, 10.0];
-        let profile = profile_from_flat(&outer, &[], &[]).unwrap();
+        let outer = vec![0.0, 0.0, 10.0, 0.0, 10.0, 3.0, 3.0, 3.0, 3.0, 10.0, 0.0, 10.0];
+        let profile = profile_from_input(ProfileIn { outer: BoundaryIn::Path { corners: outer, bulges: vec![] }, holes: vec![] }).unwrap();
         let v = view_body(&ops::extrude::extrude(&profile, 2.0).unwrap()).unwrap();
         assert!(rel_eq(v.volume, 102.0, FP_REL) && rel_eq(v.area, 182.0, FP_REL), "{} {}", v.volume, v.area);
         assert_eq!((v.vertices, v.edges, v.faces), (12, 18, 8));
     }
 
     #[test]
-    fn flat_profiles_are_split_into_holes() {
-        // Two holes of 3 and 4 corners: corners 0–2 and 3–6.
-        let holes: Vec<f64> = (0..14).map(f64::from).collect();
-        let p = profile_from_flat(&[0.0; 6], &[3, 4], &holes).unwrap();
-        assert_eq!(p.holes.len(), 2);
-        assert_eq!(p.holes[0], vec![glam::DVec2::new(0.0, 1.0), glam::DVec2::new(2.0, 3.0), glam::DVec2::new(4.0, 5.0)]);
-        assert_eq!(p.holes[1][3], glam::DVec2::new(12.0, 13.0));
+    fn app_profiles_are_split_into_corners() {
+        // (Was flat_profiles_are_split_into_holes, for the old flat-array
+        // form.) Corners [0..6) pair up as (0,1) (2,3) (4,5); a hole of 4
+        // corners [6..14) gives (12,13) last; a circle passes through.
+        let path = |from: i32, to: i32| BoundaryIn::Path { corners: (from..to).map(f64::from).collect(), bulges: vec![] };
+        let circle = BoundaryIn::Circle { center: [1.0, 2.0], radius: 3.0 };
+        let p = profile_from_input(ProfileIn { outer: path(0, 6), holes: vec![path(6, 14), circle] }).unwrap();
+        use ops::extrude::Boundary;
+        let Boundary::Path { corners, .. } = &p.outer else { panic!() };
+        assert_eq!(corners, &vec![glam::DVec2::new(0.0, 1.0), glam::DVec2::new(2.0, 3.0), glam::DVec2::new(4.0, 5.0)]);
+        let Boundary::Path { corners, .. } = &p.holes[0] else { panic!() };
+        assert_eq!(corners[3], glam::DVec2::new(12.0, 13.0));
+        assert_eq!(p.holes[1], Boundary::Circle { center: glam::DVec2::new(1.0, 2.0), radius: 3.0 });
     }
 
     #[test]
-    fn malformed_flat_profiles_are_refused_not_panicked_on() {
-        assert!(profile_from_flat(&[0.0; 5], &[], &[]).is_err()); // odd count
-        assert!(profile_from_flat(&[0.0; 6], &[3], &[0.0; 4]).is_err()); // too few hole corners
-        assert!(profile_from_flat(&[0.0; 6], &[1], &[0.0; 4]).is_err()); // too many
-        assert!(profile_from_flat(&[0.0; 6], &[u32::MAX, u32::MAX], &[0.0; 4]).is_err()); // no overflow
+    fn malformed_app_profiles_are_refused_not_panicked_on() {
+        // An odd number of coordinates, in the outline or in a hole.
+        let path = |n: usize| BoundaryIn::Path { corners: vec![0.0; n], bulges: vec![] };
+        assert!(profile_from_input(ProfileIn { outer: path(5), holes: vec![] }).is_err());
+        assert!(profile_from_input(ProfileIn { outer: path(6), holes: vec![path(3)] }).is_err());
+        // Wrong bulge counts reach the kernel's own check as a clean error.
+        let p = profile_from_input(ProfileIn {
+            outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0], bulges: vec![0.0] },
+            holes: vec![],
+        })
+        .unwrap();
+        assert!(matches!(ops::extrude::extrude(&p, 1.0), Err(ops::KernelError::InvalidInput(_))));
     }
 }

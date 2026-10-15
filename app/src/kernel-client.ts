@@ -1,15 +1,13 @@
 // Main-thread side of the kernel worker: every kernel call is an async
 // message, so a slow operation never freezes the UI.
 import type { BodyView } from "./kernel-types";
+import type { Outline } from "./profiles";
 
 /** Every operation the worker supports, with its arguments and result. */
 export interface KernelOps {
   kernel_version: { args: []; result: string };
   make_box: { args: [width: number, depth: number, height: number]; result: BodyView };
-  make_extrude: {
-    args: [outer: number[], holeCorners: number[], holes: number[], distance: number];
-    result: BodyView;
-  };
+  make_extrude: { args: [profile: Outline, distance: number]; result: BodyView };
 }
 
 export type KernelRequest = {

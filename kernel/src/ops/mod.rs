@@ -2,6 +2,7 @@
 //! `validate::checked`, so nothing invalid leaves the kernel.
 
 pub mod extrude;
+pub mod profile;
 pub mod primitives;
 pub mod transform;
 

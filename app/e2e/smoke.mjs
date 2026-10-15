@@ -157,20 +157,43 @@ try {
     await page.screenshot({ path: "e2e/l-bracket.png" });
   });
 
-  await check("plate with two holes: area minus the holes, times the distance", async () => {
-    // Holes are regular 24-gons of radius 0.15·30 = 4.5: area 12·4.5²·sin 15°
-    // each, perimeter 48·4.5·sin 7.5° each. V = (1200 − 2·hole)·20,
-    // S = 2(1200 − 2·hole) + (140 + 2·perimeter)·20. Corners 4 + 48 = 52:
-    // 104 V, 156 E, 54 F (genus 2).
+  /** Chords the display mesh gives an arc of radius r turning φ (the
+   * kernel's rule: each chord turns at most min(0.2 rad, 2·acos(1 − 0.01/r)),
+   * the angle whose chord sags 0.01 mm). */
+  const chords = (r, phi) => Math.ceil(phi / Math.min(0.2, 2 * Math.acos(1 - 0.01 / r)));
+
+  await check("plate with two round holes: area minus the holes, times the distance", async () => {
+    // Holes of radius 0.15·30 = 4.5: chords turn 2·acos(1 − 0.01/4.5) ≈
+    // 0.1334 rad, so each circle gets ceil(2π/0.1334) = 48. The mesh's
+    // holes are 48-gons: area 24·4.5²·sin(2π/48), perimeter 48·2·4.5·sin(π/48).
+    // V = (1200 − 2·hole)·20, S = 2(1200 − 2·hole) + (140 + 2·rim)·20.
+    // Square 8 V, 12 E, 4 sides; each circle 2 V, 2 E, 1 side; 2 caps:
+    // 12 V, 16 E, 8 F (genus 2).
     await pick("plate", "12,240 mm³");
-    const hole = 12 * 4.5 ** 2 * Math.sin(Math.PI / 12);
-    const rim = 48 * 4.5 * Math.sin(Math.PI / 24);
+    assert.equal(chords(4.5, 2 * Math.PI), 48);
+    const hole = 24 * 4.5 ** 2 * Math.sin((2 * Math.PI) / 48);
+    const rim = 48 * 2 * 4.5 * Math.sin(Math.PI / 48);
     near(await shown("volume"), (1200 - 2 * hole) * 20, "volume");
     near(await shown("area"), 2 * (1200 - 2 * hole) + (140 + 2 * rim) * 20, "area");
-    assert.equal(await text("topology"), "104 V · 156 E · 54 F");
+    assert.equal(await text("topology"), "12 V · 16 E · 8 F");
     assert.equal(await text("status"), "valid");
     await page.waitForTimeout(300);
     await page.screenshot({ path: "e2e/plate.png" });
+  });
+
+  await check("slot with round ends", async () => {
+    // 40 × 30: straight sides 10 long, ends half circles of radius 15:
+    // chords turn 2·acos(1 − 0.01/15) ≈ 0.0730, ceil(π/0.0730) = 44 per end.
+    // Each end's 44-chord half polygon has area 22·15²·sin(π/44).
+    // V = (10·30 + 2·half)·20. 4 corners: 8 V, 12 E, 4 sides + 2 caps.
+    await pick("slot", await text("volume"));
+    assert.equal(chords(15, Math.PI), 44);
+    const half = 22 * 15 ** 2 * Math.sin(Math.PI / 44);
+    near(await shown("volume"), (300 + 2 * half) * 20, "volume");
+    assert.equal(await text("topology"), "8 V · 12 E · 6 F");
+    assert.equal(await text("status"), "valid");
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: "e2e/slot.png" });
   });
 
   await check("star extrusion", async () => {
@@ -184,10 +207,11 @@ try {
   });
 
   await check("an outline with walls under 1 µm shows the kernel's reason", async () => {
-    // Plate 0.004 × 0.004: hole radius 0.0006 centred 0.001 from the edge,
-    // leaving a 0.0004 mm wall, below the 0.001 mm minimum feature.
+    // Plate 0.008 × 0.008: holes of radius 0.15·0.008 = 0.0012 (a legal
+    // radius) centred 0.002 from the edge, leaving a 0.0008 mm wall, below
+    // the 0.001 mm minimum feature.
     await page.selectOption("#shape", "plate");
-    for (const id of ["width", "depth"]) await setSize(id, 0.004);
+    for (const id of ["width", "depth"]) await setSize(id, 0.008);
     await page.waitForFunction(() => document.querySelector("#error").textContent.includes("features must be at least"));
     for (const [id, v] of [["width", 40], ["depth", 30]]) await setSize(id, v);
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");

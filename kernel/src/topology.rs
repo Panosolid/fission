@@ -146,26 +146,52 @@ impl Body {
     pub fn bounds(&self) -> (DVec3, DVec3) {
         let mut lo = DVec3::INFINITY;
         let mut hi = DVec3::NEG_INFINITY;
-        let mut add = |p: DVec3, half: DVec3| {
-            lo = lo.min(p - half);
-            hi = hi.max(p + half);
+        let add = |lo: &mut DVec3, hi: &mut DVec3, p: DVec3, half: DVec3| {
+            *lo = lo.min(p - half);
+            *hi = hi.max(p + half);
         };
         for v in &self.vertices {
-            add(v.point, DVec3::ZERO);
+            add(&mut lo, &mut hi, v.point, DVec3::ZERO);
         }
         for e in &self.edges {
-            if let Curve::Circle { center, axis, radius, .. } = e.curve {
-                // A circle's extent along a world axis k is r·√(1 − axis_k²),
-                // which for a unit axis equals r·√(sum of the other two
-                // components squared). The second form keeps its digits when
-                // the axis is within ~1e-8 of k, where 1 − axis_k² rounds to 0.
-                let half = DVec3::new(axis.y.hypot(axis.z), axis.z.hypot(axis.x), axis.x.hypot(axis.y)) * radius;
-                add(center, half);
+            if let Curve::Circle { center, axis, x_dir, radius } = e.curve {
+                if e.t1 - e.t0 >= std::f64::consts::TAU - crate::tolerance::ANGULAR {
+                    // A circle's extent along a world axis k is
+                    // r·√(1 − axis_k²), which for a unit axis equals
+                    // r·√(sum of the other two components squared). The
+                    // second form keeps its digits when the axis is within
+                    // ~1e-8 of k, where 1 − axis_k² rounds to 0.
+                    let half = DVec3::new(axis.y.hypot(axis.z), axis.z.hypot(axis.x), axis.x.hypot(axis.y)) * radius;
+                    add(&mut lo, &mut hi, center, half);
+                    continue;
+                }
+                // An arc: its ends are vertices, already in. Along axis k
+                // the point is c_k + r(x_k cos t + y_k sin t) =
+                // c_k + r·A_k cos(t − α_k), A_k = hypot(x_k, y_k) (= the
+                // circle's half extent, without cancellation), α_k =
+                // atan2(y_k, x_k): the most at t = α_k, the least at α_k + π.
+                // Each of those the arc passes through widens the box along
+                // axis k only (the point's other coordinates are inside
+                // the box already: they lie between the arc's ends' or are
+                // covered by another axis's extreme).
+                let y_dir = axis.cross(x_dir);
+                for k in 0..3 {
+                    let (xk, yk) = (x_dir[k], y_dir[k]);
+                    let reach = radius * xk.hypot(yk);
+                    let peak = yk.atan2(xk);
+                    for (t, sign) in [(peak, 1.0), (peak + std::f64::consts::PI, -1.0)] {
+                        if (t - e.t0).rem_euclid(std::f64::consts::TAU) <= e.t1 - e.t0 {
+                            let extreme = center[k] + sign * reach;
+                            lo[k] = lo[k].min(extreme);
+                            hi[k] = hi[k].max(extreme);
+                        }
+                    }
+                }
             }
         }
         for f in &self.faces {
             if let Surface::Sphere { center, radius, .. } = f.surface {
-                add(center, DVec3::splat(radius));
+                add(&mut lo, &mut hi, center, DVec3::splat(radius));
             }
         }
         (lo, hi)
@@ -243,6 +269,34 @@ mod tests {
         let t = crate::ops::transform::rotate(&c, DVec3::ZERO, DVec3::X, 1e-9).unwrap();
         let (lo, _) = t.bounds();
         assert!(eq(lo.z, -1e-5), "lo.z = {:e}", lo.z);
+    }
+
+    #[test]
+    fn bounds_of_arcs_by_hand() {
+        // Half cylinder r = 1, h = 2: its arcs run from (1,0) through
+        // (0,1) to (−1,0), so y spans [0, 1], not the full circle's [−1, 1].
+        let (lo, hi) = crate::fixtures::hand_half_cylinder(1.0, 2.0).bounds();
+        assert!(points_eq(lo, DVec3::new(-1.0, 0.0, 0.0)) && points_eq(hi, DVec3::new(1.0, 1.0, 2.0)), "{lo} {hi}");
+        // The same arc tilted: a quarter arc from (0,1,0) to (−1,0,0)
+        // about +Z spans x ∈ [−1, 0], y ∈ [0, 1] (its ends; it passes no
+        // axis extreme in between).
+        let (b, _) = quarter_arc_edge();
+        let (lo, hi) = b.bounds();
+        assert!(points_eq(lo, DVec3::new(-1.0, 0.0, 0.0)) && points_eq(hi, DVec3::new(0.0, 1.0, 0.0)), "{lo} {hi}");
+        // Regression (OpenCascade oracle, step 10: bounds of curved
+        // extrusions stretched towards arc centres). A shallow arc far from
+        // its centre: about the origin, radius √101, from (1, 10) to
+        // (−1, 10) through the top (0, √101). Its box is x ∈ [−1, 1],
+        // y ∈ [10, √101]; the centre (0, 0) must not pull y down to 0.
+        let mut b = Body::default();
+        let r = 101f64.sqrt();
+        let v0 = b.add_vertex(DVec3::new(1.0, 10.0, 0.0));
+        let v1 = b.add_vertex(DVec3::new(-1.0, 10.0, 0.0));
+        let start = 10f64.atan2(1.0);
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::new(1.0, 10.0, 0.0) / r, radius: r };
+        b.add_edge(c, v0, v1, 0.0, PI - 2.0 * start);
+        let (lo, hi) = b.bounds();
+        assert!(points_eq(lo, DVec3::new(-1.0, 10.0, 0.0)) && points_eq(hi, DVec3::new(1.0, r, 0.0)), "{lo} {hi}");
     }
 
     #[test]

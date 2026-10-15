@@ -31,7 +31,7 @@
 
 use fission_kernel::debug_dump;
 use fission_kernel::mesh::Mesh;
-use fission_kernel::ops::extrude::{self, Profile};
+use fission_kernel::ops::extrude::{self, Boundary, Profile};
 use fission_kernel::ops::{primitives, transform, KernelError};
 use fission_kernel::tessellate::{tessellate, TessOptions};
 use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
@@ -90,9 +90,150 @@ enum Shape {
     Box { w: Num, d: Num, h: Num },
     Cylinder { r: Num, h: Num },
     Sphere { r: Num },
-    /// A polygon profile in the XY plane (outer loop and holes, either
-    /// winding), swept along +Z by `dist`.
-    Extrude { outer: Vec<P2>, holes: Vec<Vec<P2>>, dist: Num },
+    /// A profile in the XY plane (outer loop and holes, either winding;
+    /// straight and arc pieces, or circles), swept along +Z by `dist`.
+    /// `expect` is what the generator built it to be: Some(true) must be
+    /// accepted, Some(false) refused, None not known (then `profile_expect`
+    /// decides for straight outlines; curved ones may go either way).
+    Extrude { outer: Ring, holes: Vec<Ring>, dist: Num, expect: Option<bool> },
+}
+
+/// One loop of an extrusion profile (kernel `ops::profile::Boundary`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+enum Ring {
+    /// Corners with one bulge each (tan of a quarter of the arc's signed
+    /// sweep; 0 straight), or no bulges at all.
+    Path { pts: Vec<P2>, bulges: Vec<Num> },
+    Circle { c: P2, r: Num },
+}
+
+impl Ring {
+    fn straight(pts: Vec<DVec2>) -> Ring {
+        Ring::Path { pts: pts.into_iter().map(|p| [Num(p.x), Num(p.y)]).collect(), bulges: vec![] }
+    }
+
+    fn curved(pts: Vec<DVec2>, bulges: Vec<f64>) -> Ring {
+        Ring::Path { pts: pts.into_iter().map(|p| [Num(p.x), Num(p.y)]).collect(), bulges: bulges.into_iter().map(Num).collect() }
+    }
+
+    fn numbers(&mut self) -> Vec<&mut Num> {
+        match self {
+            Ring::Path { pts, bulges } => pts.iter_mut().flatten().chain(bulges.iter_mut()).collect(),
+            Ring::Circle { c, r } => c.iter_mut().chain(std::iter::once(r)).collect(),
+        }
+    }
+
+    fn boundary(&self) -> Boundary {
+        match self {
+            Ring::Path { pts, bulges } => Boundary::Path { corners: pts.iter().map(p2).collect(), bulges: bulges.iter().map(|b| b.0).collect() },
+            Ring::Circle { c, r } => Boundary::Circle { center: p2(c), radius: r.0 },
+        }
+    }
+
+    /// The corners, if this is a straight-only path.
+    fn polygon(&self) -> Option<Vec<DVec2>> {
+        match self {
+            Ring::Path { pts, bulges } if bulges.iter().all(|b| b.0 == 0.0) => Some(pts.iter().map(p2).collect()),
+            _ => None,
+        }
+    }
+
+    /// The pieces as the harness's own arcs (see `Piece`).
+    fn pieces(&self) -> Vec<Piece> {
+        match self {
+            Ring::Circle { c, r } => vec![Piece::Circle { c: p2(c), r: r.0 }],
+            Ring::Path { pts, bulges } => {
+                let n = pts.len();
+                (0..n).map(|i| Piece::new(p2(&pts[i]), p2(&pts[(i + 1) % n]), bulges.get(i).map_or(0.0, |b| b.0))).collect()
+            }
+        }
+    }
+}
+
+/// A profile piece, worked out by the harness itself from first
+/// principles (not with the kernel's formulas): an arc turning φ = 4·atan(β)
+/// over a chord c has radius c / (2|sin(φ/2)|), and its centre lies on the
+/// chord's perpendicular bisector, r·cos(φ/2) to the left for φ > 0 (to
+/// the right for φ < 0).
+#[derive(Clone, Copy, Debug)]
+enum Piece {
+    Line { a: DVec2, b: DVec2 },
+    Arc { a: DVec2, b: DVec2, c: DVec2, r: f64, phi: f64 },
+    Circle { c: DVec2, r: f64 },
+}
+
+impl Piece {
+    fn new(a: DVec2, b: DVec2, bulge: f64) -> Piece {
+        if bulge == 0.0 {
+            return Piece::Line { a, b };
+        }
+        let phi = 4.0 * bulge.atan();
+        let chord = b - a;
+        let r = chord.length() / (2.0 * (phi / 2.0).sin().abs());
+        let left = DVec2::new(-chord.y, chord.x) / chord.length();
+        let c = (a + b) / 2.0 + left * (r * (phi / 2.0).cos() * phi.signum());
+        Piece::Arc { a, b, c, r, phi }
+    }
+
+    /// Twice the signed area this piece adds (from origin `o`), and its length.
+    fn area2_and_length(&self, o: DVec2) -> (f64, f64) {
+        match *self {
+            Piece::Line { a, b } => ((a - o).perp_dot(b - o), a.distance(b)),
+            // Chord's shoelace term plus the circular segment beyond it.
+            Piece::Arc { a, b, r, phi, .. } => ((a - o).perp_dot(b - o) + r * r * (phi - phi.sin()), r * phi.abs()),
+            Piece::Circle { r, .. } => (r * r * std::f64::consts::TAU, r * std::f64::consts::TAU),
+        }
+    }
+
+    fn distance(&self, p: DVec2) -> f64 {
+        match *self {
+            Piece::Line { a, b } => {
+                let t = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
+                p.distance(a + (b - a) * t)
+            }
+            Piece::Circle { c, r } => (p.distance(c) - r).abs(),
+            Piece::Arc { a, b, c, r, phi } => {
+                // On the arc's span: turned from a towards b by at most |φ|.
+                let (u, w) = (a - c, p - c);
+                let turn = u.perp_dot(w).atan2(u.dot(w)) * phi.signum();
+                if turn.rem_euclid(std::f64::consts::TAU) <= phi.abs() {
+                    (w.length() - r).abs()
+                } else {
+                    p.distance(a).min(p.distance(b))
+                }
+            }
+        }
+    }
+
+    /// Radius, length and largest chord sag of a curved piece in the
+    /// display mesh: chords turn at most 0.2 rad, sag at most DISPLAY_CHORD,
+    /// except that a circle never gets more than 256 chords per turn
+    /// (r·(1 − cos(π/256)) then); splitting chords only lowers the sag.
+    fn curve(&self) -> Option<(f64, f64, f64)> {
+        let (r, len) = match *self {
+            Piece::Line { .. } => return None,
+            Piece::Arc { r, phi, .. } => (r, r * phi.abs()),
+            Piece::Circle { r, .. } => (r, r * std::f64::consts::TAU),
+        };
+        let sag = tolerance::DISPLAY_CHORD.max(r * (1.0 - (std::f64::consts::PI / 256.0).cos())) * (1.0 + 1e-9);
+        Some((r, len, sag))
+    }
+}
+
+/// How far a curved extrusion's mesh may be from the exact solid because
+/// its arcs are chords: volume (profile area off by arc length × sag, times
+/// the distance) and area (both caps, plus the walls' chord deficit). Zero
+/// for anything else; boxes and straight extrusions are exact.
+fn curve_slacks(shape: &Shape) -> (f64, f64) {
+    let Shape::Extrude { outer, holes, dist, .. } = shape else { return (0.0, 0.0) };
+    let (mut v, mut a) = (0.0, 0.0);
+    for piece in std::iter::once(outer).chain(holes).flat_map(Ring::pieces) {
+        if let Some((_, arc, sag)) = piece.curve() {
+            v += arc * sag * dist.0;
+            a += 2.0 * arc * sag + arc * 0.2f64.powi(2) / 24.0 * dist.0;
+        }
+    }
+    (v, a)
 }
 
 type P2 = [Num; 2];
@@ -108,8 +249,9 @@ impl Shape {
             Shape::Box { w, d, h } => vec![w, d, h],
             Shape::Cylinder { r, h } => vec![r, h],
             Shape::Sphere { r } => vec![r],
-            Shape::Extrude { outer, holes, dist } => {
-                let mut v: Vec<&mut Num> = outer.iter_mut().chain(holes.iter_mut().flatten()).flatten().collect();
+            Shape::Extrude { outer, holes, dist, .. } => {
+                let mut v: Vec<&mut Num> = outer.numbers();
+                v.extend(holes.iter_mut().flat_map(Ring::numbers));
                 v.push(dist);
                 v
             }
@@ -121,8 +263,8 @@ impl Shape {
             Shape::Box { w, d, h } => primitives::make_box(w.0, d.0, h.0),
             Shape::Cylinder { r, h } => primitives::make_cylinder(r.0, h.0),
             Shape::Sphere { r } => primitives::make_sphere(r.0),
-            Shape::Extrude { outer, holes, dist } => {
-                let profile = Profile { outer: outer.iter().map(p2).collect(), holes: holes.iter().map(|h| h.iter().map(p2).collect()).collect() };
+            Shape::Extrude { outer, holes, dist, .. } => {
+                let profile = Profile { outer: outer.boundary(), holes: holes.iter().map(Ring::boundary).collect() };
                 extrude::extrude(&profile, dist.0)
             }
         }
@@ -309,6 +451,10 @@ fn extreme(mut op: Op, pick: prop::sample::Index, number: f64, axis: [f64; 3], s
     };
     let i = pick.index(nums.len());
     *nums[i] = Num(number);
+    // A changed profile number makes the generator's verdict unknown.
+    if let Op::Add { shape: Shape::Extrude { expect, .. }, .. } = &mut op {
+        *expect = None;
+    }
     op
 }
 
@@ -328,7 +474,7 @@ fn shape(scene: &Scene) -> impl Strategy<Value = Shape> {
 /// third of them then broken on purpose (corners swapped or duplicated, a
 /// hole moved out, a corner pushed next to another edge). Whether the kernel
 /// must accept each one is decided independently by `profile_expect`.
-fn extruded(scene: &Scene) -> BoxedStrategy<Shape> {
+fn polygon_profile(scene: &Scene) -> BoxedStrategy<Shape> {
     let l = length(scene);
     let centre = (coord(scene), coord(scene)).prop_map(|(x, y)| DVec2::new(x, y));
     let wall = prop::sample::select(vec![None, Some(0.25), Some(-0.9), Some(-1.0), Some(-1.1)]);
@@ -398,13 +544,128 @@ fn extruded(scene: &Scene) -> BoxedStrategy<Shape> {
             }
             (outer, holes)
         });
-    let pt = |p: DVec2| [Num(p.x), Num(p.y)];
     (prop_oneof![2 => good, 1 => broken], l)
         .prop_map(move |((outer, holes), dist)| Shape::Extrude {
-            outer: outer.into_iter().map(pt).collect(),
-            holes: holes.into_iter().map(|h| h.into_iter().map(pt).collect()).collect(),
+            outer: Ring::straight(outer),
+            holes: holes.into_iter().map(Ring::straight).collect(),
             dist: Num(dist),
+            expect: None,
         })
+        .boxed()
+}
+
+/// A random extrusion: half straight outlines (`polygon_profile`), half
+/// curved ones (`curved_profile`).
+fn extruded(scene: &Scene) -> BoxedStrategy<Shape> {
+    prop_oneof![polygon_profile(scene), curved_profile(scene)].boxed()
+}
+
+/// The generator's verdict from the thinnest feature it built in and the
+/// overall size: must be accepted if every feature is at least 1.01 ×
+/// MIN_FEATURE and the outline spans at most MAX_SIZE, refused if one is
+/// under 0.99 × MIN_FEATURE; too close to call otherwise.
+fn verdict(thinnest: f64, span: f64, reach: f64) -> Option<bool> {
+    if thinnest < 0.99 * MIN_FEATURE || span > MAX_SIZE * (1.0 + 1e-9) || reach > MAX_COORD * (1.0 + 1e-9) {
+        Some(false)
+    } else if thinnest > 1.01 * MIN_FEATURE && span < MAX_SIZE * (1.0 - 1e-9) && reach < MAX_COORD * (1.0 - 1e-9) {
+        Some(true)
+    } else {
+        None
+    }
+}
+
+/// Curved outlines. Four families built around a known thinnest feature,
+/// so whether the kernel must accept them is known (`verdict`):
+/// - slots: a rectangle with half-circle ends (radius = half the width);
+/// - plates with a row of 1–3 round holes, every wall and gap the same
+///   chosen width (often 0.9/1.0/1.1 × MIN_FEATURE);
+/// - washers: a circle with an off-centre round hole;
+/// - a quarter are random star polygons with bowed edges and round or
+///   bowed holes, whose verdict is unknown: if accepted, every check runs.
+fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
+    let l = length(scene);
+    let centre = (coord(scene), coord(scene)).prop_map(|(x, y)| DVec2::new(x, y));
+    // A wall or gap: any length, or right at the minimum feature size.
+    let gap = prop_oneof![
+        2 => l.clone(),
+        1 => prop::sample::select(vec![0.9, 1.0, 1.1]).prop_map(|k| k * MIN_FEATURE),
+    ];
+    let flip = any::<bool>();
+    let reach = |pts: &[DVec2], extra: f64| pts.iter().fold(0.0f64, |m, p| m.max(p.abs().max_element())) + extra;
+    // Reverses a path's direction: corners backwards, each bulge moves to
+    // the piece it now starts and changes sign.
+    let reverse = |pts: Vec<DVec2>, bulges: Vec<f64>| {
+        let n = pts.len();
+        let back: Vec<DVec2> = (0..n).map(|i| pts[(n - i) % n]).collect();
+        let bulges: Vec<f64> = (0..n).map(|i| -bulges[(2 * n - 1 - i) % n]).collect();
+        (back, bulges)
+    };
+    // Radii come from `gap` too, so arcs and holes are often right at the
+    // 1 µm minimum radius (0.9×, 1×, 1.1×).
+    let slot = (l.clone(), gap.clone(), centre.clone(), flip).prop_map(move |(len, half, c, flip)| {
+        let w = 2.0 * half;
+        let pts = vec![c, c + DVec2::new(len, 0.0), c + DVec2::new(len, w), c + DVec2::new(0.0, w)];
+        let bulges = vec![0.0, 1.0, 0.0, 1.0];
+        let r = reach(&pts, w / 2.0);
+        let (pts, bulges) = if flip { reverse(pts, bulges) } else { (pts, bulges) };
+        // Thinnest: the end radius w/2 and the straight sides' length.
+        let expect = verdict((w / 2.0).min(len), len + w, r);
+        (Ring::curved(pts, bulges), vec![], expect)
+    });
+    let plate = (gap.clone(), gap.clone(), 1..=3usize, centre.clone(), flip).prop_map(move |(rho, g, n, c, flip)| {
+        // n holes of radius rho in a row, every gap and wall g.
+        let w = n as f64 * (2.0 * rho + g) + g;
+        let h = 2.0 * rho + 2.0 * g;
+        let mut outer = vec![c, c + DVec2::new(w, 0.0), c + DVec2::new(w, h), c + DVec2::new(0.0, h)];
+        if flip {
+            outer.reverse();
+        }
+        let holes = (0..n)
+            .map(|i| {
+                let at = c + DVec2::new(g + rho + i as f64 * (2.0 * rho + g), g + rho);
+                Ring::Circle { c: [Num(at.x), Num(at.y)], r: Num(rho) }
+            })
+            .collect();
+        let expect = verdict(g.min(rho), w.max(h), reach(&outer, 0.0));
+        (Ring::straight(outer), holes, expect)
+    });
+    let washer = (gap.clone(), gap.clone(), l.clone(), centre.clone()).prop_map(move |(rho, g, e, c)| {
+        // Hole of radius rho, e off centre; the outer circle leaves a wall g.
+        let big = e + rho + g;
+        let hole = c + DVec2::new(e, 0.0);
+        let expect = verdict(g.min(rho), 2.0 * big, c.abs().max_element() + big);
+        (Ring::Circle { c: [Num(c.x), Num(c.y)], r: Num(big) }, vec![Ring::Circle { c: [Num(hole.x), Num(hole.y)], r: Num(rho) }], expect)
+    });
+    let bulge = prop_oneof![
+        3 => Just(0.0),
+        3 => -0.3..0.3f64,
+        1 => prop::sample::select(vec![1.0, -1.0, 0.05, -0.05, 2.0, -2.0]),
+    ];
+    let wavy = (3..=10usize, prop::collection::vec((0.2..1.0f64, 0.5..1.0f64), 10), prop::collection::vec(bulge, 20), l.clone(), centre, 0..=2usize)
+        .prop_map(|(n, raw, bulges, r, c, holes)| {
+            let total: f64 = raw[..n].iter().map(|g| g.0).sum();
+            let mut a = 0.0;
+            let pts: Vec<DVec2> = raw[..n]
+                .iter()
+                .map(|&(gap, k)| {
+                    a += gap / total * std::f64::consts::TAU;
+                    c + DVec2::from_angle(a) * r * k
+                })
+                .collect();
+            let holes = match holes {
+                0 => vec![],
+                1 => vec![Ring::Circle { c: [Num(c.x), Num(c.y)], r: Num(0.2 * r) }],
+                _ => {
+                    let lens = |x: f64| Ring::curved(vec![c + DVec2::new(x - 0.1 * r, 0.0), c + DVec2::new(x + 0.1 * r, 0.0)], vec![bulges[18], bulges[19].abs() + 0.3]);
+                    vec![lens(-0.25 * r), lens(0.25 * r)]
+                }
+            };
+            (Ring::curved(pts, bulges[..n].to_vec()), holes, None)
+        });
+    (prop_oneof![1 => slot, 1 => plate, 1 => washer, 1 => wavy], l)
+        // The distance comes from `length`, always in range (MIN_FEATURE
+        // itself is legal), so it doesn't change the verdict.
+        .prop_map(|((outer, holes, expect), dist)| Shape::Extrude { outer, holes, dist: Num(dist), expect })
         .boxed()
 }
 
@@ -433,10 +694,13 @@ impl ReferenceStateMachine for Scene {
                     Shape::Box { w, d, h } => vec![w.0, d.0, h.0],
                     Shape::Cylinder { r, h } => vec![r.0, h.0, 2.0 * r.0],
                     Shape::Sphere { r } => vec![r.0, 2.0 * r.0],
-                    Shape::Extrude { outer, dist, .. } => {
-                        let (lo, hi) = outer.iter().map(p2).fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)));
-                        vec![hi.x - lo.x, hi.y - lo.y, dist.0]
-                    }
+                    Shape::Extrude { outer, dist, .. } => match outer {
+                        Ring::Path { pts, .. } => {
+                            let (lo, hi) = pts.iter().map(p2).fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)));
+                            vec![hi.x - lo.x, hi.y - lo.y, dist.0]
+                        }
+                        Ring::Circle { r, .. } => vec![r.0, 2.0 * r.0, dist.0],
+                    },
                 };
                 for &v in &sizes {
                     remember(&mut s.lengths, v, LENGTHS);
@@ -574,6 +838,23 @@ fn measure(b: &Body) -> Result<Measure, String> {
         })
         .sum();
     let (lo, hi) = b.bounds();
+    // The bounds must hold every mesh point (all of them lie on the body's
+    // surface) and reach past them by no more than the mesh can fall short
+    // of the surface: the largest chord sag, doubled for the diagonals of a
+    // sphere's quads (see Piece::curve for the sag).
+    let (mlo, mhi) = mesh.positions.iter().fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(l, h), &p| (l.min(p), h.max(p)));
+    let radii = b.edges.iter().filter_map(|e| match e.curve {
+        fission_kernel::geom::Curve::Circle { radius, .. } => Some(radius),
+        _ => None,
+    });
+    let sag = radii.map(|r| 2.0 * tolerance::DISPLAY_CHORD.max(r * (1.0 - (std::f64::consts::PI / 256.0).cos()))).fold(0.0, f64::max);
+    let slack = tolerance::rounding_slack(lo.abs().max(hi.abs()).max_element()) * 4.0;
+    if (mlo - lo).min_element() < -slack || (hi - mhi).min_element() < -slack {
+        return Err(format!("bounds {lo}..{hi} miss mesh points spanning {mlo}..{mhi}"));
+    }
+    if (mlo - lo).max_element() > sag + slack || (hi - mhi).max_element() > sag + slack {
+        return Err(format!("bounds {lo}..{hi} reach more than the chord sag {sag:e} past the mesh {mlo}..{mhi}"));
+    }
     Ok(Measure { volume: mesh.signed_volume(), area: mesh.area(), perimeters, lo, hi, mesh })
 }
 
@@ -642,39 +923,65 @@ fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
                 return Err(format!("sphere r={}: volume {} not in (0, {ball})", r.0, m.volume));
             }
         }
-        Shape::Extrude { outer, holes, dist } => {
+        Shape::Extrude { outer, holes, dist, .. } => {
             // Prism: V = A·d and S = 2A + P·d, where A is the profile's area
-            // (outer minus holes, by the shoelace formula) and P the length
-            // of all its loops.
+            // (outer minus holes: shoelace over the corners plus, for each
+            // arc, the circular segment (r²/2)(φ − sin φ) beyond its chord)
+            // and P the length of all its loops.
             let d = dist.0;
-            let o = p2(&outer[0]);
-            let mut area = 0.0;
-            let mut area_err = 0.0;
-            let mut perimeter = 0.0;
-            for (k, l) in std::iter::once(outer).chain(holes).enumerate() {
-                let pts: Vec<DVec2> = l.iter().map(|p| p2(p) - o).collect();
-                let (mut twice, mut abs) = (0.0, 0.0);
-                for i in 0..pts.len() {
-                    let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
-                    twice += a.perp_dot(b);
-                    abs += a.perp_dot(b).abs() + a.length() * b.length();
-                    perimeter += a.distance(b);
+            let loops: Vec<Vec<Piece>> = std::iter::once(outer).chain(holes).map(Ring::pieces).collect();
+            let o = match loops[0][0] {
+                Piece::Line { a, .. } | Piece::Arc { a, .. } => a,
+                Piece::Circle { c, .. } => c,
+            };
+            let (mut area, mut area_err, mut perimeter) = (0.0, 0.0, 0.0);
+            // Chords instead of arcs: the mesh's profile differs from the
+            // exact one by at most (arc length × sag) per curve, and its side
+            // walls are short by at most (arc length × step²/24), the
+            // chord-to-arc deficit for chords turning step ≤ 0.2 rad.
+            let (mut curve_area, mut curve_side) = (0.0, 0.0);
+            let mut reach_r = 0.0f64;
+            for (k, pieces) in loops.iter().enumerate() {
+                let (mut twice, mut abs, mut len) = (0.0, 0.0, 0.0);
+                for piece in pieces {
+                    let (a2, l) = piece.area2_and_length(o);
+                    twice += a2;
+                    abs += a2.abs() + l * l;
+                    len += l;
+                    if let Some((r, arc, sag)) = piece.curve() {
+                        curve_area += arc * sag;
+                        curve_side += arc * 0.2f64.powi(2) / 24.0;
+                        reach_r = reach_r.max(r);
+                    }
                 }
+                perimeter += len;
                 area += if k == 0 { twice.abs() / 2.0 } else { -twice.abs() / 2.0 };
                 // Rounding bound for this reference sum: a few ulps per term,
-                // n terms, plus the subtraction of `o` from far coordinates.
-                area_err += 4.0 * pts.len() as f64 * f64::EPSILON * abs / 2.0 + perimeter * tolerance::rounding_slack(o.abs().max_element());
+                // plus the subtraction of `o` from far coordinates.
+                area_err += 4.0 * pieces.len() as f64 * f64::EPSILON * abs / 2.0 + len * tolerance::rounding_slack(o.abs().max_element() + reach_r);
             }
             let (v, s) = (area * d, 2.0 * area + perimeter * d);
             // Kernel rounding as in check_rigid (each vertex within δ of
-            // exact), plus the reference's own rounding.
-            let delta = tolerance::rounding_slack(reach(m));
-            let (v_slack, s_slack) = (m.area * delta + area_err * d, m.perimeters * delta + 2.0 * area_err);
+            // exact), plus the reference's own rounding, plus the chords.
+            let delta = tolerance::rounding_slack(reach(m) + reach_r);
+            let v_slack = m.area * delta + area_err * d + curve_area * d;
+            let s_slack = m.perimeters * delta + 2.0 * area_err + 2.0 * curve_area + curve_side * d;
             if !tolerance::measure_eq(m.volume, v, v_slack) || !tolerance::measure_eq(m.area, s, s_slack) {
                 return Err(format!(
                     "extrude: volume {} expected A·d = {v} (±{v_slack:e}); area {} expected 2A + P·d = {s} (±{s_slack:e})",
                     m.volume, m.area
                 ));
+            }
+            // Every mesh point is a boundary point of a cap (the caps and
+            // walls get no inner points): at z = 0 or d, on the outline.
+            let slack = 8.0 * delta;
+            let all: Vec<Piece> = loops.concat();
+            for (i, q) in m.mesh.positions.iter().enumerate() {
+                let off_cap = q.z.abs().min((q.z - d).abs());
+                let off_outline = all.iter().map(|piece| piece.distance(q.truncate())).fold(f64::INFINITY, f64::min);
+                if off_cap > slack || off_outline > slack {
+                    return Err(format!("extrude: mesh point {i} at {q} is {off_cap:e} off the caps and {off_outline:e} off the outline"));
+                }
             }
         }
     }
@@ -696,8 +1003,7 @@ enum Expect {
 /// most MAX_PROFILE_CORNERS in all; the outer loop spans ≤ MAX_SIZE; no two
 /// edges cross; every corner is ≥ MIN_FEATURE from every edge it isn't an
 /// end of; every hole is inside the outer loop and not inside another hole.
-fn profile_expect(outer: &[P2], holes: &[Vec<P2>], dist: f64) -> Expect {
-    let loops: Vec<Vec<DVec2>> = std::iter::once(outer).chain(holes.iter().map(|h| h.as_slice())).map(|l| l.iter().map(p2).collect()).collect();
+fn profile_expect(loops: &[Vec<DVec2>], dist: f64) -> Expect {
     if !size_ok(dist)
         || loops.iter().map(Vec::len).sum::<usize>() > tolerance::MAX_PROFILE_CORNERS
         || loops.iter().any(|l| l.len() < 3 || l.iter().any(|p| !p.is_finite() || p.abs().max_element() > MAX_COORD))
@@ -792,8 +1098,9 @@ fn is_extreme(op: &Op) -> bool {
                 Shape::Box { w, d, h } => [w, d, h].into_iter().any(len_bad),
                 Shape::Cylinder { r, h } => [r, h].into_iter().any(len_bad),
                 Shape::Sphere { r } => len_bad(r),
-                Shape::Extrude { outer, holes, dist } => {
-                    len_bad(dist) || outer.iter().chain(holes.iter().flatten()).flatten().any(coord_bad)
+                Shape::Extrude { dist, .. } => {
+                    // Any profile number non-finite or beyond MAX_COORD.
+                    len_bad(dist) || shape.clone().numbers().into_iter().any(|v| coord_bad(v))
                 }
             };
             sizes_bad || axis_bad(axis) || angle_bad(angle) || at.iter().any(coord_bad)
@@ -831,11 +1138,23 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 Shape::Box { w, d, h } => size_ok(w.0) && size_ok(d.0) && size_ok(h.0),
                 Shape::Cylinder { r, h } => size_ok(r.0) && size_ok(h.0),
                 Shape::Sphere { r } => size_ok(r.0),
-                Shape::Extrude { outer, holes, dist } => match profile_expect(outer, holes, dist.0) {
-                    Expect::Valid => true,
-                    Expect::Invalid => false,
-                    Expect::Either => base.is_some(),
-                },
+                Shape::Extrude { outer, holes, dist, expect } => {
+                    let polygons: Option<Vec<Vec<DVec2>>> = std::iter::once(outer).chain(holes).map(Ring::polygon).collect();
+                    let verdict = if !size_ok(dist.0) || shape.clone().numbers().iter().any(|v| !v.0.is_finite() || v.0.abs() > MAX_COORD) {
+                        Expect::Invalid
+                    } else if let Some(e) = expect {
+                        if *e { Expect::Valid } else { Expect::Invalid }
+                    } else if let Some(loops) = polygons {
+                        profile_expect(&loops, dist.0)
+                    } else {
+                        Expect::Either
+                    };
+                    match verdict {
+                        Expect::Valid => true,
+                        Expect::Invalid => false,
+                        Expect::Either => base.is_some(),
+                    }
+                }
             };
             if base.is_some() != sizes_ok {
                 return Err(fail(format!("sizes valid = {sizes_ok} but kernel {}", if base.is_some() { "accepted" } else { "rejected" }), vec![]));
@@ -1089,10 +1408,12 @@ fn oracle_lines(slots: &[Slot]) -> String {
         ];
         // Rounding allowance for the placed coordinates, as in check_rigid.
         let delta = tolerance::rounding_slack(reach(&m)) * s.steps.max(1) as f64;
+        let (curve_volume_slack, curve_area_slack) = curve_slacks(&s.shape);
         let line = serde_json::json!({
             "shape": s.shape, "matrix": matrix, "faces": b.faces.len(),
             "volume": m.volume, "area": m.area, "lo": m.lo.to_array(), "hi": m.hi.to_array(), "max_deviation": dev,
             "volume_slack": m.area * delta, "area_slack": m.perimeters * delta,
+            "curve_volume_slack": curve_volume_slack, "curve_area_slack": curve_area_slack,
         });
         out.push_str(&line.to_string());
         out.push('\n');

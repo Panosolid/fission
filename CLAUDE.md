@@ -14,7 +14,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/tessellate.rs`: B-rep → watertight triangle mesh (constrained Delaunay in uv space via `spade`).
   - `src/mesh.rs`: triangle mesh, volume, area, closed-mesh check.
   - `src/display.rs`: mesh shaped for the viewer (per-face normals, edge lines).
-  - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `extrude.rs`: polygon profiles with holes; `transform.rs`: move, rotate). Each returns `Result<Body, KernelError>` via `ops::finish`.
+  - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate). Each returns `Result<Body, KernelError>` via `ops::finish`.
   - `src/fixtures.rs`: hand-built test bodies that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
   - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_extrude` → `BodyView`). Keep it thin.
   - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
@@ -22,7 +22,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
   - `scripts/overnight.sh`: Tier 3 run. `scripts/endless.sh`: the same, round after round with random seeds, logging to `endless-results/`.
 - `prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies written by the harness (box, cylinder, sphere, extrusion).
-- `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `src/profiles.ts` ready-made outlines for the extrude demo (until the sketcher); `src/format.ts` number formatting and when the camera re-frames; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
+- `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `src/profiles.ts` ready-made outlines for the extrude demo (until the sketcher), in the kernel's `ProfileIn` form; `src/format.ts` number formatting and when the camera re-frames; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing": every 6 hours, 4 jobs × ~5 h of `endless.sh`; results accumulate on the `test-results` branch: `summary.txt`, `log.csv`, `failures/<seed>/`; an issue is opened when something is found).
 

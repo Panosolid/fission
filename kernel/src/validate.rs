@@ -34,6 +34,9 @@ pub enum ValidationError {
     /// A planar face's outer loop runs clockwise seen from outside, i.e.
     /// the face normal disagrees with its boundary.
     FaceOrientation { face: FaceId },
+    /// A loop runs the wrong way round its face: walking along it, the
+    /// face isn't on the left (seen from outside). Holes run clockwise.
+    LoopOrientation { face: FaceId, loop_index: usize },
     Tessellation { face: FaceId, message: String },
     /// The display mesh has holes or flipped triangles.
     MeshNotClosed { problems: usize },
@@ -65,6 +68,9 @@ impl fmt::Display for ValidationError {
             ZeroLengthEdge { edge } => write!(f, "edge {edge} has zero length"),
             ZeroAreaFace { face } => write!(f, "face {face} has zero area"),
             FaceOrientation { face } => write!(f, "face {face}: normal disagrees with its boundary loop"),
+            LoopOrientation { face, loop_index } => {
+                write!(f, "face {face}: loop {loop_index} runs the wrong way round (the face isn't on its left)")
+            }
             Tessellation { face, message } => write!(f, "face {face} could not be tessellated: {message}"),
             MeshNotClosed { problems } => write!(f, "mesh has {problems} open or flipped edges"),
             InsideOut { shell, volume } => write!(f, "shell {shell} encloses {volume:e} mm³ (normals point inward)"),
@@ -97,6 +103,7 @@ impl ValidationError {
             | EdgeOffFace { face, .. }
             | ZeroAreaFace { face }
             | FaceOrientation { face }
+            | LoopOrientation { face, .. }
             | Tessellation { face, .. } => vec![face],
             _ => vec![],
         }
@@ -265,6 +272,34 @@ fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) {
     if let Err(problems) = mesh.check_closed() {
         errs.push(ValidationError::MeshNotClosed { problems: problems.len() });
     }
+    // Triangles run counter-clockwise seen from outside, so a face's
+    // triangles have its interior on the left of each of their edges.
+    // Walking a loop in its own direction, the face must be on the left:
+    // each mesh step a→b along the loop is an edge a→b of one of the face's
+    // triangles. (Which triangles are inside is decided by crossings, not by
+    // loop direction, so a loop run backwards still meshes; this catches it.)
+    let mut directed: std::collections::HashSet<(usize, u32, u32)> = std::collections::HashSet::new();
+    for (t, tri) in mesh.triangles.iter().enumerate() {
+        for k in 0..3 {
+            directed.insert((mesh.triangle_face[t], tri[k], tri[(k + 1) % 3]));
+        }
+    }
+    for (fi, f) in body.faces.iter().enumerate() {
+        for (li, l) in f.loops.iter().enumerate() {
+            let right_way = l.coedges.iter().all(|c| {
+                let poly = &mesh.edge_polylines[c.edge];
+                let steps: Vec<(u32, u32)> = if c.reversed {
+                    poly.windows(2).map(|w| (w[1], w[0])).collect()
+                } else {
+                    poly.windows(2).map(|w| (w[0], w[1])).collect()
+                };
+                steps.iter().all(|&(a, b)| directed.contains(&(fi, a, b)))
+            });
+            if !right_way {
+                errs.push(ValidationError::LoopOrientation { face: fi, loop_index: li });
+            }
+        }
+    }
     for (si, s) in body.shells.iter().enumerate() {
         let volume = mesh.signed_volume_of(|t| s.faces.contains(&mesh.triangle_face[t]));
         if volume <= 0.0 {
@@ -431,6 +466,25 @@ mod tests {
     }
 
     #[test]
+    fn hole_running_the_wrong_way_is_caught() {
+        // Found by a planted bug in step 10 (circle holes built running
+        // counter-clockwise): every other check passed, because the mesh
+        // comes out the same. Reverse the whole hole as that bug did: its
+        // loop on each cap (faces 0 and 1, loop 1) and both loops of the
+        // bore (face 3), so every edge is still used once each way.
+        let mut b = crate::fixtures::hand_tube(1.0, 2.0, 1.0, 0.0);
+        assert_eq!(validate(&b), Ok(()));
+        for (f, l) in [(0, 1), (1, 1), (3, 0), (3, 1)] {
+            b.faces[f].loops[l].coedges[0].reversed ^= true;
+        }
+        let errs = validate(&b).unwrap_err();
+        let expected: Vec<_> = [(0, 1), (1, 1), (3, 0), (3, 1)]
+            .map(|(face, loop_index)| ValidationError::LoopOrientation { face, loop_index })
+            .to_vec();
+        assert_eq!(errs, expected);
+    }
+
+    #[test]
     fn inward_normal_is_caught() {
         let mut b = hand_cube();
         b.faces[4].sense = false;
@@ -571,6 +625,7 @@ mod tests {
             (ZeroLengthEdge { edge: 11 }, vec!["edge 11", "zero length"]),
             (ZeroAreaFace { face: 9 }, vec!["face 9", "zero area"]),
             (FaceOrientation { face: 5 }, vec!["face 5", "normal"]),
+            (LoopOrientation { face: 2, loop_index: 1 }, vec!["face 2", "loop 1", "wrong way"]),
             (Tessellation { face: 2, message: "boom".into() }, vec!["face 2", "boom"]),
             (MeshNotClosed { problems: 4 }, vec!["4 open"]),
             (InsideOut { shell: 0, volume: -1.0 }, vec!["shell 0", "-1e0", "inward"]),

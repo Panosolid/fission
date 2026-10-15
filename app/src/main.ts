@@ -13,8 +13,7 @@ const shape = $<HTMLSelectElement>("shape");
 // extruded by the height.
 const build = latestOnly((kind: ShapeKind, w: number, d: number, h: number) => {
   if (kind === "box") return kernel.call("make_box", w, d, h);
-  const o = outline(kind, w, d);
-  return kernel.call("make_extrude", o.outer, o.holeCorners, o.holes, h);
+  return kernel.call("make_extrude", outline(kind, w, d), h);
 });
 let framed: Framing | null = null;
 let framedKind: ShapeKind | null = null;

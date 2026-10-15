@@ -12,3 +12,4 @@ app/dist/
 __pycache__/
 .venv/
 kernel/endless-results/
+kernel/mutants.out*/
