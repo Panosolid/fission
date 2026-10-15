@@ -64,6 +64,11 @@ pub const DISPLAY_ANGLE: f64 = 0.2;
 /// At the cap, chord height is r(1 − cos(π/256)) ≈ 7.5e-5·r.
 pub const MAX_SEGMENTS_PER_TURN: f64 = 256.0;
 
+/// Hard cap on the corners of an extrude profile (all loops together). The
+/// profile check compares every corner with every segment, so this bounds
+/// its cost at ~MAX_PROFILE_CORNERS² ≈ 4·10^6 distance tests.
+pub const MAX_PROFILE_CORNERS: usize = 2000;
+
 /// When a span is within this fraction of a segment of a whole number of
 /// segments, it rounds down. Rounding noise (e.g. after a rotation) must not
 /// add a sliver segment and make two copies of a shape mesh differently.

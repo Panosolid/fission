@@ -1,6 +1,7 @@
 //! Modelling operations. Every one returns its body through
 //! `validate::checked`, so nothing invalid leaves the kernel.
 
+pub mod extrude;
 pub mod primitives;
 pub mod transform;
 
