@@ -84,6 +84,10 @@ mod tests {
         // 0.2 and area 2(0.0001 + 20 + 20) = 80.0002 however it is turned.
         // The old volume sum multiplied three ~2000 mm vectors per triangle
         // and lost ~1e-6 to rounding.
+        // Second cause, found when the sum moved to the bounding-box centre:
+        // the cross product was taken at the first corner even when both its
+        // edges were the 2000 mm ones (products ~1e6 cancelling to ~20), and
+        // gave 0.20000002445. Now it is taken opposite the longest edge.
         use crate::tessellate::{tessellate, TessOptions};
         use crate::tolerance::{rel_eq, FP_REL};
         let b = make_box(0.01, 0.01, 2000.0).unwrap();
