@@ -1,7 +1,10 @@
 //! `validate` checks that a body is a well-formed closed solid. Every kernel
 //! operation must finish with `checked`, which runs it.
 
-use crate::topology::{Body, EdgeId, FaceId};
+use crate::geom::{Curve, Surface};
+use crate::tolerance;
+use crate::topology::{Body, EdgeId, Face, FaceId, Loop};
+use glam::DVec3;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +24,15 @@ pub enum ValidationError {
     ShellNotConnected { shell: usize },
     /// V − E + F − R doesn't give a whole, non-negative genus.
     EulerPoincare { shell: usize, v: usize, e: usize, f: usize, rings: usize },
+    /// An edge's curve doesn't pass through its end vertex.
+    VertexOffEdge { edge: EdgeId, vertex: usize, distance: f64 },
+    /// A point of an edge is not on the surface of a face that uses it.
+    EdgeOffFace { edge: EdgeId, face: FaceId, distance: f64 },
+    ZeroLengthEdge { edge: EdgeId },
+    ZeroAreaFace { face: FaceId },
+    /// A planar face's outer loop runs clockwise seen from outside, i.e.
+    /// the face normal disagrees with its boundary.
+    FaceOrientation { face: FaceId },
 }
 
 impl fmt::Display for ValidationError {
@@ -40,6 +52,13 @@ impl fmt::Display for ValidationError {
                 f,
                 "shell {shell} breaks Euler–Poincaré: V={v} E={e} F={faces} R={rings}"
             ),
+            VertexOffEdge { edge, vertex, distance } => {
+                write!(f, "vertex {vertex} is {distance:e} mm off edge {edge}")
+            }
+            EdgeOffFace { edge, face, distance } => write!(f, "edge {edge} is {distance:e} mm off face {face}"),
+            ZeroLengthEdge { edge } => write!(f, "edge {edge} has zero length"),
+            ZeroAreaFace { face } => write!(f, "face {face} has zero area"),
+            FaceOrientation { face } => write!(f, "face {face}: normal disagrees with its boundary loop"),
         }
     }
 }
@@ -55,6 +74,7 @@ pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
     check_loops(body, &mut errs);
     check_edge_uses(body, &mut errs);
     check_shells(body, &mut errs);
+    check_geometry(body, &mut errs);
     if errs.is_empty() { Ok(()) } else { Err(errs) }
 }
 
@@ -150,6 +170,67 @@ fn check_shells(body: &Body, errs: &mut Vec<ValidationError>) {
             errs.push(ValidationError::EulerPoincare { shell: si, v: c.v, e: c.e, f: c.f, rings: c.rings });
         }
     }
+}
+
+/// Fractions along each edge sampled by the geometric checks.
+const EDGE_SAMPLES: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+fn check_geometry(body: &Body, errs: &mut Vec<ValidationError>) {
+    for (ei, e) in body.edges.iter().enumerate() {
+        if e.length() <= tolerance::LINEAR {
+            errs.push(ValidationError::ZeroLengthEdge { edge: ei });
+        }
+        for (vertex, t) in [(e.start, e.t0), (e.end, e.t1)] {
+            let distance = e.curve.eval(t).distance(body.vertices[vertex].point);
+            if distance > tolerance::LINEAR {
+                errs.push(ValidationError::VertexOffEdge { edge: ei, vertex, distance });
+            }
+        }
+    }
+    for (ei, uses) in body.edge_faces().iter().enumerate() {
+        let e = &body.edges[ei];
+        for &(fi, _) in uses {
+            let surface = &body.faces[fi].surface;
+            let distance = EDGE_SAMPLES.iter().map(|&s| surface.distance(e.point_at(s))).fold(0.0, f64::max);
+            if distance > tolerance::LINEAR {
+                errs.push(ValidationError::EdgeOffFace { edge: ei, face: fi, distance });
+            }
+        }
+    }
+    for (fi, f) in body.faces.iter().enumerate() {
+        if let Surface::Plane { .. } = f.surface {
+            let areas: Vec<f64> = f.loops.iter().map(|l| planar_loop_area(body, f, l)).collect();
+            let net: f64 = areas.iter().sum();
+            if net.abs() <= tolerance::AREA {
+                errs.push(ValidationError::ZeroAreaFace { face: fi });
+            } else if areas.first().is_some_and(|&a| a < 0.0) {
+                errs.push(ValidationError::FaceOrientation { face: fi });
+            }
+        }
+    }
+}
+
+/// Signed area of a loop on a planar face, positive when it runs
+/// counter-clockwise around the face's outward normal. Curved edges are
+/// sampled, which is plenty to tell zero from non-zero and to get the sign.
+fn planar_loop_area(body: &Body, face: &Face, l: &Loop) -> f64 {
+    let Surface::Plane { normal, .. } = face.surface else { return 0.0 };
+    let n = if face.sense { normal } else { -normal };
+    let mut pts = Vec::new();
+    for c in &l.coedges {
+        let e = &body.edges[c.edge];
+        let samples = if matches!(e.curve, Curve::Line { .. }) { 1 } else { 32 };
+        for k in 0..samples {
+            let s = k as f64 / samples as f64;
+            pts.push(e.point_at(if c.reversed { 1.0 - s } else { s }));
+        }
+    }
+    let origin = pts.first().copied().unwrap_or_default();
+    let mut twice = DVec3::ZERO;
+    for i in 0..pts.len() {
+        twice += (pts[i] - origin).cross(pts[(i + 1) % pts.len()] - origin);
+    }
+    twice.dot(n) / 2.0
 }
 
 fn is_connected(body: &Body, faces: &[FaceId], edge_faces: &[Vec<(FaceId, crate::topology::Coedge)>]) -> bool {
@@ -275,6 +356,60 @@ pub(crate) mod tests {
         // Odd characteristic is impossible for a closed orientable shell.
         assert_eq!(EulerCounts { v: 8, e: 12, f: 5, rings: 0 }.genus(), None);
         assert_eq!(EulerCounts { v: 9, e: 12, f: 6, rings: 0 }.genus(), None);
+    }
+
+    #[test]
+    fn moved_vertex_is_off_its_edges() {
+        let mut b = hand_cube();
+        b.vertices[7].point.z += 1e-3;
+        let errs = validate(&b).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(e, ValidationError::VertexOffEdge { vertex: 7, .. })), "{errs:?}");
+    }
+
+    #[test]
+    fn tiny_vertex_noise_within_tolerance_is_accepted() {
+        let mut b = hand_cube();
+        b.vertices[7].point.z += tolerance::LINEAR * 0.5;
+        assert_eq!(validate(&b), Ok(()));
+    }
+
+    #[test]
+    fn shifted_plane_puts_edges_off_face() {
+        let mut b = hand_cube();
+        if let Surface::Plane { origin, .. } = &mut b.faces[1].surface {
+            origin.z += 0.01;
+        }
+        let errs = validate(&b).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(e, ValidationError::EdgeOffFace { face: 1, .. })), "{errs:?}");
+    }
+
+    #[test]
+    fn inward_normal_is_caught() {
+        let mut b = hand_cube();
+        b.faces[4].sense = false;
+        let errs = validate(&b).unwrap_err();
+        assert_eq!(errs, vec![ValidationError::FaceOrientation { face: 4 }]);
+    }
+
+    #[test]
+    fn collapsed_box_has_zero_length_edges_and_zero_area_faces() {
+        let mut b = hand_cube();
+        // Squash the top onto the bottom.
+        for v in &mut b.vertices {
+            v.point.z = 0.0;
+        }
+        for e in &mut b.edges {
+            let (p, q) = (b.vertices[e.start].point, b.vertices[e.end].point);
+            let len = p.distance(q);
+            e.curve = Curve::Line { origin: p, dir: if len > 0.0 { (q - p) / len } else { DVec3::X } };
+            e.t1 = len;
+        }
+        if let Surface::Plane { origin, .. } = &mut b.faces[1].surface {
+            origin.z = 0.0;
+        }
+        let errs = validate(&b).unwrap_err();
+        assert!(errs.iter().any(|e| matches!(e, ValidationError::ZeroLengthEdge { .. })), "{errs:?}");
+        assert!(errs.iter().any(|e| matches!(e, ValidationError::ZeroAreaFace { face: 2 })), "{errs:?}");
     }
 
     #[test]
