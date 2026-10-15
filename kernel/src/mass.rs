@@ -217,7 +217,7 @@ fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::fixtures::*;
     use crate::geom::Transform;
@@ -419,6 +419,18 @@ mod tests {
             let slack = m.area * rounding_slack(lo.abs().max(hi.abs()).max_element());
             assert!(measure_eq(m.volume, volume, slack), "volume {} expected {volume} ± {slack}", m.volume);
         }
+    }
+
+    /// The 10 km square frame with 1 µm walls the random tester found
+    /// (seed 0x389ee678a942 and 25 others, saved): outer corners 0 and
+    /// L = 9999999.99999 (plus a corner halfway along the bottom), hole
+    /// corners 0.001 and L − 0.001, extruded 1.
+    pub(crate) fn huge_thin_frame() -> Body {
+        let v = DVec2::new;
+        let l = 9999999.99999;
+        let outer = vec![v(0.0, 0.0), v(4999999.999995, 0.0), v(l, 0.0), v(l, l), v(0.0, l)];
+        let hole = vec![v(0.001, 0.001), v(0.001, 9999999.99899), v(9999999.99899, 9999999.99899), v(9999999.99899, 0.001)];
+        extrude(&Profile::polygon(outer, vec![hole]), 1.0).unwrap()
     }
 
     #[test]

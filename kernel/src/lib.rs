@@ -4,6 +4,7 @@
 //! thin layer the browser app calls. Vectors cross the boundary as flat
 //! `[x, y, z]` arrays (`Float64Array` in JavaScript).
 
+pub mod accurate;
 pub mod geom;
 pub mod mass;
 #[cfg(not(target_arch = "wasm32"))]
