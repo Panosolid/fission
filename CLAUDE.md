@@ -40,6 +40,16 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 
 Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't download binaryen. Harmless; re-enable when size matters.
 
+## Supported modelling range
+
+Every serious kernel works inside a fixed range (Parasolid: a 1 km box). Fission's:
+- Feature sizes (any length parameter: width, radius, distance) from 1 µm to 10 km: `tolerance::MIN_FEATURE` = 1e-3 mm to `tolerance::MAX_SIZE` = 1e7 mm.
+- Every point of every body within ±100 km of the origin: `tolerance::MAX_COORD` = 1e8 mm.
+- Linear tolerance stays 1 nm (`LINEAR` = 1e-6 mm), 1000× below the smallest feature. At 100 km a double resolves ~15 nm, so this is tighter than Parasolid's box; the stateful harness tests the edges of the range.
+- Operations outside the range return `KernelError::InvalidInput`; they never panic and never produce geometry.
+- Volumes, areas and projections are computed relative to a local origin (the body's or mesh's bounding-box centre, or a point on the face), never the world origin.
+- The fuzzer spends ~95% of its inputs inside the range and ~5% on extreme inputs, which only have to produce clean errors.
+
 ## Kernel conventions
 
 - Units are millimetres. Z is up (the viewer sets `Object3D.DEFAULT_UP` to +Z).
@@ -66,6 +76,8 @@ Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't do
 - Kernel errors arrive as rejected promises with the kernel's message; show them, never swallow them.
 
 ## Git workflow
+
+- Commit after every completed step and after every bug fix together with its regression test. Never leave more than one step uncommitted. Push after each commit.
 
 - Develop on the branch named by the session; commit each roadmap item separately and push it.
 - Commit messages: a first line naming the step and feature (e.g. "Step 7: box primitive in the viewer"), then what changed and how it was verified.
