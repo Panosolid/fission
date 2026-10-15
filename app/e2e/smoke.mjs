@@ -157,24 +157,16 @@ try {
     await page.screenshot({ path: "e2e/l-bracket.png" });
   });
 
-  /** Chords the display mesh gives an arc of radius r turning φ (the
-   * kernel's rule: each chord turns at most min(0.2 rad, 2·acos(1 − 0.01/r)),
-   * the angle whose chord sags 0.01 mm). */
-  const chords = (r, phi) => Math.ceil(phi / Math.min(0.2, 2 * Math.acos(1 - 0.01 / r)));
-
   await check("plate with two round holes: area minus the holes, times the distance", async () => {
-    // Holes of radius 0.15·30 = 4.5: chords turn 2·acos(1 − 0.01/4.5) ≈
-    // 0.1334 rad, so each circle gets ceil(2π/0.1334) = 48. The mesh's
-    // holes are 48-gons: area 24·4.5²·sin(2π/48), perimeter 48·2·4.5·sin(π/48).
-    // V = (1200 − 2·hole)·20, S = 2(1200 − 2·hole) + (140 + 2·rim)·20.
+    // The numbers shown are exact (from the B-rep, not the mesh). Holes of
+    // radius 0.15·30 = 4.5: profile 1200 − 2·π·4.5² = 1200 − 40.5π,
+    // perimeters 140 + 2·2π·4.5 = 140 + 18π. Extruded 20:
+    // V = 20(1200 − 40.5π), S = 2(1200 − 40.5π) + 20(140 + 18π).
     // Square 8 V, 12 E, 4 sides; each circle 2 V, 2 E, 1 side; 2 caps:
     // 12 V, 16 E, 8 F (genus 2).
     await pick("plate", "12,240 mm³");
-    assert.equal(chords(4.5, 2 * Math.PI), 48);
-    const hole = 24 * 4.5 ** 2 * Math.sin((2 * Math.PI) / 48);
-    const rim = 48 * 2 * 4.5 * Math.sin(Math.PI / 48);
-    near(await shown("volume"), (1200 - 2 * hole) * 20, "volume");
-    near(await shown("area"), 2 * (1200 - 2 * hole) + (140 + 2 * rim) * 20, "area");
+    near(await shown("volume"), 20 * (1200 - 40.5 * Math.PI), "volume");
+    near(await shown("area"), 2 * (1200 - 40.5 * Math.PI) + 20 * (140 + 18 * Math.PI), "area");
     assert.equal(await text("topology"), "12 V · 16 E · 8 F");
     assert.equal(await text("status"), "valid");
     await page.waitForTimeout(300);
@@ -182,13 +174,12 @@ try {
   });
 
   await check("cylinder primitive: diameter from the width", async () => {
-    // Diameter 40 so r = 20, height 20: chords turn at most
-    // 2·acos(1 − 0.01/20) ≈ 0.06325, ceil(2π/0.06325) = 100 per turn. A
-    // 100-sided prism: V = 50·r²·sin(2π/100)·h. 2 V, 2 E, 3 F. The depth
-    // box is hidden (a cylinder has no depth).
+    // Diameter 40 so r = 20, height 20: V = π·400·20 = 8000π, A = 2·400π +
+    // 2π·20·20 = 1600π. 2 V, 2 E, 3 F. The depth box is hidden (a
+    // cylinder has no depth).
     await pick("cylinder", await text("volume"));
-    assert.equal(chords(20, 2 * Math.PI), 100);
-    near(await shown("volume"), 50 * 400 * Math.sin((2 * Math.PI) / 100) * 20, "volume");
+    near(await shown("volume"), 8000 * Math.PI, "volume");
+    near(await shown("area"), 1600 * Math.PI, "area");
     assert.equal(await text("topology"), "2 V · 2 E · 3 F");
     assert.equal(await text("width-label"), "Diameter");
     assert.equal(await page.isVisible("#depth-row"), false);
@@ -196,15 +187,28 @@ try {
     await page.screenshot({ path: "e2e/cylinder.png" });
   });
 
+  await check("sphere primitive: diameter from the width", async () => {
+    // Diameter 40 so r = 20: V = 4/3·π·8000, A = 4π·400 = 1600π. One
+    // vertex and the equator edge between two hemispheres. Neither depth
+    // nor height applies.
+    await pick("sphere", await text("volume"));
+    near(await shown("volume"), (32000 / 3) * Math.PI, "volume");
+    near(await shown("area"), 1600 * Math.PI, "area");
+    assert.equal(await text("topology"), "1 V · 1 E · 2 F");
+    assert.equal(await page.isVisible("#depth-row"), false);
+    assert.equal(await page.isVisible("#height-row"), false);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: "e2e/sphere.png" });
+  });
+
   await check("slot with round ends", async () => {
-    // 40 × 30: straight sides 10 long, ends half circles of radius 15:
-    // chords turn 2·acos(1 − 0.01/15) ≈ 0.0730, ceil(π/0.0730) = 44 per end.
-    // Each end's 44-chord half polygon has area 22·15²·sin(π/44).
-    // V = (10·30 + 2·half)·20. 4 corners: 8 V, 12 E, 4 sides + 2 caps.
+    // 40 × 30: straight sides 10 long, ends half circles of radius 15.
+    // Profile 10·30 + π·15² = 300 + 225π, perimeter 2·10 + 2π·15 = 20 + 30π.
+    // V = 20(300 + 225π), S = 2(300 + 225π) + 20(20 + 30π).
+    // 4 corners: 8 V, 12 E, 4 sides + 2 caps.
     await pick("slot", await text("volume"));
-    assert.equal(chords(15, Math.PI), 44);
-    const half = 22 * 15 ** 2 * Math.sin(Math.PI / 44);
-    near(await shown("volume"), (300 + 2 * half) * 20, "volume");
+    near(await shown("volume"), 20 * (300 + 225 * Math.PI), "volume");
+    near(await shown("area"), 2 * (300 + 225 * Math.PI) + 20 * (20 + 30 * Math.PI), "area");
     assert.equal(await text("topology"), "8 V · 12 E · 6 F");
     assert.equal(await text("status"), "valid");
     await page.waitForTimeout(300);

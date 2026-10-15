@@ -5,6 +5,7 @@
 //! `[x, y, z]` arrays (`Float64Array` in JavaScript).
 
 pub mod geom;
+pub mod mass;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod debug_dump;
 pub mod display;
@@ -33,6 +34,7 @@ pub fn kernel_version() -> String {
 #[derive(Debug, Serialize)]
 pub struct BodyView {
     pub mesh: DisplayMesh,
+    /// Exact, from the B-rep (`mass::mass_properties`), not the mesh.
     pub volume: f64,
     pub area: f64,
     pub vertices: usize,
@@ -44,14 +46,15 @@ pub struct BodyView {
 
 pub fn view_body(body: &Body) -> Result<BodyView, String> {
     let mesh = tessellate(body, &TessOptions::DISPLAY).map_err(|e| format!("face {}: {}", e.face, e.message))?;
+    let exact = mass::mass_properties(body);
     let errors = match validate::validate(body) {
         Ok(()) => vec![],
         Err(errs) => errs.iter().map(|e| e.to_string()).collect(),
     };
     Ok(BodyView {
         mesh: display::display_mesh(body, &mesh),
-        volume: mesh.signed_volume(),
-        area: mesh.area(),
+        volume: exact.volume,
+        area: exact.area,
         vertices: body.vertices.len(),
         edges: body.edges.len(),
         faces: body.faces.len(),
@@ -67,6 +70,13 @@ fn to_js(view: BodyView) -> Result<JsValue, JsError> {
 #[wasm_bindgen]
 pub fn make_box(width: f64, depth: f64, height: f64) -> Result<JsValue, JsError> {
     let body = ops::primitives::make_box(width, depth, height).map_err(|e| JsError::new(&e.to_string()))?;
+    to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
+}
+
+/// Sphere centred on the origin, radius in millimetres.
+#[wasm_bindgen]
+pub fn make_sphere(radius: f64) -> Result<JsValue, JsError> {
+    let body = ops::primitives::make_sphere(radius).map_err(|e| JsError::new(&e.to_string()))?;
     to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
 }
 
@@ -154,21 +164,36 @@ mod tests {
 
     #[test]
     fn cylinder_view_reports_hand_worked_numbers() {
-        // Radius 20, height 20 (the app's default 40 wide cylinder). Display
-        // chords may sag 0.01: each turns at most 2·acos(1 − 0.01/20) =
-        // 0.063249 rad, so a turn needs ceil(2π / 0.063249) = ceil(99.34) =
-        // 100 chords. The mesh is a 100-sided prism: each cap is 100
-        // triangles of ½·r²·sin(2π/100), each side panel is 2·r·sin(π/100)
-        // wide. 2 seam vertices, 2 circle edges, 2 caps + 1 side.
-        let v = view_body(&ops::primitives::make_cylinder(20.0, 20.0).unwrap()).unwrap();
-        let cap = 50.0 * 400.0 * (TAU / 100.0).sin();
-        let side = 100.0 * 2.0 * 20.0 * (PI / 100.0).sin() * 20.0;
-        assert!(rel_eq(v.volume, cap * 20.0, FP_REL), "{} vs {}", v.volume, cap * 20.0);
-        assert!(rel_eq(v.area, 2.0 * cap + side, FP_REL), "{} vs {}", v.area, 2.0 * cap + side);
+        // Radius 20, height 20 (the app's default 40 wide cylinder): the
+        // view's numbers are exact, V = π·400·20 = 8000π, A = 2·400π +
+        // 2π·20·20 = 1600π. 2 seam vertices, 2 circle edges, 2 caps + 1 side.
+        let body = ops::primitives::make_cylinder(20.0, 20.0).unwrap();
+        let v = view_body(&body).unwrap();
+        assert!(rel_eq(v.volume, 8000.0 * PI, FP_REL), "{} vs {}", v.volume, 8000.0 * PI);
+        assert!(rel_eq(v.area, 1600.0 * PI, FP_REL), "{} vs {}", v.area, 1600.0 * PI);
         assert_eq!((v.vertices, v.edges, v.faces), (2, 2, 3));
         assert!(v.errors.is_empty());
+        // What's drawn is the display mesh: display chords may sag 0.01, so
+        // each turns at most 2·acos(1 − 0.01/20) = 0.063249 rad and a turn
+        // needs ceil(2π / 0.063249) = ceil(99.34) = 100 chords: a 100-sided
+        // prism, each cap 100 triangles of ½·r²·sin(2π/100).
+        let mesh = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        let cap = 50.0 * 400.0 * (TAU / 100.0).sin();
+        assert!(rel_eq(mesh.signed_volume(), cap * 20.0, FP_REL), "{} vs {}", mesh.signed_volume(), cap * 20.0);
         // Bad sizes come back as clean errors.
         assert!(ops::primitives::make_cylinder(-1.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn sphere_view_reports_hand_worked_numbers() {
+        // Radius 20: V = 4/3·π·8000, A = 4π·400 = 1600π. One vertex on the
+        // equator, the equator edge, two hemispheres.
+        let v = view_body(&ops::primitives::make_sphere(20.0).unwrap()).unwrap();
+        assert!(rel_eq(v.volume, 32000.0 / 3.0 * PI, FP_REL), "{}", v.volume);
+        assert!(rel_eq(v.area, 1600.0 * PI, FP_REL), "{}", v.area);
+        assert_eq!((v.vertices, v.edges, v.faces), (1, 1, 2));
+        assert!(v.errors.is_empty());
+        assert!(ops::primitives::make_sphere(0.0).is_err());
     }
 
     #[test]

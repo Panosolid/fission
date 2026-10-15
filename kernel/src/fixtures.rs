@@ -163,3 +163,77 @@ pub fn hand_tube(r_in: f64, r_out: f64, h: f64, twist: f64) -> Body {
     b.shells.push(Shell { faces: vec![0, 1, 2, 3] });
     b
 }
+
+/// The part of a sphere of radius `r` (centre at the origin) between the
+/// planes z = `a` and z = `b`, −r < a < b < r: a band of the sphere and two
+/// flat discs. Edges: 0 lower rim, 1 upper rim (both counter-clockwise from
+/// above). Faces: 0 band, 1 lower disc, 2 upper disc.
+pub fn hand_sphere_slice(r: f64, a: f64, b: f64) -> Body {
+    let mut body = Body::default();
+    let rim = |z: f64| circle(DVec3::new(0.0, 0.0, z), (r * r - z * z).sqrt());
+    let va = body.add_vertex(rim(a).eval(0.0));
+    let vb = body.add_vertex(rim(b).eval(0.0));
+    let lower = body.add_edge(rim(a), va, va, 0.0, TAU);
+    let upper = body.add_edge(rim(b), vb, vb, 0.0, TAU);
+    let fwd = |edge| Loop { coedges: vec![Coedge { edge, reversed: false }] };
+    let rev = |edge| Loop { coedges: vec![Coedge { edge, reversed: true }] };
+    // The band is above the lower rim and below the upper one: running
+    // counter-clockwise from above, the lower rim has the band on its left
+    // (seen from outside), the upper rim has it on its right, so reversed.
+    let sphere = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: r };
+    body.add_face(sphere, true, vec![fwd(lower), rev(upper)]);
+    let disc = |z: f64, normal| Surface::Plane { origin: DVec3::new(0.0, 0.0, z), normal, x_dir: DVec3::X };
+    body.add_face(disc(a, DVec3::NEG_Z), true, vec![rev(lower)]);
+    body.add_face(disc(b, DVec3::Z), true, vec![fwd(upper)]);
+    body.shells.push(Shell { faces: vec![0, 1, 2] });
+    body
+}
+
+/// The part of a sphere of radius `r` (centre at the origin) above z = `a`:
+/// a cap and a flat disc. Faces: 0 cap, 1 disc.
+pub fn hand_sphere_cap(r: f64, a: f64) -> Body {
+    let mut body = Body::default();
+    let rim = circle(DVec3::new(0.0, 0.0, a), (r * r - a * a).sqrt());
+    let v = body.add_vertex(rim.eval(0.0));
+    let e = body.add_edge(rim, v, v, 0.0, TAU);
+    let sphere = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: r };
+    body.add_face(sphere, true, vec![Loop { coedges: vec![Coedge { edge: e, reversed: false }] }]);
+    let disc = Surface::Plane { origin: DVec3::new(0.0, 0.0, a), normal: DVec3::NEG_Z, x_dir: DVec3::X };
+    body.add_face(disc, true, vec![Loop { coedges: vec![Coedge { edge: e, reversed: true }] }]);
+    body.shells.push(Shell { faces: vec![0, 1] });
+    body
+}
+
+/// One eighth of a ball of radius `r`: x, y, z ≥ 0. Its curved face is a
+/// spherical triangle with three corners (A on x, B on y, C on z) joined by
+/// quarter circles, and three flat quarter discs meet at the origin.
+pub fn hand_sphere_octant(r: f64) -> Body {
+    use std::f64::consts::FRAC_PI_2;
+    let mut b = Body::default();
+    let o = b.add_vertex(DVec3::ZERO);
+    let va = b.add_vertex(DVec3::X * r);
+    let vb = b.add_vertex(DVec3::Y * r);
+    let vc = b.add_vertex(DVec3::Z * r);
+    let quarter = |axis, x_dir| Curve::Circle { center: DVec3::ZERO, axis, x_dir, radius: r };
+    // A → B about +Z (y_dir = Z × X = Y), B → C about +X (Y then X × Y = Z),
+    // C → A about +Y (Z then Y × Z = X): each from t = 0 to π/2.
+    let ab = b.add_edge(quarter(DVec3::Z, DVec3::X), va, vb, 0.0, FRAC_PI_2);
+    let bc = b.add_edge(quarter(DVec3::X, DVec3::Y), vb, vc, 0.0, FRAC_PI_2);
+    let ca = b.add_edge(quarter(DVec3::Y, DVec3::Z), vc, va, 0.0, FRAC_PI_2);
+    let oa = b.add_line(o, va);
+    let ob = b.add_line(o, vb);
+    let oc = b.add_line(o, vc);
+    let fwd = |edge| Coedge { edge, reversed: false };
+    let rev = |edge| Coedge { edge, reversed: true };
+    // Seen from (1,1,1) A → B → C is counter-clockwise: (B − A) × (C − A)
+    // = (r², r², r²) points outward.
+    let sphere = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: r };
+    b.add_face(sphere, true, vec![Loop { coedges: vec![fwd(ab), fwd(bc), fwd(ca)] }]);
+    // Each flat face runs its arc backwards, then in to the origin and out.
+    let plane = |normal| Surface::Plane { origin: DVec3::ZERO, normal, x_dir: crate::geom::any_perpendicular(normal) };
+    b.add_face(plane(DVec3::NEG_Z), true, vec![Loop { coedges: vec![rev(ab), rev(oa), fwd(ob)] }]);
+    b.add_face(plane(DVec3::NEG_X), true, vec![Loop { coedges: vec![rev(bc), rev(ob), fwd(oc)] }]);
+    b.add_face(plane(DVec3::NEG_Y), true, vec![Loop { coedges: vec![rev(ca), rev(oc), fwd(oa)] }]);
+    b.shells.push(Shell { faces: vec![0, 1, 2, 3] });
+    b
+}

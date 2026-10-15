@@ -3,9 +3,9 @@ compare it with what the Fission kernel reported.
 
 Input: the JSONL file written by the harness with FISSION_ORACLE_OUT. Each
 line has the primitive ("shape"), the 3x4 placement matrix the harness
-tracked independently of the kernel, and the kernel's numbers (volume and
-area of its display mesh, bounds, face count, and the mesh's largest
-deviation from the exact surface).
+tracked independently of the kernel, and the kernel's numbers (exact volume
+and area from its B-rep, volume and area of its display mesh, bounds, face
+count, and the mesh's largest deviation from the exact surface).
 
 OpenCascade isn't always right either: disagreements are logged for review,
 not treated as kernel failures.
@@ -176,6 +176,12 @@ def compare(case):
     # area x d and area by at most perimeters x d).
     vslack = case["volume_slack"] + REL * vol
     aslack = case["area_slack"] + REL * area
+    # The kernel's exact volume and area (from its B-rep, not its mesh)
+    # have no chords to allow for: they must match to rounding.
+    if abs(case["exact_volume"] - vol) > vslack:
+        issues.append(f"exact volume: fission {case['exact_volume']}, occ {vol}, allowed {vslack:.3g}")
+    if abs(case["exact_area"] - area) > aslack:
+        issues.append(f"exact area: fission {case['exact_area']}, occ {area}, allowed {aslack:.3g}")
     if kind == "Extrude" and curved(case["shape"]["Extrude"]):
         # Arcs bulge either way (concave walls too), so the mesh can be on
         # either side of the exact solid, by at most the harness's chord

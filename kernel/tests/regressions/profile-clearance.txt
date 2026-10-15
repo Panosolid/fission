@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6cd057059d803eb5717876d117a461c42541cdcf900bc950e5fc8482fc4dec3a # shrinks to s = Circle { center: DVec2(0.0, -1.6302962522091557), radius: 1.800854041444515, ccw: true }, t = Arc { a: DVec2(-2.1693339329349772, -1.5728253313385039), b: DVec2(0.0, -2.8644044193286713), center: DVec2(-0.8051605916378075, -1.7491564666091146), radius: 1.3755222914848406, sweep: -3.958532690285343 }
+cc 8b62f3704e3887434b877b4e475a1ce8d67ed9de3e4ca97b6293acd3b9390234 # shrinks to s = Circle { center: DVec2(0.0, 0.0), radius: 0.1, ccw: true }, t = Arc { a: DVec2(-2.954431724677853, 0.0), b: DVec2(0.0, -1.477645405292631), center: DVec2(-2.7484531599057602, -3.2805582151533934), radius: 3.2870183102860846, sweep: -1.0529385130753013 }

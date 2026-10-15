@@ -141,8 +141,8 @@ impl Body {
         uses
     }
 
-    /// Axis-aligned box containing the body. Exact for straight edges, full
-    /// circles and spheres; arcs are bounded by their whole circle.
+    /// Axis-aligned box containing the body, exact for its lines, circles,
+    /// arcs and spheres.
     pub fn bounds(&self) -> (DVec3, DVec3) {
         let mut lo = DVec3::INFINITY;
         let mut hi = DVec3::NEG_INFINITY;

@@ -8,6 +8,7 @@ export interface KernelOps {
   kernel_version: { args: []; result: string };
   make_box: { args: [width: number, depth: number, height: number]; result: BodyView };
   make_cylinder: { args: [radius: number, height: number]; result: BodyView };
+  make_sphere: { args: [radius: number]; result: BodyView };
   make_extrude: { args: [profile: Outline, distance: number]; result: BodyView };
 }
 

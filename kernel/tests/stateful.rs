@@ -30,6 +30,7 @@
 //! and `apply_op`.
 
 use fission_kernel::debug_dump;
+use fission_kernel::mass::{mass_properties, MassProps};
 use fission_kernel::mesh::Mesh;
 use fission_kernel::ops::extrude::{self, Boundary, Profile};
 use fission_kernel::ops::{primitives, transform, KernelError};
@@ -45,7 +46,7 @@ use proptest::test_runner::{
 use proptest_state_machine::ReferenceStateMachine;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use std::fmt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -819,6 +820,8 @@ fn guarded<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 /// Measurements of a body used for the identities.
 struct Measure {
     mesh: Mesh,
+    /// The kernel's exact volume and area (from the B-rep, not the mesh).
+    exact: MassProps,
     volume: f64,
     area: f64,
     /// Sum of all triangle perimeters: bounds how much area can change when
@@ -855,7 +858,7 @@ fn measure(b: &Body) -> Result<Measure, String> {
     if (mlo - lo).max_element() > sag + slack || (hi - mhi).max_element() > sag + slack {
         return Err(format!("bounds {lo}..{hi} reach more than the chord sag {sag:e} past the mesh {mlo}..{mhi}"));
     }
-    Ok(Measure { volume: mesh.signed_volume(), area: mesh.area(), perimeters, lo, hi, mesh })
+    Ok(Measure { exact: mass_properties(b), volume: mesh.signed_volume(), area: mesh.area(), perimeters, lo, hi, mesh })
 }
 
 fn reach(m: &Measure) -> f64 {
@@ -876,6 +879,15 @@ fn check_rigid(before: &Measure, after: &Measure, what: &str) -> Result<(), Stri
     if after.volume <= 0.0 {
         return Err(format!("{what} left a non-positive volume {}", after.volume));
     }
+    // The exact values move by no more than the mesh's do: the surface's
+    // points each move by at most δ too.
+    let (b, a) = (before.exact, after.exact);
+    if !tolerance::measure_eq(b.volume, a.volume, before.area * delta) {
+        return Err(format!("{what} changed the exact volume: {} → {}", b.volume, a.volume));
+    }
+    if !tolerance::measure_eq(b.area, a.area, before.perimeters * delta) {
+        return Err(format!("{what} changed the exact area: {} → {}", b.area, a.area));
+    }
     Ok(())
 }
 
@@ -895,6 +907,14 @@ fn rotation(axis: DVec3, angle: f64) -> glam::DAffine3 {
     glam::DAffine3::from_axis_angle(k, angle.rem_euclid(std::f64::consts::TAU))
 }
 
+/// The kernel's exact volume and area against closed forms, to rounding.
+fn exact_is(m: &Measure, volume: f64, area: f64, what: &str) -> Result<(), String> {
+    if !tolerance::rel_eq(m.exact.volume, volume, tolerance::FP_REL) || !tolerance::rel_eq(m.exact.area, area, tolerance::FP_REL) {
+        return Err(format!("{what}: exact volume {} expected {volume}; exact area {} expected {area}", m.exact.volume, m.exact.area));
+    }
+    Ok(())
+}
+
 /// Checks the freshly built, unplaced primitive against hand-derived values.
 fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
     match shape {
@@ -906,6 +926,7 @@ fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
             {
                 return Err(format!("box {w}×{d}×{h}: volume {} area {}", m.volume, m.area));
             }
+            exact_is(m, w * d * h, 2.0 * (w * d + d * h + w * h), "box")?;
         }
         Shape::Cylinder { r, h } => {
             // Prism over the inscribed n-gon: V = (n/2)r²sin(2π/n)·h.
@@ -915,6 +936,8 @@ fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
             if !tolerance::rel_eq(m.volume, v, tolerance::FP_REL) {
                 return Err(format!("cylinder r={r} h={h}: volume {} expected {v}", m.volume));
             }
+            // Exact: V = πr²h, A = 2πr² + 2πrh.
+            exact_is(m, PI * r * r * h, 2.0 * PI * r * (r + h), "cylinder")?;
         }
         Shape::Sphere { r } => {
             // Inscribed convex mesh: strictly inside the true ball.
@@ -922,6 +945,8 @@ fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
             if !(m.volume > 0.0 && m.volume < ball) {
                 return Err(format!("sphere r={}: volume {} not in (0, {ball})", r.0, m.volume));
             }
+            // Exact: V = 4/3·πr³, A = 4πr².
+            exact_is(m, ball, 4.0 * PI * r.0 * r.0, "sphere")?;
         }
         Shape::Extrude { outer, holes, dist, .. } => {
             // Prism: V = A·d and S = 2A + P·d, where A is the profile's area
@@ -970,6 +995,14 @@ fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
                 return Err(format!(
                     "extrude: volume {} expected A·d = {v} (±{v_slack:e}); area {} expected 2A + P·d = {s} (±{s_slack:e})",
                     m.volume, m.area
+                ));
+            }
+            // The exact values have no chords to allow for: only rounding.
+            let (ve, se) = (m.area * delta + area_err * d, m.perimeters * delta + 2.0 * area_err);
+            if !tolerance::measure_eq(m.exact.volume, v, ve) || !tolerance::measure_eq(m.exact.area, s, se) {
+                return Err(format!(
+                    "extrude: exact volume {} expected A·d = {v} (±{ve:e}); exact area {} expected 2A + P·d = {s} (±{se:e})",
+                    m.exact.volume, m.exact.area
                 ));
             }
             // Every mesh point is a boundary point of a cap (the caps and
@@ -1411,7 +1444,7 @@ fn oracle_lines(slots: &[Slot]) -> String {
         let (curve_volume_slack, curve_area_slack) = curve_slacks(&s.shape);
         let line = serde_json::json!({
             "shape": s.shape, "matrix": matrix, "faces": b.faces.len(),
-            "volume": m.volume, "area": m.area, "lo": m.lo.to_array(), "hi": m.hi.to_array(), "max_deviation": dev,
+            "volume": m.volume, "area": m.area, "exact_volume": m.exact.volume, "exact_area": m.exact.area, "lo": m.lo.to_array(), "hi": m.hi.to_array(), "max_deviation": dev,
             "volume_slack": m.area * delta, "area_slack": m.perimeters * delta,
             "curve_volume_slack": curve_volume_slack, "curve_area_slack": curve_area_slack,
         });

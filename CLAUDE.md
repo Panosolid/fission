@@ -13,10 +13,11 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/validate.rs`: `validate()` and `checked()`. Every operation's result goes through `checked()`.
   - `src/tessellate.rs`: B-rep → watertight triangle mesh (constrained Delaunay in uv space via `spade`).
   - `src/mesh.rs`: triangle mesh, volume, area, closed-mesh check.
+  - `src/mass.rs`: exact volume and area of a B-rep from its edges (vector area by Stokes, divergence theorem, cylinder flux, Gauss–Bonnet on spheres), written to keep digits for far-away and huge-radius geometry. The app shows these, not mesh values.
   - `src/display.rs`: mesh shaped for the viewer (per-face normals, edge lines).
   - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate). Each returns `Result<Body, KernelError>` via `ops::finish`.
-  - `src/fixtures.rs`: hand-built test bodies that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
-  - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_extrude` → `BodyView`). Keep it thin.
+  - `src/fixtures.rs`: hand-built test bodies (cube, cylinder, sphere, half cylinder, tube, sphere cap/slice/octant) that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
+  - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_cylinder`, `make_sphere`, `make_extrude` → `BodyView`, with exact volume and area). Keep it thin.
   - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
   - `tests/stateful.rs`: stateful random-testing harness (see its header). When a kernel operation lands, add it to `Op`, `Scene::transitions`, `apply_op` and `replay_op` the same day.
   - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
@@ -143,7 +144,7 @@ Booleans
 - [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set
 - [ ] 45. Coplanar faces, touching edges, shared vertices
 - [ ] 46. Plane–cylinder intersection (drill a hole through a box)
-- [ ] 47. Cylinder–cylinder, plane–sphere
+- [ ] 47. Cylinder–cylinder, plane–sphere. Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces
 - [ ] 48. Extrude modes (join/cut/intersect/new body), symmetric, to-face, taper
 - [ ] 49. Hole feature, Combine tool
 
