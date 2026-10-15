@@ -86,3 +86,49 @@ pub fn hand_sphere(r: f64) -> Body {
     b.shells.push(Shell { faces: vec![0, 1] });
     b
 }
+
+/// Cylinder whose top circle starts at angle `twist` instead of 0, so the
+/// top and bottom vertices don't line up. Exercises the seam bridging in
+/// cylinder tessellation with a non-zero offset.
+pub fn hand_twisted_cylinder(r: f64, h: f64, twist: f64) -> Body {
+    let mut b = hand_cylinder(r, h);
+    let x_top = DVec3::new(twist.cos(), twist.sin(), 0.0);
+    b.vertices[1].point = DVec3::new(0.0, 0.0, h) + x_top * r;
+    b.edges[1].curve = Curve::Circle { center: DVec3::new(0.0, 0.0, h), axis: DVec3::Z, x_dir: x_top, radius: r };
+    b
+}
+
+/// Half cylinder (a "D"): the half disc y ≥ 0 of radius `r`, extruded by `h`.
+/// Its curved face is a partial cylinder patch bounded by two arcs and two
+/// lines. Volume πr²h/2.
+pub fn hand_half_cylinder(r: f64, h: f64) -> Body {
+    use std::f64::consts::PI;
+    let mut b = Body::default();
+    let top = DVec3::new(0.0, 0.0, h);
+    let v0 = b.add_vertex(DVec3::new(r, 0.0, 0.0));
+    let v1 = b.add_vertex(DVec3::new(-r, 0.0, 0.0));
+    let v2 = b.add_vertex(DVec3::new(r, 0.0, h));
+    let v3 = b.add_vertex(DVec3::new(-r, 0.0, h));
+    let e0 = b.add_edge(circle(DVec3::ZERO, r), v0, v1, 0.0, PI); // bottom arc through +Y
+    let e1 = b.add_line(v1, v0); // bottom straight edge
+    let e2 = b.add_edge(circle(top, r), v2, v3, 0.0, PI); // top arc
+    let e3 = b.add_line(v3, v2); // top straight edge
+    let e4 = b.add_line(v0, v2); // vertical at +X
+    let e5 = b.add_line(v1, v3); // vertical at -X
+    let fwd = |edge| Coedge { edge, reversed: false };
+    let rev = |edge| Coedge { edge, reversed: true };
+    let plane = |origin, normal| Surface::Plane { origin, normal, x_dir: DVec3::X };
+    // Bottom, seen from below: straight edge +X → -X... i.e. e1 reversed, then the arc back.
+    b.add_face(plane(DVec3::ZERO, DVec3::NEG_Z), true, vec![Loop { coedges: vec![rev(e1), rev(e0)] }]);
+    b.add_face(plane(top, DVec3::Z), true, vec![Loop { coedges: vec![fwd(e2), fwd(e3)] }]);
+    // Flat side y = 0, seen from -Y: +X is to the right.
+    b.add_face(plane(DVec3::ZERO, DVec3::NEG_Y), true, vec![Loop { coedges: vec![fwd(e1), fwd(e4), rev(e3), rev(e5)] }]);
+    // Curved side seen from outside: the bottom arc runs to the right.
+    b.add_face(
+        Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: r },
+        true,
+        vec![Loop { coedges: vec![fwd(e0), fwd(e5), rev(e2), rev(e4)] }],
+    );
+    b.shells.push(Shell { faces: vec![0, 1, 2, 3] });
+    b
+}

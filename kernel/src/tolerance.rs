@@ -140,7 +140,19 @@ mod tests {
 
     #[test]
     fn rel_eq_scales_with_magnitude() {
-        assert!(rel_eq(1e5, 1e5 + 1e-2, 1e-6));
+        // Allowed difference is rel × the larger magnitude: 1e-6 × 1e5 = 0.1.
+        assert!(rel_eq(1e5, 1e5 + 0.09, 1e-6));
+        assert!(!rel_eq(1e5, 1e5 + 0.11, 1e-6));
+        assert!(!rel_eq(1e5, 1e5 + 1.0, 1e-6));
         assert!(!rel_eq(1.0, 1.0 + 1e-3, 1e-6));
+    }
+
+    #[test]
+    fn orient3d_sign_by_hand() {
+        // a, b, c on the z = 0 plane, counter-clockwise seen from above.
+        let (a, b, c) = (DVec3::ZERO, DVec3::X, DVec3::Y);
+        assert!(orient3d(a, b, c, DVec3::new(0.3, 0.3, -1.0)) > 0.0, "below the plane is positive");
+        assert!(orient3d(a, b, c, DVec3::new(0.3, 0.3, 1.0)) < 0.0, "above the plane is negative");
+        assert!(orient3d(a, b, c, DVec3::new(7.0, -2.0, 0.0)) == 0.0, "coplanar is exactly zero");
     }
 }

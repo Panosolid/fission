@@ -51,11 +51,6 @@ impl Mesh {
         (b - a).cross(c - a).length() / 2.0
     }
 
-    /// Area of the triangles belonging to one B-rep face.
-    pub fn face_area(&self, face: FaceId) -> f64 {
-        (0..self.triangles.len()).filter(|&t| self.triangle_face[t] == face).map(|t| self.triangle_area(t)).sum()
-    }
-
     /// Watertight and consistently oriented: every directed edge appears
     /// exactly once and its reverse exactly once.
     pub fn check_closed(&self) -> Result<(), Vec<MeshError>> {
@@ -109,17 +104,23 @@ mod tests {
 
     #[test]
     fn missing_triangle_is_open() {
+        // Removing one face of a tetrahedron leaves its 3 edges each used once.
         let mut m = tetra();
         m.triangles.pop();
-        assert!(matches!(m.check_closed().unwrap_err()[0], MeshError::OpenEdge { .. }));
+        let errs = m.check_closed().unwrap_err();
+        assert_eq!(errs.len(), 3, "{errs:?}");
+        assert!(errs.iter().all(|e| matches!(e, MeshError::OpenEdge { uses: 1, .. })), "{errs:?}");
     }
 
     #[test]
     fn flipped_triangle_is_caught() {
         let mut m = tetra();
         m.triangles[2].swap(1, 2); // the slanted face, which doesn't pass through the origin
+        // Each of the flipped triangle's 3 edges now runs the same way as its
+        // neighbour's: exactly 3 problems, each reported once.
         let errs = m.check_closed().unwrap_err();
-        assert!(errs.iter().any(|e| matches!(e, MeshError::FlippedTriangles { .. })), "{errs:?}");
+        assert_eq!(errs.len(), 3, "{errs:?}");
+        assert!(errs.iter().all(|e| matches!(e, MeshError::FlippedTriangles { .. })), "{errs:?}");
         assert!(m.signed_volume() < 1.0 / 6.0);
     }
 }

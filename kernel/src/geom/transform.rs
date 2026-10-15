@@ -64,3 +64,54 @@ impl Transform {
         self.scale
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tolerance::{eq, points_eq};
+    use std::f64::consts::FRAC_PI_2;
+
+    #[test]
+    fn transforms_by_hand() {
+        // Quarter turn about +Z (counter-clockwise from above): X → Y, Y → -X.
+        let r = Transform::rotation(DVec3::Z, FRAC_PI_2);
+        assert!(points_eq(r.point(DVec3::new(1.0, 0.0, 0.0)), DVec3::new(0.0, 1.0, 0.0)));
+        assert!(points_eq(r.point(DVec3::new(0.0, 2.0, 5.0)), DVec3::new(-2.0, 0.0, 5.0)));
+        // Translation moves points but not directions.
+        let t = Transform::translation(DVec3::new(1.0, 2.0, 3.0));
+        assert!(points_eq(t.point(DVec3::ZERO), DVec3::new(1.0, 2.0, 3.0)));
+        assert!(points_eq(t.dir(DVec3::X), DVec3::X));
+        // Scale by 2: (1, 2, 3) → (2, 4, 6); lengths double; directions stay unit.
+        let s = Transform::uniform_scale(2.0);
+        assert!(points_eq(s.point(DVec3::new(1.0, 2.0, 3.0)), DVec3::new(2.0, 4.0, 6.0)));
+        assert!(eq(s.length(1.5), 3.0));
+        assert!(eq(s.scale(), 2.0));
+        assert!(points_eq(s.dir(DVec3::Z), DVec3::Z));
+    }
+
+    #[test]
+    fn then_applies_in_order_by_hand() {
+        // Rotate X a quarter turn about Z → (0,1,0), then move by (10,0,0) → (10,1,0).
+        let rt = Transform::rotation(DVec3::Z, FRAC_PI_2).then(Transform::translation(DVec3::new(10.0, 0.0, 0.0)));
+        assert!(points_eq(rt.point(DVec3::X), DVec3::new(10.0, 1.0, 0.0)));
+        // Other order: move to (11,0,0), then rotate → (0,11,0).
+        let tr = Transform::translation(DVec3::new(10.0, 0.0, 0.0)).then(Transform::rotation(DVec3::Z, FRAC_PI_2));
+        assert!(points_eq(tr.point(DVec3::X), DVec3::new(0.0, 11.0, 0.0)));
+        // Scales multiply: 2 then 3 is 6.
+        let s = Transform::uniform_scale(2.0).then(Transform::uniform_scale(3.0));
+        assert!(eq(s.scale(), 6.0));
+        assert!(eq(s.length(1.0), 6.0));
+    }
+
+    #[test]
+    fn euler_angles_by_hand() {
+        // 90° about X takes +Y to +Z.
+        let x90 = Transform::rotation_euler_deg(DVec3::new(90.0, 0.0, 0.0));
+        assert!(points_eq(x90.point(DVec3::Y), DVec3::Z));
+        // 90° about X then 90° about Z: Y → Z (X turn) → Z (Z turn leaves Z alone),
+        // and X → X → Y.
+        let xz = Transform::rotation_euler_deg(DVec3::new(90.0, 0.0, 90.0));
+        assert!(points_eq(xz.point(DVec3::Y), DVec3::Z));
+        assert!(points_eq(xz.point(DVec3::X), DVec3::Y));
+    }
+}

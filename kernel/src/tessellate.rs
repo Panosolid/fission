@@ -61,16 +61,23 @@ pub fn tessellate(body: &Body, opts: &TessOptions) -> Result<Mesh, TessError> {
     Ok(mesh)
 }
 
+/// Largest angle one chord may span (a third of a circle).
+const MAX_SEGMENT_ANGLE: f64 = TAU / 3.0;
+
 /// Number of chords used for a curve span.
 fn segments(curve: &Curve, span: f64, opts: &TessOptions) -> usize {
     match *curve {
         Curve::Line { .. } => 1,
         Curve::Circle { radius, .. } => {
             let angle = span.abs();
-            let by_angle = (angle / opts.max_angle).ceil();
-            let chord_angle = if opts.chord < radius { 2.0 * (1.0 - opts.chord / radius).acos() } else { angle };
-            let by_chord = (angle / chord_angle).ceil();
-            (by_angle.max(by_chord).max(1.0) as usize) * opts.refine as usize
+            // A chord spanning θ sags r(1 - cos(θ/2)) below the arc, which
+            // grows up to 2r. Solving for θ is valid while chord < 2r.
+            let chord_angle =
+                if opts.chord < 2.0 * radius { 2.0 * (1.0 - opts.chord / radius).acos() } else { f64::INFINITY };
+            // No segment may turn more than a third of a circle, so a full
+            // circle always has at least 3 chords and encloses some area.
+            let step = opts.max_angle.min(chord_angle).min(MAX_SEGMENT_ANGLE);
+            ((angle / step).ceil().max(1.0) as usize) * opts.refine as usize
         }
     }
 }
@@ -348,7 +355,9 @@ fn inside(p: DVec2, loops: &[Vec<DVec2>]) -> bool {
 mod tests {
     use super::*;
     use crate::tolerance::eq;
-    use crate::fixtures::{hand_cube, hand_cylinder, hand_sphere};
+    use crate::fixtures::{hand_cube, hand_cylinder, hand_half_cylinder, hand_sphere, hand_twisted_cylinder};
+    use crate::tolerance::{points_eq, rel_eq, FP_REL, LINEAR};
+    use crate::validate::validate;
 
     fn region(loops: &[Vec<(f64, f64)>]) -> (Vec<Vec<u32>>, Vec<Vec<DVec2>>) {
         let mut next = 0;
@@ -467,6 +476,213 @@ mod tests {
         assert_eq!(c.counts(&c.shells[0]).genus(), Some(0));
         let s = hand_sphere(5.0);
         assert_eq!(s.counts(&s.shells[0]).genus(), Some(0));
+    }
+
+    #[test]
+    fn half_cylinder_patch_is_an_exact_half_prism() {
+        // The curved face is a partial patch (no loop winds round the axis).
+        // Its mesh is a prism over the inscribed half polygon: n chords over
+        // an angle of π, area n/2 · r² sin(π/n), times h.
+        for (r, h) in [(1.0, 2.0), (30.0, 0.2), (0.02, 50.0)] {
+            let body = hand_half_cylinder(r, h);
+            assert_eq!(validate(&body), Ok(()), "r={r} h={h}");
+            let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+            assert_eq!(m.check_closed(), Ok(()));
+            let n = m.edge_polylines[0].len() - 1;
+            let half_polygon = 0.5 * n as f64 * r * r * (PI / n as f64).sin();
+            assert!(rel_eq(m.signed_volume(), half_polygon * h, FP_REL), "r={r} h={h}");
+            let (on, mid) = surface_error(&body, &m);
+            assert!(on <= LINEAR && mid <= TessOptions::DISPLAY.chord);
+        }
+    }
+
+    #[test]
+    fn twisted_cylinder_seam_still_closes() {
+        // Top vertex at a different angle from the bottom one, so the seam
+        // joins points that don't line up and the B loop needs shifting.
+        for twist in [0.5, 2.0, -2.5, PI] {
+            let body = hand_twisted_cylinder(4.0, 3.0, twist);
+            assert_eq!(validate(&body), Ok(()), "twist {twist}");
+            let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+            assert_eq!(m.check_closed(), Ok(()), "twist {twist}");
+            let (on, mid) = surface_error(&body, &m);
+            assert!(on <= LINEAR && mid <= TessOptions::DISPLAY.chord, "twist {twist}: {mid}");
+            // Every side triangle spans a small angle: none may cut across
+            // the cylinder (that would put its centroid far inside).
+            for (t, &f) in m.triangle_face.iter().enumerate() {
+                if f == 2 {
+                    let [a, b, c] = m.triangle(t);
+                    let centroid = (a + b + c) / 3.0;
+                    let radial = DVec3::new(centroid.x, centroid.y, 0.0).length();
+                    assert!(4.0 - radial <= TessOptions::DISPLAY.chord * 2.0, "twist {twist}: triangle {t} cuts inside");
+                }
+            }
+            // Inscribed in the true cylinder, so strictly less volume.
+            assert!(m.signed_volume() < PI * 16.0 * 3.0);
+        }
+    }
+
+    #[test]
+    fn sphere_triangles_belong_to_their_own_hemisphere() {
+        // Face 0's loop runs counter-clockwise seen from +Z, so it is the
+        // upper hemisphere; face 1 is the lower one.
+        let body = hand_sphere(3.0);
+        let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        for (t, &f) in m.triangle_face.iter().enumerate() {
+            let [a, b, c] = m.triangle(t);
+            let z = (a + b + c).z / 3.0;
+            if f == 0 {
+                assert!(z > 0.0, "upper-face triangle {t} is below the equator");
+            } else {
+                assert!(z < 0.0, "lower-face triangle {t} is above the equator");
+            }
+        }
+    }
+
+    #[test]
+    fn sphere_refinement_counts_by_hand() {
+        // Radius 1, max angle 0.2, chord 0.01 (chord angle 2·acos(0.99) ≈ 0.284):
+        // equator 2π/0.2 → 32 segments; quarter meridian (π/2)/0.2 → 8 rings.
+        // Per hemisphere: 32 × (2·(8-1) + 1) = 480 triangles, 960 in all.
+        let body = hand_sphere(1.0);
+        let m1 = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m1.triangles.len(), 960);
+        // refine 2 doubles both: 64 × (2·(16-1) + 1) = 1984 per hemisphere.
+        let m2 = tessellate(&body, &TessOptions { refine: 2, ..TessOptions::DISPLAY }).unwrap();
+        assert_eq!(m2.triangles.len(), 3968);
+    }
+
+    #[test]
+    fn arc_edge_not_starting_at_zero_by_hand() {
+        // Unit circle, edge over t ∈ [3, 3 + π/2]: max angle 0.2 gives
+        // ceil(1.571/0.2) = 8 segments; chord limit gives ceil(1.571/0.284) = 6.
+        // So 8 segments, 9 points, all inside the arc's angle range.
+        let mut b = Body::default();
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let (t0, t1) = (3.0, 3.0 + PI / 2.0);
+        let v0 = b.add_vertex(c.eval(t0));
+        let v1 = b.add_vertex(c.eval(t1));
+        b.add_edge(c.clone(), v0, v1, t0, t1);
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        let poly = &m.edge_polylines[0];
+        assert_eq!(poly.len(), 9);
+        for (k, &i) in poly.iter().enumerate() {
+            let expected = c.eval(t0 + (t1 - t0) * k as f64 / 8.0);
+            assert!(points_eq(m.positions[i as usize], expected), "point {k}");
+        }
+    }
+
+    #[test]
+    fn chord_limit_boundary_by_hand() {
+        // A chord spanning θ sags r(1 - cos(θ/2)). A full circle needs 4
+        // chords exactly when θ = π/2, i.e. c* = r(1 - cos 45°) = r(1 - √½).
+        // Slightly tighter (0.9 c*) forces θ < π/2 → 5 chords; slightly
+        // looser (1.1 c*) allows θ > π/2 → 4 chords.
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let c_star = 1.0 - 0.5f64.sqrt();
+        let opts = |chord| TessOptions { chord, max_angle: 100.0, refine: 1 };
+        assert_eq!(segments(&c, TAU, &opts(c_star * 0.9)), 5);
+        assert_eq!(segments(&c, TAU, &opts(c_star * 1.1)), 4);
+        // Same rule on a radius-50 circle: everything scales with r.
+        let big = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 50.0 };
+        assert_eq!(segments(&big, TAU, &opts(50.0 * c_star * 0.9)), 5);
+        assert_eq!(segments(&big, TAU, &opts(50.0 * c_star * 1.1)), 4);
+    }
+
+    #[test]
+    fn full_circle_always_has_at_least_three_chords() {
+        // Even with no chord or angle limit to speak of (chord 10r), a
+        // circle is never drawn with fewer than 3 chords: 2π / (2π/3) = 3.
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let opts = TessOptions { chord: 10.0, max_angle: 100.0, refine: 1 };
+        assert_eq!(segments(&c, TAU, &opts), 3);
+        // Chord = r: the sag rule alone allows θ = π (2 chords), but two
+        // chords of a circle enclose nothing, so the floor of 3 applies.
+        // (This case was 1 chord before the fix: the old code skipped the
+        // sag rule entirely once chord >= r.)
+        assert_eq!(segments(&c, TAU, &TessOptions { chord: 1.0, ..opts }), 3);
+        // ...so a cylinder meshed that coarsely is still a valid triangular prism.
+        let body = hand_cylinder(1.0, 1.0);
+        let m = tessellate(&body, &opts).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        // Equilateral triangle in a unit circle: area (3√3/4)·r², times h = 1.
+        assert!(rel_eq(m.signed_volume(), 3.0 * 3f64.sqrt() / 4.0, FP_REL));
+    }
+
+    #[test]
+    fn unwrap_loop_by_hand() {
+        // Four points round the circle, counter-clockwise: u winds by +2π.
+        let ccw = [0.0, 1.6, 3.2, 4.8].map(|u| DVec2::new(u, 0.0));
+        let (out, w) = unwrap_loop(&ccw);
+        assert!(crate::tolerance::angle_eq(w, TAU));
+        assert!(crate::tolerance::angle_eq(out[3].x, 4.8));
+        // Clockwise starting just past zero: 0.1 → 6.2 is a step of -0.183, etc.
+        let cw = [0.1, 6.2, 4.6, 3.0, 1.4].map(|u| DVec2::new(u, 0.0));
+        let (out, w) = unwrap_loop(&cw);
+        assert!(crate::tolerance::angle_eq(w, -TAU));
+        assert!(crate::tolerance::angle_eq(out[1].x, 6.2 - TAU));
+        // A patch that doesn't go round: winding 0.
+        let patch = [5.9, 6.2, 0.2, 0.2, 5.9].map(|u| DVec2::new(u, 1.0));
+        assert!(crate::tolerance::angle_eq(unwrap_loop(&patch).1, 0.0));
+    }
+
+    #[test]
+    fn slerp_by_hand() {
+        // Halfway between X and Y on the unit circle is (√½, √½, 0).
+        let h = 0.5f64.sqrt();
+        assert!(points_eq(slerp(DVec3::X, DVec3::Y, 0.5), DVec3::new(h, h, 0.0)));
+        // A third of the way: (cos 30°, sin 30°, 0).
+        assert!(points_eq(slerp(DVec3::X, DVec3::Y, 1.0 / 3.0), DVec3::new(0.75f64.sqrt(), 0.5, 0.0)));
+        assert!(points_eq(slerp(DVec3::X, DVec3::Y, 0.0), DVec3::X));
+        assert!(points_eq(slerp(DVec3::X, DVec3::Y, 1.0), DVec3::Y));
+        assert!(points_eq(slerp(DVec3::Z, DVec3::Z, 0.7), DVec3::Z));
+    }
+
+    #[test]
+    fn push_oriented_by_hand() {
+        // Cube face 1 is the top, outward normal +Z. Seen from above,
+        // (-5,-5) → (-4,-5) → (-5,-4) is counter-clockwise: kept as is.
+        // The clockwise version must be flipped. (Placed off the origin so a
+        // sign slip in the edge vectors changes the answer.)
+        let body = hand_cube();
+        let mut m = Mesh {
+            positions: vec![DVec3::new(-5.0, -5.0, 1.0), DVec3::new(-4.0, -5.0, 1.0), DVec3::new(-5.0, -4.0, 1.0)],
+            ..Mesh::default()
+        };
+        push_oriented(&mut m, &body, 1, [0, 1, 2]);
+        push_oriented(&mut m, &body, 1, [0, 2, 1]);
+        assert_eq!(m.triangles, vec![[0, 1, 2], [0, 1, 2]]);
+        assert_eq!(m.triangle_face, vec![1, 1]);
+    }
+
+    #[test]
+    fn tiny_coordinates_are_snapped_not_rejected() {
+        // The triangulator refuses coordinates below ~1e-142; real geometry
+        // never needs them, so they are snapped to zero.
+        let (ids, uv) = region(&[vec![(1e-200, 0.0), (1.0, 0.0), (0.0, 1.0)]]);
+        assert_eq!(triangulate_uv(&ids, &uv).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn two_vertices_at_one_uv_point_is_an_error() {
+        let ids = vec![vec![0, 1, 2, 3]];
+        let uv = vec![[(0.0, 0.0), (1.0, 0.0), (1.0, 0.0), (0.0, 1.0)].map(|(x, y)| DVec2::new(x, y)).to_vec()];
+        let err = triangulate_uv(&ids, &uv).unwrap_err();
+        assert!(err.contains("same uv"), "{err}");
+    }
+
+    #[test]
+    fn unsupported_loop_layout_is_an_error_not_a_wrong_mesh() {
+        // Two loops winding round the axis plus a small extra loop on the
+        // same cylinder face: not supported yet, so it must say so.
+        let mut body = hand_cylinder(2.0, 4.0);
+        let s = body.faces[2].surface.clone();
+        let p: Vec<usize> = [(1.0, 1.0), (1.2, 1.0), (1.1, 1.5)].iter().map(|&(u, v)| body.add_vertex(s.eval(DVec2::new(u, v)))).collect();
+        let coedges = (0..3).map(|i| crate::topology::Coedge { edge: body.add_line(p[i], p[(i + 1) % 3]), reversed: false }).collect();
+        body.faces[2].loops.push(crate::topology::Loop { coedges });
+        let err = tessellate(&body, &TessOptions::DISPLAY).unwrap_err();
+        assert_eq!(err.face, 2);
+        assert!(err.message.contains("not supported"), "{}", err.message);
     }
 
     #[test]

@@ -105,9 +105,17 @@ mod tests {
             assert!(make_box(1.0, bad, 1.0).is_err(), "depth {bad} accepted");
             assert!(make_box(1.0, 1.0, bad).is_err(), "height {bad} accepted");
         }
-        for good in [LINEAR * 1.1, 1.0, tolerance::MAX_SIZE * 0.9] {
+        for good in [LINEAR * 1.1, 1.0, tolerance::MAX_SIZE * 0.9, tolerance::MAX_SIZE] {
             assert!(make_box(good, 1.0, 1.0).is_ok(), "width {good} rejected");
         }
+    }
+
+    #[test]
+    fn errors_explain_themselves() {
+        let msg = make_box(-2.0, 1.0, 1.0).unwrap_err().to_string();
+        assert!(msg.contains("width") && msg.contains("-2"), "{msg}");
+        let msg = KernelError::InvalidResult(vec![crate::validate::ValidationError::ZeroLengthEdge { edge: 4 }]).to_string();
+        assert!(msg.contains("failed validation") && msg.contains("edge 4"), "{msg}");
     }
 
     #[test]

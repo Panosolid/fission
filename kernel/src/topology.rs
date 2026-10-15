@@ -184,6 +184,96 @@ impl Body {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tolerance::{eq, points_eq};
+    use std::f64::consts::{FRAC_PI_2, PI};
+
+    fn quarter_arc_edge() -> (Body, EdgeId) {
+        // Unit circle about +Z, edge from t = π/2 to t = π: (0,1,0) → (-1,0,0).
+        let mut b = Body::default();
+        let v0 = b.add_vertex(DVec3::Y);
+        let v1 = b.add_vertex(DVec3::NEG_X);
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let e = b.add_edge(c, v0, v1, FRAC_PI_2, PI);
+        (b, e)
+    }
+
+    #[test]
+    fn edge_points_and_tangents_by_hand() {
+        let (b, e) = quarter_arc_edge();
+        let e = &b.edges[e];
+        // Halfway is t = 3π/4: (cos, sin) = (-√½, √½).
+        let h = 0.5f64.sqrt();
+        assert!(points_eq(e.point_at(0.5), DVec3::new(-h, h, 0.0)));
+        assert!(points_eq(e.point_at(0.0), DVec3::Y));
+        assert!(points_eq(e.point_at(1.0), DVec3::NEG_X));
+        // Counter-clockwise tangent at t = 3π/4 is (-sin, cos) = (-√½, -√½).
+        assert!(points_eq(e.tangent_at(0.5), DVec3::new(-h, -h, 0.0)));
+        // At the start, t = π/2: (-1, 0, 0).
+        assert!(points_eq(e.tangent_at(0.0), DVec3::NEG_X));
+        // Length r·Δt = π/2.
+        assert!(eq(e.length(), FRAC_PI_2));
+        assert!(!e.is_closed());
+    }
+
+    #[test]
+    fn closed_edge_has_same_start_and_end() {
+        let mut b = Body::default();
+        let v = b.add_vertex(DVec3::X);
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let e = b.add_edge(c, v, v, 0.0, 2.0 * PI);
+        assert!(b.edges[e].is_closed());
+    }
+
+    #[test]
+    fn ids_are_arena_positions() {
+        let mut b = Body::default();
+        assert_eq!(b.add_vertex(DVec3::ZERO), 0);
+        assert_eq!(b.add_vertex(DVec3::X), 1);
+        assert_eq!(b.add_line(0, 1), 0);
+        assert_eq!(b.add_line(1, 0), 1);
+        let s = Surface::Plane { origin: DVec3::ZERO, normal: DVec3::Z, x_dir: DVec3::X };
+        assert_eq!(b.add_face(s.clone(), true, vec![]), 0);
+        assert_eq!(b.add_face(s, true, vec![]), 1);
+    }
+
+    #[test]
+    fn degenerate_line_gets_a_finite_direction() {
+        let mut b = Body::default();
+        let v = b.add_vertex(DVec3::ONE);
+        let w = b.add_vertex(DVec3::ONE);
+        let e = b.add_line(v, w);
+        let Curve::Line { dir, .. } = b.edges[e].curve else { unreachable!() };
+        assert!(dir.is_finite(), "zero-length line produced {dir}");
+        assert!(eq(b.edges[e].length(), 0.0));
+    }
+
+    #[test]
+    fn reversed_face_normal_by_hand() {
+        let mut b = Body::default();
+        // Cylinder about Z: natural normal at (3, 0, 7) is +X; reversed is -X.
+        let s = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 3.0 };
+        let f = b.add_face(s.clone(), true, vec![]);
+        let g = b.add_face(s, false, vec![]);
+        assert!(points_eq(b.face_normal_at(f, DVec3::new(3.0, 0.0, 7.0)), DVec3::X));
+        assert!(points_eq(b.face_normal_at(g, DVec3::new(3.0, 0.0, 7.0)), DVec3::NEG_X));
+    }
+
+    #[test]
+    fn transformed_body_by_hand() {
+        let (b, e) = quarter_arc_edge();
+        // Scale by 2 then move up 5: (0,1,0) → (0,2,5); the arc keeps its
+        // angle range and doubles its radius, so its length is 2·π/2 = π.
+        let tf = Transform::uniform_scale(2.0).then(Transform::translation(DVec3::new(0.0, 0.0, 5.0)));
+        let moved = b.transformed(&tf);
+        assert!(points_eq(moved.vertices[0].point, DVec3::new(0.0, 2.0, 5.0)));
+        assert!(points_eq(moved.edges[e].point_at(1.0), DVec3::new(-2.0, 0.0, 5.0)));
+        assert!(eq(moved.edges[e].length(), PI));
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EulerCounts {
     pub v: usize,

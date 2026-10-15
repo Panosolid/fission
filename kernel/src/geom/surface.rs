@@ -77,23 +77,6 @@ impl Surface {
         }
     }
 
-    /// Period of `u`, if the surface wraps around.
-    pub fn u_period(&self) -> Option<f64> {
-        match self {
-            Surface::Plane { .. } => None,
-            Surface::Cylinder { .. } | Surface::Sphere { .. } => Some(TAU),
-        }
-    }
-
-    /// Scale that turns `u` into a length near the given point, so a uv
-    /// domain is not badly stretched when triangulated.
-    pub fn u_metric(&self) -> f64 {
-        match *self {
-            Surface::Plane { .. } => 1.0,
-            Surface::Cylinder { radius, .. } | Surface::Sphere { radius, .. } => radius,
-        }
-    }
-
     pub fn transformed(&self, tf: &Transform) -> Surface {
         match *self {
             Surface::Plane { origin, normal, x_dir } => {

@@ -295,6 +295,7 @@ mod tests {
     use super::*;
     use crate::fixtures::hand_cube;
     use crate::geom::{Curve, Surface};
+    use crate::topology::{Face, Loop};
     use glam::DVec3;
 
     #[test]
@@ -448,6 +449,103 @@ mod tests {
         // Every local check is consistent; only the enclosed volume gives it away.
         let errs = validate(&b).unwrap_err();
         assert!(matches!(errs.as_slice(), [ValidationError::InsideOut { shell: 0, .. }]), "{errs:?}");
+    }
+
+    #[test]
+    fn edge_with_only_its_end_dangling_is_reported() {
+        let mut b = hand_cube();
+        b.edges[0].end = 999;
+        let errs = validate(&b).unwrap_err();
+        assert!(matches!(errs[0], ValidationError::DanglingReference { .. }), "{errs:?}");
+    }
+
+    #[test]
+    fn two_separate_cubes_in_one_shell_are_not_connected() {
+        let mut b = hand_cube();
+        let other = hand_cube().transformed(&crate::geom::Transform::translation(DVec3::new(5.0, 0.0, 0.0)));
+        let (nv, ne, nf) = (b.vertices.len(), b.edges.len(), b.faces.len());
+        b.vertices.extend(other.vertices);
+        for mut e in other.edges {
+            e.start += nv;
+            e.end += nv;
+            b.edges.push(e);
+        }
+        for mut f in other.faces {
+            for l in &mut f.loops {
+                l.coedges.iter_mut().for_each(|c| c.edge += ne);
+            }
+            b.faces.push(f);
+        }
+        b.shells[0].faces.extend(nf..nf + 6);
+        let errs = validate(&b).unwrap_err();
+        assert!(errs.contains(&ValidationError::ShellNotConnected { shell: 0 }), "{errs:?}");
+    }
+
+    #[test]
+    fn inside_out_volume_is_reported_correctly() {
+        // The unit cube turned inside out encloses exactly -1 mm³.
+        let mut b = hand_cube();
+        for f in &mut b.faces {
+            f.sense = !f.sense;
+            for l in &mut f.loops {
+                l.coedges.reverse();
+                l.coedges.iter_mut().for_each(|c| c.reversed = !c.reversed);
+            }
+        }
+        match validate(&b).unwrap_err().as_slice() {
+            [ValidationError::InsideOut { volume, .. }] => assert!(tolerance::eq(*volume, -1.0), "{volume}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn planar_loop_area_by_hand() {
+        // A 2 × 3 rectangle far from the origin (corner at (10, 20, 7)),
+        // counter-clockwise seen from +Z: area +6. Reversing the loop, or
+        // flipping the face, gives -6.
+        let mut b = Body::default();
+        let o = DVec3::new(10.0, 20.0, 7.0);
+        let corners = [o, o + DVec3::new(2.0, 0.0, 0.0), o + DVec3::new(2.0, 3.0, 0.0), o + DVec3::new(0.0, 3.0, 0.0)];
+        let v: Vec<usize> = corners.iter().map(|&p| b.add_vertex(p)).collect();
+        let coedges = (0..4).map(|i| crate::topology::Coedge { edge: b.add_line(v[i], v[(i + 1) % 4]), reversed: false }).collect();
+        let l = Loop { coedges };
+        let up = Face { surface: Surface::Plane { origin: o, normal: DVec3::Z, x_dir: DVec3::X }, sense: true, loops: vec![] };
+        assert!(tolerance::eq(planar_loop_area(&b, &up, &l), 6.0));
+        let down = Face { sense: false, ..up.clone() };
+        assert!(tolerance::eq(planar_loop_area(&b, &down, &l), -6.0));
+        let mut rev = l.clone();
+        rev.coedges.reverse();
+        rev.coedges.iter_mut().for_each(|c| c.reversed = true);
+        assert!(tolerance::eq(planar_loop_area(&b, &up, &rev), -6.0));
+    }
+
+    #[test]
+    fn every_error_message_names_its_entities() {
+        use ValidationError::*;
+        let cases = [
+            (DanglingReference { face: 3, what: "edge 9".into() }, vec!["face 3", "edge 9"]),
+            (EmptyLoop { face: 4, loop_index: 1 }, vec!["face 4", "loop 1"]),
+            (LoopNotClosed { face: 2, loop_index: 0, position: 5 }, vec!["face 2", "loop 0", "coedge 5"]),
+            (EdgeUseCount { edge: 7, uses: 3 }, vec!["edge 7", "3 times"]),
+            (EdgeSameDirection { edge: 8 }, vec!["edge 8", "same direction"]),
+            (FaceShellCount { face: 6, shells: 0 }, vec!["face 6", "0 shells"]),
+            (ShellNotConnected { shell: 2 }, vec!["shell 2", "not connected"]),
+            (EulerPoincare { shell: 1, v: 8, e: 12, f: 5, rings: 0 }, vec!["shell 1", "V=8", "E=12", "F=5", "R=0"]),
+            (VertexOffEdge { edge: 4, vertex: 7, distance: 0.5 }, vec!["vertex 7", "edge 4", "5e-1"]),
+            (EdgeOffFace { edge: 3, face: 1, distance: 0.25 }, vec!["edge 3", "face 1", "2.5e-1"]),
+            (ZeroLengthEdge { edge: 11 }, vec!["edge 11", "zero length"]),
+            (ZeroAreaFace { face: 9 }, vec!["face 9", "zero area"]),
+            (FaceOrientation { face: 5 }, vec!["face 5", "normal"]),
+            (Tessellation { face: 2, message: "boom".into() }, vec!["face 2", "boom"]),
+            (MeshNotClosed { problems: 4 }, vec!["4 open"]),
+            (InsideOut { shell: 0, volume: -1.0 }, vec!["shell 0", "-1e0", "inward"]),
+        ];
+        for (err, words) in cases {
+            let msg = err.to_string();
+            for w in words {
+                assert!(msg.contains(w), "{msg:?} should mention {w:?}");
+            }
+        }
     }
 
     #[test]

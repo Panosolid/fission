@@ -62,13 +62,6 @@ impl Curve {
         }
     }
 
-    pub fn period(&self) -> Option<f64> {
-        match self {
-            Curve::Line { .. } => None,
-            Curve::Circle { .. } => Some(TAU),
-        }
-    }
-
     /// Arc length between parameters.
     pub fn length(&self, t0: f64, t1: f64) -> f64 {
         match *self {
@@ -138,6 +131,55 @@ mod tests {
         let q = DVec3::new(0.0, -3.0, 0.0);
         assert!(angle_eq(c.closest_param(q), 3.0 * FRAC_PI_2));
         assert!(eq(c.distance(q), 2.0));
+    }
+
+    /// Circle of radius 2 centred at (5, -3, 1), so sign errors in `p - centre`
+    /// can't hide behind a centre at the origin.
+    fn offset_circle() -> Curve {
+        Curve::Circle { center: DVec3::new(5.0, -3.0, 1.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 2.0 }
+    }
+
+    #[test]
+    fn off_centre_circle_by_hand() {
+        let c = offset_circle();
+        // t = π/2 is a quarter turn from +X towards +Y: centre + (0, 2, 0).
+        assert!(points_eq(c.eval(FRAC_PI_2), DVec3::new(5.0, -1.0, 1.0)));
+        // Derivative at t = π/2: r(-sin t, cos t, 0) = (-2, 0, 0).
+        assert!(points_eq(c.derivative(FRAC_PI_2), DVec3::new(-2.0, 0.0, 0.0)));
+        assert!(points_eq(c.tangent(FRAC_PI_2), DVec3::new(-1.0, 0.0, 0.0)));
+        // (5, -10, 1) is straight below the centre (-Y): angle 3π/2, 7 - 2 = 5 away.
+        let p = DVec3::new(5.0, -10.0, 1.0);
+        assert!(angle_eq(c.closest_param(p), 3.0 * FRAC_PI_2));
+        assert!(eq(c.distance(p), 5.0));
+        // (8, -3, 5): 3 out from the centre in the plane, 4 above.
+        // Radially 3 - 2 = 1 outside the circle, so distance √(1² + 4²) = √17.
+        assert!(eq(c.distance(DVec3::new(8.0, -3.0, 5.0)), 17f64.sqrt()));
+    }
+
+    #[test]
+    fn arc_and_segment_lengths_by_hand() {
+        // Arc length = r·Δt: radius 2 from t = 3 to t = 3 + π/2 is π.
+        assert!(eq(offset_circle().length(3.0, 3.0 + FRAC_PI_2), std::f64::consts::PI));
+        // A line's parameter is distance: from t = 3 to t = 10 is 7.
+        let l = Curve::Line { origin: DVec3::new(1.0, 1.0, 1.0), dir: DVec3::Y };
+        assert!(eq(l.length(3.0, 10.0), 7.0));
+        // Line through (1,1,1) along +Y: closest to (4, 6, 5) is t = 5, distance √(3² + 4²) = 5.
+        assert!(eq(l.closest_param(DVec3::new(4.0, 6.0, 5.0)), 5.0));
+        assert!(eq(l.distance(DVec3::new(4.0, 6.0, 5.0)), 5.0));
+    }
+
+    #[test]
+    fn transform_params_by_hand() {
+        let scale3 = Transform::uniform_scale(3.0);
+        // Line parameters are distances, so they scale: 2 → 6.
+        let l = Curve::Line { origin: DVec3::ZERO, dir: DVec3::X };
+        assert!(eq(l.transform_param(2.0, &scale3), 6.0));
+        // Circle parameters are angles, which scaling doesn't change.
+        assert!(eq(offset_circle().transform_param(2.0, &scale3), 2.0));
+        // Scaling a circle by 3 about the origin: centre ×3, radius ×3.
+        let Curve::Circle { center, radius, .. } = offset_circle().transformed(&scale3) else { unreachable!() };
+        assert!(points_eq(center, DVec3::new(15.0, -9.0, 3.0)));
+        assert!(eq(radius, 6.0));
     }
 
     #[test]

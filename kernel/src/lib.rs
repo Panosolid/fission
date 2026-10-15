@@ -74,6 +74,11 @@ mod tests {
     use crate::tolerance::{rel_eq, FP_REL};
 
     #[test]
+    fn version_comes_from_cargo() {
+        assert_eq!(kernel_version(), "0.1.0");
+    }
+
+    #[test]
     fn box_view_reports_hand_worked_numbers() {
         // 10 × 20 × 30 box: V = 6000, A = 2(200 + 600 + 300) = 2200,
         // 8 vertices, 12 edges, 6 faces.
