@@ -1,6 +1,7 @@
 //! Stateful random testing of the kernel.
 //!
-//! Random chains of 1–10 operations (add a placed primitive, move, rotate)
+//! Random chains of 1–10 operations (add a placed primitive or extrusion,
+//! move, rotate)
 //! are run against the kernel. After every step:
 //! - nothing panics;
 //! - the operation either returns a body that passes `validate()`, or a
@@ -30,12 +31,13 @@
 
 use fission_kernel::debug_dump;
 use fission_kernel::mesh::Mesh;
+use fission_kernel::ops::extrude::{self, Profile};
 use fission_kernel::ops::{primitives, transform, KernelError};
 use fission_kernel::tessellate::{tessellate, TessOptions};
 use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
 use fission_kernel::topology::Body;
 use fission_kernel::validate::validate;
-use glam::DVec3;
+use glam::{DVec2, DVec3};
 use proptest::prelude::*;
 use proptest::test_runner::{
     Config, FileFailurePersistence, RngAlgorithm, TestCaseError, TestError, TestRng, TestRunner,
@@ -88,7 +90,43 @@ enum Shape {
     Box { w: Num, d: Num, h: Num },
     Cylinder { r: Num, h: Num },
     Sphere { r: Num },
-    // Extrude { .. } arrives with step 9.
+    /// A polygon profile in the XY plane (outer loop and holes, either
+    /// winding), swept along +Z by `dist`.
+    Extrude { outer: Vec<P2>, holes: Vec<Vec<P2>>, dist: Num },
+}
+
+type P2 = [Num; 2];
+
+fn p2(p: &P2) -> DVec2 {
+    DVec2::new(p[0].0, p[1].0)
+}
+
+impl Shape {
+    /// Every number in the shape, for `extreme` to replace one.
+    fn numbers(&mut self) -> Vec<&mut Num> {
+        match self {
+            Shape::Box { w, d, h } => vec![w, d, h],
+            Shape::Cylinder { r, h } => vec![r, h],
+            Shape::Sphere { r } => vec![r],
+            Shape::Extrude { outer, holes, dist } => {
+                let mut v: Vec<&mut Num> = outer.iter_mut().chain(holes.iter_mut().flatten()).flatten().collect();
+                v.push(dist);
+                v
+            }
+        }
+    }
+
+    fn make(&self) -> Result<Body, KernelError> {
+        match self {
+            Shape::Box { w, d, h } => primitives::make_box(w.0, d.0, h.0),
+            Shape::Cylinder { r, h } => primitives::make_cylinder(r.0, h.0),
+            Shape::Sphere { r } => primitives::make_sphere(r.0),
+            Shape::Extrude { outer, holes, dist } => {
+                let profile = Profile { outer: outer.iter().map(p2).collect(), holes: holes.iter().map(|h| h.iter().map(p2).collect()).collect() };
+                extrude::extrude(&profile, dist.0)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,6 +143,7 @@ impl Op {
             Op::Add { shape: Shape::Box { .. }, .. } => "add box",
             Op::Add { shape: Shape::Cylinder { .. }, .. } => "add cylinder",
             Op::Add { shape: Shape::Sphere { .. }, .. } => "add sphere",
+            Op::Add { shape: Shape::Extrude { .. }, .. } => "add extrude",
             Op::Move { .. } => "move",
             Op::Rotate { .. } => "rotate",
         }
@@ -254,11 +293,7 @@ fn extreme(mut op: Op, pick: prop::sample::Index, number: f64, axis: [f64; 3], s
     }
     let mut nums: Vec<&mut Num> = match &mut op {
         Op::Add { shape, axis, angle, at } => {
-            let mut v: Vec<&mut Num> = match shape {
-                Shape::Box { w, d, h } => vec![w, d, h],
-                Shape::Cylinder { r, h } => vec![r, h],
-                Shape::Sphere { r } => vec![r],
-            };
+            let mut v = shape.numbers();
             v.extend(axis.iter_mut());
             v.push(angle);
             v.extend(at.iter_mut());
@@ -283,7 +318,94 @@ fn shape(scene: &Scene) -> impl Strategy<Value = Shape> {
         (l.clone(), l.clone(), l.clone()).prop_map(|(w, d, h)| Shape::Box { w: Num(w), d: Num(d), h: Num(h) }),
         (l.clone(), l.clone()).prop_map(|(r, h)| Shape::Cylinder { r: Num(r), h: Num(h) }),
         l.prop_map(|r| Shape::Sphere { r: Num(r) }),
+        extruded(scene),
     ]
+}
+
+/// A random extrusion. Outlines are rectangles (on the grid, with optional
+/// holes whose walls can be 0.9×/1.0×/1.1× MIN_FEATURE, and optional
+/// collinear corners) or star-shaped polygons with up to two holes, about a
+/// third of them then broken on purpose (corners swapped or duplicated, a
+/// hole moved out, a corner pushed next to another edge). Whether the kernel
+/// must accept each one is decided independently by `profile_expect`.
+fn extruded(scene: &Scene) -> BoxedStrategy<Shape> {
+    let l = length(scene);
+    let centre = (coord(scene), coord(scene)).prop_map(|(x, y)| DVec2::new(x, y));
+    let wall = prop::sample::select(vec![None, Some(0.25), Some(-0.9), Some(-1.0), Some(-1.1)]);
+    let rect = (l.clone(), l.clone(), centre.clone(), wall, 0..3usize).prop_map(|(w, h, c, wall, extra)| {
+        let mut outer = vec![c, c + DVec2::new(w, 0.0), c + DVec2::new(w, h), c + DVec2::new(0.0, h)];
+        for k in 0..extra {
+            // A collinear corner halfway along an edge.
+            let i = 2 * k;
+            outer.insert(i + 1, (outer[i] + outer[(i + 1) % outer.len()]) * 0.5);
+        }
+        let mut holes = vec![];
+        // Positive: inset as a fraction of the size; negative: inset of
+        // that many MIN_FEATUREs, giving walls at the tolerance boundary.
+        if let Some(f) = wall {
+            let t = if f > 0.0 { f * w.min(h) } else { -f * MIN_FEATURE };
+            let (a, b) = (c + DVec2::splat(t), c + DVec2::new(w, h) - DVec2::splat(t));
+            holes.push(vec![a, DVec2::new(a.x, b.y), b, DVec2::new(b.x, a.y)]);
+        }
+        (outer, holes)
+    });
+    let star = (3..=12usize, prop::collection::vec((0.2..1.0f64, 0.5..1.0f64), 12), l.clone(), centre, 0..=2usize, any::<bool>())
+        .prop_map(|(n, raw, r, c, nholes, flip)| {
+            let total: f64 = raw[..n].iter().map(|g| g.0).sum();
+            let mut a = 0.0;
+            let mut outer = vec![];
+            for &(gap, k) in &raw[..n] {
+                a += gap / total * std::f64::consts::TAU;
+                outer.push(c + DVec2::from_angle(a) * r * k);
+            }
+            if flip {
+                outer.reverse();
+            }
+            let hole = |o: DVec2, size: f64| (0..5).map(|i| o + DVec2::from_angle(i as f64 * 1.2566) * size).collect::<Vec<_>>();
+            let holes = match nholes {
+                0 => vec![],
+                1 => vec![hole(c, 0.2 * r)],
+                _ => vec![hole(c + DVec2::new(0.25 * r, 0.0), 0.1 * r), hole(c - DVec2::new(0.25 * r, 0.0), 0.1 * r)],
+            };
+            (outer, holes)
+        });
+    let good = prop_oneof![rect, star];
+    let broken = (good.clone(), 0..5usize, any::<prop::sample::Index>(), prop::sample::select(vec![0.9, 1.1]))
+        .prop_map(|((mut outer, mut holes), how, pick, k)| {
+            let n = outer.len();
+            let i = pick.index(n);
+            match how {
+                0 => outer.swap(i, (i + 2) % n),
+                1 => outer.insert(i, outer[i]),
+                2 => {
+                    // A hole moved well outside, or a hole where there was none.
+                    let span = outer.iter().fold(0.0f64, |m, p| m.max((*p - outer[0]).length()));
+                    let shift = DVec2::new(3.0 * span, 0.0);
+                    match holes.first_mut() {
+                        Some(h) => h.iter_mut().for_each(|p| *p += shift),
+                        None => holes.push(vec![outer[0] + shift, outer[1] + shift, outer[2] + shift]),
+                    }
+                }
+                3 => {
+                    // Corner i moved to k × MIN_FEATURE from the segment two
+                    // corners on, on its inner side.
+                    let (a, b) = (outer[(i + 2) % n], outer[(i + 3) % n]);
+                    let mid = (a + b) * 0.5;
+                    let normal = (b - a).perp().normalize_or_zero();
+                    outer[i] = mid + normal * k * MIN_FEATURE;
+                }
+                _ => outer.truncate(2),
+            }
+            (outer, holes)
+        });
+    let pt = |p: DVec2| [Num(p.x), Num(p.y)];
+    (prop_oneof![2 => good, 1 => broken], l)
+        .prop_map(move |((outer, holes), dist)| Shape::Extrude {
+            outer: outer.into_iter().map(pt).collect(),
+            holes: holes.into_iter().map(|h| h.into_iter().map(pt).collect()).collect(),
+            dist: Num(dist),
+        })
+        .boxed()
 }
 
 impl ReferenceStateMachine for Scene {
@@ -311,6 +433,10 @@ impl ReferenceStateMachine for Scene {
                     Shape::Box { w, d, h } => vec![w.0, d.0, h.0],
                     Shape::Cylinder { r, h } => vec![r.0, h.0, 2.0 * r.0],
                     Shape::Sphere { r } => vec![r.0, 2.0 * r.0],
+                    Shape::Extrude { outer, dist, .. } => {
+                        let (lo, hi) = outer.iter().map(p2).fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(lo, hi), p| (lo.min(p), hi.max(p)));
+                        vec![hi.x - lo.x, hi.y - lo.y, dist.0]
+                    }
                 };
                 for &v in &sizes {
                     remember(&mut s.lengths, v, LENGTHS);
@@ -516,8 +642,128 @@ fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
                 return Err(format!("sphere r={}: volume {} not in (0, {ball})", r.0, m.volume));
             }
         }
+        Shape::Extrude { outer, holes, dist } => {
+            // Prism: V = A·d and S = 2A + P·d, where A is the profile's area
+            // (outer minus holes, by the shoelace formula) and P the length
+            // of all its loops.
+            let d = dist.0;
+            let o = p2(&outer[0]);
+            let mut area = 0.0;
+            let mut area_err = 0.0;
+            let mut perimeter = 0.0;
+            for (k, l) in std::iter::once(outer).chain(holes).enumerate() {
+                let pts: Vec<DVec2> = l.iter().map(|p| p2(p) - o).collect();
+                let (mut twice, mut abs) = (0.0, 0.0);
+                for i in 0..pts.len() {
+                    let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                    twice += a.perp_dot(b);
+                    abs += a.perp_dot(b).abs() + a.length() * b.length();
+                    perimeter += a.distance(b);
+                }
+                area += if k == 0 { twice.abs() / 2.0 } else { -twice.abs() / 2.0 };
+                // Rounding bound for this reference sum: a few ulps per term,
+                // n terms, plus the subtraction of `o` from far coordinates.
+                area_err += 4.0 * pts.len() as f64 * f64::EPSILON * abs / 2.0 + perimeter * tolerance::rounding_slack(o.abs().max_element());
+            }
+            let (v, s) = (area * d, 2.0 * area + perimeter * d);
+            // Kernel rounding as in check_rigid (each vertex within δ of
+            // exact), plus the reference's own rounding.
+            let delta = tolerance::rounding_slack(reach(m));
+            let (v_slack, s_slack) = (m.area * delta + area_err * d, m.perimeters * delta + 2.0 * area_err);
+            if !tolerance::measure_eq(m.volume, v, v_slack) || !tolerance::measure_eq(m.area, s, s_slack) {
+                return Err(format!(
+                    "extrude: volume {} expected A·d = {v} (±{v_slack:e}); area {} expected 2A + P·d = {s} (±{s_slack:e})",
+                    m.volume, m.area
+                ));
+            }
+        }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Expect {
+    Valid,
+    Invalid,
+    /// Too close to a tolerance boundary to call.
+    Either,
+}
+
+/// Whether the kernel must accept a profile, decided independently of its
+/// code: plain floating point with error bounds instead of exact
+/// predicates, and a 1% band around MIN_FEATURE where either answer is
+/// fine. The rules: every loop has ≥ 3 finite corners within MAX_COORD, at
+/// most MAX_PROFILE_CORNERS in all; the outer loop spans ≤ MAX_SIZE; no two
+/// edges cross; every corner is ≥ MIN_FEATURE from every edge it isn't an
+/// end of; every hole is inside the outer loop and not inside another hole.
+fn profile_expect(outer: &[P2], holes: &[Vec<P2>], dist: f64) -> Expect {
+    let loops: Vec<Vec<DVec2>> = std::iter::once(outer).chain(holes.iter().map(|h| h.as_slice())).map(|l| l.iter().map(p2).collect()).collect();
+    if !size_ok(dist)
+        || loops.iter().map(Vec::len).sum::<usize>() > tolerance::MAX_PROFILE_CORNERS
+        || loops.iter().any(|l| l.len() < 3 || l.iter().any(|p| !p.is_finite() || p.abs().max_element() > MAX_COORD))
+    {
+        return Expect::Invalid;
+    }
+    let (lo, hi) = loops[0].iter().fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(lo, hi), &p| (lo.min(p), hi.max(p)));
+    if (hi - lo).max_element() > MAX_SIZE {
+        return Expect::Invalid;
+    }
+    let scale = loops.iter().flatten().fold(1.0f64, |m, p| m.max(p.abs().max_element()));
+    let err = 16.0 * f64::EPSILON * scale; // a distance's rounding
+    let mut verdict = Expect::Valid;
+    let segs: Vec<(usize, usize)> = loops.iter().enumerate().flat_map(|(k, l)| (0..l.len()).map(move |i| (k, i))).collect();
+    let ends = |(k, i): (usize, usize)| (loops[k][i], loops[k][(i + 1) % loops[k].len()]);
+    // Signed distance of c from line ab, and whether its sign is certain.
+    let side = |a: DVec2, b: DVec2, c: DVec2| {
+        let len = a.distance(b);
+        let d = (b - a).perp_dot(c - a) / len;
+        (d.signum(), d.abs() > err * 4.0)
+    };
+    for (n, &s) in segs.iter().enumerate() {
+        for &t in &segs[n + 1..] {
+            let ((a, b), (c, d)) = (ends(s), ends(t));
+            let ((s1, k1), (s2, k2), (s3, k3), (s4, k4)) = (side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b));
+            if k1 && k2 && k3 && k4 && s1 != s2 && s3 != s4 {
+                return Expect::Invalid; // a proper crossing
+            }
+        }
+    }
+    for (k, l) in loops.iter().enumerate() {
+        for (i, &p) in l.iter().enumerate() {
+            for &s in &segs {
+                if s.0 == k && (s.1 == i || (s.1 + 1) % l.len() == i) {
+                    continue;
+                }
+                let (a, b) = ends(s);
+                let t = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
+                let dist = p.distance(a + (b - a) * t);
+                if dist.is_nan() || dist < MIN_FEATURE * 0.99 - err {
+                    return Expect::Invalid;
+                }
+                if dist < MIN_FEATURE * 1.01 + err {
+                    verdict = Expect::Either;
+                }
+            }
+        }
+    }
+    // No crossings and every corner clear of every edge, so each hole is
+    // wholly inside or outside each other loop: one corner decides.
+    let inside = |p: DVec2, l: &[DVec2]| {
+        let mut odd = false;
+        for i in 0..l.len() {
+            let (a, b) = (l[i], l[(i + 1) % l.len()]);
+            if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+                odd = !odd;
+            }
+        }
+        odd
+    };
+    for (h, hole) in loops.iter().enumerate().skip(1) {
+        if !inside(hole[0], &loops[0]) || loops.iter().enumerate().skip(1).any(|(g, other)| g != h && inside(hole[0], other)) {
+            return Expect::Invalid;
+        }
+    }
+    verdict
 }
 
 fn record(op: &Op, ok: bool) {
@@ -546,6 +792,9 @@ fn is_extreme(op: &Op) -> bool {
                 Shape::Box { w, d, h } => [w, d, h].into_iter().any(len_bad),
                 Shape::Cylinder { r, h } => [r, h].into_iter().any(len_bad),
                 Shape::Sphere { r } => len_bad(r),
+                Shape::Extrude { outer, holes, dist } => {
+                    len_bad(dist) || outer.iter().chain(holes.iter().flatten()).flatten().any(coord_bad)
+                }
             };
             sizes_bad || axis_bad(axis) || angle_bad(angle) || at.iter().any(coord_bad)
         }
@@ -577,16 +826,16 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
     let fail = |message: String, bodies: Vec<(String, Body)>| Failure { step, op: format!("{op:?}"), message, bodies };
     match op {
         Op::Add { shape, axis, angle, at } => {
-            let made = guarded(|| match *shape {
-                Shape::Box { w, d, h } => primitives::make_box(w.0, d.0, h.0),
-                Shape::Cylinder { r, h } => primitives::make_cylinder(r.0, h.0),
-                Shape::Sphere { r } => primitives::make_sphere(r.0),
-            });
-            let base = classify(made).map_err(|m| fail(m, vec![]))?;
+            let base = classify(guarded(|| shape.make())).map_err(|m| fail(m, vec![]))?;
             let sizes_ok = match shape {
                 Shape::Box { w, d, h } => size_ok(w.0) && size_ok(d.0) && size_ok(h.0),
                 Shape::Cylinder { r, h } => size_ok(r.0) && size_ok(h.0),
                 Shape::Sphere { r } => size_ok(r.0),
+                Shape::Extrude { outer, holes, dist } => match profile_expect(outer, holes, dist.0) {
+                    Expect::Valid => true,
+                    Expect::Invalid => false,
+                    Expect::Either => base.is_some(),
+                },
             };
             if base.is_some() != sizes_ok {
                 return Err(fail(format!("sizes valid = {sizes_ok} but kernel {}", if base.is_some() { "accepted" } else { "rejected" }), vec![]));
@@ -713,11 +962,7 @@ fn replay_op(slots: &mut Vec<Slot>, op: &Op) -> Result<(), Failure> {
     let quiet = |r: Result<Body, KernelError>| r.ok();
     match op {
         Op::Add { shape, axis, angle, at } => {
-            let base = guarded(|| match *shape {
-                Shape::Box { w, d, h } => primitives::make_box(w.0, d.0, h.0),
-                Shape::Cylinder { r, h } => primitives::make_cylinder(r.0, h.0),
-                Shape::Sphere { r } => primitives::make_sphere(r.0),
-            })
+            let base = guarded(|| shape.make())
             .ok()
             .and_then(quiet);
             let placed = base

@@ -19,14 +19,14 @@ import sys
 from collections import Counter
 
 from OCP.BRepBndLib import BRepBndLib
-from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon, BRepBuilderAPI_Transform
 from OCP.BRepGProp import BRepGProp
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakeSphere
+from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder, BRepPrimAPI_MakePrism, BRepPrimAPI_MakeSphere
 from OCP.Bnd import Bnd_Box
 from OCP.GProp import GProp_GProps
 from OCP.TopAbs import TopAbs_FACE
 from OCP.TopExp import TopExp_Explorer
-from OCP.gp import gp_Trsf
+from OCP.gp import gp_Pnt, gp_Trsf, gp_Vec
 
 # Faces Fission uses per primitive vs OpenCascade. Fission splits a sphere
 # into two hemispheres (one face with no edges can't satisfy Euler-Poincare
@@ -36,8 +36,34 @@ FACES = {"Box": (6, 6), "Cylinder": (3, 3), "Sphere": (2, 1)}
 REL = 1e-9  # OpenCascade's exact mass properties vs exact-in-theory values
 
 
+def wire(points, ccw):
+    """Closed polygon at z = 0, wound counter-clockwise (outer loops) or
+    clockwise (holes), as OpenCascade's face builder expects."""
+    twice = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(points, points[1:] + points[:1]))
+    if (twice > 0) != ccw:
+        points = points[::-1]
+    poly = BRepBuilderAPI_MakePolygon()
+    for x, y in points:
+        poly.Add(gp_Pnt(x, y, 0.0))
+    poly.Close()
+    return poly.Wire()
+
+
+def extrusion(p):
+    pts = lambda loop: [(float(x), float(y)) for x, y in loop]
+    face = BRepBuilderAPI_MakeFace(wire(pts(p["outer"]), True), True)
+    for hole in p["holes"]:
+        face.Add(wire(pts(hole), False))
+    return BRepPrimAPI_MakePrism(face.Face(), gp_Vec(0.0, 0.0, float(p["dist"]))).Shape()
+
+
 def build(shape):
     (kind, p), = shape.items()
+    if kind == "Extrude":
+        # Two caps plus one side face per profile edge, in both kernels.
+        corners = len(p["outer"]) + sum(len(h) for h in p["holes"])
+        FACES["Extrude"] = (2 + corners, 2 + corners)
+        return kind, extrusion(p), float(p["dist"])
     num = {k: float(v) for k, v in p.items()}
     if kind == "Box":
         return kind, BRepPrimAPI_MakeBox(num["w"], num["d"], num["h"]).Shape(), min(num.values())
@@ -96,8 +122,9 @@ def compare(case):
     # between mesh and surface), plus rounding. Boxes are exact.
     if vol - case["volume"] > area * dev * 1.5 + vslack:
         issues.append(f"volume deficit too large: fission {case['volume']}, occ {vol}, deviation {dev}")
-    if kind == "Box" and abs(case["area"] - area) > aslack:
-        issues.append(f"box area: fission {case['area']}, occ {area}, allowed {aslack:.3g}")
+    # Boxes and extrusions are polyhedra: the mesh is exact, area too.
+    if kind in ("Box", "Extrude") and abs(case["area"] - area) > aslack:
+        issues.append(f"area: fission {case['area']}, occ {area}, allowed {aslack:.3g}")
     return kind, issues
 
 
