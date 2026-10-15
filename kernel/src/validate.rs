@@ -2,6 +2,7 @@
 //! operation must finish with `checked`, which runs it.
 
 use crate::geom::{Curve, Surface};
+use crate::tessellate::{tessellate, TessOptions};
 use crate::tolerance;
 use crate::topology::{Body, EdgeId, Face, FaceId, Loop};
 use glam::DVec3;
@@ -33,6 +34,11 @@ pub enum ValidationError {
     /// A planar face's outer loop runs clockwise seen from outside, i.e.
     /// the face normal disagrees with its boundary.
     FaceOrientation { face: FaceId },
+    Tessellation { face: FaceId, message: String },
+    /// The display mesh has holes or flipped triangles.
+    MeshNotClosed { problems: usize },
+    /// A shell encloses negative volume: its normals point inward.
+    InsideOut { shell: usize, volume: f64 },
 }
 
 impl fmt::Display for ValidationError {
@@ -59,6 +65,9 @@ impl fmt::Display for ValidationError {
             ZeroLengthEdge { edge } => write!(f, "edge {edge} has zero length"),
             ZeroAreaFace { face } => write!(f, "face {face} has zero area"),
             FaceOrientation { face } => write!(f, "face {face}: normal disagrees with its boundary loop"),
+            Tessellation { face, message } => write!(f, "face {face} could not be tessellated: {message}"),
+            MeshNotClosed { problems } => write!(f, "mesh has {problems} open or flipped edges"),
+            InsideOut { shell, volume } => write!(f, "shell {shell} encloses {volume:e} mm³ (normals point inward)"),
         }
     }
 }
@@ -75,6 +84,10 @@ pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
     check_edge_uses(body, &mut errs);
     check_shells(body, &mut errs);
     check_geometry(body, &mut errs);
+    if errs.is_empty() {
+        // The mesh checks assume sound topology, so they run last.
+        check_mesh(body, &mut errs);
+    }
     if errs.is_empty() { Ok(()) } else { Err(errs) }
 }
 
@@ -206,6 +219,31 @@ fn check_geometry(body: &Body, errs: &mut Vec<ValidationError>) {
             } else if areas.first().is_some_and(|&a| a < 0.0) {
                 errs.push(ValidationError::FaceOrientation { face: fi });
             }
+        }
+    }
+}
+
+fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) {
+    let mesh = match tessellate(body, &TessOptions::DISPLAY) {
+        Ok(m) => m,
+        Err(e) => {
+            errs.push(ValidationError::Tessellation { face: e.face, message: e.message });
+            return;
+        }
+    };
+    if let Err(problems) = mesh.check_closed() {
+        errs.push(ValidationError::MeshNotClosed { problems: problems.len() });
+    }
+    for (si, s) in body.shells.iter().enumerate() {
+        let volume: f64 = (0..mesh.triangles.len())
+            .filter(|&t| s.faces.contains(&mesh.triangle_face[t]))
+            .map(|t| {
+                let [a, b, c] = mesh.triangle(t);
+                a.dot(b.cross(c)) / 6.0
+            })
+            .sum();
+        if volume <= 0.0 {
+            errs.push(ValidationError::InsideOut { shell: si, volume });
         }
     }
 }
@@ -410,6 +448,23 @@ pub(crate) mod tests {
         let errs = validate(&b).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ValidationError::ZeroLengthEdge { .. })), "{errs:?}");
         assert!(errs.iter().any(|e| matches!(e, ValidationError::ZeroAreaFace { face: 2 })), "{errs:?}");
+    }
+
+    #[test]
+    fn whole_cube_turned_inside_out_is_caught() {
+        let mut b = hand_cube();
+        for f in &mut b.faces {
+            f.sense = !f.sense;
+            for l in &mut f.loops {
+                l.coedges.reverse();
+                for c in &mut l.coedges {
+                    c.reversed = !c.reversed;
+                }
+            }
+        }
+        // Every local check is consistent; only the enclosed volume gives it away.
+        let errs = validate(&b).unwrap_err();
+        assert!(matches!(errs.as_slice(), [ValidationError::InsideOut { shell: 0, .. }]), "{errs:?}");
     }
 
     #[test]

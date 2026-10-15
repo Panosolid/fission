@@ -5,6 +5,8 @@
 //! `[x, y, z]` arrays (`Float64Array` in JavaScript).
 
 pub mod geom;
+pub mod mesh;
+pub mod tessellate;
 pub mod tolerance;
 pub mod topology;
 pub mod validate;
