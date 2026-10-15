@@ -4,14 +4,16 @@
 //! thin layer the browser app calls. Vectors cross the boundary as flat
 //! `[x, y, z]` arrays (`Float64Array` in JavaScript).
 
-pub mod math;
+pub mod geom;
+pub mod tolerance;
+pub mod topology;
 
-use math::Vec3;
+use glam::DVec3;
 use wasm_bindgen::prelude::*;
 
-fn vec_from_slice(v: &[f64]) -> Result<Vec3, JsError> {
+fn vec_from_slice(v: &[f64]) -> Result<DVec3, JsError> {
     match v {
-        [x, y, z] => Ok(Vec3::new(*x, *y, *z)),
+        [x, y, z] => Ok(DVec3::new(*x, *y, *z)),
         _ => Err(JsError::new(&format!(
             "expected a vector of 3 numbers, got {}",
             v.len()
@@ -43,17 +45,22 @@ pub fn kernel_version() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tolerance::points_eq;
+
+    fn v(a: Vec<f64>) -> DVec3 {
+        DVec3::from_slice(&a)
+    }
 
     // JsError can only be built on wasm, so these tests stick to valid input.
     #[test]
     fn add_vectors_adds_componentwise() {
         let r = add_vectors(&[1.0, 2.0, 3.0], &[10.0, 20.0, 30.0]).unwrap();
-        assert_eq!(r, vec![11.0, 22.0, 33.0]);
+        assert!(points_eq(v(r), DVec3::new(11.0, 22.0, 33.0)));
     }
 
     #[test]
     fn cross_of_x_and_y_is_z() {
         let r = cross(&[1.0, 0.0, 0.0], &[0.0, 1.0, 0.0]).unwrap();
-        assert_eq!(r, vec![0.0, 0.0, 1.0]);
+        assert!(points_eq(v(r), DVec3::Z));
     }
 }
