@@ -1,0 +1,4 @@
+line 914: {"Box": {"d": "79.0", "h": "0.0010011", "w": "0.00591929905947339"}}
+  volume above exact: fission 0.00046813928775867926, occ 0.0004681390127864849, allowed 7.32e-11
+  area above exact: fission 1.0934352386090826, occ 1.0934349030224975, allowed 8.52e-08
+  area: fission 1.0934352386090826, occ 1.0934349030224975, allowed 8.52e-08
