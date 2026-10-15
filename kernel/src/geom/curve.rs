@@ -127,6 +127,20 @@ mod tests {
     }
 
     #[test]
+    fn closest_point_on_unit_circle_to_2_0_is_1_0() {
+        // Worked by hand: the closest point on a circle lies on the ray from
+        // the centre through p, at distance r. Ray to (2,0) is +X, r = 1.
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let p = DVec3::new(2.0, 0.0, 0.0);
+        assert!(points_eq(c.eval(c.closest_param(p)), DVec3::new(1.0, 0.0, 0.0)));
+        assert!(eq(c.distance(p), 1.0));
+        // (0,-3): ray is -Y, so closest point (0,-1) at angle 3π/2, distance 2.
+        let q = DVec3::new(0.0, -3.0, 0.0);
+        assert!(angle_eq(c.closest_param(q), 3.0 * FRAC_PI_2));
+        assert!(eq(c.distance(q), 2.0));
+    }
+
+    #[test]
     fn distances_to_curves() {
         let c = unit_circle();
         assert!(eq(c.distance(DVec3::new(0.0, 0.0, 0.0)), 2.0));

@@ -13,7 +13,7 @@ Kernel foundations
 - [x] 3. B-rep data structure + validate(): watertight, orientation, Euler–Poincaré
 - [x] 4. validate(): vertex-on-edge, edge-on-face, zero-length edges, zero-area faces
 - [x] 5. Tessellation of planar faces + watertight mesh check
-- [ ] 6. Tessellation of cylinder and sphere faces
+- [x] 6. Tessellation of cylinder and sphere faces
 - [ ] 7. Box primitive; viewer shows a kernel B-rep box with edges
 - [ ] 8. Kernel runs in a Web Worker from here on; every app→kernel call is an async message
 - [ ] 9. Extrude polygon profiles with holes; property test volume = area × distance

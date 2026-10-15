@@ -105,6 +105,32 @@ mod tests {
     }
 
     #[test]
+    fn near_misses_either_side_of_linear_tolerance() {
+        let p = DVec3::new(10.0, -3.0, 7.0);
+        for dir in [DVec3::X, DVec3::Y, DVec3::Z, DVec3::ONE.normalize()] {
+            assert!(points_eq(p, p + dir * LINEAR * 0.9));
+            assert!(!points_eq(p, p + dir * LINEAR * 1.1));
+        }
+        assert!(eq(5.0, 5.0 + LINEAR * 0.9));
+        assert!(!eq(5.0, 5.0 + LINEAR * 1.1));
+        assert!(is_zero(-LINEAR * 0.9));
+        assert!(!is_zero(-LINEAR * 1.1));
+        let q = DVec2::new(1.0, 2.0);
+        assert!(points2_eq(q, q + DVec2::Y * LINEAR * 0.9));
+        assert!(!points2_eq(q, q + DVec2::Y * LINEAR * 1.1));
+    }
+
+    #[test]
+    fn near_misses_either_side_of_angular_tolerance() {
+        let tilt = |angle: f64| DVec3::new(angle.cos(), angle.sin(), 0.0);
+        assert!(dirs_eq(DVec3::X, tilt(ANGULAR * 0.9)));
+        assert!(!dirs_eq(DVec3::X, tilt(ANGULAR * 1.1)));
+        assert!(!dirs_eq(DVec3::X, -DVec3::X), "opposite directions are not equal");
+        assert!(angle_eq(1.0, 1.0 + ANGULAR * 0.9));
+        assert!(!angle_eq(1.0, 1.0 + ANGULAR * 1.1));
+    }
+
+    #[test]
     fn rel_eq_scales_with_magnitude() {
         assert!(rel_eq(1e5, 1e5 + 1e-2, 1e-6));
         assert!(!rel_eq(1.0, 1.0 + 1e-3, 1e-6));

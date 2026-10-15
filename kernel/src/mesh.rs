@@ -14,6 +14,8 @@ pub struct Mesh {
     pub triangle_face: Vec<FaceId>,
     /// Polyline of mesh vertex indices for each B-rep edge.
     pub edge_polylines: Vec<Vec<u32>>,
+    /// The settings the mesh was made with.
+    pub options: crate::tessellate::TessOptions,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +95,7 @@ mod tests {
             triangles: vec![[0, 2, 1], [0, 1, 3], [1, 2, 3], [0, 3, 2]],
             triangle_face: vec![0, 1, 2, 3],
             edge_polylines: vec![],
+            options: Default::default(),
         }
     }
 

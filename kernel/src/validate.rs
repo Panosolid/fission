@@ -291,46 +291,11 @@ fn is_connected(body: &Body, faces: &[FaceId], edge_faces: &[Vec<(FaceId, crate:
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-    use crate::geom::Surface;
-    use crate::topology::{Coedge, Loop, Shell};
+    use crate::fixtures::hand_cube;
+    use crate::geom::{Curve, Surface};
     use glam::DVec3;
-
-    /// A hand-built unit cube, independent of the primitives module, so
-    /// validate is tested against something whose correctness is obvious.
-    pub fn hand_cube() -> Body {
-        let mut b = Body::default();
-        let mut v = [0; 8];
-        for (i, slot) in v.iter_mut().enumerate() {
-            let p = DVec3::new((i & 1) as f64, ((i >> 1) & 1) as f64, ((i >> 2) & 1) as f64);
-            *slot = b.add_vertex(p);
-        }
-        let mut edge = std::collections::HashMap::new();
-        // Each face as vertex indices, counter-clockwise seen from outside.
-        let faces: [([usize; 4], DVec3); 6] = [
-            ([0, 2, 3, 1], -DVec3::Z),
-            ([4, 5, 7, 6], DVec3::Z),
-            ([0, 1, 5, 4], -DVec3::Y),
-            ([2, 6, 7, 3], DVec3::Y),
-            ([0, 4, 6, 2], -DVec3::X),
-            ([1, 3, 7, 5], DVec3::X),
-        ];
-        for (quad, normal) in faces {
-            let mut coedges = Vec::new();
-            for i in 0..4 {
-                let (a, c) = (v[quad[i]], v[quad[(i + 1) % 4]]);
-                let key = (a.min(c), a.max(c));
-                let id = *edge.entry(key).or_insert_with(|| b.add_line(key.0, key.1));
-                coedges.push(Coedge { edge: id, reversed: a != key.0 });
-            }
-            let origin = b.vertices[v[quad[0]]].point;
-            let x_dir = crate::geom::any_perpendicular(normal);
-            b.add_face(Surface::Plane { origin, normal, x_dir }, true, vec![Loop { coedges }]);
-        }
-        b.shells.push(Shell { faces: (0..6).collect() });
-        b
-    }
 
     #[test]
     fn cube_is_valid_with_genus_zero() {
@@ -405,10 +370,28 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn tiny_vertex_noise_within_tolerance_is_accepted() {
-        let mut b = hand_cube();
-        b.vertices[7].point.z += tolerance::LINEAR * 0.5;
-        assert_eq!(validate(&b), Ok(()));
+    fn vertex_offset_near_tolerance_boundary() {
+        // Vertex 7 is (1,1,1); its edges end at exactly (1,1,1), so moving it
+        // by d along z puts it exactly d from all three edges.
+        for (factor, ok) in [(0.5, true), (0.9, true), (1.1, false), (2.0, false)] {
+            let mut b = hand_cube();
+            b.vertices[7].point.z += tolerance::LINEAR * factor;
+            let r = validate(&b);
+            assert_eq!(r.is_ok(), ok, "{factor}× tolerance: {r:?}");
+        }
+    }
+
+    #[test]
+    fn plane_offset_near_tolerance_boundary() {
+        // Shifting the top face's plane by d leaves its four edges d away.
+        for (factor, ok) in [(0.9, true), (1.1, false)] {
+            let mut b = hand_cube();
+            if let Surface::Plane { origin, .. } = &mut b.faces[1].surface {
+                origin.z += tolerance::LINEAR * factor;
+            }
+            let r = validate(&b);
+            assert_eq!(r.is_ok(), ok, "{factor}× tolerance: {r:?}");
+        }
     }
 
     #[test]
@@ -475,3 +458,4 @@ pub(crate) mod tests {
         let _ = checked(b);
     }
 }
+

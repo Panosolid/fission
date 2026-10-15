@@ -10,7 +10,8 @@ use crate::geom::{Curve, Surface};
 use crate::mesh::Mesh;
 use crate::tolerance;
 use crate::topology::{Body, FaceId};
-use glam::DVec2;
+use glam::{DVec2, DVec3};
+use std::f64::consts::{PI, TAU};
 use spade::{ConstrainedDelaunayTriangulation, Point2, Triangulation};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -22,6 +23,12 @@ pub struct TessOptions {
     /// Every curved segment count is multiplied by this. Doubling it halves
     /// the step everywhere, which mass properties use for extrapolation.
     pub refine: u32,
+}
+
+impl Default for TessOptions {
+    fn default() -> Self {
+        Self::DISPLAY
+    }
 }
 
 impl TessOptions {
@@ -36,7 +43,8 @@ pub struct TessError {
 }
 
 pub fn tessellate(body: &Body, opts: &TessOptions) -> Result<Mesh, TessError> {
-    let mut mesh = Mesh { positions: body.vertices.iter().map(|v| v.point).collect(), ..Mesh::default() };
+    let mut mesh =
+        Mesh { positions: body.vertices.iter().map(|v| v.point).collect(), options: *opts, ..Mesh::default() };
     for e in &body.edges {
         let n = segments(&e.curve, e.t1 - e.t0, opts);
         let mut poly = vec![e.start as u32];
@@ -94,8 +102,173 @@ fn tessellate_face(body: &Body, fi: FaceId, mesh: &mut Mesh) -> Result<(), Strin
             push_triangles(mesh, fi, tris, face.sense);
             Ok(())
         }
-        _ => Err("curved faces are not tessellated yet".into()),
+        Surface::Cylinder { radius, .. } => {
+            let (ids, uv) = periodic_domain(body, mesh, fi, radius)?;
+            let tris = triangulate_uv(&ids, &uv)?;
+            push_triangles(mesh, fi, tris, face.sense);
+            Ok(())
+        }
+        Surface::Sphere { center, radius, .. } => sphere_cap(body, fi, mesh, center, radius),
     }
+}
+
+/// Wraps an angle difference into (-π, π].
+fn wrap(d: f64) -> f64 {
+    let w = d.rem_euclid(TAU);
+    if w > PI { w - TAU } else { w }
+}
+
+/// Unwraps the u values of a loop so they change continuously. Returns the
+/// unwrapped points and how far u winds around the loop (0 or ±2π).
+fn unwrap_loop(pts: &[DVec2]) -> (Vec<DVec2>, f64) {
+    let mut out: Vec<DVec2> = Vec::with_capacity(pts.len());
+    for (i, p) in pts.iter().enumerate() {
+        let u = if i == 0 { p.x } else { out[i - 1].x + wrap(p.x - pts[i - 1].x) };
+        out.push(DVec2::new(u, p.y));
+    }
+    let (first, last) = (pts[0], pts[pts.len() - 1]);
+    let winding = out[out.len() - 1].x + wrap(first.x - last.x) - out[0].x;
+    (out, winding)
+}
+
+/// Loops of mesh vertex ids with their matching uv points.
+type UvRegion = (Vec<Vec<u32>>, Vec<Vec<DVec2>>);
+
+/// Builds a simple uv region for a face on a surface whose `u` is periodic.
+/// Loops that wind all the way around (like the two circles bounding a
+/// cylinder's side) are joined by a seam into one polygon. `u` is scaled by
+/// `u_scale` so the triangulation sees true proportions.
+fn periodic_domain(body: &Body, mesh: &Mesh, fi: FaceId, u_scale: f64) -> Result<UvRegion, String> {
+    let face = &body.faces[fi];
+    let mut ids = Vec::new();
+    let mut uvs = Vec::new();
+    let mut windings = Vec::new();
+    for li in 0..face.loops.len() {
+        let l = loop_vertices(body, mesh, fi, li);
+        let raw: Vec<DVec2> = l.iter().map(|&i| face.surface.project(mesh.positions[i as usize])).collect();
+        let (uv, w) = unwrap_loop(&raw);
+        ids.push(l);
+        uvs.push(uv);
+        windings.push(w);
+    }
+    let periodic: Vec<usize> = (0..windings.len()).filter(|&i| windings[i].abs() > PI).collect();
+    let (ids, mut uvs) = match periodic.as_slice() {
+        [] => {
+            // Bring every loop to the same period as the first.
+            let base = uvs[0][0].x;
+            for uv in uvs.iter_mut().skip(1) {
+                let shift = base + wrap(uv[0].x - base) - uv[0].x;
+                uv.iter_mut().for_each(|p| p.x += shift);
+            }
+            (ids, uvs)
+        }
+        [a, b] if ids.len() == 2 => {
+            let (ia, ua, wa) = (&ids[*a], &uvs[*a], windings[*a]);
+            let (ib, ub, wb) = (&ids[*b], &uvs[*b], windings[*b]);
+            // Walk A once round, step across the seam to the closest point of
+            // B, walk B once round (the other way), and step back.
+            let target = ua[0].x + wa;
+            let j = (0..ub.len())
+                .min_by(|&x, &y| wrap(ub[x].x - target).abs().total_cmp(&wrap(ub[y].x - target).abs()))
+                .ok_or("empty loop")?;
+            let mut poly_ids: Vec<u32> = ia.clone();
+            let mut poly_uv: Vec<DVec2> = ua.clone();
+            poly_ids.push(ia[0]);
+            poly_uv.push(DVec2::new(ua[0].x + wa, ua[0].y));
+            let shift = target + wrap(ub[j].x - target) - ub[j].x;
+            for k in 0..ub.len() {
+                let m = (j + k) % ub.len();
+                // Indices past the end of B wrap round, so undo B's winding.
+                let unwrap = if m < j { wb } else { 0.0 };
+                poly_ids.push(ib[m]);
+                poly_uv.push(DVec2::new(ub[m].x + shift + unwrap, ub[m].y));
+            }
+            poly_ids.push(ib[j]);
+            poly_uv.push(DVec2::new(ub[j].x + shift + wb, ub[j].y));
+            (vec![poly_ids], vec![poly_uv])
+        }
+        _ => return Err("this arrangement of loops around a periodic surface is not supported yet".into()),
+    };
+    uvs.iter_mut().flatten().for_each(|p| p.x *= u_scale);
+    Ok((ids, uvs))
+}
+
+/// A sphere face bounded by a single circle (a hemisphere or any other cap):
+/// rings of points from the boundary towards the pole on the face's side.
+fn sphere_cap(body: &Body, fi: FaceId, mesh: &mut Mesh, center: DVec3, radius: f64) -> Result<(), String> {
+    let face = &body.faces[fi];
+    let [l] = face.loops.as_slice() else { return Err("general sphere faces are not supported yet".into()) };
+    let [c] = l.coedges.as_slice() else { return Err("general sphere faces are not supported yet".into()) };
+    let e = &body.edges[c.edge];
+    let Curve::Circle { axis, .. } = e.curve else { return Err("sphere cap must be bounded by a circle".into()) };
+    if !e.is_closed() {
+        return Err("sphere cap boundary must be a closed circle".into());
+    }
+    let boundary = loop_vertices(body, mesh, fi, 0);
+    // The face interior lies on the left of its boundary: normal × tangent.
+    let s0 = if c.reversed { 1.0 } else { 0.0 };
+    let p0 = e.point_at(s0);
+    let t0 = if c.reversed { -e.tangent_at(s0) } else { e.tangent_at(s0) };
+    let inward = body.face_normal_at(fi, p0).cross(t0);
+    let pole_dir = if inward.dot(axis) >= 0.0 { axis } else { -axis };
+    let pole = center + pole_dir * radius;
+
+    let dirs: Vec<DVec3> = boundary.iter().map(|&i| (mesh.positions[i as usize] - center).normalize()).collect();
+    let theta = dirs[0].dot(pole_dir).clamp(-1.0, 1.0).acos();
+    let rings = segments(&Curve::Circle { center, axis, x_dir: dirs[0], radius }, theta, mesh_opts(mesh)).max(1);
+
+    let mut prev: Vec<u32> = boundary.clone();
+    for k in 1..=rings {
+        let ring: Vec<u32> = if k == rings {
+            mesh.positions.push(pole);
+            vec![(mesh.positions.len() - 1) as u32]
+        } else {
+            let f = k as f64 / rings as f64;
+            dirs.iter()
+                .map(|&d| {
+                    mesh.positions.push(center + slerp(d, pole_dir, f) * radius);
+                    (mesh.positions.len() - 1) as u32
+                })
+                .collect()
+        };
+        let n = prev.len();
+        for i in 0..n {
+            let (a, b) = (prev[i], prev[(i + 1) % n]);
+            if ring.len() == 1 {
+                push_oriented(mesh, body, fi, [a, b, ring[0]]);
+            } else {
+                let (c2, d) = (ring[(i + 1) % n], ring[i]);
+                push_oriented(mesh, body, fi, [a, b, c2]);
+                push_oriented(mesh, body, fi, [a, c2, d]);
+            }
+        }
+        prev = ring;
+    }
+    Ok(())
+}
+
+/// The options the current tessellation runs with, recovered from the mesh
+/// so helpers share one setting.
+fn mesh_opts(mesh: &Mesh) -> &TessOptions {
+    &mesh.options
+}
+
+/// Spherical interpolation between unit vectors.
+fn slerp(a: DVec3, b: DVec3, f: f64) -> DVec3 {
+    let angle = a.dot(b).clamp(-1.0, 1.0).acos();
+    if angle < tolerance::ANGULAR {
+        return a;
+    }
+    (a * ((1.0 - f) * angle).sin() + b * (f * angle).sin()) / angle.sin()
+}
+
+/// Adds a triangle wound so its normal agrees with the face's outward normal.
+fn push_oriented(mesh: &mut Mesh, body: &Body, fi: FaceId, t: [u32; 3]) {
+    let [a, b, c] = t.map(|i| mesh.positions[i as usize]);
+    let n = (b - a).cross(c - a);
+    let outward = body.face_normal_at(fi, (a + b + c) / 3.0);
+    mesh.triangles.push(if n.dot(outward) >= 0.0 { t } else { [t[0], t[2], t[1]] });
+    mesh.triangle_face.push(fi);
 }
 
 /// Adds triangles that are counter-clockwise in uv; uv runs counter-clockwise
@@ -175,7 +348,7 @@ fn inside(p: DVec2, loops: &[Vec<DVec2>]) -> bool {
 mod tests {
     use super::*;
     use crate::tolerance::eq;
-    use crate::validate::tests::hand_cube;
+    use crate::fixtures::{hand_cube, hand_cylinder, hand_sphere};
 
     fn region(loops: &[Vec<(f64, f64)>]) -> (Vec<Vec<u32>>, Vec<Vec<DVec2>>) {
         let mut next = 0;
@@ -236,6 +409,64 @@ mod tests {
         let a = tessellate(&hand_cube(), &TessOptions::DISPLAY).unwrap();
         let b = tessellate(&hand_cube(), &TessOptions::DISPLAY).unwrap();
         assert_eq!(a, b);
+    }
+
+    /// Largest distance from the surface of any mesh vertex, and of any
+    /// mesh edge's midpoint.
+    fn surface_error(body: &Body, m: &Mesh) -> (f64, f64) {
+        let mut on = 0.0f64;
+        let mut mid = 0.0f64;
+        for (t, tri) in m.triangles.iter().enumerate() {
+            let s = &body.faces[m.triangle_face[t]].surface;
+            for k in 0..3 {
+                let (a, b) = (m.positions[tri[k] as usize], m.positions[tri[(k + 1) % 3] as usize]);
+                on = on.max(s.distance(a));
+                mid = mid.max(s.distance((a + b) / 2.0));
+            }
+        }
+        (on, mid)
+    }
+
+    #[test]
+    fn cylinder_mesh_is_an_exact_prism_over_the_inscribed_polygon() {
+        for (r, h) in [(1.0, 2.0), (25.0, 0.5), (0.05, 300.0)] {
+            let body = hand_cylinder(r, h);
+            let opts = TessOptions::DISPLAY;
+            let m = tessellate(&body, &opts).unwrap();
+            assert_eq!(m.check_closed(), Ok(()), "r={r} h={h}");
+            let n = m.edge_polylines[0].len() - 1;
+            let polygon = 0.5 * n as f64 * r * r * (TAU / n as f64).sin();
+            assert!(crate::tolerance::rel_eq(m.signed_volume(), polygon * h, 1e-12), "r={r} h={h}");
+            let (on, mid) = surface_error(&body, &m);
+            assert!(on <= crate::tolerance::LINEAR);
+            assert!(mid <= opts.chord, "chord error {mid} > {}", opts.chord);
+        }
+    }
+
+    #[test]
+    fn sphere_mesh_is_closed_and_on_the_sphere() {
+        for r in [1.0, 40.0, 1e-2] {
+            let body = hand_sphere(r);
+            let opts = TessOptions::DISPLAY;
+            let m = tessellate(&body, &opts).unwrap();
+            assert_eq!(m.check_closed(), Ok(()), "r={r}");
+            assert!(m.signed_volume() > 0.0 && m.signed_volume() < 4.0 / 3.0 * PI * r.powi(3));
+            let (on, mid) = surface_error(&body, &m);
+            assert!(on <= crate::tolerance::LINEAR, "r={r}: vertex {on} off sphere");
+            // Ring and meridian edges obey the chord limit; quad diagonals
+            // cut across both directions, so they can sag up to twice that.
+            assert!(mid <= 2.0 * opts.chord, "r={r}: chord error {mid}");
+        }
+    }
+
+    #[test]
+    fn hand_cylinder_and_sphere_validate() {
+        assert_eq!(crate::validate::validate(&hand_cylinder(3.0, 7.0)), Ok(()));
+        assert_eq!(crate::validate::validate(&hand_sphere(5.0)), Ok(()));
+        let c = hand_cylinder(3.0, 7.0);
+        assert_eq!(c.counts(&c.shells[0]).genus(), Some(0));
+        let s = hand_sphere(5.0);
+        assert_eq!(s.counts(&s.shells[0]).genus(), Some(0));
     }
 
     #[test]

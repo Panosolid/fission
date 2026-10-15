@@ -11,6 +11,9 @@ pub mod tolerance;
 pub mod topology;
 pub mod validate;
 
+#[cfg(test)]
+pub(crate) mod fixtures;
+
 use glam::DVec3;
 use wasm_bindgen::prelude::*;
 
