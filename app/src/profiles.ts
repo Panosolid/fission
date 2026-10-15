@@ -5,7 +5,7 @@
 // per corner (0 straight, ±1 a half circle; tan of a quarter of the arc's
 // turn), or circles.
 
-export type ShapeKind = "box" | "l-bracket" | "plate" | "slot" | "star";
+export type ShapeKind = "box" | "cylinder" | "l-bracket" | "plate" | "slot" | "star";
 
 export type Loop =
   | { path: { corners: number[]; bulges: number[] } }
@@ -29,7 +29,7 @@ function polygon(cx: number, cy: number, radii: number[], sides: number): number
   return out;
 }
 
-export function outline(kind: Exclude<ShapeKind, "box">, w: number, d: number): Outline {
+export function outline(kind: Exclude<ShapeKind, "box" | "cylinder">, w: number, d: number): Outline {
   switch (kind) {
     case "l-bracket":
       // Arms 0.3 of the width and depth thick.

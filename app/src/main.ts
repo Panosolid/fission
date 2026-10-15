@@ -9,10 +9,11 @@ const kernel = new KernelClient();
 const viewer = new Viewer($("viewport"));
 const inputs = ["width", "depth", "height"].map((id) => $<HTMLInputElement>(id));
 const shape = $<HTMLSelectElement>("shape");
-// Boxes come from the box primitive; the other shapes are outlines
-// extruded by the height.
+// Boxes and cylinders come from the primitives (a cylinder's width is its
+// diameter); the other shapes are outlines extruded by the height.
 const build = latestOnly((kind: ShapeKind, w: number, d: number, h: number) => {
   if (kind === "box") return kernel.call("make_box", w, d, h);
+  if (kind === "cylinder") return kernel.call("make_cylinder", w / 2, h);
   return kernel.call("make_extrude", outline(kind, w, d), h);
 });
 let framed: Framing | null = null;
@@ -21,7 +22,10 @@ let framedKind: ShapeKind | null = null;
 async function update() {
   const [w, d, h] = inputs.map((i) => Number(i.value));
   const kind = shape.value as ShapeKind;
-  $("height-label").textContent = kind === "box" ? "Height" : "Extrude by";
+  const primitive = kind === "box" || kind === "cylinder";
+  $("height-label").textContent = primitive ? "Height" : "Extrude by";
+  $("width-label").textContent = kind === "cylinder" ? "Diameter" : "Width";
+  $("depth-row").hidden = kind === "cylinder";
   try {
     const { current, value: view } = await build(kind, w, d, h);
     if (!current) return;

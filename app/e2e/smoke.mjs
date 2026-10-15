@@ -181,6 +181,21 @@ try {
     await page.screenshot({ path: "e2e/plate.png" });
   });
 
+  await check("cylinder primitive: diameter from the width", async () => {
+    // Diameter 40 so r = 20, height 20: chords turn at most
+    // 2·acos(1 − 0.01/20) ≈ 0.06325, ceil(2π/0.06325) = 100 per turn. A
+    // 100-sided prism: V = 50·r²·sin(2π/100)·h. 2 V, 2 E, 3 F. The depth
+    // box is hidden (a cylinder has no depth).
+    await pick("cylinder", await text("volume"));
+    assert.equal(chords(20, 2 * Math.PI), 100);
+    near(await shown("volume"), 50 * 400 * Math.sin((2 * Math.PI) / 100) * 20, "volume");
+    assert.equal(await text("topology"), "2 V · 2 E · 3 F");
+    assert.equal(await text("width-label"), "Diameter");
+    assert.equal(await page.isVisible("#depth-row"), false);
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: "e2e/cylinder.png" });
+  });
+
   await check("slot with round ends", async () => {
     // 40 × 30: straight sides 10 long, ends half circles of radius 15:
     // chords turn 2·acos(1 − 0.01/15) ≈ 0.0730, ceil(π/0.0730) = 44 per end.

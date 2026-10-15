@@ -70,6 +70,13 @@ pub fn make_box(width: f64, depth: f64, height: f64) -> Result<JsValue, JsError>
     to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
 }
 
+/// Cylinder standing on the origin along +Z, sizes in millimetres.
+#[wasm_bindgen]
+pub fn make_cylinder(radius: f64, height: f64) -> Result<JsValue, JsError> {
+    let body = ops::primitives::make_cylinder(radius, height).map_err(|e| JsError::new(&e.to_string()))?;
+    to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
+}
+
 /// One loop of a profile as the app sends it: corners as flat
 /// [x0, y0, x1, y1, …] with one bulge per corner (or none: all straight),
 /// or a circle. In JavaScript: `{ path: { corners, bulges } }` or
@@ -118,6 +125,7 @@ pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsError>
 mod tests {
     use super::*;
     use crate::tolerance::{rel_eq, FP_REL};
+    use std::f64::consts::{PI, TAU};
 
     #[test]
     fn version_comes_from_cargo() {
@@ -142,6 +150,25 @@ mod tests {
         body.vertices[7].point.z += 0.5;
         let v = view_body(&body).unwrap();
         assert!(v.errors.iter().any(|e| e.contains("vertex 7")), "{:?}", v.errors);
+    }
+
+    #[test]
+    fn cylinder_view_reports_hand_worked_numbers() {
+        // Radius 20, height 20 (the app's default 40 wide cylinder). Display
+        // chords may sag 0.01: each turns at most 2·acos(1 − 0.01/20) =
+        // 0.063249 rad, so a turn needs ceil(2π / 0.063249) = ceil(99.34) =
+        // 100 chords. The mesh is a 100-sided prism: each cap is 100
+        // triangles of ½·r²·sin(2π/100), each side panel is 2·r·sin(π/100)
+        // wide. 2 seam vertices, 2 circle edges, 2 caps + 1 side.
+        let v = view_body(&ops::primitives::make_cylinder(20.0, 20.0).unwrap()).unwrap();
+        let cap = 50.0 * 400.0 * (TAU / 100.0).sin();
+        let side = 100.0 * 2.0 * 20.0 * (PI / 100.0).sin() * 20.0;
+        assert!(rel_eq(v.volume, cap * 20.0, FP_REL), "{} vs {}", v.volume, cap * 20.0);
+        assert!(rel_eq(v.area, 2.0 * cap + side, FP_REL), "{} vs {}", v.area, 2.0 * cap + side);
+        assert_eq!((v.vertices, v.edges, v.faces), (2, 2, 3));
+        assert!(v.errors.is_empty());
+        // Bad sizes come back as clean errors.
+        assert!(ops::primitives::make_cylinder(-1.0, 1.0).is_err());
     }
 
     #[test]

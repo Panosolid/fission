@@ -19,3 +19,4 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #panel { width: auto; border-right: none; border-bottom: 1px solid #2a2e35; }
   #viewport { min-height: 60vh; }
 }
+[hidden] { display: none !important; }

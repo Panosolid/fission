@@ -13,14 +13,15 @@
       <label>Shape
         <select id="shape">
           <option value="box">Box</option>
+          <option value="cylinder">Cylinder</option>
           <option value="l-bracket">L-bracket (extruded)</option>
           <option value="plate">Plate with two round holes (extruded)</option>
           <option value="slot">Slot with round ends (extruded)</option>
           <option value="star">Star (extruded)</option>
         </select>
       </label>
-      <label>Width <input id="width" type="number" value="40" step="any" /> mm</label>
-      <label>Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
+      <label><span id="width-label">Width</span> <input id="width" type="number" value="40" step="any" /> mm</label>
+      <label id="depth-row">Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
       <label><span id="height-label">Height</span> <input id="height" type="number" value="20" step="any" /> mm</label>
       <dl id="stats">
         <dt>Volume</dt><dd id="volume">…</dd>

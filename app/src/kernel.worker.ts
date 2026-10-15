@@ -9,6 +9,7 @@ const ready = init();
 const ops = {
   kernel_version: () => kernel.kernel_version(),
   make_box: (w: number, d: number, h: number) => kernel.make_box(w, d, h),
+  make_cylinder: (r: number, h: number) => kernel.make_cylinder(r, h),
   make_extrude: (profile: Outline, distance: number) => kernel.make_extrude(profile, distance),
 } satisfies Record<KernelRequest["op"], (...args: never[]) => unknown>;
 
