@@ -175,21 +175,26 @@ impl Seg {
                     out.extend([c + n * r, c - n * r].into_iter().filter(|&p| self.spans_point(p)));
                 }
             }
-            // Between circles: on the line of centres; for concentric ones
-            // (distance constant on the overlap) where the other's ends are.
-            // For two separate pieces the closest pair always has a point
-            // facing the other circle (c + u·r from either side), but the
-            // far point c − u·r can be the nearest approach of a neck
-            // between neighbours, whose meeting corner is excluded.
+            // Between circles, a pair of points inside both pieces where the
+            // distance is least (or a neck: a local least) lies on the line
+            // of centres, one point from {c1 ± u·r1}, the other from
+            // {c2 ± u·r2}, u = (c2 − c1)/|c2 − c1|. The pair facing away
+            // from each other, c1 − u·r1 and c2 + u·r2, is d + r1 + r2
+            // apart, the farthest any two points of the circles can be, so
+            // never a least. Every other pair has a facing point (c1 + u·r1,
+            // or c2 − u·r2 = c2 + (−u)·r2 from the other side), and one is
+            // enough: its distance to the other piece is at most the pair's.
+            // Concentric circles are the same distance apart all round
+            // their overlap, which ends at an end of one of the pieces (a
+            // candidate already), unless both are whole circles: then any
+            // point will do.
             (Some((c, r)), Some((oc, _))) => {
                 let d = oc - c;
                 if d.length() > LINEAR * 1e-3 {
-                    let u = d.normalize();
-                    out.extend([c + u * r, c - u * r].into_iter().filter(|&p| self.spans_point(p)));
-                } else {
-                    let ends = other.ends();
-                    let probes: Vec<DVec2> = if ends.is_empty() { vec![c + DVec2::X] } else { ends };
-                    out.extend(probes.into_iter().map(|e| c + (e - c).normalize_or(DVec2::X) * r).filter(|&p| self.spans_point(p)));
+                    let facing = c + d.normalize() * r;
+                    out.extend(Some(facing).filter(|&p| self.spans_point(p)));
+                } else if out.is_empty() && other.ends().is_empty() {
+                    out.push(c + DVec2::X * r);
                 }
             }
             (None, _) => {}
@@ -219,7 +224,9 @@ fn crossing(s: &Seg, t: &Seg, shared: &[DVec2]) -> bool {
                     let u = (far - *p) / len;
                     let s_other = -2.0 * u.dot(*p - c);
                     let x = *p + u * s_other;
-                    s_other > LINEAR && s_other < len && other.spans_point(x)
+                    // Up to and including the line's far end: ending on the
+                    // circle there is touching it.
+                    s_other > LINEAR && s_other <= len && other.spans_point(x)
                 }
                 [] => {
                     let len = a.distance(b);
@@ -256,8 +263,10 @@ fn crossing(s: &Seg, t: &Seg, shared: &[DVec2]) -> bool {
             }
             match shared {
                 // Two circles through P meet again at P mirrored in the line
-                // of centres (exact up to rounding, no square root).
-                [p] if d.length() > LINEAR * 1e-3 => {
+                // of centres (exact up to rounding, no square root). Their
+                // centres are apart: both pass through P, so concentric ones
+                // would have equal radii and be the same circle, above.
+                [p] => {
                     let foot = c1 + d * ((*p - c1).dot(d) / d.length_squared());
                     let x = foot * 2.0 - *p;
                     x.distance(*p) > LINEAR && s.spans_point(x) && t.spans_point(x)
@@ -600,6 +609,33 @@ mod tests {
         Seg::from_bulge(p(1.0, 0.0), p(-1.0, 0.0), 1.0).unwrap()
     }
 
+    /// Turned by `angle`, scaled by `k` > 0 about the origin, then moved by
+    /// `shift`. Turning and scaling keep every arc's sweep.
+    fn placed(seg: &Seg, angle: f64, k: f64, shift: DVec2) -> Seg {
+        let f = |q: DVec2| DVec2::from_angle(angle).rotate(q) * k + shift;
+        match *seg {
+            Seg::Line { a, b } => Seg::Line { a: f(a), b: f(b) },
+            Seg::Arc { a, b, center, radius, sweep } => Seg::Arc { a: f(a), b: f(b), center: f(center), radius: radius * k, sweep },
+            Seg::Circle { center, radius, ccw } => Seg::Circle { center: f(center), radius: radius * k, ccw },
+        }
+    }
+
+    /// Asserts `crossing` gives `expect` for the pieces as given and for
+    /// turned, scaled and moved copies of them, either way round. Whether
+    /// two pieces cross can't depend on where they are, and odd placements
+    /// stop round numbers (centres at the origin, points on the axes) from
+    /// hiding a wrong formula that happens to agree at them.
+    #[track_caller]
+    fn assert_crossing(s: &Seg, t: &Seg, shared: &[DVec2], expect: bool) {
+        for (angle, k, shift) in [(0.0, 1.0, p(0.0, 0.0)), (0.7, 2.3, p(3.7, -1.3)), (2.9, 0.031, p(-120.5, 44.25)), (-1.3, 17.0, p(1e4, -2e4))] {
+            let f = |q: DVec2| DVec2::from_angle(angle).rotate(q) * k + shift;
+            let (s2, t2) = (placed(s, angle, k, shift), placed(t, angle, k, shift));
+            let shared2: Vec<DVec2> = shared.iter().map(|&q| f(q)).collect();
+            assert_eq!(crossing(&s2, &t2, &shared2), expect, "turned {angle}, scaled {k}, moved {shift}: {s2:?} / {t2:?}");
+            assert_eq!(crossing(&t2, &s2, &shared2), expect, "the other way round, turned {angle}, scaled {k}, moved {shift}");
+        }
+    }
+
     #[test]
     fn polygon_predicates_by_hand() {
         // Moved here from extrude.rs with the profile code (same values).
@@ -710,7 +746,21 @@ mod tests {
         assert!(eq(signed_area(&loops[0]), 100.0) && eq(signed_area(&loops[1]), -4.0 * PI));
         // A stadium 10 long, 4 wide: 40 + π·2² (two half discs).
         let slot = Profile { outer: path(&[(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)], &[0.0, 1.0, 0.0, 1.0]), holes: vec![] };
-        assert!(eq(signed_area(&ok(slot)[0]), 40.0 + 4.0 * PI));
+        let slot = ok(slot).remove(0);
+        assert!(eq(signed_area(&slot), 40.0 + 4.0 * PI));
+        // Turned, scaled by k and moved, every area grows by k² and every
+        // length by k (round numbers like a first corner at the origin or a
+        // radius of 1 could hide a wrong sign or a + for a ×).
+        let d = ok(Profile { outer: path(&[(-1.0, 0.0), (1.0, 0.0)], &[0.0, 1.0]), holes: vec![] }).remove(0);
+        for (angle, k, shift) in [(0.7, 2.3, p(3.7, -1.3)), (2.9, 0.031, p(-120.5, 44.25)), (-1.3, 17.0, p(1e4, -2e4))] {
+            let moved = |segs: &[Seg]| segs.iter().map(|q| placed(q, angle, k, shift)).collect::<Vec<_>>();
+            let near = |a: f64, b: f64| crate::tolerance::rel_eq(a, b, 1e-9);
+            assert!(near(signed_area(&moved(&d)), k * k * FRAC_PI_2) && near(perimeter(&moved(&d)), k * (2.0 + PI)), "D, {k}");
+            assert!(near(signed_area(&moved(&slot)), k * k * (40.0 + 4.0 * PI)), "slot, {k}");
+            // Stadium perimeter: two sides of 10, two half circles of r = 2.
+            assert!(near(perimeter(&moved(&slot)), k * (20.0 + 4.0 * PI)), "slot, {k}");
+            assert!(near(signed_area(&moved(&loops[1])), -k * k * 4.0 * PI) && near(perimeter(&moved(&loops[1])), k * 4.0 * PI));
+        }
     }
 
     #[test]
@@ -911,17 +961,18 @@ mod tests {
         let seg = |y0: f64, y1: f64| Seg::Line { a: p(0.0, y0), b: p(0.0, y1) };
         // Up from (0, 0.9): roots −1.9 and 0.1; only 0.1 is on the 0.3 long
         // segment (the "+" root).
-        assert!(crossing(&arc, &seg(0.9, 1.2), &[]));
+        assert_crossing(&arc, &seg(0.9, 1.2), &[], true);
         // Down from (0, 1.1): roots 0.1 and 2.1; the "−" root.
-        assert!(crossing(&arc, &seg(1.1, 0.8), &[]));
+        assert_crossing(&arc, &seg(1.1, 0.8), &[], true);
         // Inside, not reaching it; outside, not reaching it.
-        assert!(!crossing(&arc, &seg(0.5, 0.9), &[]) && !crossing(&arc, &seg(1.1, 1.5), &[]));
+        assert_crossing(&arc, &seg(0.5, 0.9), &[], false);
+        assert_crossing(&arc, &seg(1.1, 1.5), &[], false);
         // An arc only from 80° to 100°: the segment up from (0, −0.5) meets
         // the circle at (0, 1) (90°: on it) after 1.5.
         let narrow = Seg::Arc { a: dir(80f64.to_radians()), b: dir(100f64.to_radians()), center: DVec2::ZERO, radius: 1.0, sweep: 20f64.to_radians() };
-        assert!(crossing(&narrow, &seg(-0.5, 1.5), &[]));
+        assert_crossing(&narrow, &seg(-0.5, 1.5), &[], true);
         // …while one meeting the circle at 60° misses it.
-        assert!(!crossing(&narrow, &Seg::Line { a: p(0.5, 0.0), b: p(0.5, 2.0) }, &[]));
+        assert_crossing(&narrow, &Seg::Line { a: p(0.5, 0.0), b: p(0.5, 2.0) }, &[], false);
     }
 
     #[test]
@@ -933,12 +984,12 @@ mod tests {
         let line = |len: f64| Seg::Line { a: p(1.0 - 0.5 * len, -s3 * len), b: p(1.0, 0.0) };
         // The lower half circle run clockwise from P to (−1, 0) passes −60°.
         let lower = Seg::from_bulge(p(1.0, 0.0), p(-1.0, 0.0), -1.0).unwrap();
-        assert!(crossing(&line(2.0), &lower, &[p(1.0, 0.0)]));
+        assert_crossing(&line(2.0), &lower, &[p(1.0, 0.0)], true);
         // A line only 0.9 long stops short of it.
-        assert!(!crossing(&line(0.9), &lower, &[p(1.0, 0.0)]));
+        assert_crossing(&line(0.9), &lower, &[p(1.0, 0.0)], false);
         // The upper half doesn't pass −60°.
         let upper = Seg::from_bulge(p(1.0, 0.0), p(-1.0, 0.0), 1.0).unwrap();
-        assert!(!crossing(&line(2.0), &upper, &[p(1.0, 0.0)]));
+        assert_crossing(&line(2.0), &upper, &[p(1.0, 0.0)], false);
     }
 
     #[test]
@@ -951,11 +1002,95 @@ mod tests {
         // Clockwise from P (−90° about (1, 1)) for 180°, to (1, 2): passes
         // 180°, the point (0, 1). They cross there.
         let t_cw = Seg::from_bulge(p(1.0, 0.0), p(1.0, 2.0), -1.0).unwrap();
-        assert!(crossing(&s, &t_cw, &shared));
+        assert_crossing(&s, &t_cw, &shared, true);
         // Counter-clockwise from P a quarter turn to (2, 1): never reaches
         // (0, 1). (0, 1) is on s's span but not t's.
         let t_ccw = Seg::from_bulge(p(1.0, 0.0), p(2.0, 1.0), (PI / 8.0).tan()).unwrap();
-        assert!(!crossing(&s, &t_ccw, &shared));
+        assert_crossing(&s, &t_ccw, &shared, false);
+    }
+
+    #[test]
+    fn two_separate_arcs_by_hand() {
+        // Circles r = 5 about (0, 0) and (8, 0) meet where x = (64 + 25 −
+        // 25)/16 = 4 along the line of centres, y = ±√(25 − 16) = ±3: at
+        // (4, 3) (37° on the first, 143° on the second) and (4, −3) (−37°,
+        // 217°).
+        let arc = |cx: f64, r: f64, from: f64, to: f64| {
+            let (a, b) = (from.to_radians(), to.to_radians());
+            Seg::Arc { a: p(cx, 0.0) + dir(a) * r, b: p(cx, 0.0) + dir(b) * r, center: p(cx, 0.0), radius: r, sweep: b - a }
+        };
+        // 0°..90° and 90°..180°: both pass (4, 3).
+        assert_crossing(&arc(0.0, 5.0, 0.0, 90.0), &arc(8.0, 5.0, 90.0, 180.0), &[], true);
+        // 0°..90° and 180°..270°: the second passes only (4, −3).
+        assert_crossing(&arc(0.0, 5.0, 0.0, 90.0), &arc(8.0, 5.0, 180.0, 270.0), &[], false);
+        // −90°..0° and 180°..270°: both pass (4, −3) (the "−h" point).
+        assert_crossing(&arc(0.0, 5.0, -90.0, 0.0), &arc(8.0, 5.0, 180.0, 270.0), &[], true);
+        // Run clockwise instead (negative sweeps): the same points.
+        assert_crossing(&arc(0.0, 5.0, 0.0, -90.0), &arc(8.0, 5.0, 270.0, 180.0), &[], true);
+        // Circles that don't meet: centres 10.5 apart (> 5 + 5), and a
+        // circle of 2 about (1, 0) inside the first (1 < 5 − 2).
+        assert_crossing(&arc(0.0, 5.0, -90.0, 90.0), &arc(10.5, 5.0, 90.0, 270.0), &[], false);
+        assert_crossing(&arc(0.0, 5.0, -90.0, 90.0), &arc(1.0, 2.0, -90.0, 90.0), &[], false);
+        // Touching, exactly (identity placement only: a turned copy can't
+        // keep an exact tie). Outside: centres 10 = 5 + 5 apart, meeting at
+        // (5, 0); inside: a circle of 3 about (2, 0), 2 = 5 − 3 from the
+        // first's centre, meeting at (5, 0) too. Touching is not allowed.
+        let none: [DVec2; 0] = [];
+        assert!(crossing(&arc(0.0, 5.0, -90.0, 90.0), &arc(10.0, 5.0, 90.0, 270.0), &none));
+        assert!(crossing(&arc(0.0, 5.0, -90.0, 90.0), &arc(2.0, 3.0, -90.0, 90.0), &none));
+    }
+
+    #[test]
+    fn touching_a_line_exactly_by_hand() {
+        // Circle r = 5 about the origin, upper half run counter-clockwise.
+        let upper = Seg::from_bulge(p(5.0, 0.0), p(-5.0, 0.0), 1.0).unwrap();
+        // The line y = 5 touches it at (0, 5): |a − c|² − r² = 125 − 25 =
+        // 100 = (u·(a − c))², so the discriminant is exactly 0.
+        assert!(crossing(&upper, &Seg::Line { a: p(-10.0, 5.0), b: p(10.0, 5.0) }, &[]));
+        // y = 3 from (−10, 3) to (10, 3) meets it at x = ±4.
+        assert_crossing(&upper, &Seg::Line { a: p(-10.0, 3.0), b: p(10.0, 3.0) }, &[], true);
+        // From the shared corner P = (4, 3) leftwards, u = (−1, 0): the other
+        // meeting is s = −2u·P = 8 along, at (−4, 3) (143°, on the upper
+        // half). A line 10 long passes it; one 7 long stops short; one
+        // exactly 8 long ends on the arc, which touches it there.
+        let ps = [p(4.0, 3.0)];
+        let upper_from_p = Seg::from_bulge(p(4.0, 3.0), p(-5.0, 0.0), (((180.0f64 - 36.869_897_645_844_02) / 4.0).to_radians()).tan()).unwrap();
+        assert_crossing(&upper_from_p, &Seg::Line { a: p(-6.0, 3.0), b: p(4.0, 3.0) }, &ps, true);
+        assert_crossing(&upper_from_p, &Seg::Line { a: p(4.0, 3.0), b: p(-3.0, 3.0) }, &ps, false);
+        assert!(crossing(&upper_from_p, &Seg::Line { a: p(4.0, 3.0), b: p(-4.0, 3.0) }, &ps));
+    }
+
+    #[test]
+    fn nested_and_concentric_clearance_by_hand() {
+        let arc = |c: DVec2, r: f64, from: f64, to: f64| {
+            let (a, b) = (from.to_radians(), to.to_radians());
+            Seg::Arc { a: c + dir(a) * r, b: c + dir(b) * r, center: c, radius: r, sweep: b - a }
+        };
+        let gap = |s: &Seg, t: &Seg| clearance(s, t, &[]);
+        // A circle of 2 about (1, 0) inside one of 5 about the origin: the
+        // gap is narrowest along +x, from (3, 0) to (5, 0): 2. The point on
+        // the small one faces away from the big one's centre; the pair is
+        // found from the big one's point facing the small one's centre.
+        let (big, small) = (arc(DVec2::ZERO, 5.0, -30.0, 30.0), arc(p(1.0, 0.0), 2.0, -30.0, 30.0));
+        assert!(eq(gap(&big, &small), 2.0), "{}", gap(&big, &small));
+        // With the big arc only from 10° to 40°, its nearest point is its
+        // end at 10°, x = 5(cos 10°, sin 10°): |x − (1, 0)|² = 25 + 1 −
+        // 10·cos 10° grows with the angle. That direction from (1, 0) is
+        // atan(0.868/3.924) ≈ 12.5°, on the small arc: gap |x − (1,0)| − 2.
+        let near = arc(DVec2::ZERO, 5.0, 10.0, 40.0);
+        let want = (26.0 - 10.0 * 10f64.to_radians().cos()).sqrt() - 2.0;
+        assert!(eq(gap(&near, &small), want), "{} vs {want}", gap(&near, &small));
+        // Concentric, radii 5 and 5.5: 0.5 apart wherever both are, here
+        // from 30° to 60° (inside the first arc, 0° to 90°).
+        let inner = arc(DVec2::ZERO, 5.0, 0.0, 90.0);
+        assert!(eq(gap(&inner, &arc(DVec2::ZERO, 5.5, 30.0, 60.0)), 0.5));
+        // No overlap (100° to 120°): nearest are the ends 10° apart,
+        // √(25 + 30.25 − 55·cos 10°) by the cosine rule.
+        let want = (55.25 - 55.0 * 10f64.to_radians().cos()).sqrt();
+        assert!(eq(gap(&inner, &arc(DVec2::ZERO, 5.5, 100.0, 120.0)), want));
+        // Two whole concentric circles have no ends at all: still 0.5.
+        let whole = |r: f64| Seg::Circle { center: p(2.0, -1.0), radius: r, ccw: true };
+        assert!(eq(gap(&whole(5.0), &whole(5.5)), 0.5));
     }
 
     #[test]
@@ -966,21 +1101,21 @@ mod tests {
         let (a, b) = (p(1.0, 0.0), p(0.0, -1.0));
         let (big, small) = ((67.5f64).to_radians().tan(), (22.5f64).to_radians().tan());
         let ab = Seg::from_bulge(a, b, big).unwrap();
-        assert!(!crossing(&ab, &Seg::from_bulge(b, a, small).unwrap(), &[a, b]));
+        assert_crossing(&ab, &Seg::from_bulge(b, a, small).unwrap(), &[a, b], false);
         // From B back to A the long way, clockwise 270° (bulge −tan 67.5°):
         // the same arc run back, every end shared. Overlap.
-        assert!(crossing(&ab, &Seg::from_bulge(b, a, -big).unwrap(), &[a, b]));
+        assert_crossing(&ab, &Seg::from_bulge(b, a, -big).unwrap(), &[a, b], true);
         // Carrying on counter-clockwise from B for 180° ends at (0, 1),
         // which the first arc passes through (at 90°). Overlap.
-        assert!(crossing(&ab, &Seg::from_bulge(b, p(0.0, 1.0), 1.0).unwrap(), &[b]));
+        assert_crossing(&ab, &Seg::from_bulge(b, p(0.0, 1.0), 1.0).unwrap(), &[b], true);
         // Out and straight back along the same arc (opposite turns,
         // sharing its far end): overlap.
         let q = Seg::from_bulge(a, p(0.0, 1.0), (PI / 8.0).tan()).unwrap();
         let back = Seg::from_bulge(p(0.0, 1.0), a, -(PI / 8.0).tan()).unwrap();
-        assert!(crossing(&q, &back, &[p(0.0, 1.0)]));
+        assert_crossing(&q, &back, &[p(0.0, 1.0)], true);
         // Two separate quarter arcs of the circle run opposite ways, sharing
         // nothing: (1,0)→(0,1) and (0,−1)→(−1,0) clockwise. No overlap.
         let other = Seg::from_bulge(p(0.0, -1.0), p(-1.0, 0.0), -(PI / 8.0).tan()).unwrap();
-        assert!(!crossing(&q, &other, &[]));
+        assert_crossing(&q, &other, &[], false);
     }
 }
