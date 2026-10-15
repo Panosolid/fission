@@ -1,0 +1,38 @@
+[package]
+name = "fission-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Geometry kernel for Fission CAD"
+license = "MIT"
+repository = "https://github.com/benpy28/fission"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+glam = { version = "0.29", features = ["serde"] }
+robust = "1"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+serde_json = "1"
+spade = "2"
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "s"
+
+[dev-dependencies]
+proptest = "1"
+proptest-state-machine = "0.9.0"
+
+# wasm-opt only shrinks the .wasm file; skip it until size matters.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+# Tests stay debug builds (debug_assertions on, so invalid kernel results
+# panic) but are optimised enough that the stateful harness runs quickly.
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2

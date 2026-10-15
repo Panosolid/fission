@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fission CAD</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <aside id="panel">
+      <h1>Fission <span id="version"></span></h1>
+      <h2>Box</h2>
+      <label>Width <input id="width" type="number" value="40" step="any" /> mm</label>
+      <label>Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
+      <label>Height <input id="height" type="number" value="20" step="any" /> mm</label>
+      <dl id="stats">
+        <dt>Volume</dt><dd id="volume">…</dd>
+        <dt>Area</dt><dd id="area">…</dd>
+        <dt>Topology</dt><dd id="topology">…</dd>
+        <dt>Validation</dt><dd id="status">…</dd>
+      </dl>
+      <p id="error"></p>
+    </aside>
+    <div id="viewport"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

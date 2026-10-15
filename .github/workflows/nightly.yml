@@ -1,0 +1,47 @@
+name: Nightly
+
+# Tier 3: the stateful harness at scale, split across parallel jobs, each
+# followed by the OpenCascade oracle. Scheduled runs only fire from the
+# default branch; "Run workflow" on the Actions tab starts one by hand.
+on:
+  schedule:
+    - cron: "17 2 * * *" # 02:17 UTC every night
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "Cases per job"
+        default: "12500"
+
+jobs:
+  stateful:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cadquery-ocp
+      - name: Harness + oracle
+        working-directory: kernel
+        # Distinct base seed per job and per night: YYYYMMDD * 100 + job.
+        run: scripts/overnight.sh "${{ inputs.cases || '12500' }}" 1 python "$(( $(date +%Y%m%d) * 100 + ${{ matrix.job }} ))"
+      - name: Upload report, new regressions and failure dumps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-job-${{ matrix.job }}
+          if-no-files-found: ignore
+          path: |
+            kernel/target/stateful-report.txt
+            kernel/target/oracle-disagreements-*.txt
+            kernel/target/failure-dumps/
+            kernel/tests/regressions/stateful/

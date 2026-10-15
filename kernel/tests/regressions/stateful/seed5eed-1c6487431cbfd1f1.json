@@ -1,0 +1,27 @@
+{
+  "seed": 24301,
+  "failure": "step 1 (Add { shape: Cylinder { r: 1.1e-6, h: 2.5 }, axis: [0.0, 1.0, 0.0], angle: 9.911584385521566, at: [500000.0, 0.0, 0.0] }): PANIC: kernel produced an invalid body:\n  mesh has 15 open or flipped edges (at src/validate.rs:133:17)",
+  "ops": [
+    {
+      "Add": {
+        "shape": {
+          "Cylinder": {
+            "r": "1.1e-6",
+            "h": "2.5"
+          }
+        },
+        "axis": [
+          "0.0",
+          "1.0",
+          "0.0"
+        ],
+        "angle": "9.911584385521566",
+        "at": [
+          "500000.0",
+          "0.0",
+          "0.0"
+        ]
+      }
+    }
+  ]
+}
