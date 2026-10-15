@@ -576,12 +576,14 @@ fn verdict(thinnest: f64, span: f64, reach: f64) -> Option<bool> {
 }
 
 /// Curved outlines. Four families built around a known thinnest feature,
-/// so whether the kernel must accept them is known (`verdict`):
+/// so whether the kernel must accept them is known (`verdict`), plus one
+/// of random shapes:
 /// - slots: a rectangle with half-circle ends (radius = half the width);
 /// - plates with a row of 1–3 round holes, every wall and gap the same
 ///   chosen width (often 0.9/1.0/1.1 × MIN_FEATURE);
 /// - washers: a circle with an off-centre round hole;
-/// - a quarter are random star polygons with bowed edges and round or
+/// - lenses (two arcs) with a square hole starting on their chord;
+/// - a fifth are random star polygons with bowed edges and round or
 ///   bowed holes, whose verdict is unknown: if accepted, every check runs.
 fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
     let l = length(scene);
@@ -637,6 +639,24 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
         let expect = verdict(g.min(rho), 2.0 * big, c.abs().max_element() + big);
         (Ring::Circle { c: [Num(c.x), Num(c.y)], r: Num(big) }, vec![Ring::Circle { c: [Num(hole.x), Num(hole.y)], r: Num(rho) }], expect)
     });
+    let lens = (l.clone(), gap.clone(), 0.3..=1.0f64, centre.clone(), flip).prop_map(move |(half, a, beta, c, flip)| {
+        // A lens from c − (half, 0) to c + (half, 0), both arcs of bulge β:
+        // radius R = half(1 + β²)/(2β), centres k = half(1 − β²)/(2β) above
+        // (the lower arc's) and below (the upper's). A square hole of side
+        // a has its first corner at c, on both arcs' chord (where a winding
+        // number sees each chord as half a turn either way). A convex shape
+        // inside a circle is nearest it at the corner farthest from the
+        // centre: each wall is R minus that distance (negative: it pokes
+        // out).
+        let (r, k) = (half * (1.0 + beta * beta) / (2.0 * beta), half * (1.0 - beta * beta) / (2.0 * beta));
+        let square = [DVec2::ZERO, DVec2::new(a, 0.0), DVec2::new(a, a), DVec2::new(0.0, a)];
+        let wall = |centre: DVec2| r - square.iter().map(|q| q.distance(centre)).fold(0.0, f64::max);
+        let thinnest = a.min(wall(DVec2::new(0.0, k))).min(wall(DVec2::new(0.0, -k)));
+        let pts = vec![c - DVec2::new(half, 0.0), c + DVec2::new(half, 0.0)];
+        let (pts, bulges) = if flip { reverse(pts, vec![beta, beta]) } else { (pts, vec![beta, beta]) };
+        let hole = Ring::straight(square.iter().map(|&q| c + q).collect());
+        (Ring::curved(pts, bulges), vec![hole], verdict(thinnest, 2.0 * half, c.abs().max_element() + half))
+    });
     let bulge = prop_oneof![
         3 => Just(0.0),
         3 => -0.3..0.3f64,
@@ -663,7 +683,7 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
             };
             (Ring::curved(pts, bulges[..n].to_vec()), holes, None)
         });
-    (prop_oneof![1 => slot, 1 => plate, 1 => washer, 1 => wavy], l)
+    (prop_oneof![1 => slot, 1 => plate, 1 => washer, 1 => lens, 1 => wavy], l)
         // The distance comes from `length`, always in range (MIN_FEATURE
         // itself is legal), so it doesn't change the verdict.
         .prop_map(|((outer, holes, expect), dist)| Shape::Extrude { outer, holes, dist: Num(dist), expect })

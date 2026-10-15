@@ -37,6 +37,9 @@
 //!   so Green's theorem in (θ, s) gives ∬ (x − p)·n dA = −r² ∮ s (1 −
 //!   cos θ) dθ = −r² ∮ s d(θ − sin θ), with θ − sin θ summed by its series
 //!   when small. The orientation sign (sense) appears twice and cancels.
+//!   Heights s are measured from o, not p: a thin tube's walls give
+//!   ±2πr²h that cancel, so each must be right to a few ulps, and p (on
+//!   the wall, up to 100 km round it) is rounded by more than h allows.
 //!
 //! Known limit: a sphere face uses ±r·A + (c − o)·(vector area) and Gauss–
 //! Bonnet, which lose digits for a face much smaller than its sphere (a
@@ -103,12 +106,15 @@ fn theta_minus_sin(t: f64) -> f64 {
     }
 }
 
-/// One coedge's share of a cylinder face's integrals, measured from the
-/// point p of the face at angle 0, with s the height above p along `axis`:
-/// (−∮ s d(θ − sin θ), −∮ s dθ) (see the module notes). A line on a
+/// One coedge's share of a cylinder face's integrals, angles measured from
+/// the face's point p, heights s along `axis` from the body's centre o:
+/// (−∮ s d(θ − sin θ), −∮ s dθ) (see the module notes). Any height can be
+/// 0 (∮ g(θ) dθ = 0 round the boundary, Green again), and o is better than
+/// p: p can be far round a big cylinder, rounded by more than the face is
+/// tall, and the circle centres sit near o. A line on a
 /// cylinder runs along the axis (dθ = 0): nothing. A circle on it is a
 /// cross-section at one height, its angle changing by (axis·k) per t.
-fn cylinder_terms(curve: &Curve, ta: f64, tb: f64, p: DVec3, center: DVec3, axis: DVec3) -> (f64, f64) {
+fn cylinder_terms(curve: &Curve, ta: f64, tb: f64, p: DVec3, o: DVec3, center: DVec3, axis: DVec3) -> (f64, f64) {
     match *curve {
         Curve::Line { .. } => (0.0, 0.0),
         Curve::Circle { center: cc, axis: k, .. } => {
@@ -116,7 +122,7 @@ fn cylinder_terms(curve: &Curve, ta: f64, tb: f64, p: DVec3, center: DVec3, axis
             let (from, at) = (flat(p - center), flat(curve.eval(ta) - center));
             let ua = axis.dot(from.cross(at)).atan2(from.dot(at));
             let ub = ua + axis.dot(k) * (tb - ta);
-            let s = axis.dot(cc - p);
+            let s = axis.dot(cc - o);
             (-s * (theta_minus_sin(ub) - theta_minus_sin(ua)), -s * (ub - ua))
         }
     }
@@ -165,7 +171,7 @@ fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
             let (mut bulge, mut turn) = (0.0, 0.0);
             for c in coedges() {
                 let (curve, ta, tb) = travel(body, c);
-                let (b, t) = cylinder_terms(curve, ta, tb, p, origin, axis);
+                let (b, t) = cylinder_terms(curve, ta, tb, p, o, origin, axis);
                 bulge += b;
                 turn += t;
             }
@@ -372,6 +378,33 @@ mod tests {
         let m = mass_properties(&bowed);
         assert!(rel_eq(m.volume, 3.0 * (100.0 - cut), FP_REL), "volume {} expected {}", m.volume, 3.0 * (100.0 - cut));
         assert!(rel_eq(m.area, 2.0 * (100.0 - cut) + 3.0 * (30.0 + r * phi), FP_REL), "area {}", m.area);
+    }
+
+    #[test]
+    fn a_huge_thin_washer_turned_keeps_its_volume() {
+        // Regression (random tester, seed 0x5eed, saved): circles of r =
+        // 1679740.80 and r − 2 whose centres are 1.5 apart (a wall 0.5 to
+        // 3.5 thick), extruded 0.5, lifted 963.28 and turned a quarter
+        // turn. V = π(R² − r²)·0.5 = π·2·(R + r)·0.5. The walls' terms are
+        // each ±2πR²h ≈ ±8.86e12 and cancel; measuring each wall's height
+        // from one of its own corners, 1.7e6 from the middle and rounded by
+        // ~4e-10 when turned, left an error of ~2πR²·4e-10 ≈ 7e3 (688 here).
+        // Turning may only move the true volume by area × rounding_slack.
+        let (big, small) = (1679740.7957549074, 1679738.7957549074);
+        let profile = Profile {
+            outer: Boundary::Circle { center: DVec2::new(0.0, 3.5), radius: big },
+            holes: vec![Boundary::Circle { center: DVec2::new(1.5, 3.5), radius: small }],
+        };
+        let body = extrude(&profile, 0.5).unwrap();
+        let turn = Transform::translation(DVec3::new(0.0, 0.0, 963.281384129561))
+            .then(Transform::rotation(DVec3::new(0.0, 0.5506269028984057, -0.6972794946650358), 1.5707963256948965));
+        let volume = PI * 2.0 * (big + small) * 0.5;
+        for b in [body.clone(), body.transformed(&turn)] {
+            let (lo, hi) = b.bounds();
+            let m = mass_properties(&b);
+            let slack = m.area * rounding_slack(lo.abs().max(hi.abs()).max_element());
+            assert!(measure_eq(m.volume, volume, slack), "volume {} expected {volume} ± {slack}", m.volume);
+        }
     }
 
     #[test]

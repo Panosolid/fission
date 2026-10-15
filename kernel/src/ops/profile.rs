@@ -13,7 +13,7 @@
 use super::KernelError;
 use crate::tolerance::{segments_touch, side, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
 /// One closed outline of a profile.
 #[derive(Clone, Debug, PartialEq)]
@@ -352,21 +352,35 @@ fn bounds(s: &Seg) -> (DVec2, DVec2) {
 /// Winding number of a loop around `p`, which must be clear of the loop.
 /// Each piece adds the angle it sweeps as seen from p: a straight piece the
 /// angle between its ends; an arc the same plus a full turn (in its own
-/// direction) when p lies between it and its chord.
+/// direction) when p lies between it and its chord. Each angle takes its
+/// sign from the exact side-of-line test, so a point a hair off a chord
+/// can't be counted on the wrong side. A point exactly on an arc's chord,
+/// between its ends, sees the chord as half a turn either way: the arc
+/// itself sweeps half a turn round it, through the arc's side.
 fn winding(segs: &[Seg], p: DVec2) -> i64 {
-    let angle = |a: DVec2, b: DVec2| (a - p).perp_dot(b - p).atan2((a - p).dot(b - p));
+    let angle = |a: DVec2, b: DVec2| {
+        let (u, v) = (a - p, b - p);
+        f64::from(side(a, b, p)) * u.perp_dot(v).abs().atan2(u.dot(v))
+    };
     let mut total = 0.0;
     for s in segs {
         match *s {
             Seg::Line { a, b } => total += angle(a, b),
             Seg::Arc { a, b, center, radius, sweep } => {
-                total += angle(a, b);
-                // Between arc and chord: inside the circle and on the arc's
-                // side of the chord (the side its middle is on).
+                // The arc's side of the chord is the side its middle is on.
                 let mid = center + dir((a - center).to_angle() + sweep / 2.0) * radius;
                 let arc_side = side(a, b, mid);
-                if p.distance(center) < radius && side(a, b, p) == arc_side {
-                    total += TAU * sweep.signum();
+                let p_side = side(a, b, p);
+                if p_side == 0 && (a - p).dot(b - p) < 0.0 {
+                    // From a (behind p) round to b (ahead): through the left
+                    // is clockwise, through the right counter-clockwise.
+                    total -= PI * f64::from(arc_side);
+                } else {
+                    total += angle(a, b);
+                    // Between arc and chord: inside the circle, on its side.
+                    if p.distance(center) < radius && p_side == arc_side {
+                        total += TAU * sweep.signum();
+                    }
                 }
             }
             Seg::Circle { center, radius, ccw } => {
@@ -1091,6 +1105,125 @@ mod tests {
         // Two whole concentric circles have no ends at all: still 0.5.
         let whole = |r: f64| Seg::Circle { center: p(2.0, -1.0), radius: r, ccw: true };
         assert!(eq(gap(&whole(5.0), &whole(5.5)), 0.5));
+    }
+
+    /// A loop's pieces straight from corners and bulges (no reorienting).
+    fn pieces(corners: &[(f64, f64)], bulges: &[f64]) -> Vec<Seg> {
+        let n = corners.len();
+        (0..n)
+            .map(|i| {
+                let (a, b) = (corners[i], corners[(i + 1) % n]);
+                Seg::from_bulge(p(a.0, a.1), p(b.0, b.1), bulges.get(i).copied().unwrap_or(0.0)).unwrap()
+            })
+            .collect()
+    }
+
+    /// Hand-drawn loops, each listed counter-clockwise (inside on the left),
+    /// with points whose winding number is known: 1 inside, 0 outside.
+    /// A named loop and points with their winding numbers.
+    type Drawn = (&'static str, Vec<Seg>, Vec<((f64, f64), i64)>);
+
+    fn drawn_loops() -> Vec<Drawn> {
+        let square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        vec![
+            // A "D": chord (−1,0)→(1,0), then the upper unit half circle back.
+            // (−0.95, 0.05) is 0.951 from the centre and above the chord.
+            ("D", pieces(&[(-1.0, 0.0), (1.0, 0.0)], &[0.0, 1.0]), vec![
+                ((0.0, 0.5), 1), ((0.9, 0.3), 1), ((-0.95, 0.05), 1), ((0.0, -0.5), 0), ((0.0, 1.5), 0), ((2.0, 0.1), 0),
+            ]),
+            // A square whose top edge bows in (bulge −0.4): centre (5,
+            // 15.25), r = 7.25, lowest at (5, 8). Above x = 1 the arc is at
+            // y = 15.25 − √(7.25² − 4²) = 9.2033.
+            ("bowed square", pieces(&square, &[0.0, 0.0, -0.4, 0.0]), vec![
+                ((5.0, 7.0), 1), ((1.0, 9.0), 1), ((5.0, 9.0), 0), ((1.0, 9.5), 0), ((5.0, 10.5), 0), ((-1.0, 5.0), 0),
+            ]),
+            // A lens: (−1,0)→(1,0) with bulge ½ (centre (0, 0.75), r = 1.25,
+            // lowest at (0, −0.5)), and back with bulge ½ (centre (0, −0.75),
+            // highest at (0, 0.5)). (0.9, 0) is √(0.81 + 0.5625) = 1.17 from
+            // both centres: inside.
+            ("lens", pieces(&[(-1.0, 0.0), (1.0, 0.0)], &[0.5, 0.5]), vec![
+                ((0.0, 0.0), 1), ((0.0, 0.45), 1), ((0.9, 0.0), 1), ((0.0, 0.55), 0), ((0.0, -0.55), 0), ((1.1, 0.0), 0),
+            ]),
+            // A stadium 10 × 4 with half circles of r = 2 on its ends.
+            ("stadium", pieces(&[(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)], &[0.0, 1.0, 0.0, 1.0]), vec![
+                ((-1.5, 2.0), 1), ((11.5, 2.0), 1), ((5.0, 3.9), 1), ((-2.5, 2.0), 0), ((-1.5, 0.5), 0), ((5.0, 4.1), 0),
+            ]),
+            // An L: the notch's corner (3, 3) is the only one turning right.
+            ("L", pieces(&[(0.0, 0.0), (10.0, 0.0), (10.0, 3.0), (3.0, 3.0), (3.0, 10.0), (0.0, 10.0)], &[]), vec![
+                ((1.0, 9.0), 1), ((9.0, 1.0), 1), ((5.0, 5.0), 0), ((11.0, 1.0), 0),
+            ]),
+            // A triangle with a straight-through corner (5, 0) on its base.
+            ("triangle", pieces(&[(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (5.0, 5.0)], &[]), vec![((5.0, 1.0), 1), ((5.0, -1.0), 0)]),
+            ("circle", vec![Seg::Circle { center: p(1.0, 2.0), radius: 3.0, ccw: true }], vec![((1.0, 4.9), 1), ((1.0, 5.1), 0)]),
+        ]
+    }
+
+    #[test]
+    fn which_way_loops_run_by_hand() {
+        // Turned to eight directions (so a different point is lowest each
+        // time, and at 0 and π ties along a level edge), scaled and moved:
+        // listed as drawn they run counter-clockwise, reversed clockwise.
+        for (name, segs, _) in drawn_loops() {
+            for (i, angle) in [0.0, FRAC_PI_2, PI, 0.4, 1.1, 2.6, 3.9, 5.6].into_iter().enumerate() {
+                let (k, shift) = if i % 2 == 0 { (1.0, p(0.0, 0.0)) } else { (3.7, p(-250.5, 1e4)) };
+                let moved: Vec<Seg> = segs.iter().map(|q| placed(q, angle, k, shift)).collect();
+                assert!(counter_clockwise(&moved), "{name} turned {angle}");
+                assert!(!counter_clockwise(&reversed(&moved)), "{name} turned {angle}, reversed");
+            }
+        }
+        let cw = [Seg::Circle { center: p(1.0, 2.0), radius: 3.0, ccw: false }];
+        assert!(!counter_clockwise(&cw));
+    }
+
+    #[test]
+    fn winding_numbers_by_hand() {
+        // The points listed with each drawn loop, placed with it in odd ways;
+        // run the other way round, every winding number changes sign.
+        for (name, segs, points) in drawn_loops() {
+            for (angle, k, shift) in [(0.0, 1.0, p(0.0, 0.0)), (0.7, 2.3, p(3.7, -1.3)), (2.9, 0.031, p(-120.5, 44.25)), (-1.3, 17.0, p(1e4, -2e4))] {
+                let f = |q: DVec2| DVec2::from_angle(angle).rotate(q) * k + shift;
+                let moved: Vec<Seg> = segs.iter().map(|q| placed(q, angle, k, shift)).collect();
+                for &((x, y), w) in &points {
+                    assert_eq!(winding(&moved, f(p(x, y))), w, "{name} at ({x}, {y}), turned {angle}");
+                    assert_eq!(winding(&reversed(&moved), f(p(x, y))), -w, "{name} reversed at ({x}, {y}), turned {angle}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_hole_starting_on_an_arcs_chord_is_inside() {
+        // Regression: a lens (−10,0)→(10,0) with bulges ½ and ½ (half as
+        // thick as long: 5 above and below the middle) and a square hole
+        // whose first corner is (0, 0), on both arcs' chord. Seen from
+        // there each chord is half a turn either way; the old winding
+        // number took the chords' angles as found (+π and −π) and called
+        // the hole outside.
+        let lens = path(&[(-10.0, 0.0), (10.0, 0.0)], &[0.5, 0.5]);
+        let hole = Boundary::polygon(square(0.0, 0.0, 1.0));
+        assert_eq!(ok(Profile { outer: lens, holes: vec![hole] }).len(), 2);
+    }
+
+    #[test]
+    fn profile_limits_exactly() {
+        // Exactly MAX_PROFILE_CORNERS corners is allowed, one more is not:
+        // a regular polygon of radius 1000 (sides 2·1000·sin(π/n) ≈ 3.1).
+        let polygon = |n: usize| {
+            Boundary::polygon((0..n).map(|i| dir(i as f64 * TAU / n as f64) * 1000.0).collect())
+        };
+        assert!(check_profile(&Profile { outer: polygon(MAX_PROFILE_CORNERS), holes: vec![] }).is_ok());
+        assert!(check_profile(&Profile { outer: polygon(MAX_PROFILE_CORNERS + 1), holes: vec![] }).is_err());
+        // A square exactly MAX_SIZE across is allowed.
+        assert!(check_profile(&Profile { outer: Boundary::polygon(square(0.0, 0.0, MAX_SIZE)), holes: vec![] }).is_ok());
+        // A square hole exactly MIN_FEATURE from the outer edge x = 0 (and
+        // far from the others): the distance from (0.001, 1) to that edge
+        // is exactly 0.001. "At least MIN_FEATURE" allows it.
+        let hole = Boundary::polygon(vec![p(MIN_FEATURE, 1.0), p(MIN_FEATURE, 2.0), p(1.0, 2.0), p(1.0, 1.0)]);
+        assert!(check_profile(&Profile { outer: Boundary::polygon(square(0.0, 0.0, 10.0)), holes: vec![hole] }).is_ok());
+        // A small round hole (r = 0.1) near the outer's right edge is inside:
+        // its test point must be on the hole, not 1/r = 10 away from it.
+        let small = Boundary::Circle { center: p(9.5, 5.0), radius: 0.1 };
+        assert!(check_profile(&Profile { outer: Boundary::polygon(square(0.0, 0.0, 10.0)), holes: vec![small] }).is_ok());
     }
 
     #[test]
