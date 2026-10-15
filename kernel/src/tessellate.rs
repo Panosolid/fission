@@ -245,7 +245,9 @@ fn sphere_cap(body: &Body, fi: FaceId, mesh: &mut Mesh, center: DVec3, radius: f
     let [l] = face.loops.as_slice() else { return Err("general sphere faces are not supported yet".into()) };
     let [c] = l.coedges.as_slice() else { return Err("general sphere faces are not supported yet".into()) };
     let e = &body.edges[c.edge];
-    let Curve::Circle { axis, .. } = e.curve else { return Err("sphere cap must be bounded by a circle".into()) };
+    let Curve::Circle { center: rim_center, axis, radius: rim_radius, .. } = e.curve else {
+        return Err("sphere cap must be bounded by a circle".into());
+    };
     if !e.is_closed() {
         return Err("sphere cap boundary must be a closed circle".into());
     }
@@ -259,7 +261,11 @@ fn sphere_cap(body: &Body, fi: FaceId, mesh: &mut Mesh, center: DVec3, radius: f
     let pole = center + pole_dir * radius;
 
     let dirs: Vec<DVec3> = boundary.iter().map(|&i| (mesh.positions[i as usize] - center).normalize()).collect();
-    let theta = dirs[0].dot(pole_dir).clamp(-1.0, 1.0).acos();
+    // Angle from the rim to the pole, from the exact curve rather than mesh
+    // points: those carry the rounding of world coordinates (~1e-8 mm at
+    // 100 km), enough to tip the ring count past a whole number, so a part
+    // that merely moved would be meshed differently.
+    let theta = rim_radius.atan2((rim_center - center).dot(pole_dir));
     let rings = segments(&Curve::Circle { center, axis, x_dir: dirs[0], radius }, theta, mesh_opts(mesh)).max(1);
 
     let mut prev: Vec<u32> = boundary.clone();
@@ -668,6 +674,28 @@ mod tests {
         let big = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 50.0 };
         assert_eq!(segments(&big, TAU, &opts(50.0 * c_star * 0.9)), 5);
         assert_eq!(segments(&big, TAU, &opts(50.0 * c_star * 1.1)), 4);
+    }
+
+    #[test]
+    fn sphere_ring_count_does_not_depend_on_position() {
+        // Regression (found by the overnight run on GitHub, seed
+        // 0x5d7c66cfebde): rotating a sphere 50 km about a far pivot changed
+        // its mesh volume by 2e-6, because the cap's pole angle was measured
+        // from mesh points that carry the rounding of world coordinates.
+        //
+        // By hand: r = 137.5…; the 0.01 chord allows 2·acos(1 − 0.01/r) ≈
+        // 0.0241 rad per chord, below the 2π/256 ≈ 0.0245 floor, so the step
+        // is exactly 2π/256. Each hemisphere spans π/2 from equator to pole,
+        // exactly 64 steps: 64 rings, i.e. 63 bands of 2·256 triangles plus a
+        // fan of 256, 256·(2·64 − 1) = 32512 triangles; 65024 for the ball.
+        let r = 137.52459832834157;
+        let ball = crate::ops::primitives::make_sphere(r).unwrap();
+        let ball = crate::ops::transform::rotate(&ball, DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0), -4.71238898038469).unwrap();
+        let far = crate::ops::transform::rotate(&ball, DVec3::new(5e7, 0.0, 0.0), DVec3::new(-9e-10, 0.0, 1.0), 3.8846540033404207).unwrap();
+        for (name, b) in [("at the origin", &ball), ("100 km out", &far)] {
+            let m = tessellate(b, &TessOptions::DISPLAY).unwrap();
+            assert_eq!(m.triangles.len(), 65024, "{name}");
+        }
     }
 
     #[test]
