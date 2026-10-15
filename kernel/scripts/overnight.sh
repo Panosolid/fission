@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Overnight (Tier 3) run of the stateful kernel harness plus the OpenCascade
-# oracle. Usage: kernel/scripts/overnight.sh [cases-per-seed] [seeds] [python]
+# oracle. Usage: kernel/scripts/overnight.sh [cases-per-seed] [seeds] [python] [base-seed]
 #   python defaults to `python3`; it needs `pip install cadquery-ocp`.
+#   base-seed defaults to today's date (YYYYMMDD); parallel jobs pass distinct ones.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CASES="${1:-100000}"
 SEEDS="${2:-4}"
 PYTHON="${3:-python3}"
-SEED="$(date +%Y%m%d)"
+SEED="${4:-$(date +%Y%m%d)}"
 mkdir -p target
 ORACLE="target/oracle-cases-$SEED.jsonl"
 rm -f "$ORACLE"

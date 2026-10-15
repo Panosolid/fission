@@ -938,7 +938,7 @@ fn print_report(r: &RunReport) -> String {
         );
     }
     if std::env::var("FISSION_STATEFUL_SLOWEST").is_ok() {
-        for (kind, t) in STATS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        for (kind, t) in STATS.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, t)| !t.slowest.1.is_empty()) {
             s += &format!("  slowest {kind}: {}\n", t.slowest.1);
         }
     }
