@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { Framing } from "./format";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { DisplayMesh } from "./kernel-types";
 
@@ -63,18 +64,20 @@ export class Viewer {
     );
   }
 
-  /** Half the diagonal of the current body's bounding box (0 if none). */
-  bodyRadius(): number {
+  /** Sphere around the current body's bounding box (radius 0 if none). */
+  bodyFraming(): Framing {
     const box = new THREE.Box3().setFromObject(this.body);
-    return box.isEmpty() ? 0 : box.getSize(new THREE.Vector3()).length() / 2;
+    if (box.isEmpty()) return { centre: [0, 0, 0], radius: 0 };
+    const c = box.getCenter(new THREE.Vector3());
+    return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
   }
 
-  /** Frames the current body; returns the radius it framed (null if none). */
-  fit(): number | null {
-    const box = new THREE.Box3().setFromObject(this.body);
-    if (box.isEmpty()) return null;
-    const centre = box.getCenter(new THREE.Vector3());
-    const radius = box.getSize(new THREE.Vector3()).length() / 2;
+  /** Frames the current body; returns what it framed (null if none). */
+  fit(): Framing | null {
+    const framing = this.bodyFraming();
+    if (!(framing.radius > 0)) return null;
+    const centre = new THREE.Vector3(...framing.centre);
+    const radius = framing.radius;
     const dist = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2));
     const dir = new THREE.Vector3(0.6, -0.8, 0.55).normalize();
     this.camera.position.copy(centre).addScaledVector(dir, dist);
@@ -82,7 +85,7 @@ export class Viewer {
     this.camera.near = dist / 1000;
     this.camera.far = dist * 100;
     this.camera.updateProjectionMatrix();
-    return radius;
+    return framing;
   }
 
   private resize() {

@@ -6,6 +6,10 @@ import type { BodyView } from "./kernel-types";
 export interface KernelOps {
   kernel_version: { args: []; result: string };
   make_box: { args: [width: number, depth: number, height: number]; result: BodyView };
+  make_extrude: {
+    args: [outer: number[], holeCorners: number[], holes: number[], distance: number];
+    result: BodyView;
+  };
 }
 
 export type KernelRequest = {

@@ -117,14 +117,82 @@ try {
     await page.waitForTimeout(300);
     assert.notDeepEqual(await pixel(0.5, 0.5), [0x14, 0x16, 0x1a], "the cube should fill the centre of the view");
     await page.screenshot({ path: "e2e/tiny-cube.png" });
-    // Back to 40 × 30 × 20, one size at a time. The first edit, 40 × 0.001
-    // × 0.001, is a >10× jump, so it re-frames at √(40² + 2·0.001²)/2 ≈
-    // 20.0000000125; the next two (radius 25, then 26.9) are under 10×, so
-    // the view is kept.
+    // Back to 40 × 30 × 20, one size at a time, re-framing whenever the body
+    // reaches past 1.5× the framed radius:
+    // 40 × 0.001 × 0.001: r ≈ 20, far beyond 1.5 × 8.66e-4 → re-frame, r0 = 20 at (20, 0, 0).
+    // 40 × 30 × 0.001: r = √(1600 + 900)/2 = 25, centre moved 15; 15 + 25 = 40 > 30 → re-frame.
+    // 40 × 30 × 20: r = √2900/2 ≈ 26.93, centre moved 10; 36.93 ≤ 37.5 → kept, r0 = 25.
     for (const [id, v] of [["width", 40], ["depth", 30], ["height", 20]]) await setSize(id, v);
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
     const back = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
-    assert.ok(Math.abs(back - Math.sqrt(1600 + 2e-6) / 2) < 1e-4, `framed radius ${back}`);
+    assert.ok(Math.abs(back - 25) < 1e-4, `framed radius ${back}`);
+  });
+
+  /** The number shown in a stats field, e.g. "21,484.26 mm³" → 21484.26. */
+  const shown = async (id) => Number((await text(id)).split(" ")[0].replaceAll(",", ""));
+  const near = (a, b, what) => assert.ok(Math.abs(a - b) <= 1e-9 * Math.abs(b), `${what}: shown ${a}, expected ${b}`);
+  const pick = async (kind, volumeNot) => {
+    await page.selectOption("#shape", kind);
+    await page.waitForFunction(
+      ([k, v]) => document.querySelector("#viewport").dataset.shape === k && document.querySelector("#volume").textContent !== v,
+      [kind, volumeNot],
+    );
+  };
+
+  await check("L-bracket extrusion shows hand-worked numbers", async () => {
+    // 40 × 30 outline with arms 0.3 thick: 1200 − 28·21 = 612 mm²; the
+    // perimeter equals the rectangle's, 140. Extruded 20: V = 612·20 =
+    // 12240, S = 2·612 + 140·20 = 4024. Six corners: 12 V, 18 E, 8 F.
+    await pick("l-bracket", "24,000 mm³");
+    assert.equal(await text("volume"), "12,240 mm³");
+    assert.equal(await text("area"), "4,024 mm²");
+    assert.equal(await text("topology"), "12 V · 18 E · 8 F");
+    assert.equal(await text("status"), "valid");
+    assert.equal(await text("height-label"), "Extrude by");
+    // A new shape is framed: r = √(40² + 30² + 20²)/2 ≈ 26.93.
+    const r = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
+    assert.ok(Math.abs(r - Math.sqrt(2900) / 2) < 1e-4, `framed radius ${r}`);
+    await page.waitForTimeout(300);
+    assert.notDeepEqual(await pixel(0.5, 0.5), [0x14, 0x16, 0x1a], "the bracket should be drawn");
+    await page.screenshot({ path: "e2e/l-bracket.png" });
+  });
+
+  await check("plate with two holes: area minus the holes, times the distance", async () => {
+    // Holes are regular 24-gons of radius 0.15·30 = 4.5: area 12·4.5²·sin 15°
+    // each, perimeter 48·4.5·sin 7.5° each. V = (1200 − 2·hole)·20,
+    // S = 2(1200 − 2·hole) + (140 + 2·perimeter)·20. Corners 4 + 48 = 52:
+    // 104 V, 156 E, 54 F (genus 2).
+    await pick("plate", "12,240 mm³");
+    const hole = 12 * 4.5 ** 2 * Math.sin(Math.PI / 12);
+    const rim = 48 * 4.5 * Math.sin(Math.PI / 24);
+    near(await shown("volume"), (1200 - 2 * hole) * 20, "volume");
+    near(await shown("area"), 2 * (1200 - 2 * hole) + (140 + 2 * rim) * 20, "area");
+    assert.equal(await text("topology"), "104 V · 156 E · 54 F");
+    assert.equal(await text("status"), "valid");
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: "e2e/plate.png" });
+  });
+
+  await check("star extrusion", async () => {
+    // Ten corners alternating R = 15 and r = 6, 36° apart: 10 triangles of
+    // ½·R·r·sin 36°, so A = 5·15·6·sin 36°, V = 20·A. 20 V, 30 E, 12 F.
+    await pick("star", await text("volume"));
+    near(await shown("volume"), 5 * 15 * 6 * Math.sin(Math.PI / 5) * 20, "volume");
+    assert.equal(await text("topology"), "20 V · 30 E · 12 F");
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: "e2e/star.png" });
+  });
+
+  await check("an outline with walls under 1 µm shows the kernel's reason", async () => {
+    // Plate 0.004 × 0.004: hole radius 0.0006 centred 0.001 from the edge,
+    // leaving a 0.0004 mm wall, below the 0.001 mm minimum feature.
+    await page.selectOption("#shape", "plate");
+    for (const id of ["width", "depth"]) await setSize(id, 0.004);
+    await page.waitForFunction(() => document.querySelector("#error").textContent.includes("features must be at least"));
+    for (const [id, v] of [["width", 40], ["depth", 30]]) await setSize(id, v);
+    await page.waitForFunction(() => document.querySelector("#error").textContent === "");
+    await page.selectOption("#shape", "box");
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
   });
 
   await check("no errors in the browser console", async () => {

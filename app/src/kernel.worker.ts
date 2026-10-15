@@ -8,6 +8,8 @@ const ready = init();
 const ops = {
   kernel_version: () => kernel.kernel_version(),
   make_box: (w: number, d: number, h: number) => kernel.make_box(w, d, h),
+  make_extrude: (outer: number[], holeCorners: number[], holes: number[], distance: number) =>
+    kernel.make_extrude(new Float64Array(outer), new Uint32Array(holeCorners), new Float64Array(holes), distance),
 } satisfies Record<KernelRequest["op"], (...args: never[]) => unknown>;
 
 self.onmessage = async (event: MessageEvent<KernelRequest>) => {
