@@ -15,100 +15,105 @@ Kernel foundations
 - [ ] 5. Tessellation of planar faces + watertight mesh check
 - [ ] 6. Tessellation of cylinder and sphere faces
 - [ ] 7. Box primitive; viewer shows a kernel B-rep box with edges
-- [ ] 8. Extrude polygon profiles with holes; property test volume = area × distance
-- [ ] 9. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
-- [ ] 10. Sphere primitive; accurate volume and area
-- [ ] 11. Move/rotate bodies; property test volume/area invariance
-- [ ] 12. STL export + download button + round-trip test
-- [ ] 13. Failure dumps: STL + HTML viewer with problem edges highlighted
-- [ ] 14. Self-intersection check in validate()
+- [ ] 8. Kernel runs in a Web Worker from here on; every app→kernel call is an async message
+- [ ] 9. Extrude polygon profiles with holes; property test volume = area × distance
+- [ ] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
+- [ ] 11. Sphere primitive; accurate volume and area
+- [ ] 12. Move/rotate bodies; property test volume/area invariance
+- [ ] 13. STL export + download button + round-trip test
+- [ ] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
+- [ ] 15. Self-intersection check in validate(). Easy for planes/cylinders/spheres; must be extended for general surfaces when NURBS arrive (63–64)
 
 App shell
-- [ ] 15. Fusion-style layout: toolbar, browser panel, properties panel, viewport
-- [ ] 16. Selection of bodies/faces/edges with highlighting
-- [ ] 17. View controls: home, top/front/right, fit, view cube
-- [ ] 18. Save/load JSON documents + autosave
-- [ ] 19. Undo/redo
+- [ ] 16. Fusion-style layout: toolbar, browser panel, properties panel, viewport
+- [ ] 17. Selection of bodies/faces/edges with highlighting
+- [ ] 18. View controls: home, top/front/right, fit, view cube
+- [ ] 19. Save/load JSON documents + autosave
+- [ ] 20. Undo/redo (document snapshots for now; switches to timeline edits at 32–33)
 
 Sketcher
-- [ ] 20. Sketch on ground plane: lines with grid snapping
-- [ ] 21. Rectangle and circle tools
-- [ ] 22. Arc tools (3-point, tangent)
-- [ ] 23. Sketch on any planar face
-- [ ] 24. Profile detection (closed regions, nested)
-- [ ] 25. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical
-- [ ] 26. Parallel, perpendicular, equal, tangent
-- [ ] 27. Editable dimensions (length, radius, angle)
-- [ ] 28. Constraint status colours
-- [ ] 29. Trim, extend, offset, mirror
+- [ ] 21. Sketch on ground plane: lines with grid snapping
+- [ ] 22. Rectangle and circle tools
+- [ ] 23. Arc tools (3-point, tangent)
+- [ ] 24. Sketch on any planar face
+- [ ] 25. Project/include edges into a sketch (copies for now; linked to their source through the naming scheme from 32)
+- [ ] 26. Profile detection (closed regions, nested)
+- [ ] 27. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical
+- [ ] 28. Parallel, perpendicular, equal, tangent
+- [ ] 29. Editable dimensions (length, radius, angle)
+- [ ] 30. Constraint status colours
+- [ ] 31. Trim, extend, offset, mirror
 
 Parametric
-- [ ] 30. Feature timeline (sketch → extrude replayed on rebuild)
-- [ ] 31. Edit any feature and rebuild after it
-- [ ] 32. User parameters and expressions
-- [ ] 33. Cone and torus surfaces
-- [ ] 34. Revolve
-- [ ] 35. Per-feature error display on the timeline
+- [ ] 32. Feature timeline (sketch → extrude replayed on rebuild). Decide the topological naming ID scheme here (e.g. "face created by feature X, from profile edge Y, side Z") and give every face/edge such an ID, so 50 is an upgrade, not a rewrite. Undo/redo becomes "undo this timeline edit"
+- [ ] 33. Edit any feature and rebuild after it; projected edges and sketch planes re-resolve through their IDs
+- [ ] 34. User parameters and expressions
+- [ ] 35. Cone and torus surfaces
+- [ ] 36. Revolve
+- [ ] 37. Per-feature error display on the timeline
+
+Test infrastructure (in place before booleans, which are built against it)
+- [ ] 38. Golden models in tests/golden/ + tests/baseline.json metrics
+- [ ] 39. OpenCascade oracle comparison (Python + cadquery/OCP): volume, area, face count, bounding box
+- [ ] 40. Overnight fuzzing + simulated-user bot (Tier 3), extended as each new feature lands
 
 Booleans
-- [ ] 36. Plane–plane and line–plane intersection
-- [ ] 37. Splitting planar faces along intersection lines
-- [ ] 38. Inside/outside classification with exact predicates
-- [ ] 39. Union/subtract/intersect for planar solids + boolean property tests
-- [ ] 40. Coplanar faces, touching edges, shared vertices
-- [ ] 41. Plane–cylinder intersection (drill a hole through a box)
-- [ ] 42. Cylinder–cylinder, plane–sphere
-- [ ] 43. Extrude modes (join/cut/intersect/new body), symmetric, to-face, taper
-- [ ] 44. Hole feature, Combine tool
+- [ ] 41. Plane–plane and line–plane intersection
+- [ ] 42. Splitting planar faces along intersection lines
+- [ ] 43. Inside/outside classification with exact predicates
+- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison
+- [ ] 45. Coplanar faces, touching edges, shared vertices
+- [ ] 46. Plane–cylinder intersection (drill a hole through a box)
+- [ ] 47. Cylinder–cylinder, plane–sphere
+- [ ] 48. Extrude modes (join/cut/intersect/new body), symmetric, to-face, taper
+- [ ] 49. Hole feature, Combine tool
 
 Robustness
-- [ ] 45. Topological naming (stable face/edge IDs)
-- [ ] 46. Cached feature results, incremental rebuild
-- [ ] 47. Kernel in a Web Worker
-- [ ] 48. Golden models, tests/baseline.json, simulated-user bot (Tier 3)
-- [ ] 49. Oracle comparison against OpenCascade
+- [ ] 50. Full topological naming on top of the 32 scheme (faces split by booleans, merged faces, history matching)
+- [ ] 51. Cached feature results, incremental rebuild
 
 Modelling tools
-- [ ] 50. Construction planes, axes, points
-- [ ] 51. Rectangular/circular patterns, mirror
-- [ ] 52. Chamfer
-- [ ] 53. Fillet between planar faces
-- [ ] 54. Fillet planar–curved, edge chains
-- [ ] 55. Shell
-- [ ] 56. Draft
-- [ ] 57. Move/copy/align bodies
-- [ ] 58. Measure, section view
-- [ ] 59. Appearances, physical properties
+- [ ] 52. Construction planes, axes, points
+- [ ] 53. Sketch on construction planes
+- [ ] 54. Rectangular/circular patterns, mirror
+- [ ] 55. Chamfer
+- [ ] 56. Fillet between planar faces
+- [ ] 57. Fillet planar–curved, edge chains
+- [ ] 58. Shell
+- [ ] 59. Draft
+- [ ] 60. Move/copy/align bodies
+- [ ] 61. Measure, section view
+- [ ] 62. Appearances, physical properties
 
 Advanced geometry
-- [ ] 60. NURBS curves (eval, knot insertion)
-- [ ] 61. NURBS surfaces
-- [ ] 62. Sketch splines
-- [ ] 63. Sweep
-- [ ] 64. Loft
-- [ ] 65. NURBS surface–surface intersection (marching)
-- [ ] 66. General fillets on curved faces
+- [ ] 63. NURBS curves (eval, knot insertion)
+- [ ] 64. NURBS surfaces; extend the self-intersection check to general surfaces
+- [ ] 65. Sketch splines
+- [ ] 66. Sweep
+- [ ] 67. Loft
+- [ ] 68. NURBS surface–surface intersection (marching)
+- [ ] 69. General fillets on curved faces
 
 Interoperability
-- [ ] 67. STEP export
-- [ ] 68. STEP import (simple parts)
-- [ ] 69. Healing imported geometry
-- [ ] 70. 3MF and OBJ export
+- [ ] 70. STEP export
+- [ ] 71. STEP import (simple parts)
+- [ ] 72. Healing imported geometry
+- [ ] 73. 3MF and OBJ export
 
 Assemblies and drawings
-- [ ] 71. Components with their own bodies/timelines
-- [ ] 72. Joints: rigid, revolute, slider
-- [ ] 73. Interference checking
-- [ ] 74. Drawings: projected views
-- [ ] 75. Hidden-line removal
-- [ ] 76. Drawing dimensions, PDF/DXF export
+- [ ] 74. Components with their own bodies/timelines
+- [ ] 75. Joints: rigid, revolute, slider
+- [ ] 76. Interference checking
+- [ ] 77. Drawings: projected views
+- [ ] 78. Hidden-line removal
+- [ ] 79. Drawing dimensions, PDF/DXF export
 
 Extras
-- [ ] 77. Realistic rendering
-- [ ] 78. Tetrahedral meshing + FEM stress
-- [ ] 79. CAM: 2.5D toolpaths, G-code
-- [ ] 80. Sheet metal
-- [ ] 81. Cloud saving, versions, sharing
+- [ ] 80. Realistic rendering
+- [ ] 81. Tetrahedral meshing + FEM stress
+- [ ] 82. CAM: 2.5D toolpaths, G-code
+- [ ] 83. Sheet metal
+- [ ] 84. Cloud saving, versions, sharing
 
 ## Testing rules
 
