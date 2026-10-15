@@ -20,8 +20,8 @@
 //! - `>` vs `>=` (or `<` vs `<=`) at an exact tie that can't be built or
 //!   doesn't change the answer: LINEAR·1e-3 for "the same centre";
 //!   distances > LINEAR from shared corners and roots; a point exactly on
-//!   a circle in winding (it would be on the loop, which callers rule
-//!   out); dot < 0 at a cusp (perpendicular tangents aren't a cusp); the
+//!   a circle, or at an arc's end, in winding (it would be on the loop,
+//!   which callers rule out); dot < 0 at a cusp (perpendicular tangents aren't a cusp); the
 //!   turn tests in counter_clockwise (nonzero there, and t_out.x is ±1 at
 //!   a straight-through lowest point).
 //! - Tie-breaks for "lowest point" (`<` vs `<=`, `==`, `>` on x): any
@@ -1086,6 +1086,12 @@ mod tests {
         };
         assert_crossing(&near(5.0, 0.0, 100.0, 140.0), &near(5.0005, 9e-4, 140.0, 100.0), &[], true);
         assert_crossing(&near(5.0, 0.0, 100.0, 120.0), &near(5.0005, 9e-4, 140.0, 100.0), &[], false);
+        // Equal radii (5) with centres 9e-4 apart are two circles, not one:
+        // they meet only where x = 4.5e-4, at about ±90°. An arc from 0° to
+        // 90° on the first and one from 30° to 60° on the second never
+        // reach that, so they don't cross (taken as one circle, the second's
+        // ends would look like an overlap).
+        assert_crossing(&near(5.0, 0.0, 0.0, 90.0), &near(5.0, 9e-4, 30.0, 60.0), &[], false);
         // Touching, exactly (identity placement only: a turned copy can't
         // keep an exact tie). Outside: centres 10 = 5 + 5 apart, meeting at
         // (5, 0); inside: a circle of 3 about (2, 0), 2 = 5 − 3 from the

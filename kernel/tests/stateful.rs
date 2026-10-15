@@ -1467,6 +1467,9 @@ fn oracle_lines(slots: &[Slot]) -> String {
             "volume": m.volume, "area": m.area, "exact_volume": m.exact.volume, "exact_area": m.exact.area, "lo": m.lo.to_array(), "hi": m.hi.to_array(), "max_deviation": dev,
             "volume_slack": m.area * delta, "area_slack": m.perimeters * delta,
             "curve_volume_slack": curve_volume_slack, "curve_area_slack": curve_area_slack,
+            // For reading disagreements: how far the part has been and how
+            // many operations it went through (rounding from there stays).
+            "reached": s.reach, "steps": s.steps,
         });
         out.push_str(&line.to_string());
         out.push('\n');
