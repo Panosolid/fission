@@ -1,0 +1,20 @@
+[package]
+name = "fission-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Geometry kernel for Fission CAD"
+license = "MIT"
+repository = "https://github.com/benpy28/fission"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "s"
+
+# wasm-opt only shrinks the .wasm file; skip it until size matters.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

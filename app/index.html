@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fission CAD</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <aside id="panel">
+      <h1>Fission <span id="version"></span></h1>
+      <p class="hint">Stage 0: Rust adds the vectors, Three.js draws them.</p>
+      <label><span class="swatch a"></span>A <input id="a" value="1, 2, 0" /></label>
+      <label><span class="swatch b"></span>B <input id="b" value="2, -1, 1" /></label>
+      <div class="result">
+        <div><span class="swatch sum"></span>A + B = <code id="sum">…</code></div>
+        <div><span class="swatch cross"></span>A × B = <code id="cross">…</code></div>
+        <div>A · B = <code id="dot">…</code></div>
+      </div>
+      <p id="error"></p>
+    </aside>
+    <div id="viewport"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
