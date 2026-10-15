@@ -32,7 +32,7 @@ use fission_kernel::debug_dump;
 use fission_kernel::mesh::Mesh;
 use fission_kernel::ops::{primitives, transform, KernelError};
 use fission_kernel::tessellate::{tessellate, TessOptions};
-use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE};
+use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
 use fission_kernel::topology::Body;
 use fission_kernel::validate::validate;
 use glam::DVec3;
@@ -155,7 +155,7 @@ fn length(scene: &Scene) -> BoxedStrategy<f64> {
         35 => grid.clone(),
         20 => reuse.clone(),
         12 => near_miss(reuse),
-        3 => prop::sample::select(vec![LINEAR * 0.9, LINEAR * 1.1, MAX_SIZE * (1.0 - 1e-12), MAX_SIZE]),
+        3 => prop::sample::select(vec![MIN_FEATURE * 0.9, MIN_FEATURE * 1.1, MAX_SIZE * (1.0 - 1e-12), MAX_SIZE]),
         25 => (-3.0f64..4.0).prop_map(|e| 10f64.powf(e)),
         5 => prop::sample::select(HOSTILE.to_vec()),
     ]
@@ -397,7 +397,7 @@ fn check_rigid(before: &Measure, after: &Measure, what: &str) -> Result<(), Stri
 }
 
 fn size_ok(x: f64) -> bool {
-    x.is_finite() && x > LINEAR && x <= MAX_SIZE
+    x.is_finite() && (MIN_FEATURE..=MAX_SIZE).contains(&x)
 }
 
 /// Mirrors the kernel's rule: an axis counts as zero when its largest

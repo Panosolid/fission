@@ -23,13 +23,15 @@ pub const MASS_PROPS_REL: f64 = 1e-6;
 /// and only differ by floating-point rounding (e.g. the volume of a box).
 pub const FP_REL: f64 = 1e-12;
 
-/// Largest model dimension accepted (1 km). Beyond this, LINEAR is too
-/// close to f64 rounding at the coordinates involved.
-pub const MAX_SIZE: f64 = 1e6;
+/// Smallest feature size accepted (1 µm), 1000× LINEAR.
+pub const MIN_FEATURE: f64 = 1e-3;
 
-/// Coordinates must stay within ±MAX_COORD (1 km) of the origin, for the
-/// same reason as MAX_SIZE.
-pub const MAX_COORD: f64 = 1e6;
+/// Largest feature size accepted (10 km).
+pub const MAX_SIZE: f64 = 1e7;
+
+/// Every point must stay within ±MAX_COORD (100 km) of the origin. There a
+/// double resolves ~15 nm, still well inside LINEAR.
+pub const MAX_COORD: f64 = 1e8;
 
 /// How many units in the last place a short chain of arithmetic may drift.
 /// Used to bound rounding when values are moved around model space.

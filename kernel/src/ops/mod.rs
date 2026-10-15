@@ -31,10 +31,10 @@ impl fmt::Display for KernelError {
 
 /// Checks a length parameter: finite, above tolerance, below the model limit.
 pub(crate) fn check_length(name: &str, value: f64) -> Result<(), KernelError> {
-    use crate::tolerance::{LINEAR, MAX_SIZE};
-    if !value.is_finite() || value <= LINEAR || value > MAX_SIZE {
+    use crate::tolerance::{MAX_SIZE, MIN_FEATURE};
+    if !value.is_finite() || !(MIN_FEATURE..=MAX_SIZE).contains(&value) {
         return Err(KernelError::InvalidInput(format!(
-            "{name} must be between {LINEAR} and {MAX_SIZE} mm, got {value}"
+            "{name} must be between {MIN_FEATURE} and {MAX_SIZE} mm, got {value}"
         )));
     }
     Ok(())

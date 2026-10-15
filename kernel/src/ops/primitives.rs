@@ -102,7 +102,7 @@ pub fn make_sphere(radius: f64) -> Result<Body, KernelError> {
 mod tests {
     use super::*;
     use crate::tessellate::{tessellate, TessOptions};
-    use crate::tolerance::{self, points_eq, rel_eq, FP_REL, LINEAR};
+    use crate::tolerance::{self, points_eq, rel_eq, FP_REL, MIN_FEATURE};
     use proptest::prelude::*;
     use proptest::test_runner::FileFailurePersistence;
 
@@ -148,12 +148,12 @@ mod tests {
 
     #[test]
     fn sizes_either_side_of_the_limits() {
-        for bad in [0.0, -1.0, LINEAR * 0.9, LINEAR, f64::NAN, f64::INFINITY, tolerance::MAX_SIZE * 1.1] {
+        for bad in [0.0, -1.0, MIN_FEATURE * 0.9, f64::NAN, f64::INFINITY, tolerance::MAX_SIZE * 1.1] {
             assert!(make_box(bad, 1.0, 1.0).is_err(), "width {bad} accepted");
             assert!(make_box(1.0, bad, 1.0).is_err(), "depth {bad} accepted");
             assert!(make_box(1.0, 1.0, bad).is_err(), "height {bad} accepted");
         }
-        for good in [LINEAR * 1.1, 1.0, tolerance::MAX_SIZE * 0.9, tolerance::MAX_SIZE] {
+        for good in [MIN_FEATURE, MIN_FEATURE * 1.1, 1.0, tolerance::MAX_SIZE * 0.9, tolerance::MAX_SIZE] {
             assert!(make_box(good, 1.0, 1.0).is_ok(), "width {good} rejected");
         }
     }
@@ -206,21 +206,21 @@ mod tests {
 
     #[test]
     fn curved_primitive_size_limits() {
-        for bad in [0.0, -1.0, LINEAR * 0.9, f64::NAN, f64::NEG_INFINITY, tolerance::MAX_SIZE * 1.1] {
+        for bad in [0.0, -1.0, MIN_FEATURE * 0.9, f64::NAN, f64::NEG_INFINITY, tolerance::MAX_SIZE * 1.1] {
             assert!(make_cylinder(bad, 1.0).is_err() && make_cylinder(1.0, bad).is_err() && make_sphere(bad).is_err(), "{bad}");
         }
-        for good in [LINEAR * 1.1, 1.0, tolerance::MAX_SIZE] {
+        for good in [MIN_FEATURE, MIN_FEATURE * 1.1, 1.0, tolerance::MAX_SIZE] {
             assert!(make_cylinder(good, 1.0).is_ok() && make_cylinder(1.0, good).is_ok() && make_sphere(good).is_ok(), "{good}");
         }
     }
 
     #[test]
     fn nasty_proportions() {
-        check_box(LINEAR * 1.1, LINEAR * 1.1, LINEAR * 1.1); // smallest allowed cube
+        check_box(MIN_FEATURE, MIN_FEATURE, MIN_FEATURE); // smallest allowed cube
         check_box(1e-2, 1e-2, 1e5); // needle
         check_box(1e5, 1e5, 1e-2); // sheet
         check_box(1e5, 1e5, 1e5);
-        check_box(LINEAR * 1.1, 1e5, 1e5); // thinnest plate at the largest size
+        check_box(MIN_FEATURE, tolerance::MAX_SIZE, tolerance::MAX_SIZE); // thinnest plate at the largest size
     }
 
     /// Lengths spread evenly on a log scale, so tiny and huge sizes are as
