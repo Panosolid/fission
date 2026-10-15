@@ -46,7 +46,7 @@ pub fn rounding_slack(scale: f64) -> f64 {
 /// a ≈ b to FP_REL, plus an absolute allowance for rounding that does not
 /// shrink with the values themselves (e.g. a tiny part far from the origin).
 pub fn measure_eq(a: f64, b: f64, abs_slack: f64) -> bool {
-    (a - b).abs() <= FP_REL * a.abs().max(b.abs()) + abs_slack
+    a.is_finite() && b.is_finite() && (a - b).abs() <= FP_REL * a.abs().max(b.abs()) + abs_slack
 }
 
 /// Allowed relative error when comparing results that went through f32
@@ -109,10 +109,11 @@ pub fn angle_eq(a: f64, b: f64) -> bool {
 }
 
 /// Relative comparison: |a - b| <= rel * max(|a|, |b|), falling back to
-/// `LINEAR` near zero.
+/// `LINEAR` near zero. Never true unless both are finite (otherwise
+/// ∞ ≤ rel·∞ would let an infinite result pass).
 pub fn rel_eq(a: f64, b: f64, rel: f64) -> bool {
     let scale = a.abs().max(b.abs());
-    (a - b).abs() <= (rel * scale).max(LINEAR * LINEAR)
+    a.is_finite() && b.is_finite() && (a - b).abs() <= (rel * scale).max(LINEAR * LINEAR)
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +158,21 @@ fn c3(p: DVec3) -> robust::Coord3D<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn infinite_or_nan_values_never_compare_equal() {
+        // Regression (found by mutation testing in mass.rs): |∞ − x| = ∞ is
+        // ≤ rel·max(∞, x) = ∞, so rel_eq(∞, x) was true and a test whose
+        // result blew up to infinity passed. A measurement that isn't
+        // finite is never "equal" to anything, itself included.
+        for (a, b) in [(f64::INFINITY, 1.0), (1.0, f64::NEG_INFINITY), (f64::INFINITY, f64::INFINITY), (f64::NAN, 1.0), (f64::NAN, f64::NAN)] {
+            assert!(!rel_eq(a, b, FP_REL) && !rel_eq(a, b, 1.0), "rel_eq({a}, {b})");
+            assert!(!measure_eq(a, b, 0.0) && !measure_eq(a, b, f64::INFINITY), "measure_eq({a}, {b})");
+        }
+        // Finite values still compare as before: 1 vs 1 + 1e-13 at FP_REL.
+        assert!(rel_eq(1.0, 1.0 + 1e-13, FP_REL) && !rel_eq(1.0, 1.0 + 1e-11, FP_REL));
+        assert!(measure_eq(1.0, 1.5, 0.5) && !measure_eq(1.0, 1.6, 0.5));
+    }
 
     #[test]
     fn exact_orientation_of_nearly_collinear_points() {
