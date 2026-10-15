@@ -379,6 +379,10 @@ struct Slot {
     start: Vec<DVec3>,
     /// Operations applied so far (rounding grows with each).
     steps: u32,
+    /// Farthest coordinate the part or its arithmetic has reached: its
+    /// bounds after every step, moves, and rotation pivots. A part that went
+    /// 50 km out and came back carries rounding from 50 km.
+    reach: f64,
 }
 
 /// The kernel's vertices must be where the harness's own matrix puts them.
@@ -386,8 +390,12 @@ struct Slot {
 /// (e.g. a "rotation" that silently did nothing).
 fn check_position(s: &Slot) -> Result<(), String> {
     let Some(b) = &s.body else { return Ok(()) };
-    let scale = b.bounds().0.abs().max(b.bounds().1.abs()).max_element() + s.affine.translation.abs().max_element();
-    let slack = tolerance::rounding_slack(scale) * s.steps as f64;
+    let now = b.bounds().0.abs().max(b.bounds().1.abs()).max_element() + s.affine.translation.abs().max_element();
+    // Rounding allowance for the farthest point reached, per step, but
+    // never more than the modelling tolerance: inside the supported range
+    // that allowance is ~1e-8 per step, so a part off by more than LINEAR
+    // is a kernel bug, not rounding.
+    let slack = (tolerance::rounding_slack(now.max(s.reach)) * s.steps as f64).min(LINEAR);
     for (k, (&p0, v)) in s.start.iter().zip(&b.vertices).enumerate() {
         let expected = s.affine.transform_point3(p0);
         let off = expected.distance(v.point);
@@ -396,6 +404,11 @@ fn check_position(s: &Slot) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn body_reach(b: &Body) -> f64 {
+    let (lo, hi) = b.bounds();
+    lo.abs().max(hi.abs()).max_element()
 }
 
 fn panic_message(p: Box<dyn std::any::Any + Send>) -> String {
@@ -580,7 +593,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             }
             let Some(base) = base else {
                 record(op, false);
-                slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0 });
+                slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
                 return Ok(());
             };
             let m0 = measure(&base).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
@@ -620,7 +633,8 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             }
             record(op, placed.is_some());
             let affine = glam::DAffine3::from_translation(to) * if rot_ok { rotation(ax, an) } else { glam::DAffine3::IDENTITY };
-            let slot = Slot { body: placed, shape: shape.clone(), affine, start: base.vertices.iter().map(|v| v.point).collect(), steps: 1 };
+            let mut slot = Slot { body: placed, shape: shape.clone(), affine, start: base.vertices.iter().map(|v| v.point).collect(), steps: 1, reach: 0.0 };
+            slot.reach = slot.body.as_ref().map_or(0.0, body_reach).max(to.abs().max_element());
             check_position(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.clone())).collect()))?;
             slots.push(slot);
         }
@@ -648,6 +662,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 }
                 let s = &mut slots[*target];
                 s.affine = glam::DAffine3::from_translation(by) * s.affine;
+                s.reach = s.reach.max(reach(&before)).max(reach(&after)).max(by.abs().max_element());
                 s.body = Some(m.clone());
                 s.steps += 1;
                 check_position(s).map_err(|e| fail(e, both()))?;
@@ -682,6 +697,9 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 let s = &mut slots[*target];
                 let r = glam::DAffine3::from_translation(pv) * rotation(ax, an) * glam::DAffine3::from_translation(-pv);
                 s.affine = r * s.affine;
+                // The kernel works relative to the pivot, so its arithmetic
+                // reaches as far as the pivot plus the part.
+                s.reach = s.reach.max(reach(&before) + pv.abs().max_element()).max(reach(&after));
                 s.body = Some(t.clone());
                 s.steps += 1;
                 check_position(s).map_err(|e| fail(e, both()))?;
@@ -705,7 +723,7 @@ fn replay_op(slots: &mut Vec<Slot>, op: &Op) -> Result<(), Failure> {
             let placed = base
                 .and_then(|b| guarded(|| transform::rotate(&b, DVec3::ZERO, v3(axis), angle.0)).ok().and_then(quiet))
                 .and_then(|b| guarded(|| transform::translate(&b, v3(at))).ok().and_then(quiet));
-            slots.push(Slot { body: placed, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0 });
+            slots.push(Slot { body: placed, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
         }
         Op::Move { target, by } => {
             if let Some(b) = slots[*target].body.clone() {
