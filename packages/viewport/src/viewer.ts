@@ -1,19 +1,20 @@
 import * as THREE from "three";
-import type { Framing } from "./framing";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { DisplayMesh } from "@fission/core";
+import type { DisplayMesh, Framing, SharedViewport } from "@fission/core";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
-export class Viewer {
+export class Viewer implements SharedViewport {
   private renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
   private controls: OrbitControls;
   private body = new THREE.Group();
+  readonly element: HTMLElement;
 
   constructor(private container: HTMLElement) {
+    this.element = container;
     this.scene.background = new THREE.Color(0x14161a);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(this.renderer.domElement);

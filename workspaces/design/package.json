@@ -10,6 +10,8 @@
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
   },
   "dependencies": {
-    "@fission/core": "*"
+    "@fission/core": "*",
+    "@fission/ui": "*",
+    "@fission/viewport": "*"
   }
 }

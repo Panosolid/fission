@@ -5,8 +5,9 @@
 // panels and viewport overlays and saves its own part of the project.
 
 import type { KernelClient } from "../kernel/kernel-client";
-import type { History, Selection } from "./session";
-import type { Project, WorkspaceId } from "./project";
+import type { History, Selection } from "./session.ts";
+import type { Project, WorkspaceId } from "./project.ts";
+import type { SharedViewport } from "./viewport.ts";
 
 export interface ToolbarItem {
   id: string;
@@ -28,8 +29,7 @@ export interface WorkspaceContext {
   history: History;
   /** The panel element the workspace fills (the viewport stays shared). */
   panel: HTMLElement;
-  /** The shared viewport element. */
-  viewport: HTMLElement;
+  viewport: SharedViewport;
 }
 
 export interface WorkspacePlugin {
@@ -37,6 +37,8 @@ export interface WorkspacePlugin {
   title: string;
   /** One line: what this workspace is for. */
   summary: string;
+  /** Placeholders say so; the shell marks them in the switcher. */
+  status: "working" | "placeholder";
   /** Shows the workspace in ctx.panel. Returns a function that hides it again. */
   mount(ctx: WorkspaceContext): () => void;
   toolbar?(): ToolbarItem[];

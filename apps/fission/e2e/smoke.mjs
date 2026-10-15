@@ -238,6 +238,65 @@ try {
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
   });
 
+  await check("the switcher lists the six workspaces, Design first and working", async () => {
+    const tabs = await page.$$eval("#workspaces [role=tab]", (ts) => ts.map((t) => [t.textContent, t.classList.contains("soon")]));
+    assert.deepEqual(tabs, [
+      ["Design", false],
+      ["Render", true],
+      ["Simulate", true],
+      ["Manufacture", true],
+      ["Laser", true],
+      ["Slice", true],
+    ]);
+    assert.equal(await page.getAttribute("[data-workspace=design]", "aria-selected"), "true");
+  });
+
+  await check("each placeholder workspace says what it will do and 'Coming soon', and keeps the viewport", async () => {
+    // Back to a known body, then remember the camera's view of it.
+    await page.selectOption("#shape", "box");
+    await page.fill("#width", "40");
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForTimeout(300); // let orbit damping settle
+    const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
+    const before = await pixel(0.5, 0.5);
+    for (const [id, title] of [["render", "Render"], ["simulate", "Simulate"], ["manufacture", "Manufacture"], ["laser", "Laser"], ["slice", "Slice"]]) {
+      await page.click(`[data-workspace=${id}]`);
+      assert.equal(await page.textContent(".placeholder h2"), title);
+      assert.equal(await page.textContent(".placeholder .coming-soon"), "Coming soon");
+      assert.match(await page.textContent(".placeholder .starts-after"), /^Work starts after CAD step \d+/);
+      assert.equal(await page.$eval("body", (b) => b.dataset.activeWorkspace), id);
+      assert.equal(new URL(page.url()).hash, `#${id}`);
+      await page.screenshot({ path: `e2e/workspace-${id}.png` });
+    }
+    // The body and camera stayed put the whole time.
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius);
+    assert.deepEqual(await pixel(0.5, 0.5), before);
+  });
+
+  await check("the community page promises free sharing only", async () => {
+    await page.click("#community");
+    assert.equal(await page.textContent(".placeholder h2"), "Community");
+    assert.match(await page.textContent(".placeholder"), /Everything here is free: no paid models, no payments\./);
+    assert.equal(await page.getAttribute("#community", "aria-pressed"), "true");
+    await page.screenshot({ path: "e2e/community.png" });
+  });
+
+  await check("back in Design the part, its numbers and the camera are as they were", async () => {
+    const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
+    await page.click("[data-workspace=design]");
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    assert.equal(await page.inputValue("#width"), "40");
+    assert.equal(await page.inputValue("#shape"), "box");
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius);
+    await page.screenshot({ path: "e2e/workspace-design.png" });
+  });
+
+  await check("opening a workspace link goes straight to it", async () => {
+    await page.goto(`${url}#laser`);
+    assert.equal(await page.textContent(".placeholder h2"), "Laser");
+    assert.equal(await page.getAttribute("[data-workspace=laser]", "aria-selected"), "true");
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });

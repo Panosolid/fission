@@ -1,8 +1,8 @@
 // Runs the WASM kernel off the main thread. Every request is a message
 // { id, op, args }; every reply is { id, ok: true, value } or { id, ok: false, error }.
 import init, * as kernel from "./wasm/fission_kernel.js";
-import type { KernelRequest, KernelResponse } from "./kernel-client";
-import type { Outline } from "./kernel-types";
+import type { KernelRequest, KernelResponse } from "./kernel-client.ts";
+import type { Outline } from "./kernel-types.ts";
 
 const ready = init();
 

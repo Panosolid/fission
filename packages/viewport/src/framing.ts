@@ -1,8 +1,6 @@
-/** A sphere around a body: what the camera frames. */
-export interface Framing {
-  centre: [number, number, number];
-  radius: number;
-}
+import type { Framing } from "@fission/core";
+
+export type { Framing };
 
 /** How far a body may reach past the framed sphere before re-framing. */
 export const FIT_SLACK = 1.5;

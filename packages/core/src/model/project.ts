@@ -5,7 +5,7 @@
 // workspace stores its own data under its id and refers to design geometry
 // only through references (references.ts).
 
-import type { Material } from "./material";
+import type { Material } from "./material.ts";
 
 export type WorkspaceId = "design" | "render" | "simulate" | "manufacture" | "laser" | "slice";
 
@@ -19,4 +19,9 @@ export interface Project {
   materials: Material[];
   /** Each workspace's own saved data (its WorkspacePlugin's save/load). */
   workspaces: Partial<Record<WorkspaceId, unknown>>;
+}
+
+/** A new, empty project. */
+export function emptyProject(name = "Untitled"): Project {
+  return { formatVersion: 1, name, units: { length: "mm" }, materials: [], workspaces: {} };
 }

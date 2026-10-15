@@ -13,7 +13,8 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "packages/*/src",

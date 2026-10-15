@@ -1,10 +1,22 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: #14161a; color: #e6e8eb; font: 14px system-ui, sans-serif; }
-body { display: flex; }
-#panel { width: 280px; padding: 16px; background: #1c1f24; border-right: 1px solid #2a2e35; display: flex; flex-direction: column; gap: 10px; }
-#panel h1 { font-size: 18px; margin: 0; }
-#panel h2 { font-size: 13px; margin: 8px 0 0; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
+body { display: flex; flex-direction: column; }
+
+/* Top bar: name, workspace tabs, community. */
+#topbar { display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 44px; background: #1c1f24; border-bottom: 1px solid #2a2e35; flex-shrink: 0; }
+#topbar h1 { font-size: 16px; margin: 0; white-space: nowrap; }
 #version { font-size: 12px; color: #8a919c; font-weight: normal; }
+#workspaces { display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; }
+#topbar button { background: none; border: none; border-bottom: 2px solid transparent; color: #b5bbc4; padding: 12px 10px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
+#topbar button:hover { color: #e6e8eb; }
+#topbar button[aria-selected="true"], #topbar button[aria-pressed="true"] { color: #e6e8eb; border-bottom-color: #4aa8ff; }
+#topbar button.soon { color: #6f7680; }
+#topbar button.soon[aria-selected="true"] { color: #b5bbc4; }
+
+/* Workspace: its panel beside the shared viewport. */
+#workspace { flex: 1; display: flex; min-height: 0; }
+#panel { width: 280px; padding: 16px; background: #1c1f24; border-right: 1px solid #2a2e35; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+#panel h2 { font-size: 13px; margin: 8px 0 0; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
 label { display: flex; align-items: center; gap: 8px; }
 label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background: #14161a; border: 1px solid #2a2e35; color: inherit; border-radius: 4px; font-family: ui-monospace, monospace; }
 #stats { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0 0; }
@@ -14,9 +26,19 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #status.bad { color: #ff6b6b; }
 #error { color: #ff6b6b; min-height: 1em; margin: 0; white-space: pre-wrap; }
 #viewport { flex: 1; min-width: 0; }
+
+/* Placeholder pages. */
+.placeholder h2 { font-size: 18px; margin: 0; text-transform: none; letter-spacing: 0; color: #e6e8eb; }
+.placeholder h3 { font-size: 12px; margin: 14px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
+.placeholder p { margin: 6px 0; line-height: 1.45; }
+.placeholder ul { margin: 0; padding-left: 18px; line-height: 1.45; }
+.placeholder .coming-soon { display: inline-block; padding: 2px 8px; border: 1px solid #4aa8ff; border-radius: 10px; color: #4aa8ff; font-size: 12px; }
+.placeholder .starts-after { color: #8a919c; font-size: 13px; margin-top: 14px; }
+
 @media (max-width: 640px) {
-  body { flex-direction: column; }
-  #panel { width: auto; border-right: none; border-bottom: 1px solid #2a2e35; }
-  #viewport { min-height: 60vh; }
+  #workspace { flex-direction: column; }
+  #panel { width: auto; border-right: none; border-bottom: 1px solid #2a2e35; max-height: 45vh; }
+  #viewport { min-height: 50vh; }
+  #topbar h1 #version { display: none; }
 }
 [hidden] { display: none !important; }

@@ -12,9 +12,15 @@
   },
   "dependencies": {
     "@fission/core": "*",
-    "@fission/design": "*",
     "@fission/ui": "*",
     "@fission/viewport": "*",
+    "@fission/community": "*",
+    "@fission/design": "*",
+    "@fission/render": "*",
+    "@fission/simulate": "*",
+    "@fission/manufacture": "*",
+    "@fission/laser": "*",
+    "@fission/slice": "*",
     "three": "^0.170.0"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
 // Main-thread side of the kernel worker: every kernel call is an async
 // message, so a slow operation never freezes the UI.
-import type { BodyView, Outline } from "./kernel-types";
+import type { BodyView, Outline } from "./kernel-types.ts";
 
 /** Every operation the worker supports, with its arguments and result. */
 export interface KernelOps {

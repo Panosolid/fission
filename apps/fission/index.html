@@ -3,35 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Fission CAD</title>
+    <title>Fission</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   </head>
   <body>
-    <aside id="panel">
+    <header id="topbar">
       <h1>Fission <span id="version"></span></h1>
-      <label>Shape
-        <select id="shape">
-          <option value="box">Box</option>
-          <option value="cylinder">Cylinder</option>
-          <option value="sphere">Sphere</option>
-          <option value="l-bracket">L-bracket (extruded)</option>
-          <option value="plate">Plate with two round holes (extruded)</option>
-          <option value="slot">Slot with round ends (extruded)</option>
-          <option value="star">Star (extruded)</option>
-        </select>
-      </label>
-      <label><span id="width-label">Width</span> <input id="width" type="number" value="40" step="any" /> mm</label>
-      <label id="depth-row">Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
-      <label id="height-row"><span id="height-label">Height</span> <input id="height" type="number" value="20" step="any" /> mm</label>
-      <dl id="stats">
-        <dt>Volume</dt><dd id="volume">…</dd>
-        <dt>Area</dt><dd id="area">…</dd>
-        <dt>Topology</dt><dd id="topology">…</dd>
-        <dt>Validation</dt><dd id="status">…</dd>
-      </dl>
-      <p id="error"></p>
-    </aside>
-    <div id="viewport"></div>
+      <nav id="workspaces" aria-label="Workspaces"></nav>
+      <button id="community" type="button" title="Shared models, free to download (coming soon)">Community</button>
+    </header>
+    <main id="workspace">
+      <aside id="panel"></aside>
+      <div id="viewport"></div>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
