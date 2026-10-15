@@ -105,6 +105,28 @@ try {
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
   });
 
+  await check("a 1 µm cube is measured and framed", async () => {
+    // 0.001³ = 1e-9 mm³ and 6 · 0.001² = 6e-6 mm²: never shown as 0.
+    for (const id of ["width", "depth", "height"]) await setSize(id, 0.001);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "1 × 10⁻⁹ mm³");
+    assert.equal(await text("area"), "6 × 10⁻⁶ mm²");
+    // The camera re-framed on it: radius = half the diagonal = √3·0.001/2
+    // ≈ 8.66e-4 (float32 mesh positions, so compare to 1e-6 relative).
+    const r = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
+    assert.ok(Math.abs(r - Math.sqrt(3) * 0.001 / 2) < 1e-9, `framed radius ${r}`);
+    await page.waitForTimeout(300);
+    assert.notDeepEqual(await pixel(0.5, 0.5), [0x14, 0x16, 0x1a], "the cube should fill the centre of the view");
+    await page.screenshot({ path: "e2e/tiny-cube.png" });
+    // Back to 40 × 30 × 20, one size at a time. The first edit, 40 × 0.001
+    // × 0.001, is a >10× jump, so it re-frames at √(40² + 2·0.001²)/2 ≈
+    // 20.0000000125; the next two (radius 25, then 26.9) are under 10×, so
+    // the view is kept.
+    for (const [id, v] of [["width", 40], ["depth", 30], ["height", 20]]) await setSize(id, v);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    const back = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
+    assert.ok(Math.abs(back - Math.sqrt(1600 + 2e-6) / 2) < 1e-4, `framed radius ${back}`);
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });

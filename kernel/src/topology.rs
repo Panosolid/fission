@@ -155,8 +155,11 @@ impl Body {
         }
         for e in &self.edges {
             if let Curve::Circle { center, axis, radius, .. } = e.curve {
-                // A circle's extent along a world axis k is r·√(1 − axis_k²).
-                let half = (DVec3::ONE - axis * axis).max(DVec3::ZERO).map(f64::sqrt) * radius;
+                // A circle's extent along a world axis k is r·√(1 − axis_k²),
+                // which for a unit axis equals r·√(sum of the other two
+                // components squared). The second form keeps its digits when
+                // the axis is within ~1e-8 of k, where 1 − axis_k² rounds to 0.
+                let half = DVec3::new(axis.y.hypot(axis.z), axis.z.hypot(axis.x), axis.x.hypot(axis.y)) * radius;
                 add(center, half);
             }
         }
@@ -225,6 +228,21 @@ mod tests {
         let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
         let e = b.add_edge(c, v0, v1, FRAC_PI_2, PI);
         (b, e)
+    }
+
+    #[test]
+    fn bounds_of_a_barely_tilted_circle() {
+        // Regression (OpenCascade oracle, overnight batch: cylinders of
+        // radius 3e4 to 1e7 tilted by ~1e-9 had bounds short by r·θ).
+        // A cylinder of radius r = 1e4 turned by θ = 1e-9 about X: each
+        // circle's axis is (0, −sin θ, cos θ), so it reaches r·sin θ =
+        // 1e4 · 1e-9 = 1e-5 below its centre in z. The bottom circle is
+        // centred at the origin, so lo.z = −1e-5. The old formula
+        // r·√(1 − cos²θ) rounds cos θ to 1.0 and gives 0.
+        let c = crate::ops::primitives::make_cylinder(1e4, 1.0).unwrap();
+        let t = crate::ops::transform::rotate(&c, DVec3::ZERO, DVec3::X, 1e-9).unwrap();
+        let (lo, _) = t.bounds();
+        assert!(eq(lo.z, -1e-5), "lo.z = {:e}", lo.z);
     }
 
     #[test]

@@ -63,10 +63,16 @@ export class Viewer {
     );
   }
 
-  /** Frames the current body. */
-  fit() {
+  /** Half the diagonal of the current body's bounding box (0 if none). */
+  bodyRadius(): number {
     const box = new THREE.Box3().setFromObject(this.body);
-    if (box.isEmpty()) return;
+    return box.isEmpty() ? 0 : box.getSize(new THREE.Vector3()).length() / 2;
+  }
+
+  /** Frames the current body; returns the radius it framed (null if none). */
+  fit(): number | null {
+    const box = new THREE.Box3().setFromObject(this.body);
+    if (box.isEmpty()) return null;
     const centre = box.getCenter(new THREE.Vector3());
     const radius = box.getSize(new THREE.Vector3()).length() / 2;
     const dist = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2));
@@ -76,6 +82,7 @@ export class Viewer {
     this.camera.near = dist / 1000;
     this.camera.far = dist * 100;
     this.camera.updateProjectionMatrix();
+    return radius;
   }
 
   private resize() {
