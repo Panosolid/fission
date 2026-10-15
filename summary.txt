@@ -1,0 +1,14 @@
+Fission random testing, all runs so far (updated 2026-10-15 13:32 UTC)
+
+hours of testing:                 0.9
+rounds:                           9
+random operation chains:          18000
+rounds where the harness failed:  1
+bodies compared with OpenCascade: 37550
+OpenCascade disagreements:        0
+last problem found:               2026-10-15 13:19:19 (seed 102788882230238)
+
+Every round is a line in log.csv. Each round that found a problem has a
+folder in failures/ named after its seed: report.txt says what went wrong,
+the .json file is the shortest chain of operations that shows it, and
+failure-dumps/*/index.html is a 3D view with the problem in red.

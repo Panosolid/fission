@@ -1,0 +1,17 @@
+Stateful kernel test: 457 cases over 1 seed(s) ["0x5d7c66cfebde"] in 87.8s
+Failures: 1
+  seed 0x5d7c66cfebde: step 2 (Rotate { target: 0, pivot: [50000000.0, 0.0, 0.0], axis: [-9.000000000000001e-10, 0.0, 1.0], angle: 3.8846540033404207 }): rotating changed the volume: 10892329.12667528 → 10892354.170237735 (minimal chain: 2 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seed5d7c66cfebde-ddae3a62303d8387.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seed5d7c66cfebde/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box           296 / 27      →  91.6%    69.9ms  slowest 272.1µs
+  add cylinder      248 / 33      →  88.3%      9.3s  slowest 79.8ms
+  add sphere        326 / 29      →  91.8%     36.4s  slowest 180.7ms
+  move              453 / 40      →  91.9%      7.0s  slowest 91.6ms
+  rotate            566 / 24      →  95.9%      7.9s  slowest 91.5ms
+  ~extreme input      14 / 50      →  21.9%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 71.4999991, d: 0.012033085411091085, h: 29.0 }, axis: [0.37300272081705904, -0.8264089527776777, 0.7793613586555839], angle: 8.778452526354265, at: [19.5, 19.0, -490.55769447697566] }
+  slowest add cylinder: Add { shape: Cylinder { r: 58697.87865089549, h: 91.1909527777225 }, axis: [-1.1000000000000001e-9, 0.0, 1.0], angle: -1.5707963267948966, at: [-18.5, -615.9959330492693, -169.5000011] }
+  slowest add sphere: Add { shape: Sphere { r: 14970.82850890837 }, axis: [-0.6358110468735825, -0.29044589433961215, 0.5916633541088623], angle: -4.71238898038469, at: [-6.5, -38.820692741405026, -7.0] }
+  slowest move: Move { target: 2, by: [0.5, -18.51504365085896, 878.7280752145008] }
+  slowest rotate: Rotate { target: 4, pivot: [17.5, 41545.66991633436, 519.6464263042079], axis: [1.0, 1.0, 0.0], angle: 3.141592653589793 }
