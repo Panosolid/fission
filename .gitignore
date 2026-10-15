@@ -11,3 +11,4 @@ app/dist/
 # Python
 __pycache__/
 .venv/
+kernel/endless-results/

@@ -20,7 +20,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
   - `tests/stateful.rs`: stateful random-testing harness (see its header). When a kernel operation lands, add it to `Op`, `Scene::transitions`, `apply_op` and `replay_op` the same day.
   - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
-  - `scripts/overnight.sh`: Tier 3 run.
+  - `scripts/overnight.sh`: Tier 3 run. `scripts/endless.sh`: the same, round after round with random seeds, logging to `endless-results/`.
 - `prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies written by the harness.
 - `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
@@ -36,6 +36,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - App unit tests: `cd app && npm test`
 - Browser smoke test: `cd app && npm run build && npm run e2e`
 - Stateful random testing, quick mode (~200 cases, ~50 s, also part of `cargo test`; ~95% of operations in range, ~5% with one extreme input, counted in the report's "~extreme input" row): `cd kernel && cargo test --test stateful -- --nocapture`
+- Endless mode (owner's own computer, no Claude involved; random seed per round until Ctrl+C, results in `kernel/endless-results/`, gitignored): `cd kernel && scripts/endless.sh [cases-per-round] [rounds, 0 = endless] [python]`
 - Overnight mode (100,000 cases × 4 seeds in release, then the OpenCascade oracle): `cd kernel && scripts/overnight.sh [cases] [seeds] [python]` (needs `pip install cadquery-ocp`)
 
 Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't download binaryen. Harmless; re-enable when size matters.
