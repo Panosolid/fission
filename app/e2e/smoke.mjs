@@ -83,6 +83,28 @@ try {
     assert.equal(await text("volume"), "24,000 mm³");
   });
 
+  await check("the kernel runs in a Web Worker, not on the main thread", async () => {
+    const workers = page.workers();
+    assert.equal(workers.length, 1, "expected exactly one worker");
+    // The page itself must not have loaded the wasm module.
+    const wasmOnPage = await page.evaluate(() =>
+      performance.getEntriesByType("resource").some((r) => r.name.endsWith(".wasm")),
+    );
+    assert.equal(wasmOnPage, false, "main thread fetched the .wasm file");
+  });
+
+  await check("a burst of edits ends showing the last one", async () => {
+    // Type 20 widths as fast as possible; replies may race, but the screen
+    // must end on the last: 77 × 30 × 20 = 46200.
+    for (let w = 1; w <= 20; w++) await setSize("width", w);
+    await setSize("width", 77);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "46,200 mm³");
+    await page.waitForTimeout(300);
+    assert.equal(await text("volume"), "46,200 mm³");
+    await setSize("width", 40);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });

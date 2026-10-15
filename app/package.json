@@ -8,7 +8,8 @@
     "dev": "npm run kernel && vite",
     "build": "npm run kernel && tsc && vite build",
     "preview": "vite preview",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/smoke.mjs",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
   },
   "dependencies": {
     "three": "^0.170.0"

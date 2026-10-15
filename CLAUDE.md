@@ -18,7 +18,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/fixtures.rs`: hand-built test bodies that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
   - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box` → `BodyView`). Keep it thin.
   - `tests/regressions/`: proptest failure seeds (committed).
-- `app/`: Vite + TypeScript + Three.js web app (`src/main.ts` UI, `src/viewer.ts` Three.js viewport, `src/kernel-types.ts` shapes of kernel results, `e2e/smoke.mjs` browser test). `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
+- `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages).
 
@@ -29,7 +29,8 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
 - Build the app: `cd app && npm install && npm run build`
 - Dev server: `cd app && npm run dev`
-- Browser smoke test: `cd app && npm run e2e`
+- App unit tests: `cd app && npm test`
+- Browser smoke test: `cd app && npm run build && npm run e2e`
 
 Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't download binaryen. Harmless; re-enable when size matters.
 
@@ -52,6 +53,12 @@ Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't do
 4. If the feature is visible, it has been checked in a real browser (the e2e smoke test, or a Playwright screenshot).
 5. The roadmap item is ticked here, then committed and pushed with a message saying what was done and how it was verified.
 
+## App conventions
+
+- The main thread never loads the WASM module; every kernel call goes through `KernelClient` to the worker (the e2e test checks this).
+- Wrap UI-driven kernel calls in `latestOnly` so a late reply to an old request never overwrites a newer result.
+- Kernel errors arrive as rejected promises with the kernel's message; show them, never swallow them.
+
 ## Git workflow
 
 - Develop on the branch named by the session; commit each roadmap item separately and push it.
@@ -68,7 +75,7 @@ Kernel foundations
 - [x] 5. Tessellation of planar faces + watertight mesh check
 - [x] 6. Tessellation of cylinder and sphere faces
 - [x] 7. Box primitive; viewer shows a kernel B-rep box with edges
-- [ ] 8. Kernel runs in a Web Worker from here on; every app→kernel call is an async message
+- [x] 8. Kernel runs in a Web Worker from here on; every app→kernel call is an async message
 - [ ] 9. Extrude polygon profiles with holes; property test volume = area × distance
 - [ ] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
 - [ ] 11. Sphere primitive; accurate volume and area
