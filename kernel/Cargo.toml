@@ -23,6 +23,7 @@ opt-level = "s"
 
 [dev-dependencies]
 proptest = "1"
+proptest-state-machine = "0.9.0"
 
 # wasm-opt only shrinks the .wasm file; skip it until size matters.
 [package.metadata.wasm-pack.profile.release]

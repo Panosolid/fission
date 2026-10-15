@@ -141,6 +141,33 @@ impl Body {
         uses
     }
 
+    /// Axis-aligned box containing the body. Exact for straight edges, full
+    /// circles and spheres; arcs are bounded by their whole circle.
+    pub fn bounds(&self) -> (DVec3, DVec3) {
+        let mut lo = DVec3::INFINITY;
+        let mut hi = DVec3::NEG_INFINITY;
+        let mut add = |p: DVec3, half: DVec3| {
+            lo = lo.min(p - half);
+            hi = hi.max(p + half);
+        };
+        for v in &self.vertices {
+            add(v.point, DVec3::ZERO);
+        }
+        for e in &self.edges {
+            if let Curve::Circle { center, axis, radius, .. } = e.curve {
+                // A circle's extent along a world axis k is r·√(1 − axis_k²).
+                let half = (DVec3::ONE - axis * axis).max(DVec3::ZERO).map(f64::sqrt) * radius;
+                add(center, half);
+            }
+        }
+        for f in &self.faces {
+            if let Surface::Sphere { center, radius, .. } = f.surface {
+                add(center, DVec3::splat(radius));
+            }
+        }
+        (lo, hi)
+    }
+
     pub fn transformed(&self, tf: &Transform) -> Body {
         Body {
             vertices: self.vertices.iter().map(|v| Vertex { point: tf.point(v.point) }).collect(),
@@ -259,6 +286,25 @@ mod tests {
         let g = b.add_face(s, false, vec![]);
         assert!(points_eq(b.face_normal_at(f, DVec3::new(3.0, 0.0, 7.0)), DVec3::X));
         assert!(points_eq(b.face_normal_at(g, DVec3::new(3.0, 0.0, 7.0)), DVec3::NEG_X));
+    }
+
+    #[test]
+    fn bounds_by_hand() {
+        // Unit circle about Z centred at (5, 0, 2): x ∈ [4, 6], y ∈ [-1, 1], z = 2.
+        let mut b = Body::default();
+        let v = b.add_vertex(DVec3::new(6.0, 0.0, 2.0));
+        let c = Curve::Circle { center: DVec3::new(5.0, 0.0, 2.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        b.add_edge(c, v, v, 0.0, 2.0 * PI);
+        let (lo, hi) = b.bounds();
+        assert!(points_eq(lo, DVec3::new(4.0, -1.0, 2.0)));
+        assert!(points_eq(hi, DVec3::new(6.0, 1.0, 2.0)));
+        // Tilt the axis to (0, √½, √½): extents r·√(1 − a²) = (1, √½, √½).
+        let h = 0.5f64.sqrt();
+        b.edges[0].curve = Curve::Circle { center: DVec3::ZERO, axis: DVec3::new(0.0, h, h), x_dir: DVec3::X, radius: 1.0 };
+        b.vertices[0].point = DVec3::X;
+        let (lo, hi) = b.bounds();
+        assert!(points_eq(lo, DVec3::new(-1.0, -h, -h)));
+        assert!(points_eq(hi, DVec3::new(1.0, h, h)));
     }
 
     #[test]

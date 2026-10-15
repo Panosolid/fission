@@ -235,13 +235,7 @@ fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) {
         errs.push(ValidationError::MeshNotClosed { problems: problems.len() });
     }
     for (si, s) in body.shells.iter().enumerate() {
-        let volume: f64 = (0..mesh.triangles.len())
-            .filter(|&t| s.faces.contains(&mesh.triangle_face[t]))
-            .map(|t| {
-                let [a, b, c] = mesh.triangle(t);
-                a.dot(b.cross(c)) / 6.0
-            })
-            .sum();
+        let volume = mesh.signed_volume_of(|t| s.faces.contains(&mesh.triangle_face[t]));
         if volume <= 0.0 {
             errs.push(ValidationError::InsideOut { shell: si, volume });
         }
@@ -496,6 +490,16 @@ mod tests {
             [ValidationError::InsideOut { volume, .. }] => assert!(tolerance::eq(*volume, -1.0), "{volume}"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn small_box_far_from_the_origin_is_valid() {
+        // Regression: shell volume was summed about the world origin, so a
+        // 0.01 mm cube 1e6 mm out came out negative and was called inside out.
+        let b = hand_cube()
+            .transformed(&crate::geom::Transform::uniform_scale(0.01))
+            .transformed(&crate::geom::Transform::translation(DVec3::splat(1e6)));
+        assert_eq!(validate(&b), Ok(()));
     }
 
     #[test]

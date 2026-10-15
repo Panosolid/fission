@@ -27,6 +27,26 @@ pub const FP_REL: f64 = 1e-12;
 /// close to f64 rounding at the coordinates involved.
 pub const MAX_SIZE: f64 = 1e6;
 
+/// Coordinates must stay within ±MAX_COORD (1 km) of the origin, for the
+/// same reason as MAX_SIZE.
+pub const MAX_COORD: f64 = 1e6;
+
+/// How many units in the last place a short chain of arithmetic may drift.
+/// Used to bound rounding when values are moved around model space.
+pub const ROUNDING_ULPS: f64 = 64.0;
+
+/// Largest rounding error expected in a coordinate of magnitude `scale`
+/// after a transform: ROUNDING_ULPS units in the last place.
+pub fn rounding_slack(scale: f64) -> f64 {
+    scale.abs().max(1.0) * ROUNDING_ULPS * f64::EPSILON
+}
+
+/// a ≈ b to FP_REL, plus an absolute allowance for rounding that does not
+/// shrink with the values themselves (e.g. a tiny part far from the origin).
+pub fn measure_eq(a: f64, b: f64, abs_slack: f64) -> bool {
+    (a - b).abs() <= FP_REL * a.abs().max(b.abs()) + abs_slack
+}
+
 /// Allowed relative error when comparing results that went through f32
 /// (STL files store single-precision floats).
 pub const F32_REL: f64 = 1e-6;
@@ -35,6 +55,12 @@ pub const F32_REL: f64 = 1e-6;
 /// display tessellation.
 pub const DISPLAY_CHORD: f64 = 0.01;
 pub const DISPLAY_ANGLE: f64 = 0.2;
+
+/// Hard cap on chords per full turn of a circle, before `refine`. Keeps
+/// tessellation cost bounded for any legal size: without it a 1 km sphere
+/// at a 0.01 mm chord needs millions of triangles and stalls the kernel.
+/// At the cap, chord height is r(1 − cos(π/256)) ≈ 7.5e-5·r.
+pub const MAX_SEGMENTS_PER_TURN: f64 = 256.0;
 
 /// Maximum angle per segment used for mass-property tessellation.
 pub const MASS_PROPS_ANGLE: f64 = 0.02;
@@ -145,6 +171,19 @@ mod tests {
         assert!(!rel_eq(1e5, 1e5 + 0.11, 1e-6));
         assert!(!rel_eq(1e5, 1e5 + 1.0, 1e-6));
         assert!(!rel_eq(1.0, 1.0 + 1e-3, 1e-6));
+    }
+
+    #[test]
+    fn measure_eq_boundaries_by_hand() {
+        // Allowance = FP_REL·max(|a|,|b|) + slack. For a = 1, slack = 1e-9:
+        // about 1e-12 + 1e-9 = 1.001e-9.
+        let allowed = FP_REL + 1e-9;
+        assert!(measure_eq(1.0, 1.0 + allowed * 0.9, 1e-9));
+        assert!(!measure_eq(1.0, 1.0 + allowed * 1.1, 1e-9));
+        // Rounding slack at 1e6 is 1e6 · 64 · 2.22e-16 ≈ 1.42e-8, and never
+        // less than the slack at magnitude 1.
+        assert!(rel_eq(rounding_slack(1e6), 1e6 * 64.0 * f64::EPSILON, FP_REL));
+        assert!(rel_eq(rounding_slack(1e-3), rounding_slack(1.0), FP_REL));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 //! `validate::checked`, so nothing invalid leaves the kernel.
 
 pub mod primitives;
+pub mod transform;
 
 use crate::validate::ValidationError;
 use std::fmt;

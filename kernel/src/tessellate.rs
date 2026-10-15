@@ -76,7 +76,7 @@ fn segments(curve: &Curve, span: f64, opts: &TessOptions) -> usize {
                 if opts.chord < 2.0 * radius { 2.0 * (1.0 - opts.chord / radius).acos() } else { f64::INFINITY };
             // No segment may turn more than a third of a circle, so a full
             // circle always has at least 3 chords and encloses some area.
-            let step = opts.max_angle.min(chord_angle).min(MAX_SEGMENT_ANGLE);
+            let step = opts.max_angle.min(chord_angle).clamp(TAU / tolerance::MAX_SEGMENTS_PER_TURN, MAX_SEGMENT_ANGLE);
             ((angle / step).ceil().max(1.0) as usize) * opts.refine as usize
         }
     }
@@ -590,6 +590,17 @@ mod tests {
     }
 
     #[test]
+    fn segment_count_is_capped_for_huge_circles() {
+        // r = 1e6 at a 0.01 mm chord would need 2π / (2·acos(1 − 1e-8)) ≈
+        // 22,214 chords; the cap holds it to 256 (and 512 with refine 2).
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1e6 };
+        assert_eq!(segments(&c, TAU, &TessOptions::DISPLAY), 256);
+        assert_eq!(segments(&c, TAU, &TessOptions { refine: 2, ..TessOptions::DISPLAY }), 512);
+        // Half a turn gets half: 128.
+        assert_eq!(segments(&c, PI, &TessOptions::DISPLAY), 128);
+    }
+
+    #[test]
     fn full_circle_always_has_at_least_three_chords() {
         // Even with no chord or angle limit to speak of (chord 10r), a
         // circle is never drawn with fewer than 3 chords: 2π / (2π/3) = 3.
@@ -687,11 +698,13 @@ mod tests {
 
     #[test]
     fn circle_segment_counts_respect_both_limits() {
-        let c = Curve::Circle { center: Default::default(), axis: glam::DVec3::Z, x_dir: glam::DVec3::X, radius: 1000.0 };
+        // Below the per-turn cap (r = 100 needs ~222 chords), every chord sags
+        // no more than the chord limit.
+        let c = Curve::Circle { center: Default::default(), axis: glam::DVec3::Z, x_dir: glam::DVec3::X, radius: 100.0 };
         let opts = TessOptions::DISPLAY;
         let n = segments(&c, std::f64::consts::TAU, &opts);
         // Chord height of each segment within the limit.
-        let sag = 1000.0 * (1.0 - (std::f64::consts::PI / n as f64).cos());
+        let sag = 100.0 * (1.0 - (std::f64::consts::PI / n as f64).cos());
         assert!(sag <= opts.chord);
         let small = Curve::Circle { center: Default::default(), axis: glam::DVec3::Z, x_dir: glam::DVec3::X, radius: 1e-3 };
         assert!(segments(&small, std::f64::consts::TAU, &opts) as f64 >= std::f64::consts::TAU / opts.max_angle);

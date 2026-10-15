@@ -62,7 +62,7 @@ Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't do
 ## Git workflow
 
 - Develop on the branch named by the session; commit each roadmap item separately and push it.
-- Commit messages: a first line naming the day and feature (e.g. "Day 7: box primitive in the viewer"), then what changed and how it was verified.
+- Commit messages: a first line naming the step and feature (e.g. "Step 7: box primitive in the viewer"), then what changed and how it was verified.
 - Never commit generated files (`app/src/kernel/`, `kernel/target/`, `app/dist/`).
 
 ## Roadmap (mark items [x] when done)

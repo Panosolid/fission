@@ -33,9 +33,20 @@ impl Mesh {
 
     /// Volume enclosed, positive when triangles face outward (divergence theorem).
     pub fn signed_volume(&self) -> f64 {
+        self.signed_volume_of(|_| true)
+    }
+
+    /// Volume enclosed by the triangles `keep` selects (e.g. one shell's).
+    ///
+    /// Each tetrahedron is measured from a point on the mesh rather than the
+    /// world origin: the sum is the same for a closed mesh, but far from the
+    /// origin the origin-based terms are huge and cancel catastrophically.
+    pub fn signed_volume_of(&self, keep: impl Fn(usize) -> bool) -> f64 {
+        let Some(&o) = self.positions.first() else { return 0.0 };
         (0..self.triangles.len())
+            .filter(|&t| keep(t))
             .map(|t| {
-                let [a, b, c] = self.triangle(t);
+                let [a, b, c] = self.triangle(t).map(|p| p - o);
                 a.dot(b.cross(c))
             })
             .sum::<f64>()
@@ -100,6 +111,25 @@ mod tests {
         assert!(eq(m.signed_volume(), 1.0 / 6.0));
         assert!(eq(m.area(), 1.5 + 3f64.sqrt() / 2.0));
         assert_eq!(m.check_closed(), Ok(()));
+    }
+
+    #[test]
+    fn volume_far_from_the_origin() {
+        // A tetrahedron is still 1/6 when moved to (1e5, 1e5, 1e5); area
+        // 1.5 + √3/2 too. Summing a·(b×c) about the world origin would
+        // cancel terms of size ~1e15 down to ~0.17 and lose the digits.
+        let mut m = tetra();
+        let far = DVec3::splat(1e5);
+        m.positions.iter_mut().for_each(|p| *p += far);
+        assert!(crate::tolerance::rel_eq(m.signed_volume(), 1.0 / 6.0, crate::tolerance::FP_REL), "{}", m.signed_volume());
+        assert!(crate::tolerance::rel_eq(m.area(), 1.5 + 3f64.sqrt() / 2.0, crate::tolerance::FP_REL));
+
+        // Worst case the kernel allows: a 0.01 mm tetrahedron (volume
+        // 0.01³/6) at the edge of model space, 1e6 mm out.
+        let mut tiny = tetra();
+        tiny.positions.iter_mut().for_each(|p| *p = *p * 0.01 + DVec3::splat(1e6));
+        let expected = 1e-6 / 6.0;
+        assert!(crate::tolerance::rel_eq(tiny.signed_volume(), expected, crate::tolerance::FP_REL), "{} vs {expected}", tiny.signed_volume());
     }
 
     #[test]
