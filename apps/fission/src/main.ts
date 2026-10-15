@@ -1,7 +1,8 @@
-import { KernelClient, latestOnly } from "./kernel-client";
-import { Viewer } from "./viewer";
-import { formatQuantity as fmt, needsRefit, type Framing } from "./format";
-import { outline, type ShapeKind } from "./profiles";
+import "@fission/ui/theme.css";
+import { KernelClient, latestOnly } from "@fission/core";
+import { Viewer, needsRefit, type Framing } from "@fission/viewport";
+import { formatQuantity as fmt } from "@fission/ui";
+import { outline, type ShapeKind } from "@fission/design";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 

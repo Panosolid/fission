@@ -7,14 +7,9 @@
 
 export type ShapeKind = "box" | "cylinder" | "sphere" | "l-bracket" | "plate" | "slot" | "star";
 
-export type Loop =
-  | { path: { corners: number[]; bulges: number[] } }
-  | { circle: { center: [number, number]; radius: number } };
+import type { Loop, Outline } from "@fission/core";
 
-export interface Outline {
-  outer: Loop;
-  holes: Loop[];
-}
+export type { Loop, Outline };
 
 const straight = (corners: number[]): Loop => ({ path: { corners, bulges: [] } });
 

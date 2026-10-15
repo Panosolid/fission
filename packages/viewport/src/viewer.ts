@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import type { Framing } from "./format";
+import type { Framing } from "./framing";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { DisplayMesh } from "./kernel-types";
+import type { DisplayMesh } from "@fission/core";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);

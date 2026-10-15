@@ -32,9 +32,10 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - Tier 1 (after every change): `cd kernel && cargo clippy --all-targets && cargo test <module>`
 - All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored)
 - Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
-- Build the app: `cd apps/fission && npm install && npm run build`
+- Install (repo root, npm workspaces): `npm install`
+- Build the app: `cd apps/fission && npm run build`
 - Dev server: `cd apps/fission && npm run dev`
-- App unit tests: `cd apps/fission && npm test`
+- Unit tests of every package and workspace: `npm test` (repo root)
 - Browser smoke test: `cd apps/fission && npm run build && npm run e2e`
 - Stateful random testing, quick mode (~200 cases, ~50 s, also part of `cargo test`; ~95% of operations in range, ~5% with one extreme input, counted in the report's "~extreme input" row): `cd kernel && cargo test --test stateful -- --nocapture`
 - Endless mode (owner's own computer, no Claude involved; random seed per round until Ctrl+C, results in `kernel/endless-results/`, gitignored): `cd kernel && scripts/endless.sh [cases-per-round] [rounds, 0 = endless] [python]`

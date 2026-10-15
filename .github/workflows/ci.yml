@@ -35,11 +35,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/fission/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci
-        working-directory: apps/fission
       - run: npm test
-        working-directory: apps/fission
       - run: npm run build
         working-directory: apps/fission
       - run: npx playwright install --with-deps chromium
