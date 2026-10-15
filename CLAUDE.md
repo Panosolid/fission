@@ -23,7 +23,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
   - `scripts/overnight.sh`: Tier 3 run. `scripts/endless.sh`: the same, round after round with random seeds, logging to `endless-results/`.
 - `prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies written by the harness (box, cylinder, sphere, extrusion).
-- `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `src/profiles.ts` ready-made outlines for the extrude demo (until the sketcher), in the kernel's `ProfileIn` form; `src/format.ts` number formatting and when the camera re-frames; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
+- `apps/fission/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `src/profiles.ts` ready-made outlines for the extrude demo (until the sketcher), in the kernel's `ProfileIn` form; `src/format.ts` number formatting and when the camera re-frames; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `apps/fission/src/kernel/` (generated, gitignored).
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing": every 6 hours, 4 jobs × ~5 h of `endless.sh`; results accumulate on the `test-results` branch: `summary.txt`, `log.csv`, `failures/<seed>/`; an issue is opened when something is found).
 
@@ -32,10 +32,10 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - Tier 1 (after every change): `cd kernel && cargo clippy --all-targets && cargo test <module>`
 - All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored)
 - Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
-- Build the app: `cd app && npm install && npm run build`
-- Dev server: `cd app && npm run dev`
-- App unit tests: `cd app && npm test`
-- Browser smoke test: `cd app && npm run build && npm run e2e`
+- Build the app: `cd apps/fission && npm install && npm run build`
+- Dev server: `cd apps/fission && npm run dev`
+- App unit tests: `cd apps/fission && npm test`
+- Browser smoke test: `cd apps/fission && npm run build && npm run e2e`
 - Stateful random testing, quick mode (~200 cases, ~50 s, also part of `cargo test`; ~95% of operations in range, ~5% with one extreme input, counted in the report's "~extreme input" row): `cd kernel && cargo test --test stateful -- --nocapture`
 - Endless mode (owner's own computer, no Claude involved; random seed per round until Ctrl+C, results in `kernel/endless-results/`, gitignored): `cd kernel && scripts/endless.sh [cases-per-round] [rounds, 0 = endless] [python]`
 - Overnight mode (100,000 cases × 4 seeds in release, then the OpenCascade oracle): `cd kernel && scripts/overnight.sh [cases] [seeds] [python]` (needs `pip install cadquery-ocp`)
@@ -83,7 +83,7 @@ Every serious kernel works inside a fixed range (Parasolid: a 1 km box). Fission
 
 - Develop on the branch named by the session; commit each roadmap item separately and push it.
 - Commit messages: a first line naming the step and feature (e.g. "Step 7: box primitive in the viewer"), then what changed and how it was verified.
-- Never commit generated files (`app/src/kernel/`, `kernel/target/`, `app/dist/`).
+- Never commit generated files (`apps/fission/src/kernel/`, `kernel/target/`, `apps/fission/dist/`).
 
 ## Roadmap (mark items [x] when done)
 

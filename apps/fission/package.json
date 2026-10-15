@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "kernel": "wasm-pack build ../kernel --target web --out-dir ../app/src/kernel --out-name fission_kernel",
+    "kernel": "wasm-pack build ../../kernel --target web --out-dir ../apps/fission/src/kernel --out-name fission_kernel",
     "dev": "npm run kernel && vite",
     "build": "npm run kernel && tsc && vite build",
     "preview": "vite preview",
