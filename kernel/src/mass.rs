@@ -45,6 +45,13 @@
 //! Bonnet, which lose digits for a face much smaller than its sphere (a
 //! shallow cap). Only whole hemispheres exist until booleans (steps 46–47),
 //! which must replace this with a stable form before making such faces.
+//!
+//! Mutation testing (`cargo mutants -f src/mass.rs`) leaves these
+//! survivors, all equivalent: `* s` vs `/ s` with s = ±1 (directions of
+//! travel); `< 0.1` vs `<= 0.1` for switching θ − sin θ to its series (both
+//! forms are accurate at 0.1); and removing the axial part of a cylinder
+//! face's vector area (`−` vs `+`), which is zero in exact arithmetic and
+//! only kept to drop rounding.
 
 use crate::geom::{Curve, Surface};
 use crate::topology::{Body, Coedge, Face};
@@ -60,7 +67,13 @@ pub struct MassProps {
 /// Exact volume and area of a valid body (to rounding).
 pub fn mass_properties(body: &Body) -> MassProps {
     let (lo, hi) = body.bounds();
-    let o = (lo + hi) * 0.5;
+    about(body, (lo + hi) * 0.5)
+}
+
+/// The same, measured from `o`. Any point gives the same answer in exact
+/// arithmetic (the divergence theorem holds about any point); a point near
+/// the body keeps the most digits.
+fn about(body: &Body, o: DVec3) -> MassProps {
     let mut volume = 0.0;
     let mut area = 0.0;
     for face in &body.faces {
@@ -95,12 +108,13 @@ fn half_moment(curve: &Curve, ta: f64, tb: f64, o: DVec3) -> DVec3 {
     }
 }
 
-/// θ − sin θ without cancellation: by its series below 0.1, where the
-/// terms after θ⁹ are under 1e-15 of the first.
+/// θ − sin θ without cancellation: by its series θ³/3! − θ⁵/5! + … below
+/// 0.1, to θ¹¹: the first term left out is 6θ¹⁰/13! ≈ 1e-19 of the first.
+/// (Stopping at θ⁹ left 6θ⁸/11! ≈ 1.5e-15, six ulps, at 0.1.)
 fn theta_minus_sin(t: f64) -> f64 {
     if t.abs() < 0.1 {
         let t2 = t * t;
-        t * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0)))
+        t * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0 * (1.0 - t2 / 110.0))))
     } else {
         t - t.sin()
     }
@@ -447,6 +461,113 @@ mod tests {
             let m = mass_properties(&body);
             assert!(rel_eq(m.volume, v, MASS_PROPS_REL), "{name}: volume {} vs extrapolated {v}", m.volume);
             assert!(rel_eq(m.area, a, MASS_PROPS_REL), "{name}: area {} vs extrapolated {a}", m.area);
+        }
+    }
+
+    #[test]
+    // The references keep all 20 worked digits, more than an f64 holds.
+    #[allow(clippy::excessive_precision)]
+    fn theta_minus_sin_by_hand() {
+        // References summed by hand from θ³/3! − θ⁵/5! + θ⁷/7! − … in exact
+        // fractions (Python, until the terms were below 1e-45), 20 digits.
+        // Below 0.1 the series is used and must be good to a few ulps; the
+        // direct θ − sin θ there would lose about 0.1/(θ³/6) ulps (1e7 of
+        // them at θ = 1e-3).
+        // Purely relative (rel_eq's floor of LINEAR² would accept anything
+        // this small): within n ulps of the reference.
+        let close = |got: f64, want: f64, n: f64| (got - want).abs() <= n * f64::EPSILON * want.abs();
+        for (t, want) in [
+            (1e-6, 1.666_666_666_666_583_333_3e-19),
+            (1e-3, 1.666_666_583_333_335_317_5e-10),
+            (0.05, 2.083_072_932_167_120_513_5e-5),
+            (0.0999, 1.660_842_687_008_990_605_0e-4),
+        ] {
+            for sign in [1.0, -1.0] {
+                let got = theta_minus_sin(sign * t);
+                assert!(close(got, sign * want, 4.0), "{t}: {got} vs {want}");
+            }
+        }
+        // From 0.1 the direct form, losing ~0.1/1.7e-4 ≈ 600 ulps at the
+        // switch, inside FP_REL; well above it, a few ulps.
+        for (t, want) in [(0.1, 1.665_833_531_718_476_931_9e-4), (0.1001, 1.670_834_359_769_619_622_1e-4)] {
+            assert!(close(theta_minus_sin(t), want, FP_REL / f64::EPSILON), "{t}");
+        }
+        for (t, want) in [(1.0, 0.158_529_015_192_103_493_35), (3.0, 2.858_879_991_940_132_777_9)] {
+            assert!(close(theta_minus_sin(t), want, 8.0), "{t}");
+        }
+    }
+
+    #[test]
+    fn the_same_body_described_differently() {
+        // The same surfaces and edges, written down differently, must give
+        // the same numbers (each still validates). Round descriptions (a
+        // cylinder's origin at the height of its first vertex, circles
+        // starting at t = 0) could hide a formula that only works for them.
+        let shift_cylinders = |mut b: Body, by: f64| {
+            for f in &mut b.faces {
+                if let Surface::Cylinder { origin, axis, .. } = &mut f.surface {
+                    *origin += *axis * by;
+                }
+            }
+            b
+        };
+        // Full circles starting at t = 0.3: same circle, the vertex on it moved.
+        let shift_circles = |mut b: Body| {
+            for e in 0..b.edges.len() {
+                let edge = &mut b.edges[e];
+                if edge.is_closed() {
+                    edge.t0 += 0.3;
+                    edge.t1 += 0.3;
+                    let at = edge.curve.eval(edge.t0);
+                    b.vertices[b.edges[e].start].point = at;
+                }
+            }
+            b
+        };
+        // The bowed square of `extrusions_by_hand`: an arc turning
+        // 4·atan 0.4 ≈ 1.52 rad, not a half circle (whose ends at 0 and π
+        // have equal sines, which can hide a wrong angle).
+        let square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let bowed = extrude(&Profile { outer: path(&square, &[0.0, 0.0, -0.4, 0.0]), holes: vec![] }, 3.0).unwrap();
+        let (r, phi) = (7.25, 4.0 * 0.4f64.atan());
+        let cut = r * r / 2.0 * (phi - phi.sin());
+        for (name, body, volume, area) in [
+            ("bowed square", bowed, 3.0 * (100.0 - cut), 2.0 * (100.0 - cut) + 3.0 * (30.0 + r * phi)),
+            ("half cylinder", hand_half_cylinder(2.0, 3.0), 6.0 * PI, 10.0 * PI + 12.0),
+            ("tube", hand_tube(1.0, 2.0, 3.0, 0.3), 9.0 * PI, 24.0 * PI),
+            ("cap", hand_sphere_cap(5.0, 3.0), 52.0 * PI / 3.0, 36.0 * PI),
+            ("big cap", hand_sphere_cap(5.0, -3.0), 448.0 * PI / 3.0, 96.0 * PI),
+        ] {
+            for by in [7.3, -2.1] {
+                let b = shift_cylinders(body.clone(), by);
+                assert_eq!(crate::validate::validate(&b), Ok(()), "{name}, origin moved {by}");
+                check(&b, volume, area);
+            }
+            let b = shift_circles(body.clone());
+            assert_eq!(crate::validate::validate(&b), Ok(()), "{name}, circles from 0.3");
+            check(&b, volume, area);
+        }
+    }
+
+    #[test]
+    fn any_point_will_do() {
+        // Measured from points away from the body's centre, so every
+        // centre term (c − o)·(vector area) is non-zero (from the box
+        // centre, a sphere's centre is o itself and its term vanishes).
+        let rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)];
+        let stadium = extrude(&Profile { outer: path(&rect, &[0.0, 1.0, 0.0, 1.0]), holes: vec![] }, 2.0).unwrap();
+        for (name, body, volume, area) in [
+            ("cube", hand_cube(), 1.0, 6.0),
+            ("tube", hand_tube(1.0, 2.0, 3.0, 0.3), 9.0 * PI, 24.0 * PI),
+            ("cap", hand_sphere_cap(5.0, 3.0), 52.0 * PI / 3.0, 36.0 * PI),
+            ("slice", hand_sphere_slice(5.0, -3.0, 4.0), 434.0 * PI / 3.0, 95.0 * PI),
+            ("octant", hand_sphere_octant(2.0), 4.0 * PI / 3.0, 5.0 * PI),
+            ("stadium", stadium, 2.0 * (40.0 + 4.0 * PI), 2.0 * (40.0 + 4.0 * PI) + 2.0 * (20.0 + 4.0 * PI)),
+        ] {
+            for o in [DVec3::new(3.0, -2.0, 7.0), DVec3::new(-0.4, 11.0, 0.2)] {
+                let m = about(&body, o);
+                assert!(rel_eq(m.volume, volume, FP_REL) && rel_eq(m.area, area, FP_REL), "{name} from {o}: {m:?}");
+            }
         }
     }
 

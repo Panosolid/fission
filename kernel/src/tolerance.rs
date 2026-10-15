@@ -108,12 +108,15 @@ pub fn angle_eq(a: f64, b: f64) -> bool {
     (a - b).abs() <= ANGULAR
 }
 
-/// Relative comparison: |a - b| <= rel * max(|a|, |b|), falling back to
-/// `LINEAR` near zero. Never true unless both are finite (otherwise
-/// ∞ ≤ rel·∞ would let an infinite result pass).
+/// Relative comparison: |a - b| <= rel * max(|a|, |b|). Never true unless
+/// both are finite (otherwise ∞ ≤ rel·∞ would let an infinite result
+/// pass). There is no absolute floor: one (LINEAR² = 1e-12) used to make
+/// every comparison of values below ~1 looser than asked, e.g. 1e-3
+/// relative for a 1 µm cube's volume, and any two values under 1e-12
+/// "equal". Compare against zero with an explicit bound instead.
 pub fn rel_eq(a: f64, b: f64, rel: f64) -> bool {
     let scale = a.abs().max(b.abs());
-    a.is_finite() && b.is_finite() && (a - b).abs() <= (rel * scale).max(LINEAR * LINEAR)
+    a.is_finite() && b.is_finite() && (a - b).abs() <= rel * scale
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +174,8 @@ mod tests {
         }
         // Finite values still compare as before: 1 vs 1 + 1e-13 at FP_REL.
         assert!(rel_eq(1.0, 1.0 + 1e-13, FP_REL) && !rel_eq(1.0, 1.0 + 1e-11, FP_REL));
+        // Tiny values are compared relatively too: 1e-15 vs 2e-15 differ.
+        assert!(!rel_eq(1e-15, 2e-15, FP_REL) && rel_eq(1e-15, 1e-15 * (1.0 + 1e-13), FP_REL));
         assert!(measure_eq(1.0, 1.5, 0.5) && !measure_eq(1.0, 1.6, 0.5));
     }
 

@@ -10,6 +10,30 @@
 //! because the centre sits on the chord's perpendicular bisector at
 //! (c/2)·cot(sweep/2) to the left, and cot(sweep/2) = (1 − β²)/(2β).
 
+//!
+//! Mutation testing (`cargo mutants -f src/ops/profile.rs`) leaves these
+//! survivors, all equivalent (no input can tell them apart):
+//! - `> 0.0` vs `>= 0.0` on an arc's sweep (spans, counter_clockwise): a
+//!   sweep is never 0 (a zero bulge is a line).
+//! - `* s` vs `/ s` where s is ±1: tangents (sweep sign), winding
+//!   (TAU·signum, PI·side), signed_area (TAU·±1).
+//! - `>` vs `>=` (or `<` vs `<=`) at an exact tie that can't be built or
+//!   doesn't change the answer: LINEAR·1e-3 for "the same centre";
+//!   distances > LINEAR from shared corners and roots; a point exactly on
+//!   a circle in winding (it would be on the loop, which callers rule
+//!   out); dot < 0 at a cusp (perpendicular tangents aren't a cusp); the
+//!   turn tests in counter_clockwise (nonzero there, and t_out.x is ±1 at
+//!   a straight-through lowest point).
+//! - Tie-breaks for "lowest point" (`<` vs `<=`, `==`, `>` on x): any
+//!   lowest point of a loop gives the right answer: an end of a level
+//!   bottom edge turns left (counter-clockwise loops), a point inside one
+//!   goes straight on, rightwards.
+//! - `turn != 0` vs `== 0` for two straight pieces at the lowest corner:
+//!   the leftmost lowest corner of a straight-edged loop always turns, so
+//!   it is never 0 there, and the tangent test that follows agrees.
+//! - Any point on a whole circle does as its probe (`c + X·r` vs `c − X·r`
+//!   in critical_points and check_profile), and adding candidates of a
+//!   concentric circle (`&&` vs `||`) can't lower a minimum already found.
 use super::KernelError;
 use crate::tolerance::{segments_touch, side, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
@@ -774,6 +798,12 @@ mod tests {
             // Stadium perimeter: two sides of 10, two half circles of r = 2.
             assert!(near(perimeter(&moved(&slot)), k * (20.0 + 4.0 * PI)), "slot, {k}");
             assert!(near(signed_area(&moved(&loops[1])), -k * k * 4.0 * PI) && near(perimeter(&moved(&loops[1])), k * 4.0 * PI));
+            // Not a half circle (sin φ ≠ 0): the bowed square of
+            // concave_arc_by_hand, 100 − (r²/2)(φ − sin φ), sides 30 + rφ.
+            let (r, phi) = (7.25, 4.0 * 0.4f64.atan());
+            let bowed = pieces(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], &[0.0, 0.0, -0.4, 0.0]);
+            assert!(near(signed_area(&moved(&bowed)), k * k * (100.0 - r * r / 2.0 * (phi - phi.sin()))), "bowed, {k}");
+            assert!(near(perimeter(&moved(&bowed)), k * (30.0 + r * phi)), "bowed, {k}");
         }
     }
 
@@ -1045,6 +1075,17 @@ mod tests {
         // circle of 2 about (1, 0) inside the first (1 < 5 − 2).
         assert_crossing(&arc(0.0, 5.0, -90.0, 90.0), &arc(10.5, 5.0, 90.0, 270.0), &[], false);
         assert_crossing(&arc(0.0, 5.0, -90.0, 90.0), &arc(1.0, 2.0, -90.0, 90.0), &[], false);
+        // Nearly concentric (centres 9e-4 apart, under a micrometre) yet
+        // crossing: radii 5 and 5.0005 meet where x = (8.1e-7 + 25 −
+        // 25.00500025)/1.8e-3 = −2.7774, y = ±√(25 − 2.7774²) = ±4.158
+        // (about ±123.7° on both). Only "the same centre" below 1e-9 may be
+        // treated as concentric.
+        let near = |r: f64, cx: f64, from: f64, to: f64| {
+            let (a, b) = (from.to_radians(), to.to_radians());
+            Seg::Arc { a: p(cx, 0.0) + dir(a) * r, b: p(cx, 0.0) + dir(b) * r, center: p(cx, 0.0), radius: r, sweep: b - a }
+        };
+        assert_crossing(&near(5.0, 0.0, 100.0, 140.0), &near(5.0005, 9e-4, 140.0, 100.0), &[], true);
+        assert_crossing(&near(5.0, 0.0, 100.0, 120.0), &near(5.0005, 9e-4, 140.0, 100.0), &[], false);
         // Touching, exactly (identity placement only: a turned copy can't
         // keep an exact tie). Outside: centres 10 = 5 + 5 apart, meeting at
         // (5, 0); inside: a circle of 3 about (2, 0), 2 = 5 − 3 from the
@@ -1152,6 +1193,16 @@ mod tests {
             ("L", pieces(&[(0.0, 0.0), (10.0, 0.0), (10.0, 3.0), (3.0, 3.0), (3.0, 10.0), (0.0, 10.0)], &[]), vec![
                 ((1.0, 9.0), 1), ((9.0, 1.0), 1), ((5.0, 5.0), 0), ((11.0, 1.0), 0),
             ]),
+            // A 1 × 10 strip whose right side bows in (bulge −0.04): centre
+            // (1, 5) + (−10, 0)·(1 − 0.0016)/(−0.16) = (63.4, 5), r =
+            // 10·1.0016/0.16 = 62.6, so at y = 5 the side is at x = 0.8. Its
+            // circle's bottom is far below the strip: turned so the arc
+            // passes other directions (−130° at a turn of 0.87, 0° at π), a
+            // wrong "does it pass its circle's bottom" test would take that
+            // point as the lowest and read the concave arc's clockwise turn.
+            ("bowed strip", pieces(&[(0.0, 0.0), (1.0, 0.0), (1.0, 10.0), (0.0, 10.0)], &[0.0, -0.04, 0.0, 0.0]), vec![
+                ((0.5, 5.0), 1), ((0.75, 5.0), 1), ((0.85, 5.0), 0), ((1.1, 5.0), 0),
+            ]),
             // A triangle with a straight-through corner (5, 0) on its base.
             ("triangle", pieces(&[(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (5.0, 5.0)], &[]), vec![((5.0, 1.0), 1), ((5.0, -1.0), 0)]),
             ("circle", vec![Seg::Circle { center: p(1.0, 2.0), radius: 3.0, ccw: true }], vec![((1.0, 4.9), 1), ((1.0, 5.1), 0)]),
@@ -1164,8 +1215,10 @@ mod tests {
         // time, and at 0 and π ties along a level edge), scaled and moved:
         // listed as drawn they run counter-clockwise, reversed clockwise.
         for (name, segs, _) in drawn_loops() {
-            for (i, angle) in [0.0, FRAC_PI_2, PI, 0.4, 1.1, 2.6, 3.9, 5.6].into_iter().enumerate() {
-                let (k, shift) = if i % 2 == 0 { (1.0, p(0.0, 0.0)) } else { (3.7, p(-250.5, 1e4)) };
+            for (i, angle) in [0.0, FRAC_PI_2, PI, 0.4, 0.87, 1.1, 2.6, 3.9, 5.6].into_iter().enumerate() {
+                // Small scales too: a radius under 1 makes r and 1/r differ
+                // the other way.
+                let (k, shift) = [(1.0, p(0.0, 0.0)), (3.7, p(-250.5, 1e4)), (0.031, p(7.5, -3.25))][i % 3];
                 let moved: Vec<Seg> = segs.iter().map(|q| placed(q, angle, k, shift)).collect();
                 assert!(counter_clockwise(&moved), "{name} turned {angle}");
                 assert!(!counter_clockwise(&reversed(&moved)), "{name} turned {angle}, reversed");

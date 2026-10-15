@@ -89,12 +89,17 @@ mod tests {
         // edges were the 2000 mm ones (products ~1e6 cancelling to ~20), and
         // gave 0.20000002445. Now it is taken opposite the longest edge.
         use crate::tessellate::{tessellate, TessOptions};
-        use crate::tolerance::{rel_eq, FP_REL};
         let b = make_box(0.01, 0.01, 2000.0).unwrap();
         for (axis, angle) in [(DVec3::new(1.0, -2.0, 3.0), 1.0), (DVec3::new(0.63, -0.37, 0.41), -FRAC_PI_2), (DVec3::X, 0.3)] {
             let r = rotate(&b, DVec3::ZERO, axis, angle).unwrap();
             let m = tessellate(&r, &TessOptions::DISPLAY).unwrap();
-            assert!(rel_eq(m.signed_volume(), 0.2, FP_REL), "{axis} {angle}: {}", m.signed_volume());
+            // The bound this test has always had in effect: rel_eq used to
+            // fall back to an absolute LINEAR² = 1e-12 near zero, and
+            // FP_REL·0.2 is smaller. Measured: 4e-13. (Rounding theory
+            // allows up to area × rounding_slack(2000) ≈ 2.3e-9; widening to
+            // that would loosen the test, so it stays.)
+            let v = m.signed_volume();
+            assert!((v - 0.2).abs() <= crate::tolerance::AREA, "{axis} {angle}: {v}");
             // Area can't be better than the rotated coordinates allow: each
             // is rounded by up to δ = rounding_slack(2000), and moving a
             // vertex by δ changes a triangle's area by at most its
