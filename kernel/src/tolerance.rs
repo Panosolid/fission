@@ -62,12 +62,19 @@ pub const DISPLAY_ANGLE: f64 = 0.2;
 /// At the cap, chord height is r(1 − cos(π/256)) ≈ 7.5e-5·r.
 pub const MAX_SEGMENTS_PER_TURN: f64 = 256.0;
 
+/// When a span is within this fraction of a segment of a whole number of
+/// segments, it rounds down. Rounding noise (e.g. after a rotation) must not
+/// add a sliver segment and make two copies of a shape mesh differently.
+pub const SEGMENT_COUNT_SLACK: f64 = 1e-9;
+
 /// Maximum angle per segment used for mass-property tessellation.
 pub const MASS_PROPS_ANGLE: f64 = 0.02;
 
-/// Values this small are snapped to zero before triangulation (the CDT
-/// rejects subnormal-ish coordinates).
-pub const SNAP_TO_ZERO: f64 = 1e-100;
+/// Values this small are snapped to zero before triangulation. The CDT
+/// rejects non-zero coordinates below 2^-142 ≈ 1.8e-43, and anything this
+/// far below LINEAR is rounding residue anyway. Must stay above the CDT's
+/// floor (checked by a test in tessellate.rs).
+pub const SNAP_TO_ZERO: f64 = 1e-40;
 
 pub fn eq(a: f64, b: f64) -> bool {
     (a - b).abs() <= LINEAR

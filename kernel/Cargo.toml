@@ -28,3 +28,11 @@ proptest-state-machine = "0.9.0"
 # wasm-opt only shrinks the .wasm file; skip it until size matters.
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
+
+# Tests stay debug builds (debug_assertions on, so invalid kernel results
+# panic) but are optimised enough that the stateful harness runs quickly.
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2

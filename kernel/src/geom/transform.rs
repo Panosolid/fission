@@ -22,8 +22,11 @@ impl Transform {
         Self { affine: DAffine3::from_translation(t), scale: 1.0 }
     }
 
+    /// Rotation about `axis` through the origin. Panics if the axis is zero
+    /// or not finite: callers check user input first (see ops::transform).
     pub fn rotation(axis: DVec3, angle: f64) -> Self {
-        Self { affine: DAffine3::from_quat(DQuat::from_axis_angle(axis.normalize(), angle)), scale: 1.0 }
+        let axis = super::unit(axis).expect("rotation axis must be a non-zero finite vector");
+        Self { affine: DAffine3::from_quat(DQuat::from_axis_angle(axis, angle)), scale: 1.0 }
     }
 
     /// Rotation from XYZ Euler angles in degrees (applied X, then Y, then Z).

@@ -17,7 +17,11 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/ops/`: modelling operations (`primitives.rs`: box). Each returns `Result<Body, KernelError>` via `ops::finish`.
   - `src/fixtures.rs`: hand-built test bodies that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
   - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box` → `BodyView`). Keep it thin.
-  - `tests/regressions/`: proptest failure seeds (committed).
+  - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
+  - `tests/stateful.rs`: stateful random-testing harness (see its header). When a kernel operation lands, add it to `Op`, `Scene::transitions`, `apply_op` and `replay_op` the same day.
+  - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
+  - `scripts/overnight.sh`: Tier 3 run.
+- `prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies written by the harness.
 - `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages).
@@ -31,6 +35,8 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - Dev server: `cd app && npm run dev`
 - App unit tests: `cd app && npm test`
 - Browser smoke test: `cd app && npm run build && npm run e2e`
+- Stateful random testing, quick mode (~200 cases, ~30 s, also part of `cargo test`): `cd kernel && cargo test --test stateful -- --nocapture`
+- Overnight mode (100,000 cases × 4 seeds in release, then the OpenCascade oracle): `cd kernel && scripts/overnight.sh [cases] [seeds] [python]` (needs `pip install cadquery-ocp`)
 
 Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't download binaryen. Harmless; re-enable when size matters.
 
@@ -121,7 +127,7 @@ Booleans
 - [ ] 41. Plane–plane and line–plane intersection
 - [ ] 42. Splitting planar faces along intersection lines
 - [ ] 43. Inside/outside classification with exact predicates
-- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison
+- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set
 - [ ] 45. Coplanar faces, touching edges, shared vertices
 - [ ] 46. Plane–cylinder intersection (drill a hole through a box)
 - [ ] 47. Cylinder–cylinder, plane–sphere
@@ -248,6 +254,14 @@ After a run, report briefly: PASS/FAIL per tier; any metric that moved from base
 - Don't rerun passing tests unless the code they cover changed.
 - If a fix fails twice, stop and explain the problem instead of trying random changes.
 
+## Crash-freedom (top priority)
+
+- No kernel operation may panic on any input: bad input returns `KernelError::InvalidInput`, never silently broken geometry.
+- Cost must be bounded for every legal input (e.g. `MAX_SEGMENTS_PER_TURN`).
+- Use `geom::unit` (not `normalize`) on any user-supplied direction: lengths can overflow or underflow.
+- In the harness, a check must verify what an operation did (independent position tracking), not only invariants it preserves.
+
 ## Owner preferences
 - Explain things in chat in plain words, not in Markdown or PDF documents.
+- Call roadmap items "steps", not days.
 - Show evidence, not claims: when asked whether tests work, run them (including a deliberately broken case) and show the output.

@@ -77,7 +77,7 @@ fn segments(curve: &Curve, span: f64, opts: &TessOptions) -> usize {
             // No segment may turn more than a third of a circle, so a full
             // circle always has at least 3 chords and encloses some area.
             let step = opts.max_angle.min(chord_angle).clamp(TAU / tolerance::MAX_SEGMENTS_PER_TURN, MAX_SEGMENT_ANGLE);
-            ((angle / step).ceil().max(1.0) as usize) * opts.refine as usize
+            ((angle / step - tolerance::SEGMENT_COUNT_SLACK).ceil().max(1.0) as usize) * opts.refine as usize
         }
     }
 }
@@ -138,6 +138,44 @@ fn unwrap_loop(pts: &[DVec2]) -> (Vec<DVec2>, f64) {
     (out, winding)
 }
 
+/// The uv points of a loop (same order as `loop_vertices`), with edges that
+/// are constant-parameter lines of the surface given exactly one value for
+/// that parameter. A circle round a cylinder's axis has a single v; a line
+/// along the axis has a single u. Projecting each point instead adds
+/// rounding noise, which far from the origin can exceed the point spacing of
+/// a small circle: the "straight" row zig-zags and the triangulation folds.
+fn snapped_loop_uv(body: &Body, mesh: &Mesh, fi: FaceId, li: usize) -> Vec<DVec2> {
+    let face = &body.faces[fi];
+    let ids = loop_vertices(body, mesh, fi, li);
+    let mut uv: Vec<DVec2> = ids.iter().map(|&i| face.surface.project(mesh.positions[i as usize])).collect();
+    let Surface::Cylinder { origin, axis, .. } = face.surface else { return uv };
+    let n = uv.len();
+    // Coedge k's points sit at positions start_k ..= end_k (start_k is the
+    // previous coedge's last point, so corners get both edges' snaps).
+    let mut end = n - 1;
+    for c in &face.loops[li].coedges {
+        let e = &body.edges[c.edge];
+        let count = mesh.edge_polylines[c.edge].len() - 1;
+        let positions: Vec<usize> = (0..=count).map(|k| (end + k) % n).collect();
+        end = (end + count) % n;
+        match e.curve {
+            Curve::Circle { center, axis: ca, .. } if ca.cross(axis).length() <= tolerance::ANGULAR => {
+                let radial = (center - origin) - axis * (center - origin).dot(axis);
+                if radial.length() <= tolerance::LINEAR {
+                    let v = (center - origin).dot(axis);
+                    positions.iter().for_each(|&k| uv[k].y = v);
+                }
+            }
+            Curve::Line { origin: lo, dir } if dir.cross(axis).length() <= tolerance::ANGULAR => {
+                let u = face.surface.project(lo).x;
+                positions.iter().for_each(|&k| uv[k].x = u);
+            }
+            _ => {}
+        }
+    }
+    uv
+}
+
 /// Loops of mesh vertex ids with their matching uv points.
 type UvRegion = (Vec<Vec<u32>>, Vec<Vec<DVec2>>);
 
@@ -152,7 +190,7 @@ fn periodic_domain(body: &Body, mesh: &Mesh, fi: FaceId, u_scale: f64) -> Result
     let mut windings = Vec::new();
     for li in 0..face.loops.len() {
         let l = loop_vertices(body, mesh, fi, li);
-        let raw: Vec<DVec2> = l.iter().map(|&i| face.surface.project(mesh.positions[i as usize])).collect();
+        let raw = snapped_loop_uv(body, mesh, fi, li);
         let (uv, w) = unwrap_loop(&raw);
         ids.push(l);
         uvs.push(uv);
@@ -320,35 +358,40 @@ pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Ve
             cdt.add_constraint(a, b);
         }
     }
-    let mut out = Vec::new();
+    // Inside/outside by topology, not geometry: walk from the outside of the
+    // triangulation, flipping between outside and inside each time a
+    // boundary (constraint) edge is crossed. Testing triangle centroids
+    // instead misclassifies the slivers that appear when boundary points are
+    // collinear up to rounding.
+    let mut inside: std::collections::HashMap<usize, bool> = std::collections::HashMap::new();
+    let mut queue = std::collections::VecDeque::new();
     for f in cdt.inner_faces() {
-        let [a, b, c] = f.vertices();
-        let pa = a.position();
-        let pb = b.position();
-        let pc = c.position();
-        let centroid = DVec2::new((pa.x + pb.x + pc.x) / 3.0, (pa.y + pb.y + pc.y) / 3.0);
-        if inside(centroid, uv) {
-            out.push([a, b, c].map(|v| handle_to_mesh[v.fix().index()]));
+        for e in f.adjacent_edges() {
+            if e.rev().face().is_outer() && !inside.contains_key(&f.fix().index()) {
+                let parity = e.is_constraint_edge();
+                inside.insert(f.fix().index(), parity);
+                queue.push_back((f, parity));
+            }
         }
     }
-    Ok(out)
-}
-
-/// Even-odd point-in-region test against all loops.
-fn inside(p: DVec2, loops: &[Vec<DVec2>]) -> bool {
-    let mut crossings = 0;
-    for l in loops {
-        for i in 0..l.len() {
-            let (a, b) = (l[i], l[(i + 1) % l.len()]);
-            if (a.y > p.y) != (b.y > p.y) {
-                let x = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x);
-                if x > p.x {
-                    crossings += 1;
+    while let Some((f, parity)) = queue.pop_front() {
+        for e in f.adjacent_edges() {
+            if let Some(next) = e.rev().face().as_inner() {
+                let next_parity = parity ^ e.is_constraint_edge();
+                if let std::collections::hash_map::Entry::Vacant(slot) = inside.entry(next.fix().index()) {
+                    slot.insert(next_parity);
+                    queue.push_back((next, next_parity));
                 }
             }
         }
     }
-    crossings % 2 == 1
+    let mut out = Vec::new();
+    for f in cdt.inner_faces() {
+        if inside.get(&f.fix().index()).copied().unwrap_or(false) {
+            out.push(f.vertices().map(|v| handle_to_mesh[v.fix().index()]));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -479,6 +522,44 @@ mod tests {
     }
 
     #[test]
+    fn rotated_cylinder_has_no_sliver_misclassification() {
+        // Regression (found by the stateful harness, minimal case
+        // tests/regressions/stateful/seed5eed-75f6a478290e8ae7.json): after a
+        // 90° turn about (1,1,0) the top circle's points are no longer exactly
+        // collinear in the side face's uv space, the triangulation makes
+        // slivers along the boundary, and classifying triangles by their
+        // centroid put some on the wrong side: 6 open/flipped mesh edges.
+        let c = crate::fixtures::hand_cylinder(56.5, 5.0);
+        let b = c.transformed(&crate::geom::Transform::rotation(DVec3::new(1.0, 1.0, 0.0), PI / 2.0));
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        assert_eq!(validate(&b), Ok(()));
+    }
+
+    #[test]
+    fn tiny_cylinder_far_away_does_not_fold() {
+        // Regression (stateful harness, seed5eed-1c6487431cbfd1f1.json):
+        // radius 1.1e-6 turned about Y and moved 5e5 out. Projected uv
+        // carried ~1e-10 of noise against a 2e-7 point spacing, so each
+        // circle's "straight" row in uv zig-zagged and the triangulation
+        // made triangles from three points of one row: flat in uv, folded
+        // over the cap in 3D (15 open/flipped mesh edges).
+        let c = crate::fixtures::hand_cylinder(1.1e-6, 2.5);
+        let b = c
+            .transformed(&crate::geom::Transform::rotation(DVec3::Y, 9.911584385521566))
+            .transformed(&crate::geom::Transform::translation(DVec3::new(5e5, 0.0, 0.0)));
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        // The same for a partial cylinder patch, whose straight edges are
+        // constant-u lines.
+        let h = crate::fixtures::hand_half_cylinder(1.1e-6, 2.5)
+            .transformed(&crate::geom::Transform::rotation(DVec3::new(1.0, 2.0, 3.0), 2.0))
+            .transformed(&crate::geom::Transform::translation(DVec3::new(-3e5, 4e5, 1e5)));
+        let m = tessellate(&h, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+    }
+
+    #[test]
     fn half_cylinder_patch_is_an_exact_half_prism() {
         // The curved face is a partial patch (no loop winds round the axis).
         // Its mesh is a prism over the inscribed half polygon: n chords over
@@ -601,6 +682,17 @@ mod tests {
     }
 
     #[test]
+    fn whole_segment_counts_survive_rounding_noise() {
+        // At the cap a hemisphere's quarter meridian spans exactly
+        // (π/2) / (2π/256) = 64 steps. A span a few ulps over must still
+        // give 64, and one a tenth of a step over must give 65.
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1e6 };
+        let step = TAU / 256.0;
+        assert_eq!(segments(&c, 64.0 * step * (1.0 + 4.0 * f64::EPSILON), &TessOptions::DISPLAY), 64);
+        assert_eq!(segments(&c, 64.1 * step, &TessOptions::DISPLAY), 65);
+    }
+
+    #[test]
     fn full_circle_always_has_at_least_three_chords() {
         // Even with no chord or angle limit to speak of (chord 10r), a
         // circle is never drawn with fewer than 3 chords: 2π / (2π/3) = 3.
@@ -664,6 +756,27 @@ mod tests {
         push_oriented(&mut m, &body, 1, [0, 2, 1]);
         assert_eq!(m.triangles, vec![[0, 1, 2], [0, 1, 2]]);
         assert_eq!(m.triangle_face, vec![1, 1]);
+    }
+
+    #[test]
+    fn coordinates_between_the_old_snap_and_the_cdt_floor() {
+        // Regression (stateful harness, tests/regressions/stateful/
+        // seed5eed-df8b7471ccfdeb56.json): a box turned by almost a full
+        // revolution leaves uv residue around 1e-60. That is above the old
+        // 1e-100 snap but below the triangulator's 2^-142 floor, so it was
+        // rejected with TooSmall. Both sides of the floor must work.
+        for tiny in [1e-60, spade::MIN_ALLOWED_VALUE * 0.9, spade::MIN_ALLOWED_VALUE * 1.1, 1e-30] {
+            let (ids, uv) = region(&[vec![(tiny, -tiny), (1.0, tiny), (0.0, 1.0)]]);
+            assert_eq!(triangulate_uv(&ids, &uv).unwrap().len(), 1, "{tiny:e}");
+        }
+    }
+
+    #[test]
+    fn snap_threshold_is_above_the_triangulator_floor() {
+        // Compile-time facts, checked at test time so a change to either
+        // constant can't silently reopen the TooSmall crash.
+        let (snap, floor) = (tolerance::SNAP_TO_ZERO, spade::MIN_ALLOWED_VALUE);
+        assert!(snap > floor && snap < tolerance::LINEAR * 1e-20, "{snap:e} vs floor {floor:e}");
     }
 
     #[test]

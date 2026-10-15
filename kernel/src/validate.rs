@@ -72,6 +72,37 @@ impl fmt::Display for ValidationError {
     }
 }
 
+impl ValidationError {
+    /// Edges this error is about, for highlighting.
+    pub fn edges(&self) -> Vec<EdgeId> {
+        use ValidationError::*;
+        match *self {
+            EdgeUseCount { edge, .. }
+            | EdgeSameDirection { edge }
+            | VertexOffEdge { edge, .. }
+            | EdgeOffFace { edge, .. }
+            | ZeroLengthEdge { edge } => vec![edge],
+            _ => vec![],
+        }
+    }
+
+    /// Faces this error is about, for highlighting.
+    pub fn faces(&self) -> Vec<FaceId> {
+        use ValidationError::*;
+        match *self {
+            DanglingReference { face, .. }
+            | EmptyLoop { face, .. }
+            | LoopNotClosed { face, .. }
+            | FaceShellCount { face, .. }
+            | EdgeOffFace { face, .. }
+            | ZeroAreaFace { face }
+            | FaceOrientation { face }
+            | Tessellation { face, .. } => vec![face],
+            _ => vec![],
+        }
+    }
+}
+
 /// Runs every check and returns all problems found.
 pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
     let mut errs = Vec::new();

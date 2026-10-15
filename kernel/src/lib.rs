@@ -5,6 +5,8 @@
 //! `[x, y, z]` arrays (`Float64Array` in JavaScript).
 
 pub mod geom;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod debug_dump;
 pub mod display;
 pub mod mesh;
 pub mod ops;

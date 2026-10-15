@@ -3,7 +3,6 @@
 
 use crate::topology::FaceId;
 use glam::DVec3;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Mesh {
@@ -38,16 +37,22 @@ impl Mesh {
 
     /// Volume enclosed by the triangles `keep` selects (e.g. one shell's).
     ///
-    /// Each tetrahedron is measured from a point on the mesh rather than the
-    /// world origin: the sum is the same for a closed mesh, but far from the
-    /// origin the origin-based terms are huge and cancel catastrophically.
+    /// Each triangle contributes (a−o)·((b−a)×(c−a))/6, which equals the
+    /// tetrahedron volume (a−o)·((b−o)×(c−o))/6 exactly (the extra terms
+    /// are triple products with a repeated vector). Two choices keep the
+    /// rounding small:
+    /// - `o` is a point on the mesh, not the world origin, so the vectors
+    ///   don't grow with distance from the origin;
+    /// - the cross product uses the triangle's own short edges, so its
+    ///   rounding is relative to the triangle's size, not to |a−o|²
+    ///   (which, across a long part, is enormous).
     pub fn signed_volume_of(&self, keep: impl Fn(usize) -> bool) -> f64 {
         let Some(&o) = self.positions.first() else { return 0.0 };
         (0..self.triangles.len())
             .filter(|&t| keep(t))
             .map(|t| {
-                let [a, b, c] = self.triangle(t).map(|p| p - o);
-                a.dot(b.cross(c))
+                let [a, b, c] = self.triangle(t);
+                (a - o).dot((b - a).cross(c - a))
             })
             .sum::<f64>()
             / 6.0
@@ -65,25 +70,27 @@ impl Mesh {
     /// Watertight and consistently oriented: every directed edge appears
     /// exactly once and its reverse exactly once.
     pub fn check_closed(&self) -> Result<(), Vec<MeshError>> {
-        let mut directed: HashMap<(u32, u32), usize> = HashMap::new();
+        // Each directed edge as (low, high, runs low→high). Sorting groups
+        // the uses of every undirected edge together; a flat sort is much
+        // faster than a hash map on meshes with ~10^5 triangles.
+        let mut uses: Vec<(u32, u32, bool)> = Vec::with_capacity(self.triangles.len() * 3);
         for t in &self.triangles {
             for k in 0..3 {
-                *directed.entry((t[k], t[(k + 1) % 3])).or_default() += 1;
+                let (a, b) = (t[k], t[(k + 1) % 3]);
+                uses.push((a.min(b), a.max(b), a < b));
             }
         }
+        uses.sort_unstable();
         let mut errs = Vec::new();
-        let mut keys: Vec<_> = directed.keys().copied().collect();
-        keys.sort_unstable();
-        for (a, b) in keys {
-            if a > b && directed.contains_key(&(b, a)) {
-                continue; // reported from the other side
-            }
-            let fwd = directed[&(a, b)];
-            let back = directed.get(&(b, a)).copied().unwrap_or(0);
-            if fwd > 1 || back > 1 {
-                errs.push(MeshError::FlippedTriangles { a, b });
-            } else if back == 0 {
-                errs.push(MeshError::OpenEdge { a, b, uses: fwd });
+        for group in uses.chunk_by(|x, y| (x.0, x.1) == (y.0, y.1)) {
+            let (lo, hi) = (group[0].0, group[0].1);
+            let up = group.iter().filter(|u| u.2).count();
+            let down = group.len() - up;
+            if up > 1 || down > 1 {
+                errs.push(MeshError::FlippedTriangles { a: lo, b: hi });
+            } else if up == 0 || down == 0 {
+                let (a, b) = if up == 1 { (lo, hi) } else { (hi, lo) };
+                errs.push(MeshError::OpenEdge { a, b, uses: group.len() });
             }
         }
         if errs.is_empty() { Ok(()) } else { Err(errs) }
