@@ -97,9 +97,9 @@ Kernel foundations
 - [x] 7. Box primitive; viewer shows a kernel B-rep box with edges
 - [x] 8. Kernel runs in a Web Worker from here on; every app→kernel call is an async message
 - [x] 9. Extrude polygon profiles with holes; property test volume = area × distance
-- [ ] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
-- [ ] 11. Sphere primitive; accurate volume and area
-- [ ] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 44)
+- [x] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
+- [x] 11. Sphere primitive; accurate volume and area
+- [ ] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 44). Acceptance case: today a 26.5 × 0.0124 × 27 box placed 37.8 km out and moved back loses 8.7e-8 of its volume to rounding there (OpenCascade oracle, seed 0x5eed, 3000 cases); after this step it must not
 - [ ] 13. STL export + download button + round-trip test
 - [ ] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
 - [ ] 15. Self-intersection check in validate(). Easy for planes/cylinders/spheres; must be extended for general surfaces when NURBS arrive (63–64)
