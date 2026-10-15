@@ -7,6 +7,7 @@
 pub mod geom;
 pub mod tolerance;
 pub mod topology;
+pub mod validate;
 
 use glam::DVec3;
 use wasm_bindgen::prelude::*;

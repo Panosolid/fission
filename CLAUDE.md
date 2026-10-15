@@ -10,7 +10,7 @@ Work one roadmap item per session/day, in order. Each item ends with something v
 Kernel foundations
 - [x] 1. Testing rules in repo; tolerance module with exact predicates
 - [x] 2. Curves and surfaces: line, circle, plane, cylinder, sphere (eval, normal, closest point)
-- [ ] 3. B-rep data structure + validate(): watertight, orientation, Euler–Poincaré
+- [x] 3. B-rep data structure + validate(): watertight, orientation, Euler–Poincaré
 - [ ] 4. validate(): vertex-on-edge, edge-on-face, zero-length edges, zero-area faces
 - [ ] 5. Tessellation of planar faces + watertight mesh check
 - [ ] 6. Tessellation of cylinder and sphere faces
