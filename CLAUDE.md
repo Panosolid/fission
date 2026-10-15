@@ -24,7 +24,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - `prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies written by the harness.
 - `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
-- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages).
+- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing": every 6 hours, 4 jobs × ~5 h of `endless.sh`; results accumulate on the `test-results` branch: `summary.txt`, `log.csv`, `failures/<seed>/`; an issue is opened when something is found).
 
 ## Commands
 

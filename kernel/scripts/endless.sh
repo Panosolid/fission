@@ -11,6 +11,9 @@
 #     python defaults to python3; the oracle runs only if it can `import OCP`
 #     (pip install cadquery-ocp). Without it the harness still runs.
 #
+# FISSION_ENDLESS_MINUTES=<m> stops starting new rounds after m minutes (used
+# by the GitHub workflow, whose jobs have a time limit).
+#
 # Results go to kernel/endless-results/ (gitignored):
 #   log.csv           one line per round: when, seed, cases, harness result,
 #                     bodies compared with OpenCascade, disagreements, seconds
@@ -40,6 +43,8 @@ fi
 echo "Building the harness in release mode (first time takes a few minutes)..."
 cargo test --release --test stateful --no-run -q || { echo "Build failed; fix that first."; exit 1; }
 
+DEADLINE=0
+[ -n "${FISSION_ENDLESS_MINUTES:-}" ] && DEADLINE=$(( $(date +%s) + FISSION_ENDLESS_MINUTES * 60 ))
 rounds=0 fails=0 bodies_total=0 disagree_total=0 folders=0
 stop=0
 # Ctrl+C also reaches the harness and kills it mid-round, so an interrupted
@@ -117,6 +122,7 @@ while [ $stop = 0 ]; do
   echo "$(date '+%Y-%m-%d %H:%M:%S'),$seed,$CASES,$harness,$bodies,$disagreements,$secs" >>"$OUT/log.csv"
   summary
   [ "$MAX_ROUNDS" -gt 0 ] && [ $rounds -ge "$MAX_ROUNDS" ] && stop=1
+  [ $DEADLINE -gt 0 ] && [ "$(date +%s)" -ge $DEADLINE ] && stop=1
   echo "round $rounds: seed $seed, harness $harness, oracle $bodies bodies / $disagreements disagreements, ${secs}s"
 done
 
