@@ -30,12 +30,13 @@
 //! and `apply_op`.
 
 use fission_kernel::debug_dump;
-use fission_kernel::mass::{mass_properties, MassProps};
+use fission_kernel::mass::MassProps;
 use fission_kernel::mesh::Mesh;
 use fission_kernel::ops::extrude::{self, Boundary, Profile};
 use fission_kernel::ops::{primitives, transform, KernelError};
-use fission_kernel::tessellate::{tessellate, TessOptions};
+use fission_kernel::tessellate::TessOptions;
 use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
+use fission_kernel::placed::Placed;
 use fission_kernel::topology::Body;
 use fission_kernel::validate::validate;
 use glam::{DVec2, DVec3};
@@ -782,7 +783,8 @@ impl fmt::Display for Failure {
 /// oracle).
 #[derive(Clone)]
 struct Slot {
-    body: Option<Body>,
+    /// The kernel's body: its local geometry and its placement.
+    body: Option<Placed>,
     shape: Shape,
     /// Placement tracked by the harness itself, independently of the kernel.
     affine: glam::DAffine3,
@@ -801,23 +803,24 @@ struct Slot {
 /// (e.g. a "rotation" that silently did nothing).
 fn check_position(s: &Slot) -> Result<(), String> {
     let Some(b) = &s.body else { return Ok(()) };
-    let now = b.bounds().0.abs().max(b.bounds().1.abs()).max_element() + s.affine.translation.abs().max_element();
+    let now = body_reach(b) + s.affine.translation.abs().max_element();
     // Rounding allowance for the farthest point reached, per step, but
     // never more than the modelling tolerance: inside the supported range
     // that allowance is ~1e-8 per step, so a part off by more than LINEAR
     // is a kernel bug, not rounding.
     let slack = (tolerance::rounding_slack(now.max(s.reach)) * s.steps as f64).min(LINEAR);
-    for (k, (&p0, v)) in s.start.iter().zip(&b.vertices).enumerate() {
+    for (k, &p0) in s.start.iter().enumerate() {
         let expected = s.affine.transform_point3(p0);
-        let off = expected.distance(v.point);
+        let at = b.vertex(k);
+        let off = expected.distance(at);
         if off.is_nan() || off > slack {
-            return Err(format!("vertex {k} is at {} but should be at {expected} ({off:e} off)", v.point));
+            return Err(format!("vertex {k} is at {at} but should be at {expected} ({off:e} off)"));
         }
     }
     Ok(())
 }
 
-fn body_reach(b: &Body) -> f64 {
+fn body_reach(b: &Placed) -> f64 {
     let (lo, hi) = b.bounds();
     lo.abs().max(hi.abs()).max_element()
 }
@@ -851,8 +854,8 @@ struct Measure {
     hi: DVec3,
 }
 
-fn measure(b: &Body) -> Result<Measure, String> {
-    let mesh = tessellate(b, &TessOptions::DISPLAY).map_err(|e| format!("tessellation failed: face {}: {}", e.face, e.message))?;
+fn measure(b: &Placed) -> Result<Measure, String> {
+    let mesh = b.tessellate(&TessOptions::DISPLAY).map_err(|e| format!("tessellation failed: face {}: {}", e.face, e.message))?;
     mesh.check_closed().map_err(|e| format!("mesh not closed: {} problems", e.len()))?;
     let perimeters = (0..mesh.triangles.len())
         .map(|t| {
@@ -866,7 +869,7 @@ fn measure(b: &Body) -> Result<Measure, String> {
     // of the surface: the largest chord sag, doubled for the diagonals of a
     // sphere's quads (see Piece::curve for the sag).
     let (mlo, mhi) = mesh.positions.iter().fold((DVec3::INFINITY, DVec3::NEG_INFINITY), |(l, h), &p| (l.min(p), h.max(p)));
-    let radii = b.edges.iter().filter_map(|e| match e.curve {
+    let radii = b.body.edges.iter().filter_map(|e| match e.curve {
         fission_kernel::geom::Curve::Circle { radius, .. } => Some(radius),
         _ => None,
     });
@@ -878,7 +881,7 @@ fn measure(b: &Body) -> Result<Measure, String> {
     if (mlo - lo).max_element() > sag + slack || (hi - mhi).max_element() > sag + slack {
         return Err(format!("bounds {lo}..{hi} reach more than the chord sag {sag:e} past the mesh {mlo}..{mhi}"));
     }
-    Ok(Measure { exact: mass_properties(b), volume: mesh.signed_volume(), area: mesh.area(), perimeters, lo, hi, mesh })
+    Ok(Measure { exact: b.mass_properties(), volume: mesh.signed_volume(), area: mesh.area(), perimeters, lo, hi, mesh })
 }
 
 fn reach(m: &Measure) -> f64 {
@@ -1177,6 +1180,19 @@ fn classify(r: Result<Result<Body, KernelError>, String>) -> Result<Option<Body>
     }
 }
 
+/// A move or turn: the kernel may refuse it cleanly, and when it does not,
+/// it must have changed only the placement, leaving the geometry (and so
+/// its validity, volume and area) bit for bit as it was.
+fn classify_motion(before: &Placed, r: Result<Result<Placed, KernelError>, String>) -> Result<Option<Placed>, String> {
+    match r {
+        Err(panic) => Err(panic),
+        Ok(Ok(p)) if p.body != before.body => Err("moving or turning changed the body's geometry, not just its placement".into()),
+        Ok(Ok(p)) => Ok(Some(p)),
+        Ok(Err(KernelError::InvalidInput(_))) => Ok(None),
+        Ok(Err(KernelError::InvalidResult(errs))) => Err(format!("InvalidResult: {}", errs[0])),
+    }
+}
+
 /// Applies one operation. With `checks` off it only runs the kernel (used
 /// for the determinism replay, whose results are compared bit for bit).
 fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result<(), Failure> {
@@ -1217,16 +1233,17 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
                 return Ok(());
             };
-            let m0 = measure(&base).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
+            let built = Placed::new(base.clone());
+            let m0 = measure(&built).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             check_primitive(shape, &m0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
 
             // Place it: rotate about the origin, then move.
             let (ax, an, to) = (v3(axis), angle.0, v3(at));
-            let rotated = classify(guarded(|| transform::rotate(&base, DVec3::ZERO, ax, an)))
+            let rotated = classify_motion(&built, guarded(|| transform::rotate(&built, DVec3::ZERO, ax, an)))
                 .map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             let placed = match &rotated {
-                Some(r) => classify(guarded(|| transform::translate(r, to)))
-                    .map_err(|m| fail(m, vec![("rotated".into(), r.clone())]))?,
+                Some(r) => classify_motion(r, guarded(|| transform::translate(r, to)))
+                    .map_err(|m| fail(m, vec![("rotated".into(), r.baked())]))?,
                 None => None,
             };
             // Bad rotation inputs must be refused; modest ones must work.
@@ -1249,31 +1266,31 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 return Err(fail(format!("move by {to} well inside model space was refused"), vec![("primitive".into(), base)]));
             }
             if let Some(p) = &placed {
-                let m1 = measure(p).map_err(|m| fail(m, vec![("placed".into(), p.clone())]))?;
-                check_rigid(&m0, &m1, "placing").map_err(|m| fail(m, vec![("primitive".into(), base.clone()), ("placed".into(), p.clone())]))?;
+                let m1 = measure(p).map_err(|m| fail(m, vec![("placed".into(), p.baked())]))?;
+                check_rigid(&m0, &m1, "placing").map_err(|m| fail(m, vec![("primitive".into(), base.clone()), ("placed".into(), p.baked())]))?;
             }
             record(op, placed.is_some());
             let affine = glam::DAffine3::from_translation(to) * if rot_ok { rotation(ax, an) } else { glam::DAffine3::IDENTITY };
             let mut slot = Slot { body: placed, shape: shape.clone(), affine, start: base.vertices.iter().map(|v| v.point).collect(), steps: 1, reach: 0.0 };
             slot.reach = slot.body.as_ref().map_or(0.0, body_reach).max(to.abs().max_element());
-            check_position(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.clone())).collect()))?;
+            check_position(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.baked())).collect()))?;
             slots.push(slot);
         }
         Op::Move { target, by } => {
             let Some(body) = slots[*target].body.clone() else { return Ok(()) };
             let by = v3(by);
-            let before = measure(&body).map_err(|m| fail(m, vec![("before".into(), body.clone())]))?;
-            let moved = classify(guarded(|| transform::translate(&body, by))).map_err(|m| fail(m, vec![("before".into(), body.clone())]))?;
+            let before = measure(&body).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
+            let moved = classify_motion(&body, guarded(|| transform::translate(&body, by))).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
             if moved.is_some() && !by.is_finite() {
                 return Err(fail("non-finite move accepted".into(), vec![]));
             }
             if by.is_finite() && reach(&before) + by.abs().max_element() < MAX_COORD * 0.5 && moved.is_none() {
-                return Err(fail(format!("move by {by} well inside model space was refused"), vec![("before".into(), body)]));
+                return Err(fail(format!("move by {by} well inside model space was refused"), vec![("before".into(), body.baked())]));
             }
             record(op, moved.is_some());
             if let Some(m) = moved {
-                let after = measure(&m).map_err(|e| fail(e, vec![("after".into(), m.clone())]))?;
-                let both = || vec![("before".into(), body.clone()), ("after".into(), m.clone())];
+                let after = measure(&m).map_err(|e| fail(e, vec![("after".into(), m.baked())]))?;
+                let both = || vec![("before".into(), body.baked()), ("after".into(), m.baked())];
                 check_rigid(&before, &after, "moving").map_err(|e| fail(e, both()))?;
                 // Bounds shift by exactly `by`, up to rounding.
                 let slack = tolerance::rounding_slack(reach(&before).max(reach(&after)));
@@ -1292,25 +1309,26 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
         Op::Rotate { target, pivot, axis, angle } => {
             let Some(body) = slots[*target].body.clone() else { return Ok(()) };
             let (pv, ax, an) = (v3(pivot), v3(axis), angle.0);
-            let before = measure(&body).map_err(|m| fail(m, vec![("before".into(), body.clone())]))?;
-            let turned = classify(guarded(|| transform::rotate(&body, pv, ax, an))).map_err(|m| fail(m, vec![("before".into(), body.clone())]))?;
-            let valid = axis_ok(ax) && an.is_finite() && pv.is_finite();
+            let before = measure(&body).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
+            let turned = classify_motion(&body, guarded(|| transform::rotate(&body, pv, ax, an))).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
+            // Like every point, the pivot must lie in model space.
+            let valid = axis_ok(ax) && an.is_finite() && pv.is_finite() && pv.abs().max_element() <= MAX_COORD;
             if turned.is_some() && !valid {
                 return Err(fail("invalid rotation accepted".into(), vec![]));
             }
             // A rotation keeps every point within reach + 2|pivot| of the origin.
             if valid && 2.0 * (reach(&before) + 2.0 * pv.abs().max_element()) < MAX_COORD && turned.is_none() {
-                return Err(fail("rotation well inside model space was refused".into(), vec![("before".into(), body)]));
+                return Err(fail("rotation well inside model space was refused".into(), vec![("before".into(), body.baked())]));
             }
             record(op, turned.is_some());
             if let Some(t) = turned {
-                let after = measure(&t).map_err(|e| fail(e, vec![("after".into(), t.clone())]))?;
-                let both = || vec![("before".into(), body.clone()), ("after".into(), t.clone())];
+                let after = measure(&t).map_err(|e| fail(e, vec![("after".into(), t.baked())]))?;
+                let both = || vec![("before".into(), body.baked()), ("after".into(), t.baked())];
                 check_rigid(&before, &after, "rotating").map_err(|e| fail(e, both()))?;
                 // Every vertex keeps its distance from the pivot.
                 let slack = tolerance::rounding_slack(reach(&before).max(reach(&after)) + pv.abs().max_element());
-                for (p, q) in body.vertices.iter().zip(&t.vertices) {
-                    let (d0, d1) = (p.point.distance(pv), q.point.distance(pv));
+                for v in 0..body.body.vertices.len() {
+                    let (d0, d1) = (body.vertex(v).distance(pv), t.vertex(v).distance(pv));
                     if (d0 - d1).abs() > slack {
                         return Err(fail(format!("a vertex's distance to the pivot changed {d0} → {d1}"), both()));
                     }
@@ -1338,20 +1356,20 @@ fn replay_op(slots: &mut Vec<Slot>, op: &Op) -> Result<(), Failure> {
             .ok()
             .and_then(quiet);
             let placed = base
-                .and_then(|b| guarded(|| transform::rotate(&b, DVec3::ZERO, v3(axis), angle.0)).ok().and_then(quiet))
-                .and_then(|b| guarded(|| transform::translate(&b, v3(at))).ok().and_then(quiet));
+                .and_then(|b| guarded(|| transform::rotate(&Placed::new(b), DVec3::ZERO, v3(axis), angle.0)).ok().and_then(Result::ok))
+                .and_then(|b| guarded(|| transform::translate(&b, v3(at))).ok().and_then(Result::ok));
             slots.push(Slot { body: placed, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
         }
         Op::Move { target, by } => {
             if let Some(b) = slots[*target].body.clone() {
-                if let Some(m) = guarded(|| transform::translate(&b, v3(by))).ok().and_then(quiet) {
+                if let Some(m) = guarded(|| transform::translate(&b, v3(by))).ok().and_then(Result::ok) {
                     slots[*target].body = Some(m);
                 }
             }
         }
         Op::Rotate { target, pivot, axis, angle } => {
             if let Some(b) = slots[*target].body.clone() {
-                if let Some(t) = guarded(|| transform::rotate(&b, v3(pivot), v3(axis), angle.0)).ok().and_then(quiet) {
+                if let Some(t) = guarded(|| transform::rotate(&b, v3(pivot), v3(axis), angle.0)).ok().and_then(Result::ok) {
                     slots[*target].body = Some(t);
                 }
             }
@@ -1393,7 +1411,7 @@ fn check_chain(ops: &[Op], seen: Option<&AtomicUsize>) -> Result<Vec<Slot>, Fail
                 message: format!("replaying the same chain gave a different result for shape {i}"),
                 bodies: [(&a.body, "first run"), (&b.body, "second run")]
                     .into_iter()
-                    .filter_map(|(b, l)| b.as_ref().map(|b| (l.to_string(), b.clone())))
+                    .filter_map(|(b, l)| b.as_ref().map(|b| (l.to_string(), b.baked())))
                     .collect(),
             });
         }
@@ -1442,11 +1460,12 @@ fn oracle_lines(slots: &[Slot]) -> String {
     for s in slots {
         let Some(b) = &s.body else { continue };
         let Ok(m) = measure(b) else { continue };
+        let world = b.baked();
         // Largest distance of a triangle centroid or edge midpoint from its
         // surface: how far the mesh strays from the exact shape.
         let mut dev = 0.0f64;
         for (t, tri) in m.mesh.triangles.iter().enumerate() {
-            let surf = &b.faces[m.mesh.triangle_face[t]].surface;
+            let surf = &world.faces[m.mesh.triangle_face[t]].surface;
             let p = tri.map(|i| m.mesh.positions[i as usize]);
             dev = dev.max(surf.distance((p[0] + p[1] + p[2]) / 3.0));
             for k in 0..3 {
@@ -1463,7 +1482,7 @@ fn oracle_lines(slots: &[Slot]) -> String {
         let delta = tolerance::rounding_slack(reach(&m)) * s.steps.max(1) as f64;
         let (curve_volume_slack, curve_area_slack) = curve_slacks(&s.shape);
         let line = serde_json::json!({
-            "shape": s.shape, "matrix": matrix, "faces": b.faces.len(),
+            "shape": s.shape, "matrix": matrix, "faces": b.body.faces.len(),
             "volume": m.volume, "area": m.area, "exact_volume": m.exact.volume, "exact_area": m.exact.area, "lo": m.lo.to_array(), "hi": m.hi.to_array(), "max_deviation": dev,
             "volume_slack": m.area * delta, "area_slack": m.perimeters * delta,
             "curve_volume_slack": curve_volume_slack, "curve_area_slack": curve_area_slack,

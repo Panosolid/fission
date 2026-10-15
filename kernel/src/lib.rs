@@ -12,6 +12,7 @@ pub mod debug_dump;
 pub mod display;
 pub mod mesh;
 pub mod ops;
+pub mod placed;
 pub mod tessellate;
 pub mod tolerance;
 pub mod topology;

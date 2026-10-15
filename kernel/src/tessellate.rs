@@ -872,8 +872,11 @@ mod tests {
         // fan of 256, 256·(2·64 − 1) = 32512 triangles; 65024 for the ball.
         let r = 137.52459832834157;
         let ball = crate::ops::primitives::make_sphere(r).unwrap();
-        let ball = crate::ops::transform::rotate(&ball, DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0), -4.71238898038469).unwrap();
-        let far = crate::ops::transform::rotate(&ball, DVec3::new(5e7, 0.0, 0.0), DVec3::new(-9e-10, 0.0, 1.0), 3.8846540033404207).unwrap();
+        // Turned and moved geometry, baked into world coordinates (as two
+        // bodies meeting in a boolean will be).
+        let turned = crate::ops::transform::rotate(&crate::placed::Placed::new(ball), DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0), -4.71238898038469).unwrap();
+        let far = crate::ops::transform::rotate(&turned, DVec3::new(5e7, 0.0, 0.0), DVec3::new(-9e-10, 0.0, 1.0), 3.8846540033404207).unwrap();
+        let (ball, far) = (turned.baked(), far.baked());
         for (name, b) in [("at the origin", &ball), ("100 km out", &far)] {
             let m = tessellate(b, &TessOptions::DISPLAY).unwrap();
             assert_eq!(m.triangles.len(), 65024, "{name}");

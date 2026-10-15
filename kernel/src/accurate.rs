@@ -52,8 +52,10 @@ impl Dd {
         Dd { hi, lo }
     }
 
+    /// The nearest double. Every Dd here is renormalised (hi = fl(hi + lo)),
+    /// so that is hi itself.
     pub fn to_f64(self) -> f64 {
-        self.hi + self.lo
+        self.hi
     }
 }
 
@@ -105,11 +107,6 @@ pub fn triple(u: [Dd; 3], v: [Dd; 3], w: [Dd; 3]) -> Dd {
 /// double-double rounding, ~1e-32 of the largest product.
 pub fn det3(o: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Dd {
     triple(diff3(a, o), diff3(b, o), diff3(c, o))
-}
-
-/// u·k for exact differences u (from `diff3`) and a double vector k.
-pub fn dot(u: [Dd; 3], k: DVec3) -> Dd {
-    u[0] * Dd::new(k.x) + u[1] * Dd::new(k.y) + u[2] * Dd::new(k.z)
 }
 
 #[cfg(test)]
@@ -169,7 +166,19 @@ mod tests {
         // and fl = 0.30000000000000004441; the difference is −2^-55.
         let d = Dd::new(0.1) * Dd::new(3.0) - Dd::new(0.1 * 3.0);
         assert_eq!(d.to_f64(), -(2f64).powi(-55));
-        // dot: (a − o)·k with a − o = (1e16 + 2) − 1e16 exactly = 2 in x.
-        assert_eq!(dot(diff3(DVec3::new(1e16 + 2.0, 0.0, 0.0), DVec3::new(1e16, 0.0, 0.0)), DVec3::new(0.5, 9.0, 9.0)).to_f64(), 1.0);
+        // Both parts carry a remainder: (1e16 + 1) + (1e16 + 1) = 2e16 + 2,
+        // each held as hi = 1e16, lo = 1. Minus 2e16 leaves 2 (doubles: 0).
+        let a = Dd::new(1e16) + Dd::new(1.0);
+        assert_eq!((a.hi, a.lo), (1e16, 1.0));
+        assert_eq!((a + a - Dd::new(2e16)).to_f64(), 2.0);
+        // Remainders of very different sizes: (1e16 + 1) + (1 + 2^-53) −
+        // (1e16 + 2) = 2^-53. Adding the two remainders 1 + 2^-53 rounds to 1
+        // (a tie, to even), and that rounding error, 2^-53, must be kept.
+        let tiny = (2f64).powi(-53);
+        let c = Dd { hi: 1.0, lo: tiny };
+        assert_eq!((a + c - Dd::new(1e16 + 2.0)).to_f64(), tiny);
+        // And the difference of two such: (1e16 + 1) − (1e16 − 1) = 2.
+        let b = Dd::new(1e16) - Dd::new(1.0);
+        assert_eq!((a - b).to_f64(), 2.0);
     }
 }

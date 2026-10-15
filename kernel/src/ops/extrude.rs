@@ -317,6 +317,20 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_may_not_reach_out_of_model_space() {
+        // A circle of r = 5 centred at x = c reaches x = c + 5. Its centre
+        // can be inside ±MAX_COORD while the curve itself pokes out, so the
+        // profile check bounds every piece: c + 5 = MAX_COORD − 0.9 × LINEAR
+        // is accepted, MAX_COORD + 1.1 × LINEAR refused for that reason.
+        let disc = |c: f64| Profile { outer: Boundary::Circle { center: DVec2::new(c, 0.0), radius: 5.0 }, holes: vec![] };
+        assert!(extrude(&disc(MAX_COORD - 5.0 - 0.9 * crate::tolerance::LINEAR), 1.0).is_ok());
+        match extrude(&disc(MAX_COORD - 5.0 + 1.1 * crate::tolerance::LINEAR), 1.0) {
+            Err(KernelError::InvalidInput(m)) => assert!(m.contains("reaches beyond"), "{m}"),
+            other => panic!("expected the model-space refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn far_from_the_origin_keeps_its_volume() {
         // Triangle (0,0),(3,0),(0,4) has area 6; extruded 2 → 12, measured
         // relative to the body's own centre even 50 km out.

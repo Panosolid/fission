@@ -267,7 +267,7 @@ mod tests {
         // centred at the origin, so lo.z = −1e-5. The old formula
         // r·√(1 − cos²θ) rounds cos θ to 1.0 and gives 0.
         let c = crate::ops::primitives::make_cylinder(1e4, 1.0).unwrap();
-        let t = crate::ops::transform::rotate(&c, DVec3::ZERO, DVec3::X, 1e-9).unwrap();
+        let t = crate::ops::transform::rotate(&crate::placed::Placed::new(c), DVec3::ZERO, DVec3::X, 1e-9).unwrap().baked();
         let (lo, _) = t.bounds();
         assert!(eq(lo.z, -1e-5), "lo.z = {:e}", lo.z);
     }
