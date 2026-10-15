@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "test": "npm test --workspaces --if-present",
+    "typecheck": "tsc -p tsconfig.json",
     "build": "npm run build -w @fission/app",
     "e2e": "npm run e2e -w @fission/app"
   }
