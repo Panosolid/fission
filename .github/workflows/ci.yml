@@ -15,6 +15,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: kernel
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: kernel
       - run: cargo test
         working-directory: kernel
       - run: python3 prototypes/vectors.py
@@ -37,4 +39,8 @@ jobs:
       - run: npm ci
         working-directory: app
       - run: npm run build
+        working-directory: app
+      - run: npx playwright install --with-deps chromium
+        working-directory: app
+      - run: npm run e2e
         working-directory: app

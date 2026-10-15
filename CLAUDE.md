@@ -1,9 +1,62 @@
 # Fission
 
-Goal: a free, open-source parametric CAD app that rivals Fusion 360.
-Stack: Rust kernel (`kernel/`) compiled to WebAssembly, TypeScript + Three.js app (`app/`), Python prototypes (`prototypes/`).
+A free, open-source parametric CAD app that rivals Fusion 360. Inspired by what ArtCraft is doing to Adobe: professional tools without the subscription.
 
-Work one roadmap item per session/day, in order. Each item ends with something visible or tested, and is committed and pushed.
+The owner is a student learning the maths behind every algorithm. Correctness beats speed: geometry bugs are silent, so nothing is done until it is checked automatically.
+
+## Repository layout
+
+- `kernel/`: Rust geometry kernel, compiled to WebAssembly with wasm-pack.
+  - `src/tolerance.rs`: every tolerance and the exact predicates. The only place epsilons live.
+  - `src/geom/`: analytic curves (`curve.rs`: Line, Circle), surfaces (`surface.rs`: Plane, Cylinder, Sphere), similarity transforms (`transform.rs`).
+  - `src/topology.rs`: B-rep arenas (Vertex, Edge, Coedge, Loop, Face, Shell, Body) and Euler counts.
+  - `src/validate.rs`: `validate()` and `checked()`. Every operation's result goes through `checked()`.
+  - `src/tessellate.rs`: B-rep → watertight triangle mesh (constrained Delaunay in uv space via `spade`).
+  - `src/mesh.rs`: triangle mesh, volume, area, closed-mesh check.
+  - `src/display.rs`: mesh shaped for the viewer (per-face normals, edge lines).
+  - `src/ops/`: modelling operations (`primitives.rs`: box). Each returns `Result<Body, KernelError>` via `ops::finish`.
+  - `src/fixtures.rs`: hand-built test bodies that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
+  - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box` → `BodyView`). Keep it thin.
+  - `tests/regressions/`: proptest failure seeds (committed).
+- `app/`: Vite + TypeScript + Three.js web app (`src/main.ts` UI, `src/viewer.ts` Three.js viewport, `src/kernel-types.ts` shapes of kernel results, `e2e/smoke.mjs` browser test). `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
+- `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
+- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages).
+
+## Commands
+
+- Tier 1 (after every change): `cd kernel && cargo clippy --all-targets && cargo test <module>`
+- All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored)
+- Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
+- Build the app: `cd app && npm install && npm run build`
+- Dev server: `cd app && npm run dev`
+- Browser smoke test: `cd app && npm run e2e`
+
+Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't download binaryen. Harmless; re-enable when size matters.
+
+## Kernel conventions
+
+- Units are millimetres. Z is up (the viewer sets `Object3D.DEFAULT_UP` to +Z).
+- Model sizes must be within (LINEAR, MAX_SIZE]; `ops::check_length` enforces this for every length input.
+- A face's outward normal is its surface's natural normal (∂u × ∂v), flipped when `sense` is false. Cylinder and sphere natural normals point away from the axis/centre.
+- Loops run counter-clockwise seen from outside, so the face interior is on the left of every coedge (normal × tangent points into the face). The first loop of a face is the outer one when it has one.
+- Every edge is used by exactly two coedges, once in each direction. Edges run start → end over t0 < t1; full circles are closed edges with start == end and no seam vertex. Cylinder side faces have no seam edge; they have two loops.
+- Euler–Poincaré per shell: V − E + F − R = 2(1 − genus), where R counts inner loops.
+- Tessellation: edges are discretised once and shared by both faces, so meshes are watertight by construction. `TessOptions::refine` multiplies every curved segment count (used for Richardson extrapolation of mass properties).
+- Kernel operations never panic on bad user input; they return `KernelError::InvalidInput`. Invalid results panic in debug/test builds (they are bugs) and return `KernelError::InvalidResult` in release.
+
+## Definition of done for a roadmap item
+
+1. Tier 1 is clean: clippy has no warnings, and the tests for the changed modules pass.
+2. Tier 2 property tests for the feature exist and pass, with nasty cases included.
+3. The test quality rules below are met (hand-worked test with the working shown, 0.9×/1.1× boundary tests).
+4. If the feature is visible, it has been checked in a real browser (the e2e smoke test, or a Playwright screenshot).
+5. The roadmap item is ticked here, then committed and pushed with a message saying what was done and how it was verified.
+
+## Git workflow
+
+- Develop on the branch named by the session; commit each roadmap item separately and push it.
+- Commit messages: a first line naming the day and feature (e.g. "Day 7: box primitive in the viewer"), then what changed and how it was verified.
+- Never commit generated files (`app/src/kernel/`, `kernel/target/`, `app/dist/`).
 
 ## Roadmap (mark items [x] when done)
 
@@ -14,7 +67,7 @@ Kernel foundations
 - [x] 4. validate(): vertex-on-edge, edge-on-face, zero-length edges, zero-area faces
 - [x] 5. Tessellation of planar faces + watertight mesh check
 - [x] 6. Tessellation of cylinder and sphere faces
-- [ ] 7. Box primitive; viewer shows a kernel B-rep box with edges
+- [x] 7. Box primitive; viewer shows a kernel B-rep box with edges
 - [ ] 8. Kernel runs in a Web Worker from here on; every app→kernel call is an async message
 - [ ] 9. Extrude polygon profiles with holes; property test volume = area × distance
 - [ ] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
@@ -161,6 +214,13 @@ Include nasty cases on purpose: coplanar faces, touching edges, shared vertices,
 - On failure, save the seed and the minimal failing input in `tests/regressions/` so it replays exactly.
 - When proptest shrinks a failure to a minimal case, keep that case as a permanent test.
 
+### Test quality rules for every new module
+- Every new module needs at least one hand-worked test: an expected value worked out independently of the code (by hand, from geometry or algebra), with the working shown in a comment next to the assertion. Example: "closest point on a unit circle to (2,0): it lies on the ray from the centre through the point at distance r, so (1,0)".
+- Every new module that compares against a tolerance needs boundary tests at 0.9× (must pass) and 1.1× (must fail) of that tolerance.
+- Self-consistency tests (round trips like project(eval(uv)) == uv, finite differences vs analytic derivatives, two code paths agreeing) are allowed and useful, but don't count towards either requirement. They catch inconsistency, not a shared mistake.
+- A test must be able to fail. When adding a check to validate(), also add a test that breaks a valid body in exactly that way and asserts the specific error.
+- Mutation testing (`cargo mutants`) is used to find code that no test notices being broken. Surviving mutants in kernel code get a test, or a written reason why the mutant is equivalent.
+
 ### Every bug gets a regression test
 Reproduce it as a failing test first (shape files or timeline JSON), then fix it, then keep the test forever. Never fix a geometry bug without a test that would have caught it.
 
@@ -182,4 +242,5 @@ After a run, report briefly: PASS/FAIL per tier; any metric that moved from base
 - If a fix fails twice, stop and explain the problem instead of trying random changes.
 
 ## Owner preferences
-Explain things in chat in plain words, not in Markdown or PDF documents.
+- Explain things in chat in plain words, not in Markdown or PDF documents.
+- Show evidence, not claims: when asked whether tests work, run them (including a deliberately broken case) and show the output.

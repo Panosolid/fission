@@ -1,47 +1,41 @@
-import init, { add_vectors, cross, dot, kernel_version } from "./kernel/fission_kernel.js";
+import init, { kernel_version, make_box } from "./kernel/fission_kernel.js";
+import type { BodyView } from "./kernel-types";
 import { Viewer } from "./viewer";
-
-type Vec = [number, number, number];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-function parseVec(text: string): Vec {
-  const parts = text.split(",").map((s) => Number(s.trim()));
-  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
-    throw new Error(`"${text}" is not a vector like 1, 2, 3`);
-  }
-  return parts as Vec;
-}
-
-const fmt = (v: ArrayLike<number>) =>
-  `(${Array.from(v, (n) => +n.toFixed(4)).join(", ")})`;
+const fmt = (n: number) => (+n.toPrecision(10)).toLocaleString("en-GB", { maximumFractionDigits: 6 });
 
 async function start() {
   await init();
   $("version").textContent = `kernel v${kernel_version()}`;
 
   const viewer = new Viewer($("viewport"));
-  const inputA = $<HTMLInputElement>("a");
-  const inputB = $<HTMLInputElement>("b");
+  const inputs = ["width", "depth", "height"].map((id) => $<HTMLInputElement>(id));
+  let first = true;
 
   function update() {
+    const [w, d, h] = inputs.map((i) => Number(i.value));
     try {
-      const a = parseVec(inputA.value);
-      const b = parseVec(inputB.value);
-      const sum = add_vectors(Float64Array.from(a), Float64Array.from(b));
-      const crossed = cross(Float64Array.from(a), Float64Array.from(b));
-      $("sum").textContent = fmt(sum);
-      $("cross").textContent = fmt(crossed);
-      $("dot").textContent = String(+dot(Float64Array.from(a), Float64Array.from(b)).toFixed(4));
-      $("error").textContent = "";
-      viewer.showVectors(a, b, Array.from(sum) as Vec, Array.from(crossed) as Vec);
+      const view = make_box(w, d, h) as BodyView;
+      viewer.showBody(view.mesh);
+      if (first) {
+        viewer.fit();
+        first = false;
+      }
+      $("volume").textContent = `${fmt(view.volume)} mm³`;
+      $("area").textContent = `${fmt(view.area)} mm²`;
+      $("topology").textContent = `${view.vertices} V · ${view.edges} E · ${view.faces} F`;
+      const status = $("status");
+      status.textContent = view.errors.length === 0 ? "valid" : `${view.errors.length} problem(s)`;
+      status.className = view.errors.length === 0 ? "ok" : "bad";
+      $("error").textContent = view.errors.join("\n");
     } catch (e) {
       $("error").textContent = e instanceof Error ? e.message : String(e);
     }
   }
 
-  inputA.addEventListener("input", update);
-  inputB.addEventListener("input", update);
+  inputs.forEach((i) => i.addEventListener("input", update));
   update();
 }
 

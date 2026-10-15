@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn natural_normal_matches_du_cross_dv() {
         // Finite differences of eval, compared with the analytic normal.
-        let h = 1e-6;
+        let h = 1e-6; // finite-difference step, not a comparison tolerance
         for s in surfaces() {
             let uv = DVec2::new(1.2, 0.4);
             let du = (s.eval(uv + DVec2::X * h) - s.eval(uv - DVec2::X * h)) / (2.0 * h);

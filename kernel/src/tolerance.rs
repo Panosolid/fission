@@ -19,6 +19,14 @@ pub const AREA: f64 = LINEAR * LINEAR;
 /// See `mesh::mass_properties` for why tessellation-based values are this good.
 pub const MASS_PROPS_REL: f64 = 1e-6;
 
+/// Allowed relative error for results that are exact in real arithmetic
+/// and only differ by floating-point rounding (e.g. the volume of a box).
+pub const FP_REL: f64 = 1e-12;
+
+/// Largest model dimension accepted (1 km). Beyond this, LINEAR is too
+/// close to f64 rounding at the coordinates involved.
+pub const MAX_SIZE: f64 = 1e6;
+
 /// Allowed relative error when comparing results that went through f32
 /// (STL files store single-precision floats).
 pub const F32_REL: f64 = 1e-6;

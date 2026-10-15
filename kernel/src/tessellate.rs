@@ -436,7 +436,7 @@ mod tests {
             assert_eq!(m.check_closed(), Ok(()), "r={r} h={h}");
             let n = m.edge_polylines[0].len() - 1;
             let polygon = 0.5 * n as f64 * r * r * (TAU / n as f64).sin();
-            assert!(crate::tolerance::rel_eq(m.signed_volume(), polygon * h, 1e-12), "r={r} h={h}");
+            assert!(crate::tolerance::rel_eq(m.signed_volume(), polygon * h, crate::tolerance::FP_REL), "r={r} h={h}");
             let (on, mid) = surface_error(&body, &m);
             assert!(on <= crate::tolerance::LINEAR);
             assert!(mid <= opts.chord, "chord error {mid} > {}", opts.chord);
