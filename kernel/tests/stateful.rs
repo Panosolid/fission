@@ -126,8 +126,11 @@ struct Scene {
     coords: Vec<f64>,
 }
 
-fn remember(pool: &mut Vec<f64>, v: f64) {
-    if v.is_finite() && !pool.contains(&v) {
+/// Adds `v` to a reuse pool if it is within `limit` (lengths: MIN_FEATURE
+/// up to MAX_SIZE; coordinates: up to MAX_COORD either way). Extreme values
+/// from the 5% stay out, so they can't leak into in-range operations.
+fn remember(pool: &mut Vec<f64>, v: f64, limit: (f64, f64)) {
+    if (limit.0..=limit.1).contains(&v) && !pool.contains(&v) {
         pool.push(v);
         if pool.len() > POOL {
             pool.remove(0);
@@ -135,8 +138,18 @@ fn remember(pool: &mut Vec<f64>, v: f64) {
     }
 }
 
-const HOSTILE: [f64; 10] =
-    [0.0, -0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, 5e-324, LINEAR, MAX_SIZE * 1.1];
+const LENGTHS: (f64, f64) = (MIN_FEATURE, MAX_SIZE);
+const COORDS: (f64, f64) = (-MAX_COORD, MAX_COORD);
+
+/// Values outside the supported range, used only by `extreme`.
+const HOSTILE: [f64; 14] = [
+    0.0, -0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, -1e18, 5e-324, LINEAR,
+    MIN_FEATURE * 0.9, MAX_SIZE * 1.1, MAX_COORD * 1.1, -MAX_COORD * 1.1,
+];
+
+/// Share of operations (out of 100) that get one extreme value; the rest
+/// stay inside the supported range.
+const EXTREME_PERCENT: u32 = 5;
 
 /// A near-miss: `v` nudged by 0.9× or 1.1× the linear tolerance either way.
 fn near_miss(v: impl Strategy<Value = f64>) -> impl Strategy<Value = f64> {
@@ -147,33 +160,38 @@ fn from_pool(pool: &[f64], fallback: BoxedStrategy<f64>) -> BoxedStrategy<f64> {
     if pool.is_empty() { fallback } else { prop::sample::select(pool.to_vec()).boxed() }
 }
 
-/// A size: ~70% coincident (0.5 grid, reused, near-miss), ~30% random.
+/// An in-range size: ~70% coincident (0.5 grid, reused, near-miss), the
+/// rest random across the whole range (log-uniform 1 µm to 10 km) or at
+/// its edges.
 fn length(scene: &Scene) -> BoxedStrategy<f64> {
     let grid = (1..=200i32).prop_map(|k| k as f64 * 0.5).boxed();
     let reuse = from_pool(&scene.lengths, grid.clone());
+    let (lo, hi) = (MIN_FEATURE.log10(), MAX_SIZE.log10());
     prop_oneof![
-        35 => grid.clone(),
-        20 => reuse.clone(),
+        37 => grid.clone(),
+        21 => reuse.clone(),
         12 => near_miss(reuse),
-        3 => prop::sample::select(vec![MIN_FEATURE * 0.9, MIN_FEATURE * 1.1, MAX_SIZE * (1.0 - 1e-12), MAX_SIZE]),
-        25 => (-3.0f64..4.0).prop_map(|e| 10f64.powf(e)),
-        5 => prop::sample::select(HOSTILE.to_vec()),
+        3 => prop::sample::select(vec![MIN_FEATURE, MIN_FEATURE * 1.1, MAX_SIZE * (1.0 - 1e-12), MAX_SIZE]),
+        27 => (lo..hi).prop_map(|e| 10f64.powf(e).clamp(MIN_FEATURE, MAX_SIZE)),
     ]
     .boxed()
 }
 
-/// A coordinate: same mix, signed, sometimes near the edge of model space.
+/// An in-range coordinate: same mix, signed; mostly within a metre, some
+/// anywhere out to ±100 km, a few at the edge of model space.
 fn coord(scene: &Scene) -> BoxedStrategy<f64> {
     let grid = (-40..=40i32).prop_map(|k| k as f64 * 0.5).boxed();
     let reuse = from_pool(&scene.coords, grid.clone());
     let flip = (reuse.clone(), any::<bool>()).prop_map(|(v, neg)| if neg { -v } else { v });
+    let far = (MIN_FEATURE.log10()..MAX_COORD.log10(), any::<bool>())
+        .prop_map(|(e, neg)| 10f64.powf(e).min(MAX_COORD) * if neg { -1.0 } else { 1.0 });
     prop_oneof![
-        35 => grid,
-        20 => flip,
+        37 => grid,
+        21 => flip,
         12 => near_miss(reuse),
         3 => prop::sample::select(vec![MAX_COORD - 1.0, -(MAX_COORD - 1.0), MAX_COORD * 0.5]),
-        25 => -1e3f64..1e3,
-        5 => prop::sample::select(HOSTILE.to_vec()),
+        20 => -1e3f64..1e3,
+        7 => far,
     ]
     .boxed()
 }
@@ -191,11 +209,12 @@ fn axis() -> impl Strategy<Value = V3> {
         ])
         .prop_map(|a| a.map(Num)),
         10 => prop::sample::select(vec![tilted(0.9), tilted(1.1), tilted(-0.9), tilted(-1.1)]),
-        45 => (-1.0f64..1.0, -1.0f64..1.0, -1.0f64..1.0).prop_map(|(x, y, z)| [Num(x), Num(y), Num(z)]),
-        5 => prop::sample::select(vec![[0.0; 3], [f64::NAN, 0.0, 1.0], [0.0, ANGULAR * 0.5, 0.0], [1e300, 1e300, 0.0]])
-            .prop_map(|a| a.map(Num)),
+        50 => (-1.0f64..1.0, -1.0f64..1.0, -1.0f64..1.0).prop_map(|(x, y, z)| [Num(x), Num(y), Num(z)]),
     ]
 }
+
+/// Axes `extreme` swaps in whole: zero, tiny, overflowing, NaN.
+const HOSTILE_AXES: [[f64; 3]; 4] = [[0.0; 3], [f64::NAN, 0.0, 1.0], [0.0, ANGULAR * 0.5, 0.0], [1e300, 1e300, 0.0]];
 
 fn angle() -> impl Strategy<Value = Num> {
     prop_oneof![
@@ -203,10 +222,59 @@ fn angle() -> impl Strategy<Value = Num> {
         15 => (-8..=8i32).prop_map(|k| k as f64 * FRAC_PI_4),
         10 => ((-4..=4i32), prop::sample::select(vec![-1.1, -0.9, 0.9, 1.1]))
             .prop_map(|(k, f)| k as f64 * FRAC_PI_2 + f * ANGULAR),
-        30 => -10.0f64..10.0,
-        5 => prop::sample::select(vec![f64::NAN, f64::INFINITY, 1e300, -1e18]),
+        35 => -10.0f64..10.0,
     ]
     .prop_map(Num)
+}
+
+/// An operation whose every input is inside the supported range.
+fn in_range_op(s: &Scene) -> BoxedStrategy<Op> {
+    let add = (shape(s), axis(), angle(), vec3(coord(s)))
+        .prop_map(|(shape, axis, angle, at)| Op::Add { shape, axis, angle, at })
+        .boxed();
+    if s.slots == 0 {
+        return add;
+    }
+    let target = 0..s.slots;
+    let mv = (target.clone(), vec3(coord(s))).prop_map(|(target, by)| Op::Move { target, by });
+    let rot = (target, vec3(coord(s)), axis(), angle())
+        .prop_map(|(target, pivot, axis, angle)| Op::Rotate { target, pivot, axis, angle });
+    prop_oneof![3 => add, 3 => mv, 3 => rot].boxed()
+}
+
+/// The same operation with one input pushed outside the supported range:
+/// one number replaced by a hostile value, or (half the time, for
+/// operations with an axis) the whole axis replaced by a hostile one.
+fn extreme(mut op: Op, pick: prop::sample::Index, number: f64, axis: [f64; 3], swap_axis: bool) -> Op {
+    if swap_axis {
+        if let Op::Add { axis: a, .. } | Op::Rotate { axis: a, .. } = &mut op {
+            *a = axis.map(Num);
+            return op;
+        }
+    }
+    let mut nums: Vec<&mut Num> = match &mut op {
+        Op::Add { shape, axis, angle, at } => {
+            let mut v: Vec<&mut Num> = match shape {
+                Shape::Box { w, d, h } => vec![w, d, h],
+                Shape::Cylinder { r, h } => vec![r, h],
+                Shape::Sphere { r } => vec![r],
+            };
+            v.extend(axis.iter_mut());
+            v.push(angle);
+            v.extend(at.iter_mut());
+            v
+        }
+        Op::Move { by, .. } => by.iter_mut().collect(),
+        Op::Rotate { pivot, axis, angle, .. } => {
+            let mut v: Vec<&mut Num> = pivot.iter_mut().collect();
+            v.extend(axis.iter_mut());
+            v.push(angle);
+            v
+        }
+    };
+    let i = pick.index(nums.len());
+    *nums[i] = Num(number);
+    op
 }
 
 fn shape(scene: &Scene) -> impl Strategy<Value = Shape> {
@@ -227,17 +295,12 @@ impl ReferenceStateMachine for Scene {
     }
 
     fn transitions(s: &Scene) -> BoxedStrategy<Op> {
-        let add = (shape(s), axis(), angle(), vec3(coord(s)))
-            .prop_map(|(shape, axis, angle, at)| Op::Add { shape, axis, angle, at })
-            .boxed();
-        if s.slots == 0 {
-            return add;
-        }
-        let target = 0..s.slots;
-        let mv = (target.clone(), vec3(coord(s))).prop_map(|(target, by)| Op::Move { target, by });
-        let rot = (target, vec3(coord(s)), axis(), angle())
-            .prop_map(|(target, pivot, axis, angle)| Op::Rotate { target, pivot, axis, angle });
-        prop_oneof![3 => add, 3 => mv, 3 => rot].boxed()
+        let normal = in_range_op(s);
+        let hostile_number = prop::sample::select(HOSTILE.to_vec());
+        let hostile_axis = prop::sample::select(HOSTILE_AXES.to_vec());
+        let extreme = (normal.clone(), any::<prop::sample::Index>(), hostile_number, hostile_axis, any::<bool>())
+            .prop_map(|(op, pick, number, axis, swap_axis)| extreme(op, pick, number, axis, swap_axis));
+        prop_oneof![100 - EXTREME_PERCENT => normal, EXTREME_PERCENT => extreme].boxed()
     }
 
     fn apply(mut s: Scene, op: &Op) -> Scene {
@@ -250,19 +313,19 @@ impl ReferenceStateMachine for Scene {
                     Shape::Sphere { r } => vec![r.0, 2.0 * r.0],
                 };
                 for &v in &sizes {
-                    remember(&mut s.lengths, v);
+                    remember(&mut s.lengths, v, LENGTHS);
                 }
                 // Positions plus sizes give touching faces and shared edges.
                 for (k, p) in at.iter().enumerate() {
-                    remember(&mut s.coords, p.0);
+                    remember(&mut s.coords, p.0, COORDS);
                     if let Some(&size) = sizes.get(k) {
-                        remember(&mut s.coords, p.0 + size);
-                        remember(&mut s.coords, p.0 - size);
+                        remember(&mut s.coords, p.0 + size, COORDS);
+                        remember(&mut s.coords, p.0 - size, COORDS);
                     }
                 }
             }
-            Op::Move { by, .. } => by.iter().for_each(|v| remember(&mut s.coords, v.0)),
-            Op::Rotate { pivot, .. } => pivot.iter().for_each(|v| remember(&mut s.coords, v.0)),
+            Op::Move { by, .. } => by.iter().for_each(|v| remember(&mut s.coords, v.0, COORDS)),
+            Op::Rotate { pivot, .. } => pivot.iter().for_each(|v| remember(&mut s.coords, v.0, COORDS)),
         }
         s
     }
@@ -444,10 +507,38 @@ fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
     Ok(())
 }
 
-fn record(kind: &'static str, ok: bool) {
+fn record(op: &Op, ok: bool) {
     let mut s = STATS.lock().unwrap_or_else(|e| e.into_inner());
-    let t = s.entry(kind).or_default();
-    if ok { t.ok += 1 } else { t.clean_error += 1 }
+    let kinds: &[&'static str] = if is_extreme(op) { &[op.kind(), EXTREME_ROW] } else { &[op.kind()] };
+    for &kind in kinds {
+        let t = s.entry(kind).or_default();
+        if ok { t.ok += 1 } else { t.clean_error += 1 }
+    }
+}
+
+/// Report row counting operations with an input outside the supported range.
+const EXTREME_ROW: &str = "~extreme input";
+
+/// Whether any input is outside the supported range (non-finite, a size
+/// outside [MIN_FEATURE, MAX_SIZE], a coordinate beyond MAX_COORD, a
+/// degenerate or overflowing axis, an angle beyond ±1000 rad).
+fn is_extreme(op: &Op) -> bool {
+    let len_bad = |v: &Num| !(LENGTHS.0..=LENGTHS.1).contains(&v.0);
+    let coord_bad = |v: &Num| !(COORDS.0..=COORDS.1).contains(&v.0);
+    let axis_bad = |a: &V3| !axis_ok(v3(a)) || a.iter().any(|c| c.0.abs() > 1e3);
+    let angle_bad = |a: &Num| !(-1e3..=1e3).contains(&a.0);
+    match op {
+        Op::Add { shape, axis, angle, at } => {
+            let sizes_bad = match shape {
+                Shape::Box { w, d, h } => [w, d, h].into_iter().any(len_bad),
+                Shape::Cylinder { r, h } => [r, h].into_iter().any(len_bad),
+                Shape::Sphere { r } => len_bad(r),
+            };
+            sizes_bad || axis_bad(axis) || angle_bad(angle) || at.iter().any(coord_bad)
+        }
+        Op::Move { by, .. } => by.iter().any(coord_bad),
+        Op::Rotate { pivot, axis, angle, .. } => pivot.iter().any(coord_bad) || axis_bad(axis) || angle_bad(angle),
+    }
 }
 
 /// Classifies a kernel result: Ok(Some(body)) on success, Ok(None) on a
@@ -488,7 +579,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 return Err(fail(format!("sizes valid = {sizes_ok} but kernel {}", if base.is_some() { "accepted" } else { "rejected" }), vec![]));
             }
             let Some(base) = base else {
-                record(op.kind(), false);
+                record(op, false);
                 slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0 });
                 return Ok(());
             };
@@ -527,7 +618,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 let m1 = measure(p).map_err(|m| fail(m, vec![("placed".into(), p.clone())]))?;
                 check_rigid(&m0, &m1, "placing").map_err(|m| fail(m, vec![("primitive".into(), base.clone()), ("placed".into(), p.clone())]))?;
             }
-            record(op.kind(), placed.is_some());
+            record(op, placed.is_some());
             let affine = glam::DAffine3::from_translation(to) * if rot_ok { rotation(ax, an) } else { glam::DAffine3::IDENTITY };
             let slot = Slot { body: placed, shape: shape.clone(), affine, start: base.vertices.iter().map(|v| v.point).collect(), steps: 1 };
             check_position(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.clone())).collect()))?;
@@ -544,7 +635,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             if by.is_finite() && reach(&before) + by.abs().max_element() < MAX_COORD * 0.5 && moved.is_none() {
                 return Err(fail(format!("move by {by} well inside model space was refused"), vec![("before".into(), body)]));
             }
-            record(op.kind(), moved.is_some());
+            record(op, moved.is_some());
             if let Some(m) = moved {
                 let after = measure(&m).map_err(|e| fail(e, vec![("after".into(), m.clone())]))?;
                 let both = || vec![("before".into(), body.clone()), ("after".into(), m.clone())];
@@ -575,7 +666,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             if valid && 2.0 * (reach(&before) + 2.0 * pv.abs().max_element()) < MAX_COORD && turned.is_none() {
                 return Err(fail("rotation well inside model space was refused".into(), vec![("before".into(), body)]));
             }
-            record(op.kind(), turned.is_some());
+            record(op, turned.is_some());
             if let Some(t) = turned {
                 let after = measure(&t).map_err(|e| fail(e, vec![("after".into(), t.clone())]))?;
                 let both = || vec![("before".into(), body.clone()), ("after".into(), t.clone())];

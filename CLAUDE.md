@@ -35,7 +35,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - Dev server: `cd app && npm run dev`
 - App unit tests: `cd app && npm test`
 - Browser smoke test: `cd app && npm run build && npm run e2e`
-- Stateful random testing, quick mode (~200 cases, ~30 s, also part of `cargo test`): `cd kernel && cargo test --test stateful -- --nocapture`
+- Stateful random testing, quick mode (~200 cases, ~50 s, also part of `cargo test`; ~95% of operations in range, ~5% with one extreme input, counted in the report's "~extreme input" row): `cd kernel && cargo test --test stateful -- --nocapture`
 - Overnight mode (100,000 cases × 4 seeds in release, then the OpenCascade oracle): `cd kernel && scripts/overnight.sh [cases] [seeds] [python]` (needs `pip install cadquery-ocp`)
 
 Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't download binaryen. Harmless; re-enable when size matters.
