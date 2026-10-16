@@ -16,6 +16,8 @@ export type { DataReader, LengthUnit, Project, WorkspaceId } from "./model/proje
 export { emptyProject, FORMAT_VERSION, projectFromJson, projectToJson, readProject } from "./model/project.ts";
 export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup } from "./model/links.ts";
 export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
+export type { Answer, EditRoute, LinkedValue, OwnershipChange, ProposedEdit, Transfer } from "./model/ownership.ts";
+export { TRANSFER_OWNERSHIP, acceptProposal, linkOwner, linkedValue, ownedBy, proposeEdit, rejectProposal, setOwnedValue, transferOwnership } from "./model/ownership.ts";
 export type { BodyReference, EdgeReference, FaceReference, GeometryReference, Resolution, StableId } from "./model/references.ts";
 export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
@@ -30,7 +32,7 @@ export { DependencyGraph } from "./model/graph.ts";
 export type { Command, CommandSpec, ParamSpec, Parsed } from "./model/commands.ts";
 export { commandListSchema, commandSchema, parseCommand, parseCommandList } from "./model/commands.ts";
 export type { Feature, Intent, Origin, ParameterValue, Provenance, Timeline } from "./model/feature.ts";
-export { describeProvenance } from "./model/feature.ts";
+export { describeProvenance, workspaceName } from "./model/feature.ts";
 export { EXACTNESS, isExact, RepresentationRegistry, XY_PLANE } from "./model/representation.ts";
 export type { Action, ActionOutcome, ActionTarget, Selected, SelectionKind } from "./model/actions.ts";
 export { ActionRegistry } from "./model/actions.ts";
