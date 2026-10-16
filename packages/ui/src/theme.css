@@ -22,6 +22,8 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #stats { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0 0; }
 #stats dt { color: #8a919c; }
 #stats dd { margin: 0; font-family: ui-monospace, monospace; }
+#stats.stale dd { opacity: 0.45; }
+#stale-note { color: #f5b14c; }
 #status.ok { color: #3ddc97; }
 #status.bad { color: #ff6b6b; }
 #error { color: #ff6b6b; min-height: 1em; margin: 0; white-space: pre-wrap; }

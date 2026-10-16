@@ -1,0 +1,63 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DependencyGraph, type Cost } from "../src/model/graph.ts";
+
+const node = (id: string, cost: Cost = "cheap") => ({ id, label: id, workspace: "design" as const, cost });
+
+/**
+ * sketch → extrude → { mass (cheap), stress (expensive) }; stress → report (cheap).
+ * Worked by hand: changing the sketch makes all four downstream stale;
+ * mass and report rebuild now, stress waits for a rerun.
+ */
+function project() {
+  const g = new DependencyGraph();
+  g.set(node("sketch"));
+  g.set(node("extrude"), ["sketch"]);
+  g.set(node("mass"), ["extrude"]);
+  g.set(node("stress", "expensive"), ["extrude"]);
+  g.set(node("report"), ["stress"]);
+  return g;
+}
+
+test("a change marks everything downstream, and splits cheap from expensive", () => {
+  const g = project();
+  const s = g.changed("sketch");
+  assert.deepEqual(new Set(s.updateNow), new Set(["extrude", "mass", "report"]));
+  assert.deepEqual(s.awaitingRerun, ["stress"]);
+  assert.deepEqual(new Set(g.stale()), new Set(["extrude", "mass", "stress", "report"]));
+  assert.equal(g.isStale("sketch"), false, "the thing that changed is current by definition");
+});
+
+test("a change part-way down touches only what is below it", () => {
+  const g = project();
+  assert.deepEqual(g.changed("stress"), { updateNow: ["report"], awaitingRerun: [] });
+  assert.equal(g.isStale("mass"), false);
+});
+
+test("a rebuilt result is fresh again; the rest stays marked", () => {
+  const g = project();
+  g.changed("sketch");
+  g.markFresh("mass");
+  assert.equal(g.isStale("mass"), false);
+  assert.equal(g.isStale("stress"), true);
+});
+
+test("cycles and unknown inputs are refused", () => {
+  const g = project();
+  assert.throws(() => g.set(node("sketch"), ["report"]), /sketch would depend on itself through report/);
+  assert.throws(() => g.set(node("loop"), ["loop"]), /loop depends on loop, which is not in the project/);
+  assert.throws(() => g.set(node("x"), ["nowhere"]), /depends on nowhere, which is not in the project/);
+});
+
+test("removing an input marks its readers stale and reports the dangling input, never silently", () => {
+  const g = project();
+  g.remove("extrude");
+  assert.equal(g.isStale("mass"), true);
+  assert.deepEqual(new Set(g.missingInputs().map((m) => `${m.id}<-${m.missing}`)), new Set(["mass<-extrude", "stress<-extrude"]));
+});
+
+test("replacing a node keeps it in the same place", () => {
+  const g = project();
+  g.set({ ...node("mass"), label: "Mass properties" }, ["extrude"]);
+  assert.deepEqual([...g.downstreamOf("extrude")].sort(), ["mass", "report", "stress"]);
+});

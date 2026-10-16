@@ -6,6 +6,7 @@ import { describeProvenance, latestOnly, type Framing, type WorkspaceContext, ty
 import { formatQuantity as fmt } from "@fission/ui";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, partDocument, specOf, type DesignDocument } from "./document.ts";
+import { PART_VIEW, syncGraph } from "./graph.ts";
 import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
 
@@ -34,6 +35,7 @@ const PANEL = `
     <dt>Topology</dt><dd id="topology">…</dd>
     <dt>Validation</dt><dd id="status">…</dd>
   </dl>
+  <p id="stale-note" hidden>Out of date: these numbers are for the last part that built.</p>
   <p id="error"></p>
   <button id="download-stl" type="button">Download STL</button>
   <p id="stl-note"></p>`;
@@ -68,6 +70,14 @@ function mount(ctx: WorkspaceContext): () => void {
   // The body is built from the part's feature intent (document.ts).
   const build = latestOnly((doc: DesignDocument) => buildSpec(kernel, specOf(doc, lastFeature(doc))));
 
+  /** Never shows stale numbers unmarked: dims them while out of date, and says so if the rebuild failed. */
+  function markStale(failed = false) {
+    const stale = ctx.graph.isStale(PART_VIEW);
+    $("stats").classList.toggle("stale", stale);
+    $("stats").dataset.stale = String(stale); // read by the e2e test
+    $("stale-note").hidden = !(stale && failed);
+  }
+
   async function update() {
     const [w, d, h] = inputs.map((i) => Number(i.value));
     const kind = shape.value as ShapeKind;
@@ -80,13 +90,19 @@ function mount(ctx: WorkspaceContext): () => void {
     $("height-row").hidden = kind === "sphere";
     // The panel edits feature #1 of the one-step timeline; the project holds it.
     const doc = partDocument(kind, w, d, h);
+    syncGraph(ctx.graph, doc, (ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
     ctx.project.workspaces.design = doc;
+    markStale();
     const feature = lastFeature(doc);
     $("intent").textContent = feature.intent.summary;
     $("provenance").textContent = describeProvenance(feature.provenance);
     try {
       const { current, value: view } = await build(doc);
       if (!current || !shown) return;
+      // Built from the current inputs: the feature and the numbers are fresh.
+      for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
+      ctx.graph.markFresh(PART_VIEW);
+      markStale();
       viewport.showBody(view.mesh);
       // A different shape is a new part: frame it.
       if (kind !== framedKind || needsRefit(framed, viewport.bodyFraming())) {
@@ -103,7 +119,9 @@ function mount(ctx: WorkspaceContext): () => void {
       $("error").textContent = view.errors.join("\n");
       viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
     } catch (e) {
-      if (shown) $("error").textContent = e instanceof Error ? e.message : String(e);
+      if (!shown) return;
+      $("error").textContent = e instanceof Error ? e.message : String(e);
+      markStale(true);
     }
   }
 

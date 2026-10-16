@@ -2,7 +2,7 @@
 // between workspaces. Each workspace fills the side panel; the viewport is
 // shared, so switching keeps the camera and what is on screen.
 import "@fission/ui/theme.css";
-import { emptyProject, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -35,6 +35,7 @@ const ctx = {
   kernel: new KernelClient(),
   selection: selectionNotBuilt,
   history: historyNotBuilt,
+  graph: new DependencyGraph(),
   panel,
   viewport: new Viewer($("viewport")),
 };

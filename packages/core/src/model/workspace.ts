@@ -5,6 +5,7 @@
 // panels and viewport overlays and saves its own part of the project.
 
 import type { KernelClient } from "../kernel/kernel-client";
+import type { DependencyGraph } from "./graph.ts";
 import type { History, Selection } from "./session.ts";
 import type { Project, WorkspaceId } from "./project.ts";
 import type { SharedViewport } from "./viewport.ts";
@@ -27,6 +28,8 @@ export interface WorkspaceContext {
   kernel: KernelClient;
   selection: Selection;
   history: History;
+  /** The project-wide dependency graph: what depends on what, and what is out of date. */
+  graph: DependencyGraph;
   /** The panel element the workspace fills (the viewport stays shared). */
   panel: HTMLElement;
   viewport: SharedViewport;

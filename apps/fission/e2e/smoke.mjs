@@ -80,9 +80,14 @@ try {
   await check("bad input shows an error instead of crashing", async () => {
     await setSize("width", 0);
     await page.waitForFunction(() => document.querySelector("#error").textContent.includes("width must be"));
+    // The old numbers stay on screen, but marked out of date, never shown as current.
+    assert.equal(await page.$eval("#stats", (el) => el.dataset.stale), "true");
+    assert.equal(await page.isVisible("#stale-note"), true);
     await setSize("width", 40);
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");
     assert.equal(await text("volume"), "24,000 mm³");
+    assert.equal(await page.$eval("#stats", (el) => el.dataset.stale), "false");
+    assert.equal(await page.isVisible("#stale-note"), false);
   });
 
   await check("the kernel runs in a Web Worker, not on the main thread", async () => {
