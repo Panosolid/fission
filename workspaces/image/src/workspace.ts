@@ -7,6 +7,7 @@
 import type { MountedWorkspace, WorkspaceContext } from "@fission/core";
 import { setBrightness, setDpi, setLayerVisible, setMmPerPixel, toImageRep, type ImageDocument, type Pixels } from "./document.ts";
 import { openImage } from "./open.ts";
+import { imageObjects } from "./representations.ts";
 import { brightnessView, layerRows, NOT_SAVED_NOTE, parseBrightnessInput, parseSizeInput, sizeView } from "./panels.ts";
 import type { PhysicalSize } from "./physical-size.ts";
 
@@ -47,6 +48,9 @@ export async function openImageFile(name: string, bytes: Uint8Array, decode = br
     message = (e as Error).message;
   }
 }
+
+/** The open image's layers as live handles other workspaces can take (representations.ts). */
+export const currentImageObjects = () => imageObjects(() => current);
 
 /** For the tests: forget the open image. */
 export function resetImageWorkspace() {

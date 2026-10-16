@@ -61,7 +61,7 @@ test("placeholders declare no representations; working workspaces produce every 
     p.registerRepresentations?.(registry, kernel);
     // Producers are registered per object type: collect every kind any type gives.
     const given = new Set<string>();
-    for (const type of ["design.feature", "design.profile"]) for (const k of registry.produces(type)) given.add(k);
+    for (const type of ["design.feature", "design.profile", "image.layer"]) for (const k of registry.produces(type)) given.add(k);
     for (const k of p.representations.produces) assert.ok(given.has(k), `${p.id} declares ${k} but registers no producer for it`);
   }
 });
