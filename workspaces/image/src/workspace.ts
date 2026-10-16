@@ -34,6 +34,20 @@ async function browserDecode(bytes: Uint8Array, format: PhysicalSize["format"]):
 let current: ImageDocument | null = null;
 let message: string | null = null;
 
+/**
+ * Opens a file as the open image, as Open does: a refusal becomes the
+ * message the page shows. The shell calls it for a PNG or JPEG dropped or
+ * pasted anywhere (X6), then shows this workspace.
+ */
+export async function openImageFile(name: string, bytes: Uint8Array, decode = browserDecode): Promise<void> {
+  try {
+    current = await openImage(bytes, name, decode);
+    message = null;
+  } catch (e) {
+    message = (e as Error).message;
+  }
+}
+
 /** For the tests: forget the open image. */
 export function resetImageWorkspace() {
   current = null;

@@ -3,7 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createSelection, DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, type ImageRep, type KernelCalls, type SharedViewport, type WorkspaceContext } from "@fission/core";
-import { mountImage, resetImageWorkspace } from "../src/workspace.ts";
+import { mountImage, openImageFile, resetImageWorkspace } from "../src/workspace.ts";
+import { imageWorkspace } from "../src/index.ts";
 import type { Decoder } from "../src/open.ts";
 import { idat, iend, ihdr, phys, png } from "./helpers.ts";
 
@@ -265,4 +266,27 @@ test("brightness and visibility are kept across a switch away and back", async (
   assert.equal((f.ctx.browser.querySelector("#layer-list .layer-visibility") as HTMLButtonElement).textContent, "Show");
   assert.deepEqual([...f.shown.at(-1)!.rgba], [0, 0, 0, 0, 0, 0, 0, 0]);
   hide();
+});
+
+// X6: a PNG or JPEG dropped or pasted anywhere comes here through the importer the workspace registers.
+test("a dropped file opens through the importer: the page shows it once mounted; a damaged one shows its message", async () => {
+  const registry = new RepresentationRegistry();
+  imageWorkspace.registerRepresentations!(registry, fake().ctx.kernel);
+  const importer = registry.importerFor("png");
+  assert.ok(importer && importer === registry.importerFor("jpeg"));
+  assert.equal(importer.workspace, "image");
+  resetImageWorkspace();
+  await openImageFile("plate.png", plate, decodeAs(200, 100));
+  const f = fake();
+  const hide = mountImage(f.ctx, decodeAs(1, 1));
+  assert.equal(f.shown.length, 1);
+  assert.equal(text(f.ctx, "image-mm"), "20 × 10 mm"); // 200 × 100 px at 0.1 mm per pixel
+  hide();
+  // The same file decoding to the wrong size is refused and the page says why; the image already open stays, as with Open.
+  await openImageFile("plate.png", plate, decodeAs(100, 200));
+  const g = fake();
+  const hide2 = mountImage(g.ctx, decodeAs(1, 1));
+  assert.equal(text(g.ctx, "image-error"), "The file's header says 200 × 100 pixels but it decoded to 100 × 200.");
+  assert.equal(g.shown.length, 1);
+  hide2();
 });

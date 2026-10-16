@@ -12,7 +12,7 @@
 // showing it at its real size in the shared viewport (G1b).
 
 import type { WorkspacePlugin } from "@fission/core";
-import { mountImage } from "./workspace.ts";
+import { mountImage, openImageFile } from "./workspace.ts";
 
 export * from "./errors.ts";
 export * from "./limits.ts";
@@ -21,7 +21,7 @@ export * from "./adjust.ts";
 export * from "./document.ts";
 export * from "./open.ts";
 export * from "./panels.ts";
-export { mountImage, resetImageWorkspace } from "./workspace.ts";
+export { mountImage, openImageFile, resetImageWorkspace } from "./workspace.ts";
 
 const summary = "Photo and texture editing with real-world sizes, for textures, engravings, lithophanes and tracing.";
 
@@ -32,6 +32,8 @@ export const imageWorkspace: WorkspacePlugin = {
   status: "working",
   // Handing images to other workspaces comes with the links (G2).
   representations: { produces: [], accepts: [] },
+  // A PNG or JPEG dropped or pasted anywhere opens here (X6).
+  registerRepresentations: (registry) => registry.registerImporter({ formats: ["png", "jpeg"], workspace: "image", open: (name, bytes) => openImageFile(name, bytes) }),
   commands: [],
   mount: (ctx) => mountImage(ctx),
 };

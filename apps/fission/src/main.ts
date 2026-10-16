@@ -11,7 +11,7 @@ import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
 import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
-import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -45,6 +45,8 @@ const kernel = new KernelClient();
 // The one conversion layer: every workspace says what it can hand over.
 const representations = new RepresentationRegistry();
 for (const w of workspaces) w.registerRepresentations?.(representations, kernel);
+// The shell opens whole projects, dropped or pasted like any other file (X6).
+representations.registerImporter({ formats: ["project"], workspace: null, open: async (_name, bytes) => openProject(new TextDecoder().decode(bytes)) });
 // The one action registry: the verbs each workspace offers for a selection.
 const actions = new ActionRegistry();
 for (const w of workspaces) w.registerActions?.(actions);
@@ -394,24 +396,78 @@ $("save").addEventListener("click", () => {
   }
 });
 $("open").addEventListener("click", () => $("open-file").click());
+/** Replaces the open project with the one in `text`; throws, leaving the open project as it was, when it doesn't read cleanly. */
+function openProject(text: string) {
+  const project = projectFromJson(text, workspaces);
+  ctx.selection.clear(); // it named the old part's faces
+  ctx.project = project;
+  useGraph(new DependencyGraph(), new ChangeNotes()); // the old notes were about the old project
+  keep(newId());
+  autosave?.changed(); // store the opened file as it is
+  show(current); // re-mounts the workspace on the opened project
+  if (split) mountSplit(split.id); // and the second one
+  fileStatus("");
+}
 $("open-file").addEventListener("change", async () => {
   const input = $<HTMLInputElement>("open-file");
   const file = input.files?.[0];
   input.value = ""; // so choosing the same file again opens it again
   if (!file) return;
   try {
-    const project = projectFromJson(await file.text(), workspaces);
-    ctx.selection.clear(); // it named the old part's faces
-    ctx.project = project;
-    useGraph(new DependencyGraph(), new ChangeNotes()); // the old notes were about the old project
-    keep(newId());
-    autosave?.changed(); // store the opened file as it is
-    show(current); // re-mounts the workspace on the opened project
-    if (split) mountSplit(split.id); // and the second one
-    fileStatus("");
+    openProject(await file.text());
   } catch (e) {
     fileStatus(`Couldn't open ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
   }
+});
+
+// Files from outside (X6): a file dropped anywhere on the app, or pasted
+// (outside a text field), goes through the representation registry: a
+// project opens as Open does, a PNG or JPEG opens in Image, and anything
+// else is refused in the top bar with what will take it and when.
+async function receive(files: File[]) {
+  const heads = await Promise.all(files.map(async (f) => ({ name: f.name, size: f.size, head: new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()) })));
+  const route = routeFiles(representations, heads);
+  if (!route) return;
+  if (route.kind === "refused") return fileStatus(route.message);
+  const file = files[0];
+  try {
+    await route.importer.open(file.name, new Uint8Array(await file.arrayBuffer()));
+  } catch (e) {
+    return fileStatus(`Couldn't open “${file.name}”: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  fileStatus("");
+  const into = route.importer.workspace;
+  if (!into) return; // the shell itself (a project) has already shown it
+  if (split?.id === into) mountSplit(into); // re-mounted where it already is
+  else show(into);
+}
+const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
+const dropHint = (on: boolean) => {
+  document.body.dataset.drop = on ? "on" : ""; // read by the e2e test
+  $("workspace").classList.toggle("file-drop", on); // the outline (styles/file-drop.css)
+};
+window.addEventListener("dragover", (e) => {
+  if (!carriesFiles(e)) return;
+  e.preventDefault(); // allows the drop
+  e.dataTransfer!.dropEffect = "copy";
+  dropHint(true);
+});
+window.addEventListener("dragleave", (e) => {
+  if (e.relatedTarget === null) dropHint(false); // left the window
+});
+window.addEventListener("drop", (e) => {
+  if (!carriesFiles(e)) return;
+  e.preventDefault(); // never let the browser navigate to the file
+  dropHint(false);
+  void receive([...e.dataTransfer!.files]);
+});
+document.addEventListener("paste", (e) => {
+  const target = e.target as HTMLElement | null;
+  if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
+  const files = [...(e.clipboardData?.files ?? [])];
+  if (files.length === 0) return;
+  e.preventDefault();
+  void receive(files);
 });
 // One assistant panel for every workspace, beside the viewport.
 $("assistant-toggle").addEventListener("click", () => {

@@ -37,6 +37,10 @@ Producers are registered per object type (`"design.feature"`, `"design.profile"`
 
 Design produces Solid and Mesh for its features, and Outline for its profiles. The Outline producer is generic: it accepts any `OutlineSource` (an object with a plane and an outline). The step-21 sketch registers as another type with the same producer, so there is no sketch-only path. A test in `workspaces/design/test/document.test.ts` holds it to that.
 
+## Files from outside (`files.ts`)
+
+A file dropped anywhere on the app, or pasted outside a text field, goes through the same registry. `identifyFile` says what it is: contents with a strong signature (PNG, JPEG, PDF, STEP, a Fission project, SVG) decide alone; STL and DXF, whose signatures are weak, count only with their extension; a name that claims a format its contents don't match is refused as damaged or renamed. Each workspace that opens a format registers an importer for it (`registerImporter`, one per format; the shell registers projects). A format nothing opens yet is refused with a message naming the workspace that will take it (STL: Design, as mesh bodies; SVG: Vector and Laser; DXF: Laser; STEP: Design; PDF: Layout), so the message changes by itself when that workspace registers its importer. One file at a time.
+
 ## Live links (`links.ts`)
 
 A `LiveLink` stores where its source is, as an `Origin` (an object id, or a stable face or edge id from step 32). It also stores the representations its holder accepts. `fetchLinked` goes through the registry each time, so the holder always shows the current source. `breakLink` turns a link into a `FrozenCopy` holding what the link showed at that moment, and keeps the source so provenance still works. `resolveLink` runs after every edit. A missing source gives a warning for the holding item. It is never dropped silently. In the UI, `linkBadge` shows Linked, Frozen copy or Link broken.

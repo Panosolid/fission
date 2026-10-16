@@ -9,6 +9,7 @@
 // Image workspace and with parameters / analysis results.
 
 import type { BodySpec, Outline } from "../kernel/kernel-types.ts";
+import type { FileFormat, FileImporter } from "./files.ts";
 
 export type RepresentationKind = "solid" | "outline" | "mesh" | "image" | "data";
 
@@ -111,6 +112,7 @@ const nouns: Record<RepresentationKind, string> = {
 export class RepresentationRegistry {
   private producers = new Map<string, Map<RepresentationKind, Producer>>();
   private converters: Converter[] = [];
+  private importers = new Map<FileFormat, FileImporter>();
 
   /** Says that objects of `type` can describe themselves as `kind`. */
   registerProducer(type: string, kind: RepresentationKind, producer: Producer): void {
@@ -122,6 +124,17 @@ export class RepresentationRegistry {
 
   registerConverter(converter: Converter): void {
     this.converters.push(converter);
+  }
+
+  /** Says who opens files of these formats when they are dropped or pasted (files.ts); one importer per format. */
+  registerImporter(importer: FileImporter): void {
+    for (const f of importer.formats) if (this.importers.has(f)) throw new Error(`${f} files already have an importer`);
+    for (const f of importer.formats) this.importers.set(f, importer);
+  }
+
+  /** Who opens files of this format, or null while nothing does. */
+  importerFor(format: FileFormat): FileImporter | null {
+    return this.importers.get(format) ?? null;
   }
 
   /** The representations an object of this type can give directly, most exact first. */
