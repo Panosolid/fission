@@ -5,6 +5,8 @@ export type { BodySpec, BodyView, DisplayMesh, Loop, Outline, StlFile } from "./
 export type { Material } from "./model/material.ts";
 export type { LengthUnit, Project, WorkspaceId } from "./model/project.ts";
 export { emptyProject } from "./model/project.ts";
+export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup } from "./model/links.ts";
+export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
 export type { BodyReference, EdgeReference, FaceReference, GeometryReference, Resolution, StableId } from "./model/references.ts";
 export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";

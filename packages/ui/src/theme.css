@@ -48,3 +48,5 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #topbar h1 #version { display: none; }
 }
 [hidden] { display: none !important; }
+.link-badge { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: #23272e; }
+.link-badge.unresolved { color: #f5b14c; }
