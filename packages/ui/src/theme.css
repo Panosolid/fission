@@ -163,20 +163,21 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 .downstream-chip .chip-mark { color: #f5b14c; }
 .downstream-chip.updating .chip-value, .downstream-chip.needs-rerun .chip-value { opacity: 0.6; }
 .downstream-chip.missing .chip-mark { color: #ff6b6b; }
-.change-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; padding: 6px 8px; margin-bottom: 6px; border-radius: 6px; border-left: 3px solid #4aa8ff; background: #23272e; }
-.change-note.needs-rerun { border-left-color: #f5b14c; }
-.change-note .note-body { flex: 1; }
-.change-note details { margin-top: 4px; color: #aab0b8; }
-.change-note summary { cursor: pointer; }
-.change-note ol { margin: 4px 0 0; padding-left: 18px; }
-.change-note .note-dismiss { font: inherit; font-size: 14px; line-height: 1; background: none; border: none; color: inherit; cursor: pointer; padding: 0 2px; opacity: 0.7; }
-.change-note .note-dismiss:hover, .change-note .note-dismiss:focus-visible { opacity: 1; }
 #assistant { width: 320px; padding: 16px; background: #1c1f24; border-left: 1px solid #2a2e35; overflow-y: auto; }
 #assistant[hidden] { display: none; }
 #assistant h4 { margin: 12px 0 4px; }
 #assistant .where { font-weight: normal; font-size: 12px; color: #8a919c; }
 #ai-status { font-size: 12px; color: #8a919c; }
-.notes-strip { position: absolute; top: 8px; left: 8px; right: 112px; max-width: 440px; z-index: 1; }
-.notes-strip:empty { display: none; }
-#split-viewport .notes-strip { top: 48px; }
-.notes-strip .change-note { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+/* Image workspace (G1b) */
+#image-size { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0; }
+#image-size dt { color: #8a919c; }
+#image-size dd { margin: 0; font-family: ui-monospace, monospace; }
+#image-size-inputs { display: grid; gap: 6px; }
+#image-adjust { display: grid; grid-template-columns: auto 1fr 4.5em; align-items: center; gap: 8px; margin: 10px 0; }
+#image-adjust input { width: 100%; min-width: 0; margin: 0; }
+#image-brightness-value { font-family: ui-monospace, monospace; text-align: right; }
+#layer-list li { display: flex; align-items: center; gap: 4px; }
+#layer-list .tree-row { flex: 1; min-width: 0; }
+#layer-list .layer-hidden .tree-row { opacity: 0.5; }
+#layer-list .layer-visibility { padding: 2px 8px; font-size: 12px; }
+#image-error { color: #ff6b6b; margin: 0; white-space: pre-wrap; }

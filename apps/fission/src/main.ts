@@ -7,6 +7,7 @@
 // scene and the same project and selection. Change notes (X5) show over
 // each pane's viewport, for the workspace in that pane.
 import "@fission/ui/theme.css";
+import "@fission/ui/change-notes.css";
 import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
