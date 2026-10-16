@@ -24,6 +24,7 @@ export const sliceWorkspace: WorkspacePlugin = {
   title: "Slice",
   summary: "A 3D printing slicer for any printer, fed directly by the design.",
   status: "placeholder",
+  representations: { produces: [], accepts: [] },
   mount(ctx) {
     showPlaceholder(ctx.panel, {
       title: "Slice",

@@ -5,8 +5,9 @@
 import { describeProvenance, latestOnly, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { formatQuantity as fmt } from "@fission/ui";
 import { needsRefit } from "@fission/viewport";
-import { lastFeature, partDocument, specOf, type DesignDocument } from "./document.ts";
+import { lastFeature, partDocument, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
+import { registerDesign } from "./representations.ts";
 import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
 
@@ -163,5 +164,8 @@ export const designWorkspace: WorkspacePlugin = {
   title: "Design",
   summary: "Parametric modelling: sketches, features and the timeline. The source of truth for all geometry.",
   status: "working",
+  representations: { produces: ["solid", "mesh", "outline"], accepts: [] },
+  registerRepresentations: registerDesign,
+  readData: readDesignDocument,
   mount,
 };

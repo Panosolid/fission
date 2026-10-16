@@ -4,7 +4,7 @@ export type { BodySpec, BodyView, DisplayMesh, Loop, Outline, StlFile } from "./
 // DRAFT model interfaces (see each file).
 export type { Material } from "./model/material.ts";
 export type { LengthUnit, Project, WorkspaceId } from "./model/project.ts";
-export { emptyProject } from "./model/project.ts";
+export { emptyProject, FORMAT_VERSION, readProject } from "./model/project.ts";
 export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup } from "./model/links.ts";
 export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
 export type { BodyReference, EdgeReference, FaceReference, GeometryReference, Resolution, StableId } from "./model/references.ts";
@@ -21,3 +21,4 @@ export type { Feature, Intent, Origin, ParameterValue, Provenance, Timeline } fr
 export { describeProvenance } from "./model/feature.ts";
 export { EXACTNESS, isExact, RepresentationRegistry, XY_PLANE } from "./model/representation.ts";
 export type { ToolbarItem, ViewportOverlay, WorkspaceContext, WorkspacePlugin } from "./model/workspace.ts";
+export { WORKSPACE_API_VERSION } from "./model/workspace.ts";

@@ -17,7 +17,10 @@ export class Viewer implements SharedViewport {
   private legend = document.createElement("ul");
   readonly element: HTMLElement;
 
-  constructor(private container: HTMLElement) {
+  private container: HTMLElement;
+
+  constructor(container: HTMLElement) {
+    this.container = container;
     this.element = container;
     this.scene.background = new THREE.Color(0x14161a);
     this.renderer.setPixelRatio(window.devicePixelRatio);

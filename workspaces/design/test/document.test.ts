@@ -84,3 +84,12 @@ test("step 21: a sketch produces Outline through the same registry and producer,
   const sketch: OutlineSource = { type: "design.sketch", id: "sketch-1", plane: XY_PLANE, outline: () => triangle };
   assert.deepEqual(await registry.deliver(sketch, ["outline", "mesh"]), { representation: { kind: "outline", plane: XY_PLANE, outline: triangle }, note: null });
 });
+
+test("Design's saved data reads back, and anything else is refused clearly", async () => {
+  const { readDesignDocument } = await import("../src/document.ts");
+  const doc = partDocument("slot", 40, 30, 20);
+  assert.deepEqual(readDesignDocument(JSON.parse(JSON.stringify(doc))), doc);
+  assert.throws(() => readDesignDocument(null), /Design data is missing/);
+  assert.throws(() => readDesignDocument({ ...doc, version: 2 }), /version 2 is not one this Fission reads/);
+  assert.throws(() => readDesignDocument({ ...doc, timeline: { features: [] } }), /no timeline/);
+});

@@ -2,7 +2,7 @@
 // between workspaces. Each workspace fills the side panel; the viewport is
 // shared, so switching keeps the camera and what is on screen.
 import "@fission/ui/theme.css";
-import { DependencyGraph, emptyProject, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -28,16 +28,22 @@ const workspaces: WorkspacePlugin[] = [
   imageWorkspace,
 ];
 
+const kernel = new KernelClient();
+// The one conversion layer: every workspace says what it can hand over.
+const representations = new RepresentationRegistry();
+for (const w of workspaces) w.registerRepresentations?.(representations, kernel);
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const panel = $("panel");
 const ctx = {
   project: emptyProject(),
-  kernel: new KernelClient(),
+  kernel,
   selection: selectionNotBuilt,
   history: historyNotBuilt,
   graph: new DependencyGraph(),
   panel,
   viewport: new Viewer($("viewport")),
+  representations,
 };
 
 type Page = WorkspaceId | "community";

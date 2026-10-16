@@ -26,6 +26,7 @@ export const renderWorkspace: WorkspacePlugin = {
   title: "Render",
   summary: "Realistic images of your design, straight from the Design timeline.",
   status: "placeholder",
+  representations: { produces: [], accepts: [] },
   mount(ctx) {
     showPlaceholder(ctx.panel, {
       title: "Render",

@@ -18,5 +18,5 @@ test("selection and undo/redo are not built yet and say so", () => {
 });
 
 test("a new project is empty, in millimetres", () => {
-  assert.deepEqual(emptyProject("Bracket"), { formatVersion: 1, name: "Bracket", units: { length: "mm" }, materials: [], workspaces: {} });
+  assert.deepEqual(emptyProject("Bracket"), { formatVersion: 2, name: "Bracket", units: { length: "mm" }, materials: [], links: [], workspaces: {} });
 });

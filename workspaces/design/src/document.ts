@@ -98,5 +98,18 @@ export function specOf(document: DesignDocument, feature: Feature): BodySpec {
   }
 }
 
+/**
+ * Design's part of a loaded project, checked. Version 1 is the first, so
+ * there is nothing to migrate yet; a later version adds its step here.
+ */
+export function readDesignDocument(data: unknown): DesignDocument {
+  const d = data as Partial<DesignDocument> | null;
+  if (typeof d !== "object" || d === null) throw new Error("Design data is missing");
+  if (d.version !== 1) throw new Error(`Design data version ${String(d.version)} is not one this Fission reads (1)`);
+  if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features) || d.timeline.features.length === 0)
+    throw new Error("Design data has no timeline");
+  return d as DesignDocument;
+}
+
 /** The part's final feature (the one-step timeline's only one, until step 32). */
 export const lastFeature = (document: DesignDocument) => document.timeline.features.at(-1)!;

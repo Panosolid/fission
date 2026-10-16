@@ -8,5 +8,19 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@fission/core": "*"
+  },
+  "devDependencies": {
+    "@fission/design": "*",
+    "@fission/render": "*",
+    "@fission/simulate": "*",
+    "@fission/manufacture": "*",
+    "@fission/laser": "*",
+    "@fission/slice": "*",
+    "@fission/circuit": "*",
+    "@fission/vector": "*",
+    "@fission/image": "*"
   }
 }

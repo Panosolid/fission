@@ -34,6 +34,7 @@ export const vectorWorkspace: WorkspacePlugin = {
   title: "Vector",
   summary,
   status: "placeholder",
+  representations: { produces: [], accepts: [] },
   mount(ctx) {
     showPlaceholder(ctx.panel, {
       title: "Vector",
