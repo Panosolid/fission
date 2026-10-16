@@ -1,0 +1,16 @@
+Stateful kernel test: 2012 cases over 1 seed(s) ["0x6d5a1d281ce7"] in 261.2s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1128 / 114     →  90.8%   262.3ms  slowest 272.6µs
+  add cylinder     1109 / 116     →  90.5%     22.2s  slowest 46.8ms
+  add extrude       639 / 623     →  50.6%      9.5s  slowest 138.1ms
+  add sphere       1099 / 119     →  90.2%     80.8s  slowest 166.0ms
+  move             2234 / 187     →  92.3%     28.0s  slowest 68.3ms
+  rotate           2290 / 126     →  94.8%     26.8s  slowest 68.7ms
+  ~extreme input      94 / 312     →  23.2%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 27.0, d: 24.0, h: 44.589197680806876 }, axis: [0.48892693533276427, 0.17253118814716428, -0.4235905658682821], angle: 3.141592653589793, at: [-5.0, 3.5, 0.021473401889535792] }
+  slowest add cylinder: Add { shape: Cylinder { r: 44709.52657881701, h: 15.0 }, axis: [-9.000000000000001e-10, 0.0, 1.0], angle: -5.497787143782138, at: [-2.5, 16.5, 4.499989] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[0.6530270957054337, 7023.303026210663], [21121.560105727694, 7023.303026210663], [21121.560105727694, -17.0], [0.6530270957054337, -17.0]], bulges: [] }, holes: [Circle { c: [3520.804540201037, 3503.1515131053316], r: 3520.1505131053314 }, Circle { c: [10561.1065664117, 3503.1515131053316], r: 3520.1505131053314 }, Circle { c: [17601.408592622363, 3503.1515131053316], r: 3520.1505131053314 }], dist: 70.5, expect: None }, axis: [0.4217634679815265, 0.22155702319285153, 0.7817990518172957], angle: -9.354964480828333, at: [11.0, 5.5, 2.999989] }
+  slowest add sphere: Add { shape: Sphere { r: 144.999989 }, axis: [0.0, 0.0, -1.0], angle: -2.356194490192345, at: [-0.0, 7.0, -78.71498148390036] }
+  slowest move: Move { target: 0, by: [11.0, -5.5, -818.1241206793326] }
+  slowest rotate: Rotate { target: 0, pivot: [-4.0, -13.5, -977.0229517363136], axis: [-0.6718065737830294, -0.4509150621793757, -0.7853955678812112], angle: -1.5707963267948966 }

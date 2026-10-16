@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2012 cases over 1 seed(s) ["0x809694e897cf"] in 284.5s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1198 / 97      →  92.5%   305.3ms  slowest 327.1µs
+  add cylinder     1181 / 105     →  91.8%     26.5s  slowest 60.4ms
+  add extrude       619 / 637     →  49.3%     10.6s  slowest 146.6ms
+  add sphere       1143 / 112     →  91.1%     86.0s  slowest 196.8ms
+  move             2366 / 231     →  91.1%     30.1s  slowest 74.0ms
+  rotate           2336 / 141     →  94.3%     29.1s  slowest 75.0ms
+  ~extreme input      75 / 357     →  17.4%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 28.499991, d: 7.500011, h: 17.5 }, axis: [1.0, 1.0, 1.0], angle: -3.141592653589793, at: [-3.0, 16.5, 18.000009] }
+  slowest add cylinder: Add { shape: Cylinder { r: 737986.0080516665, h: 48.499989 }, axis: [0.0, 3.0, 4.0], angle: -3.141592653589793, at: [12.5, 17.5, -14.5] }
+  slowest add extrude: Add { shape: Extrude { outer: Circle { c: [7.0, 0.0], r: 115958.91206177516 }, holes: [Circle { c: [13558.829273903993, 0.0], r: 102309.58278787117 }], dist: 16.0, expect: Some(true) }, axis: [0.3057290902508929, 0.9196696954176368, 0.6250879876471718], angle: -3.141592653589793, at: [9.0, 14207.180343444605, -0.061364534014274774] }
+  slowest add sphere: Add { shape: Sphere { r: 7327.182360546011 }, axis: [0.8262398509652016, 0.6275699268537259, -0.41205128940362273], angle: 4.71238897948469, at: [16.0, -17.0, 0.0041474851526388645] }
+  slowest move: Move { target: 1, by: [-3.5, -115967.91206177516, 19.0] }
+  slowest rotate: Rotate { target: 1, pivot: [-6.5, -166.5047814542037, -17.0], axis: [0.8840974555460304, -0.25578406655828595, -0.04658048740942275], angle: 5.329007817760271 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 284.45s
+
