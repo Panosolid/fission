@@ -86,7 +86,9 @@ fn model(bytes: &[u8]) -> Result<Decoded, Refusal> {
         return Err(Refusal::WrongLength);
     }
     let triangles = bytes[84..]
-        .chunks_exact(50)
+        .as_chunks::<50>()
+        .0
+        .iter()
         .map(|t| std::array::from_fn(|k| u32::from_le_bytes([t[4 * k], t[4 * k + 1], t[4 * k + 2], t[4 * k + 3]])))
         .collect();
     Ok(Decoded { header: bytes[..80].to_vec(), triangles })
