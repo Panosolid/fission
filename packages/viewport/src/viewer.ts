@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
-import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
+import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, segmentsNear, unhidden } from "./picking.ts";
 import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
 import { selectionFraming } from "./framing.ts";
@@ -10,50 +10,52 @@ import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rg
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
-export class Viewer implements SharedViewport {
+/** What a view needs from the viewer it shows: the one scene, body, selection and picking. */
+interface ViewHost {
+  readonly scene: THREE.Scene;
+  readonly body: THREE.Group;
+  mesh(): DisplayMesh | null;
+  faceMesh(): THREE.Mesh | null;
+  highlight(): ViewportHighlight;
+  picking(): boolean;
+  pick(pick: ViewportPick): void;
+  setHover(face: number | null, edge: number | null): void;
+  bodyFraming(): Framing;
+}
+
+/**
+ * One camera on the viewer's scene (X3, split view): its own canvas, orbit,
+ * view cube, framing and picking, drawing the same body, selection and
+ * overlays as every other view. The scene is shared, never copied (the
+ * "one viewport" rule); only the camera differs.
+ */
+export class ViewportView {
+  readonly element: HTMLElement;
   private renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-  private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
   private controls: OrbitControls;
-  private body = new THREE.Group();
-  private mesh: DisplayMesh | null = null;
-  private faces: THREE.BufferGeometry | null = null;
-  private faceMesh: THREE.Mesh | null = null;
-  private edges: THREE.BufferGeometry | null = null;
   private raycaster = new THREE.Raycaster();
-  private picker: ((pick: ViewportPick) => void) | null = null;
-  private highlight: ViewportHighlight = NO_HIGHLIGHT;
-  /** The face or edge under the pointer while picking is on (at most one is set). */
-  private hover: { face: number | null; edge: number | null } = { face: null, edge: null };
-  private overlays = new Map<string, AnalysisOverlay>();
+  private cube: ViewCube;
   private legend = document.createElement("ul");
-  readonly element: HTMLElement;
+  private resizer: ResizeObserver;
+  private queuedHover = 0;
 
-  private container: HTMLElement;
+  private host: ViewHost;
 
-  constructor(container: HTMLElement) {
-    this.container = container;
+  constructor(host: ViewHost, container: HTMLElement) {
+    this.host = host;
     this.element = container;
-    this.scene.background = new THREE.Color(0x14161a);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(this.renderer.domElement);
     this.legend.className = "overlay-legend";
     this.legend.hidden = true;
     container.appendChild(this.legend);
-    const cube = new ViewCube((name) => this.setView(name));
-    container.appendChild(cube.element);
+    this.cube = new ViewCube((name) => this.setView(name));
+    container.appendChild(this.cube.element);
 
     this.camera.position.set(80, -100, 70);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-
-    const grid = new THREE.GridHelper(200, 20, 0x3a3f47, 0x2a2e35);
-    grid.rotation.x = Math.PI / 2; // lay the grid on the XY plane
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(1, -2, 3);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.6);
-    fill.position.set(-2, 1, -1);
-    this.scene.add(grid, new THREE.AxesHelper(20), new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body);
 
     // A click picks; a press that moves further is the camera orbiting.
     let down: { x: number; y: number; id: number } | null = null;
@@ -66,107 +68,41 @@ export class Viewer implements SharedViewport {
       down = null;
       if (!start || start.id !== e.pointerId || !isClick(start, { x: e.clientX, y: e.clientY })) return;
       const edge = this.edgeAt(e.clientX, e.clientY);
-      this.onPick?.({ face: edge === null ? this.faceAt(e.clientX, e.clientY) : null, edge, shift: e.shiftKey });
+      this.host.pick({ face: edge === null ? this.faceAt(e.clientX, e.clientY) : null, edge, shift: e.shiftKey });
     });
     // Hover: what a click would pick, looked up at most once a frame, never while a button is held.
     let pointer: { x: number; y: number } | null = null;
-    let queued = false;
     canvas.addEventListener("pointermove", (e) => {
       pointer = e.buttons === 0 ? { x: e.clientX, y: e.clientY } : null;
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        if (!pointer || !this.picker) return this.setHover(null, null);
+      if (this.queuedHover) return;
+      this.queuedHover = requestAnimationFrame(() => {
+        this.queuedHover = 0;
+        if (!pointer || !this.host.picking()) return this.host.setHover(null, null);
         const edge = this.edgeAt(pointer.x, pointer.y);
-        this.setHover(edge === null ? this.faceAt(pointer.x, pointer.y) : null, edge);
+        this.host.setHover(edge === null ? this.faceAt(pointer.x, pointer.y) : null, edge);
       });
     });
     canvas.addEventListener("pointerleave", () => {
       pointer = null;
-      this.setHover(null, null);
+      this.host.setHover(null, null);
     });
 
-    new ResizeObserver(() => this.resize()).observe(container);
+    this.resizer = new ResizeObserver(() => this.resize());
+    this.resizer.observe(container);
     this.resize();
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
-      this.renderer.render(this.scene, this.camera);
-      cube.render(this.renderer, this.camera);
+      this.renderer.render(this.host.scene, this.camera);
+      this.cube.render(this.renderer, this.camera);
     });
   }
 
-  showBody(mesh: DisplayMesh) {
-    this.body.traverse((o) => {
-      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) o.geometry.dispose();
-    });
-    this.body.clear();
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.positions, 3));
-    geometry.setAttribute("normal", new THREE.Float32BufferAttribute(mesh.normals, 3));
-    geometry.setIndex(mesh.indices);
-    this.mesh = mesh;
-    this.faces = geometry;
-    const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      metalness: 0.1,
-      roughness: 0.6,
-      polygonOffset: true, // keep edges drawn on top of faces
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    });
-    const edges = new THREE.BufferGeometry();
-    edges.setAttribute("position", new THREE.Float32BufferAttribute(mesh.edge_lines, 3));
-    this.edges = edges;
-    this.faceMesh = new THREE.Mesh(geometry, material);
-    this.body.add(this.faceMesh, new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ vertexColors: true })));
-    this.hover = { face: null, edge: null }; // indices of the old body
-    this.paint();
-  }
-
-  get onPick() {
-    return this.picker;
-  }
-
-  /** Picking also turns hover on; null turns both off. */
-  set onPick(handler: ((pick: ViewportPick) => void) | null) {
-    this.picker = handler;
-    if (!handler) this.setHover(null, null);
-  }
-
-  showSelection(highlight: ViewportHighlight) {
-    this.highlight = { body: highlight.body, faces: [...highlight.faces], edges: [...highlight.edges] };
-    this.paint();
-  }
-
-  private setHover(face: number | null, edge: number | null) {
-    if (face === this.hover.face && edge === this.hover.edge) return;
-    this.hover = { face, edge };
-    this.paint();
-  }
-
-  setOverlay(overlay: AnalysisOverlay) {
-    this.overlays.set(overlay.id, overlay);
-    this.paint();
-  }
-
-  clearOverlay(id: string) {
-    if (this.overlays.delete(id)) this.paint();
-  }
-
-  /**
-   * Colours the body's faces from the overlays, tints the selected and
-   * hovered ones, colours selected and hovered edges, and lists the
-   * overlays in the legend.
-   */
-  private paint() {
-    const overlays = [...this.overlays.values()];
-    // Read by the e2e test.
+  /** Writes what the viewer shows onto this view's element (read by the e2e test) and lists the overlays in its legend. */
+  label(overlays: AnalysisOverlay[], highlight: ViewportHighlight, hover: { face: number | null; edge: number | null }) {
     this.element.dataset.overlays = overlays.map((o) => o.id).join(" ");
-    const { body, faces, edges } = this.highlight;
+    const { body, faces, edges } = highlight;
     this.element.dataset.highlight = `${body ? "body " : ""}faces ${faces.join(",")} edges ${edges.join(",")}`;
-    this.element.dataset.hover = this.hover.edge !== null ? `edge ${this.hover.edge}` : this.hover.face !== null ? `face ${this.hover.face}` : "";
+    this.element.dataset.hover = hover.edge !== null ? `edge ${hover.edge}` : hover.face !== null ? `face ${hover.face}` : "";
     this.legend.hidden = overlays.length === 0;
     this.legend.replaceChildren(
       ...overlays.map((o) => {
@@ -176,41 +112,19 @@ export class Viewer implements SharedViewport {
         return li;
       }),
     );
-    if (!this.mesh || !this.faces) return;
-    // Vertices belong to one face each (display.rs), so per-vertex colour is per-face colour.
-    // Vertex colours are linear; THREE.Color converts from sRGB.
-    // Tints are mixed in sRGB, like the colours are chosen.
-    const linear = (c: Rgb) => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace).toArray();
-    const perTriangle = triangleColours(this.mesh.triangle_faces, overlays);
-    const mixes = faceMixes(this.mesh.triangle_faces, this.highlight, this.hover.face);
-    const colours = new Float32Array(this.mesh.positions.length).fill(0);
-    for (let i = 0; i < colours.length / 3; i++) colours.set(linear(BASE_COLOUR), 3 * i);
-    perTriangle.forEach((c, t) => {
-      if (!c && mixes[t] === 0) return;
-      const colour = linear(tint(c ?? BASE_COLOUR, SELECTION_COLOUR, mixes[t]));
-      for (let k = 0; k < 3; k++) colours.set(colour, 3 * this.mesh!.indices[3 * t + k]);
-    });
-    this.faces.setAttribute("color", new THREE.BufferAttribute(colours, 3));
-    if (!this.edges) return;
-    const lineColours = new Float32Array(this.mesh.edge_lines.length);
-    segmentColours(this.mesh.edge_line_edges, this.highlight, this.hover.edge).forEach((c, s) => {
-      const colour = linear(c);
-      lineColours.set(colour, 6 * s);
-      lineColours.set(colour, 6 * s + 3);
-    });
-    this.edges.setAttribute("color", new THREE.BufferAttribute(lineColours, 3));
   }
 
   /** The kernel face index under a point on screen (client pixels), or null for empty space. */
   private faceAt(clientX: number, clientY: number): number | null {
-    if (!this.mesh || !this.faceMesh) return null;
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return null;
-    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
-    this.raycaster.setFromCamera(ndc, this.camera);
+    const mesh = this.host.mesh();
+    const faceMesh = this.host.faceMesh();
+    if (!mesh || !faceMesh) return null;
+    const ndc = clientToNdc({ x: clientX, y: clientY }, this.renderer.domElement.getBoundingClientRect());
+    if (!ndc) return null;
+    this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
     // Nearest hit first; for indexed geometry faceIndex is the triangle number.
-    const [hit] = this.raycaster.intersectObject(this.faceMesh, false);
-    return faceOfTriangle(this.mesh.triangle_faces, hit?.faceIndex);
+    const [hit] = this.raycaster.intersectObject(faceMesh, false);
+    return faceOfTriangle(mesh.triangle_faces, hit?.faceIndex);
   }
 
   /**
@@ -218,18 +132,21 @@ export class Viewer implements SharedViewport {
    * on screen (client pixels) and is not hidden by a face there, or null.
    */
   private edgeAt(clientX: number, clientY: number): number | null {
-    if (!this.mesh || !this.faceMesh) return null;
+    const mesh = this.host.mesh();
+    const faceMesh = this.host.faceMesh();
+    if (!mesh || !faceMesh) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
-    const lines = this.mesh.edge_lines;
+    const lines = mesh.edge_lines;
     const point = (i: number) => new THREE.Vector3(lines[3 * i], lines[3 * i + 1], lines[3 * i + 2]);
     // Every segment end on screen; NaN for ends outside the camera's depth range.
     const screen = new Float64Array((lines.length / 3) * 2);
     for (let i = 0; i < lines.length / 3; i++) {
       const v = point(i).project(this.camera);
       const drawable = v.z >= -1 && v.z <= 1;
-      screen[2 * i] = drawable ? rect.left + ((v.x + 1) / 2) * rect.width : NaN;
-      screen[2 * i + 1] = drawable ? rect.top + ((1 - v.y) / 2) * rect.height : NaN;
+      const at = ndcToClient(v, rect);
+      screen[2 * i] = drawable ? at.x : NaN;
+      screen[2 * i + 1] = drawable ? at.y : NaN;
     }
     for (const { segment, t } of segmentsNear(screen, { x: clientX, y: clientY })) {
       // The edge's point nearest the pointer, and the first face towards it.
@@ -237,18 +154,10 @@ export class Viewer implements SharedViewport {
       const towards = target.clone().sub(this.camera.position);
       const distance = towards.length();
       this.raycaster.set(this.camera.position, towards.normalize());
-      const [hit] = this.raycaster.intersectObject(this.faceMesh, false);
-      if (unhidden(distance, hit ? hit.distance : null)) return edgeOfSegment(this.mesh.edge_line_edges, segment);
+      const [hit] = this.raycaster.intersectObject(faceMesh, false);
+      if (unhidden(distance, hit ? hit.distance : null)) return edgeOfSegment(mesh.edge_line_edges, segment);
     }
     return null;
-  }
-
-  /** Sphere around the current body's bounding box (radius 0 if none). */
-  bodyFraming(): Framing {
-    const box = new THREE.Box3().setFromObject(this.body);
-    if (box.isEmpty()) return { centre: [0, 0, 0], radius: 0 };
-    const c = box.getCenter(new THREE.Vector3());
-    return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
   }
 
   /** Frames the current body from the home view; returns what it framed (null if none). */
@@ -256,9 +165,9 @@ export class Viewer implements SharedViewport {
     return this.setView("home");
   }
 
-  /** Turns the camera to a standard view, framing the current body; returns what it framed (null if none). */
+  /** Turns this view's camera to a standard view, framing the current body; returns what it framed (null if none). */
   setView(name: ViewName): Framing | null {
-    const framing = this.bodyFraming();
+    const framing = this.host.bodyFraming();
     if (!(framing.radius > 0)) return null;
     const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
     this.place(position, target, up);
@@ -267,13 +176,14 @@ export class Viewer implements SharedViewport {
 
   /**
    * Frames what is selected (faces and edges; a selected body is the whole
-   * body) from the current direction; returns what it framed, or null when
-   * nothing is selected, leaving the camera alone.
+   * body) from this view's current direction; returns what it framed, or
+   * null when nothing is selected, leaving the camera alone.
    */
   fitSelection(): Framing | null {
-    const { body, faces, edges } = this.highlight;
-    if (!this.mesh) return null;
-    const framing = faces.length || edges.length ? selectionFraming(this.mesh, faces, edges) : body ? this.bodyFraming() : null;
+    const { body, faces, edges } = this.host.highlight();
+    const mesh = this.host.mesh();
+    if (!mesh) return null;
+    const framing = faces.length || edges.length ? selectionFraming(mesh, faces, edges) : body ? this.host.bodyFraming() : null;
     if (!framing || !(framing.radius > 0)) return null;
     this.spendDamping();
     const towardCamera = this.camera.position.clone().sub(this.controls.target).normalize();
@@ -309,10 +219,216 @@ export class Viewer implements SharedViewport {
   }
 
   private resize() {
-    const { clientWidth: w, clientHeight: h } = this.container;
+    const { clientWidth: w, clientHeight: h } = this.element;
     if (w === 0 || h === 0) return;
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Stops drawing and takes this view's canvas, cube and legend out of its element. */
+  dispose() {
+    this.renderer.setAnimationLoop(null);
+    if (this.queuedHover) cancelAnimationFrame(this.queuedHover);
+    this.resizer.disconnect();
+    this.controls.dispose();
+    this.renderer.domElement.remove();
+    this.cube.element.remove();
+    this.legend.remove();
+    this.renderer.dispose();
+  }
+}
+
+/**
+ * The one viewport: one scene with the current body, its selection, hover
+ * and analysis overlays, seen through one or more views (split view, X3).
+ * The main view fills the element the viewer was made with; the camera
+ * methods of SharedViewport (fit, setView, fitSelection) act on it.
+ */
+export class Viewer implements SharedViewport {
+  private scene = new THREE.Scene();
+  private body = new THREE.Group();
+  private mesh: DisplayMesh | null = null;
+  private faces: THREE.BufferGeometry | null = null;
+  private faceMesh: THREE.Mesh | null = null;
+  private edges: THREE.BufferGeometry | null = null;
+  private picker: ((pick: ViewportPick) => void) | null = null;
+  private highlight: ViewportHighlight = NO_HIGHLIGHT;
+  /** The face or edge under the pointer while picking is on (at most one is set). */
+  private hover: { face: number | null; edge: number | null } = { face: null, edge: null };
+  private overlays = new Map<string, AnalysisOverlay>();
+  private host: ViewHost;
+  /** The main view first, then any added ones. */
+  private views: ViewportView[] = [];
+  readonly element: HTMLElement;
+
+  constructor(container: HTMLElement) {
+    this.element = container;
+    this.scene.background = new THREE.Color(0x14161a);
+    const grid = new THREE.GridHelper(200, 20, 0x3a3f47, 0x2a2e35);
+    grid.rotation.x = Math.PI / 2; // lay the grid on the XY plane
+    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    key.position.set(1, -2, 3);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+    fill.position.set(-2, 1, -1);
+    this.scene.add(grid, new THREE.AxesHelper(20), new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body);
+
+    this.host = {
+      scene: this.scene,
+      body: this.body,
+      mesh: () => this.mesh,
+      faceMesh: () => this.faceMesh,
+      highlight: () => this.highlight,
+      picking: () => this.picker !== null,
+      pick: (pick) => this.picker?.(pick),
+      setHover: (face, edge) => this.setHover(face, edge),
+      bodyFraming: () => this.bodyFraming(),
+    };
+    this.views.push(new ViewportView(this.host, container));
+    this.paint();
+  }
+
+  /** The view filling the viewer's own element. */
+  get main(): ViewportView {
+    return this.views[0];
+  }
+
+  /** Another view of the same scene, filling `container`, with its own camera; it starts at the home view of the current body. */
+  addView(container: HTMLElement): ViewportView {
+    if (this.views.some((v) => v.element === container)) throw new Error("That element already shows a view");
+    const view = new ViewportView(this.host, container);
+    this.views.push(view);
+    this.paint();
+    view.fit();
+    return view;
+  }
+
+  /** Takes an added view away; false for the main view or one already removed. */
+  removeView(view: ViewportView): boolean {
+    const i = this.views.indexOf(view);
+    if (i <= 0) return false;
+    this.views.splice(i, 1);
+    view.dispose();
+    return true;
+  }
+
+  /** How many views show the scene (1 unless split). */
+  get viewCount(): number {
+    return this.views.length;
+  }
+
+  showBody(mesh: DisplayMesh) {
+    this.body.traverse((o) => {
+      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) o.geometry.dispose();
+    });
+    this.body.clear();
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.positions, 3));
+    geometry.setAttribute("normal", new THREE.Float32BufferAttribute(mesh.normals, 3));
+    geometry.setIndex(mesh.indices);
+    this.mesh = mesh;
+    this.faces = geometry;
+    const material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      metalness: 0.1,
+      roughness: 0.6,
+      polygonOffset: true, // keep edges drawn on top of faces
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
+    const edges = new THREE.BufferGeometry();
+    edges.setAttribute("position", new THREE.Float32BufferAttribute(mesh.edge_lines, 3));
+    this.edges = edges;
+    this.faceMesh = new THREE.Mesh(geometry, material);
+    this.body.add(this.faceMesh, new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ vertexColors: true })));
+    this.hover = { face: null, edge: null }; // indices of the old body
+    this.paint();
+  }
+
+  get onPick() {
+    return this.picker;
+  }
+
+  /** Picking also turns hover on; null turns both off. A click in any view picks. */
+  set onPick(handler: ((pick: ViewportPick) => void) | null) {
+    this.picker = handler;
+    if (!handler) this.setHover(null, null);
+  }
+
+  showSelection(highlight: ViewportHighlight) {
+    this.highlight = { body: highlight.body, faces: [...highlight.faces], edges: [...highlight.edges] };
+    this.paint();
+  }
+
+  private setHover(face: number | null, edge: number | null) {
+    if (face === this.hover.face && edge === this.hover.edge) return;
+    this.hover = { face, edge };
+    this.paint();
+  }
+
+  setOverlay(overlay: AnalysisOverlay) {
+    this.overlays.set(overlay.id, overlay);
+    this.paint();
+  }
+
+  clearOverlay(id: string) {
+    if (this.overlays.delete(id)) this.paint();
+  }
+
+  /**
+   * Colours the body's faces from the overlays, tints the selected and
+   * hovered ones, colours selected and hovered edges, and lists the
+   * overlays in every view's legend.
+   */
+  private paint() {
+    const overlays = [...this.overlays.values()];
+    for (const view of this.views) view.label(overlays, this.highlight, this.hover);
+    if (!this.mesh || !this.faces) return;
+    // Vertices belong to one face each (display.rs), so per-vertex colour is per-face colour.
+    // Vertex colours are linear; THREE.Color converts from sRGB.
+    // Tints are mixed in sRGB, like the colours are chosen.
+    const linear = (c: Rgb) => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace).toArray();
+    const perTriangle = triangleColours(this.mesh.triangle_faces, overlays);
+    const mixes = faceMixes(this.mesh.triangle_faces, this.highlight, this.hover.face);
+    const colours = new Float32Array(this.mesh.positions.length).fill(0);
+    for (let i = 0; i < colours.length / 3; i++) colours.set(linear(BASE_COLOUR), 3 * i);
+    perTriangle.forEach((c, t) => {
+      if (!c && mixes[t] === 0) return;
+      const colour = linear(tint(c ?? BASE_COLOUR, SELECTION_COLOUR, mixes[t]));
+      for (let k = 0; k < 3; k++) colours.set(colour, 3 * this.mesh!.indices[3 * t + k]);
+    });
+    this.faces.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+    if (!this.edges) return;
+    const lineColours = new Float32Array(this.mesh.edge_lines.length);
+    segmentColours(this.mesh.edge_line_edges, this.highlight, this.hover.edge).forEach((c, s) => {
+      const colour = linear(c);
+      lineColours.set(colour, 6 * s);
+      lineColours.set(colour, 6 * s + 3);
+    });
+    this.edges.setAttribute("color", new THREE.BufferAttribute(lineColours, 3));
+  }
+
+  /** Sphere around the current body's bounding box (radius 0 if none). */
+  bodyFraming(): Framing {
+    const box = new THREE.Box3().setFromObject(this.body);
+    if (box.isEmpty()) return { centre: [0, 0, 0], radius: 0 };
+    const c = box.getCenter(new THREE.Vector3());
+    return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
+  }
+
+  /** Frames the current body from the home view in the main view; returns what it framed (null if none). */
+  fit(): Framing | null {
+    return this.main.fit();
+  }
+
+  /** Turns the main view's camera to a standard view, framing the current body. */
+  setView(name: ViewName): Framing | null {
+    return this.main.setView(name);
+  }
+
+  /** Frames the selection in the main view, from its current direction. */
+  fitSelection(): Framing | null {
+    return this.main.fitSelection();
   }
 }

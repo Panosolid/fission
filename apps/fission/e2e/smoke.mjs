@@ -916,7 +916,7 @@ try {
     await page.click('[data-workspace="design"]');
   });
 
-  await check("desktop: focus moves top bar, toolbar, browser, View buttons, properties; panel toggles hidden", async () => {
+  await check("desktop: focus moves top bar, toolbar, browser, View buttons, Split, properties; panel toggles hidden", async () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
@@ -928,11 +928,11 @@ try {
     const regions = [];
     for (let i = 0; i < 120 && regions.at(-1) !== "properties"; i++) {
       await page.keyboard.press("Tab");
-      const region = await page.evaluate(() => document.activeElement?.closest("#topbar, #toolbar, #browser, #view-controls, #properties")?.id ?? "other");
+      const region = await page.evaluate(() => document.activeElement?.closest("#topbar, #toolbar, #browser, #view-controls, #split-toggle, #properties")?.id ?? "other");
       if (region !== regions.at(-1)) regions.push(region);
     }
-    // The View buttons sit over the viewport, between the browser and properties.
-    assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "properties"]);
+    // The View buttons and Split sit over the viewport, between the browser and properties.
+    assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "split-toggle", "properties"]);
     await page.screenshot({ path: "e2e/design-1280.png" });
   });
 
@@ -1336,6 +1336,156 @@ try {
       assert.equal(download.suggestedFilename(), "Untitled.fission.json");
     } finally {
       await bare.close();
+    }
+  });
+
+  await check("split view: Design beside a placeholder, own panels and cameras, one selection, Close split restores one view", async () => {
+    const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("console", (m) => {
+      if (m.type() === "error") consoleErrors.push(m.text());
+    });
+    try {
+      await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
+      await wide.goto(url + "#design");
+      await wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+      const canvasOf = (sel) => `${sel} > canvas`;
+      const image = (sel) => wide.evaluate((s) => document.querySelector(s).toDataURL(), canvasOf(sel));
+      const pixelAt = (sel, x, y) =>
+        wide.evaluate(
+          ([s, x, y]) => {
+            const src = document.querySelector(s);
+            const r = src.getBoundingClientRect();
+            const c = document.createElement("canvas");
+            c.width = src.width;
+            c.height = src.height;
+            const g = c.getContext("2d");
+            g.drawImage(src, 0, 0);
+            const k = src.width / r.width; // device pixels per CSS pixel
+            return Array.from(g.getImageData(Math.floor((x - r.x) * k), Math.floor((y - r.y) * k), 1, 1).data.slice(0, 3));
+          },
+          [canvasOf(sel), x, y],
+        );
+      const isBody = ([r, g, b]) => r + g + b > 3 * 80; // lit grey-blue, far brighter than the background
+      const selected = () => wide.evaluate(() => document.body.dataset.selection ?? "");
+      const settle = () => wide.waitForTimeout(300); // orbit damping settles, a frame or two paints
+      const box = (sel) => wide.locator(canvasOf(sel)).boundingBox();
+
+      // One workspace to start: no second pane, one canvas drawing the scene.
+      assert.equal(await wide.isVisible("#split"), false);
+      assert.equal((await wide.$$("#viewport > canvas, #split-viewport > canvas")).length, 1);
+      await wide.click("#split-toggle");
+      await wide.waitForFunction(() => document.body.dataset.split === "render");
+      // Render (the first workspace that is not Design) in the second pane's
+      // own properties; Design keeps its panels in the first pane.
+      assert.equal(await wide.textContent("#split-properties .placeholder h2"), "Render");
+      assert.equal(await wide.textContent("#properties #status"), "valid");
+      assert.equal(await wide.$("#properties .placeholder"), null);
+      assert.equal(await wide.$eval("body", (b) => b.dataset.activeWorkspace), "design");
+      assert.equal(await wide.getAttribute("#split-toggle", "aria-pressed"), "true");
+      // The choice offers every workspace but Design, Render chosen.
+      assert.deepEqual(await wide.$$eval("#split-choice option", (os) => os.map((o) => o.value)), ["render", "simulate", "manufacture", "laser", "slice", "circuit", "vector", "image", "layout"]);
+      assert.equal(await wide.$eval("#split-choice", (s) => s.value), "render");
+      await settle();
+
+      // Both views draw the body: each starts at home on the same box, so the
+      // box's centre (20, 15, 10) lands at each canvas's own screenPoint.
+      const [mainBox, splitBox] = [await box("#viewport"), await box("#split-viewport")];
+      // The second view is framed for its own size: taller than wide, so the
+      // framed sphere fits the narrower horizontal field of view and the
+      // box, inside the sphere, stops short of the left and right edges.
+      for (const fx of [0.01, 0.99]) {
+        const p = { x: splitBox.x + fx * splitBox.width, y: splitBox.y + splitBox.height / 2 };
+        assert.ok(!isBody(await pixelAt("#split-viewport", p.x, p.y)), `the whole box fits the second view (at ${fx} of its width)`);
+      }
+      assert.ok(mainBox.width > 300 && splitBox.width > 300, `room for both: ${mainBox.width}, ${splitBox.width}`);
+      assert.ok(mainBox.x + mainBox.width <= splitBox.x + 0.5, "side by side, Design's on the left");
+      for (const [sel, b] of [["#viewport", mainBox], ["#split-viewport", splitBox]]) {
+        const c = screenPoint(b, [20, 15, 10]);
+        assert.ok(isBody(await pixelAt(sel, c.x, c.y)), `${sel} draws the body`);
+        assert.deepEqual(await pixelAt(sel, b.x + 3, b.y + b.height - 3), [0x14, 0x16, 0x1a], `${sel} corner is background`);
+      }
+      assert.equal(await wide.evaluate(() => document.documentElement.scrollWidth), 1280, "no sideways scroll");
+      await wide.screenshot({ path: "e2e/split-1280.png" });
+
+      // Cameras are independent: Top in the second pane turns only its view.
+      const mainBefore = await image("#viewport");
+      const splitBefore = await image("#split-viewport");
+      await wide.click("#split-viewport .view-controls [data-view=top]");
+      await settle();
+      assert.notEqual(await image("#split-viewport"), splitBefore, "the second view turned");
+      assert.equal(await image("#viewport"), mainBefore, "the first view did not");
+      // From the top the box's top face centre (20, 15, 20) is under TOP's screenPoint in the second view.
+      const topInSplit = screenPoint(splitBox, [20, 15, 20], TOP);
+      assert.ok(isBody(await pixelAt("#split-viewport", topInSplit.x, topInSplit.y)), "top view of the body");
+
+      // One selection: a face picked in the first view shows in both, and a
+      // click in the second view picks the same shared body.
+      const topInMain = screenPoint(mainBox, [20, 15, 20]);
+      await wide.mouse.click(topInMain.x, topInMain.y);
+      assert.equal(await selected(), "face:feature-1/1");
+      assert.equal(await wide.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges ");
+      assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.highlight), "faces 1 edges ");
+      await wide.keyboard.press("Escape");
+      assert.equal(await selected(), "");
+      await wide.mouse.click(topInSplit.x, topInSplit.y);
+      assert.equal(await selected(), "face:feature-1/1", "picked through the second view");
+      assert.equal(await wide.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges ");
+      await wide.keyboard.press("Escape");
+
+      // Choosing another workspace for the second pane keeps its camera.
+      const splitTop = await image("#split-viewport");
+      await wide.selectOption("#split-choice", "slice");
+      await wide.waitForFunction(() => document.body.dataset.split === "slice");
+      assert.equal(await wide.textContent("#split-properties .placeholder h2"), "Slice");
+      await settle();
+      assert.equal(await image("#split-viewport"), splitTop, "the second camera stayed on Top");
+
+      // Choosing the second pane's workspace in the switcher swaps the panes:
+      // Slice in the first, Design (its panels, its picking) in the second.
+      await wide.click("[data-workspace=slice]");
+      await wide.waitForFunction(() => document.body.dataset.split === "design");
+      assert.equal(await wide.$eval("body", (b) => b.dataset.activeWorkspace), "slice");
+      assert.equal(await wide.textContent("#properties .placeholder h2"), "Slice");
+      assert.equal(await wide.textContent("#split-properties #status"), "valid");
+      assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.shape), "box");
+      assert.deepEqual(await wide.$$eval("#split-choice option", (os) => os.map((o) => o.value)).then((v) => v.includes("slice")), false);
+      await wide.mouse.click(topInMain.x, topInMain.y);
+      assert.equal(await selected(), "face:feature-1/1", "Design picks from either view while it is in the second pane");
+      await wide.keyboard.press("Escape");
+      await wide.click("[data-workspace=design]");
+      await wide.waitForFunction(() => document.body.dataset.split === "slice");
+      assert.equal(await wide.textContent("#properties #status"), "valid");
+
+      // Close split: one view again, its canvas gone, the first view untouched.
+      const mainNow = await image("#viewport");
+      await wide.click("#split-close");
+      assert.equal(await wide.isVisible("#split"), false);
+      assert.equal(await wide.$("#split-viewport > canvas"), null);
+      assert.equal(await wide.$("#split-viewport .view-controls"), null);
+      assert.equal(await wide.$eval("#split-properties", (el) => el.childElementCount), 0, "the second workspace emptied its slots");
+      assert.equal(await wide.$eval("body", (b) => b.dataset.split), "");
+      assert.equal(await wide.getAttribute("#split-toggle", "aria-pressed"), "false");
+      assert.equal(await wide.evaluate(() => document.activeElement?.id), "split-toggle", "focus back on Split");
+      await settle();
+      const full = await box("#viewport");
+      assert.ok(full.width > mainBox.width + 200, "the first view has the room back");
+      const c = screenPoint(full, [20, 15, 10]);
+      assert.ok(isBody(await pixelAt("#viewport", c.x, c.y)), "still draws the body");
+      assert.notEqual(await image("#viewport"), mainNow, "redrawn at the new size");
+
+      // Too narrow for two: a window shrinking under 900 px closes the split, and phones never offer it.
+      await wide.click("#split-toggle");
+      await wide.waitForFunction(() => document.body.dataset.split === "render");
+      await wide.setViewportSize({ width: 860, height: 800 });
+      await wide.waitForFunction(() => document.body.dataset.split === "");
+      assert.equal(await wide.$("#split-viewport > canvas"), null);
+      assert.equal(await wide.isVisible("#split-toggle"), false);
+      await wide.setViewportSize({ width: 375, height: 740 });
+      assert.equal(await wide.isVisible("#split-toggle"), false);
+      assert.equal(await wide.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
+    } finally {
+      await wide.close();
     }
   });
 

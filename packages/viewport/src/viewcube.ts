@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { isClick } from "./picking.ts";
+import { clientToNdc, isClick } from "./picking.ts";
 import { CUBE_CORNER, cubeView, viewDirection, type ViewName } from "./views.ts";
 
 type Vec3 = [number, number, number];
@@ -72,10 +72,9 @@ export class ViewCube {
 
   /** The view under a point on screen (client pixels), or null off the cube. */
   private viewAt(clientX: number, clientY: number): ViewName | null {
-    const rect = this.element.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return null;
-    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
-    this.raycaster.setFromCamera(ndc, this.camera);
+    const ndc = clientToNdc({ x: clientX, y: clientY }, this.element.getBoundingClientRect());
+    if (!ndc) return null;
+    this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
     const [hit] = this.raycaster.intersectObjects(this.faces.map((f) => f.mesh), false);
     return hit ? cubeView(hit.point.toArray()) : null;
   }
