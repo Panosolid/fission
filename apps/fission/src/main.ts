@@ -18,6 +18,7 @@ import { sliceWorkspace } from "@fission/slice";
 import { circuitWorkspace } from "@fission/circuit";
 import { vectorWorkspace } from "@fission/vector";
 import { imageWorkspace } from "@fission/image";
+import { layoutWorkspace } from "@fission/layout";
 
 const workspaces: WorkspacePlugin[] = [
   designWorkspace,
@@ -29,6 +30,7 @@ const workspaces: WorkspacePlugin[] = [
   circuitWorkspace,
   vectorWorkspace,
   imageWorkspace,
+  layoutWorkspace,
 ];
 
 const kernel = new KernelClient();

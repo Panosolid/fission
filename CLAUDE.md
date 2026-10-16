@@ -5,7 +5,7 @@ A free, open-source suite for making things: parametric CAD at its heart, with r
 End goal, a world-class free CAD suite anyone can use instead of a paid subscription:
 - A kernel trusted like a commercial one: exact B-rep geometry, booleans, fillets, NURBS, STEP in and out, every result validated, crashes as rare as possible, tests that stay ahead of the features.
 - Parametric Design good enough for real parts: constrained sketches, a feature timeline that survives edits (topological naming), assemblies and drawings.
-- The best integration of any creative and making tools: nine workspaces (Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image) sharing one project, live-linked, with lossless round trips and no exporting files between them.
+- The best integration of any creative and making tools: ten workspaces (Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image, Layout) sharing one project, live-linked, with lossless round trips and no exporting files between them.
 - An optional AI assistant that costs us nothing to run (the user picks the provider), only issues the same commands a user could, previews everything, and never controls a machine.
 - Free community sharing, no payments anywhere. A licence is chosen once the CAD is decent (the owner's call; not yet).
 
@@ -22,7 +22,7 @@ End goal, a world-class free CAD suite anyone can use instead of a paid subscrip
 Each folder with its own CLAUDE.md (kernel/, packages/, workspaces/, apps/) has the details; it loads when you work there.
 - `kernel/`: Rust geometry kernel → WebAssembly. `src/tolerance.rs` is the only place epsilons live; every operation's result goes through `validate::checked()`; when a kernel operation lands, add it to the stateful harness (`tests/stateful.rs`: `Op`, `Scene::transitions`, `apply_op`, `replay_op`) the same day.
 - `packages/`: shared TypeScript (core document model and kernel bridge, viewport, ui, testing, ai; storage and community are placeholders). `packages/core/src/kernel/kernel-client.ts` is the only way the app talks to the kernel.
-- `workspaces/`: the nine workspaces (Design real, the rest placeholders). `apps/fission`: the app shell and browser tests.
+- `workspaces/`: the ten workspaces (Design real, the rest placeholders). `apps/fission`: the app shell and browser tests.
 - `docs/`: `roadmap.md` (the full roadmap), `integration.md`, `ai.md`, `project-format.md`, `community.md`.
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust (and `oracle/compare.py`, the OpenCascade oracle).
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing", results on the `test-results` branch; see kernel/CLAUDE.md).
