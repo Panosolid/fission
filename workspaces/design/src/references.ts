@@ -7,7 +7,7 @@
 // at a different face after such an edit (17e checks and warns). Step 32
 // replaces this function's body; nothing else builds ids.
 
-import type { GeometryReference, StableId } from "@fission/core";
+import type { GeometryReference, OutlineReference, StableId } from "@fission/core";
 
 /** Says what every id from `designReference` is, for tests and the properties panel. */
 export const PLACEHOLDER_ID_NOTE = "Placeholder id (feature and kernel index) until topological naming, step 32";
@@ -17,7 +17,7 @@ export const PLACEHOLDER_ID_NOTE = "Placeholder id (feature and kernel index) un
  * this kernel index on the body `featureId` built. Bad input throws: an
  * empty feature id, an index on a body, a missing or non-integer index.
  */
-export function designReference(kind: GeometryReference["kind"], featureId: string, index?: number): GeometryReference {
+export function designReference(kind: Exclude<GeometryReference["kind"], "outline">, featureId: string, index?: number): GeometryReference {
   if (featureId.length === 0 || /[:/]/.test(featureId)) throw new Error(`invalid feature id ${JSON.stringify(featureId)}`);
   if (kind === "body") {
     if (index !== undefined) throw new Error("a body reference takes no index");
@@ -35,4 +35,20 @@ export function readDesignReference(ref: GeometryReference): { kind: GeometryRef
   const m = /^(body|face|edge):([^:/]+)(?:\/(0|[1-9]\d*))?$/.exec(ref.id);
   if (!m || m[1] !== ref.kind || (m[3] === undefined) !== (ref.kind === "body")) return null;
   return m[3] === undefined ? { kind: ref.kind, featureId: m[2] } : { kind: ref.kind, featureId: m[2], index: Number(m[3]) };
+}
+
+/**
+ * The reference for one of the document's profiles, e.g.
+ * "outline:profile-1". Profiles have ids of their own in the document, so
+ * this one is stable today (sketch profiles at step 21 will be too).
+ */
+export function profileReference(profileId: string): OutlineReference {
+  if (profileId.length === 0 || /[:/]/.test(profileId)) throw new Error(`invalid profile id ${JSON.stringify(profileId)}`);
+  return { kind: "outline", id: `outline:${profileId}` as StableId };
+}
+
+/** The profile id `profileReference` built this reference from; null for any other reference. */
+export function readProfileReference(ref: { kind: string; id: string }): string | null {
+  const m = /^outline:([^:/]+)$/.exec(ref.id);
+  return ref.kind === "outline" && m ? m[1] : null;
 }

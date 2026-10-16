@@ -18,7 +18,7 @@ export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup }
 export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
 export type { Answer, EditRoute, LinkedValue, OwnershipChange, ProposedEdit, Transfer } from "./model/ownership.ts";
 export { TRANSFER_OWNERSHIP, acceptProposal, linkOwner, linkedValue, ownedBy, proposeEdit, rejectProposal, setOwnedValue, transferOwnership } from "./model/ownership.ts";
-export type { BodyReference, EdgeReference, FaceReference, GeometryReference, Resolution, StableId } from "./model/references.ts";
+export type { BodyReference, EdgeReference, FaceReference, GeometryReference, OutlineReference, Resolution, StableId } from "./model/references.ts";
 export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
 export { createSelection, historyNotBuilt } from "./model/session.ts";
