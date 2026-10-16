@@ -1,0 +1,108 @@
+name: Fuzzing
+
+# Fuzzing the file readers on GitHub's computers (free for public repos):
+# the STL reader (kernel/tests/fuzz_stl.rs) and the project loader
+# (packages/testing/src/project-fuzz.ts), each broken files by the thousand
+# checked against a simple model, a fresh seed every round of 2,000 inputs.
+#
+# Nightly at 23:10 UTC (7:10am Perth), after the random testing run
+# (nightly.yml, 15:00 to 22:35 UTC, collected by about 22:50) so the two
+# never compete for runners or push to test-results at once; 45 minutes a
+# reader, so results are in by about 8am Perth. "Run workflow" on the
+# Actions tab tests any branch for `minutes`.
+#
+# A final job adds the rounds to the test-results branch
+# (.github/scripts/collect-fuzz.sh: fuzz/log.csv, fuzz/summary.txt, and
+# fuzz/failures/seed-<seed>/ with fuzz-report.txt and the shrunk inputs) and
+# files one issue per kind of problem, as random testing does
+# (.github/scripts/file_issues.py). Scheduled runs only fire from the default
+# branch.
+on:
+  schedule:
+    - cron: "10 23 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Minutes of fuzzing per reader"
+        default: "45"
+
+concurrency:
+  group: fuzzing-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  stl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - name: Fuzz the STL reader until the time is up
+        working-directory: kernel
+        env:
+          MINUTES: ${{ inputs.minutes || '45' }}
+          FISSION_FUZZ_OUT: ${{ runner.temp }}/fuzz
+        # A debug build (the tests' own profile), so overflow checks are on.
+        # The job fails when a round found something; collect still runs.
+        run: |
+          cargo test --test fuzz_stl --no-run
+          FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) cargo test --test fuzz_stl fuzz_stl_random -- --nocapture
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-stl
+          path: ${{ runner.temp }}/fuzz/
+          if-no-files-found: ignore
+
+  project:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Fuzz the project loader until the time is up
+        env:
+          MINUTES: ${{ inputs.minutes || '45' }}
+          FISSION_FUZZ_OUT: ${{ runner.temp }}/fuzz
+        run: FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) npm run fuzz -w @fission/testing
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-project
+          path: ${{ runner.temp }}/fuzz/
+          if-no-files-found: ignore
+
+  collect:
+    needs: [stl, project]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/incoming
+      - name: Add this run to the test-results branch and file issues
+        env:
+          IN: ${{ runner.temp }}/incoming
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        # Copied out first: the script switches this checkout to test-results.
+        run: |
+          cp .github/scripts/collect-fuzz.sh .github/scripts/file_issues.py "$RUNNER_TEMP/"
+          bash "$RUNNER_TEMP/collect-fuzz.sh"

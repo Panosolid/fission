@@ -97,6 +97,8 @@ add_run() {
       print "The commit and branch columns of log.csv (and commit.txt in each"
       print "failures folder) say which code a round tested."
     }' log.csv >summary.txt
+  # The fuzzing section (collect-fuzz.sh) stays at the end.
+  [ -f fuzz/summary.txt ] && { echo; cat fuzz/summary.txt; } >>summary.txt.fuzz
   if [ -f mutants/log.csv ]; then
     tail -1 mutants/log.csv | awk -F, '{
       print ""
@@ -107,6 +109,7 @@ add_run() {
       print "mutants/missed.txt lists every survivor; mutants/log.csv has one line per night."
     }' >>summary.txt
   fi
+  if [ -f summary.txt.fuzz ]; then cat summary.txt.fuzz >>summary.txt; rm summary.txt.fuzz; fi
 }
 
 git config user.name "github-actions[bot]"

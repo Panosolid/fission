@@ -1,0 +1,1 @@
+{"formatVersion": 2, "links": [], "materials": [], "units": {"length": "mm"}, "name": "", "workspaces": {"design": {"version": 1, "profiles": [null], "timeline": {"features": [{"id": "feature-1", "intent": {"type": "extrude", "summary": "", "parameters": {"profile": "profile-1", "distance": 1}}}]}}}}
