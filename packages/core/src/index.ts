@@ -2,7 +2,16 @@
 export { KernelClient, latestOnly, type KernelCalls, type KernelOps, type KernelRequest, type KernelResponse } from "./kernel/kernel-client.ts";
 export type { BodySpec, BodyView, DisplayMesh, Loop, Outline, StlFile } from "./kernel/kernel-types.ts";
 // DRAFT model interfaces (see each file).
-export type { Material } from "./model/material.ts";
+export type { Material, MaterialLibrary } from "./model/material.ts";
+export { materialLibrary } from "./model/material.ts";
+export type { HumanConfirmation, Job, Machine, MachineKind, MachineLibrary } from "./model/machines.ts";
+export { machineLibrary } from "./model/machines.ts";
+export type { SearchHit } from "./model/search.ts";
+export { searchProject } from "./model/search.ts";
+export type { DesignFeedback, FeedbackKind } from "./model/feedback.ts";
+export { reportFeedback } from "./model/feedback.ts";
+export type { Parameter, ParameterSweep, ProjectParameters } from "./model/parameters.ts";
+export { projectParameters } from "./model/parameters.ts";
 export type { LengthUnit, Project, WorkspaceId } from "./model/project.ts";
 export { emptyProject, FORMAT_VERSION, readProject } from "./model/project.ts";
 export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup } from "./model/links.ts";
