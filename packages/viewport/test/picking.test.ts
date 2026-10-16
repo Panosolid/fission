@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLICK_SLOP_PX, EDGE_DEPTH_SLACK, EDGE_PICK_PX, edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "../src/picking.ts";
+import { CLICK_SLOP_PX, EDGE_DEPTH_SLACK, EDGE_PICK_PX, clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, segmentsNear, unhidden } from "../src/picking.ts";
 
 test("a press and release under the slop is a click, over it is a camera drag", () => {
   const at = { x: 100, y: 200 };
@@ -76,4 +76,46 @@ test("an edge point is hidden only by a face clearly in front of it", () => {
   assert.equal(unhidden(100, 100 * (1 - 0.9 * EDGE_DEPTH_SLACK)), true);
   assert.equal(unhidden(100, 100 * (1 - 1.1 * EDGE_DEPTH_SLACK)), false);
   assert.equal(unhidden(100, 40), false); // the box's near side in front of a back edge
+});
+
+test("a point on screen is measured against the view it is in (hand-worked)", () => {
+  // A view 400 × 200 px whose top-left corner is at (100, 50) on screen.
+  const rect = { left: 100, top: 50, width: 400, height: 200 };
+  // Its centre (100 + 200, 50 + 100) = (300, 150) is the middle of the view: (0, 0).
+  assert.deepEqual(clientToNdc({ x: 300, y: 150 }, rect), { x: 0, y: 0 });
+  // Top-left corner: left edge is x = −1, top edge is y = +1 (device y points up).
+  assert.deepEqual(clientToNdc({ x: 100, y: 50 }, rect), { x: -1, y: 1 });
+  // Bottom-right corner (500, 250): (1, −1).
+  assert.deepEqual(clientToNdc({ x: 500, y: 250 }, rect), { x: 1, y: -1 });
+  // (200, 100): a quarter across (100 of 400 px) is 0.25 × 2 − 1 = −0.5;
+  // a quarter down (50 of 200 px) is −(0.25 × 2) + 1 = 0.5.
+  assert.deepEqual(clientToNdc({ x: 200, y: 100 }, rect), { x: -0.5, y: 0.5 });
+});
+
+test("split view: the same screen point is the middle of the right view and off the left one", () => {
+  // Two views side by side, each 400 × 300 px: the left from x = 0, the right from x = 400.
+  const left = { left: 0, top: 0, width: 400, height: 300 };
+  const right = { left: 400, top: 0, width: 400, height: 300 };
+  // (600, 150) is the right view's centre (400 + 200, 150): (0, 0) there.
+  assert.deepEqual(clientToNdc({ x: 600, y: 150 }, right), { x: 0, y: 0 });
+  // Measured against the left view it is 600 / 400 × 2 − 1 = 2: outside (−1…1), so a
+  // view that used the wrong rectangle would cast its ray past its own edge.
+  assert.deepEqual(clientToNdc({ x: 600, y: 150 }, left), { x: 2, y: 0 });
+});
+
+test("a view with no size has no device coordinates", () => {
+  assert.equal(clientToNdc({ x: 0, y: 0 }, { left: 0, top: 0, width: 0, height: 100 }), null);
+  assert.equal(clientToNdc({ x: 0, y: 0 }, { left: 0, top: 0, width: 100, height: 0 }), null);
+  assert.equal(clientToNdc({ x: 0, y: 0 }, { left: 0, top: 0, width: NaN, height: 100 }), null);
+  assert.equal(clientToNdc({ x: 0, y: 0 }, { left: 0, top: 0, width: -5, height: 100 }), null);
+});
+
+test("device coordinates back to the screen undo clientToNdc (self-consistency)", () => {
+  const rect = { left: 37, top: 12, width: 640, height: 360 };
+  for (const p of [{ x: 37, y: 12 }, { x: 677, y: 372 }, { x: 100.5, y: 300.25 }, { x: -50, y: 900 }]) {
+    const back = ndcToClient(clientToNdc(p, rect)!, rect);
+    assert.ok(Math.abs(back.x - p.x) < 1e-9 && Math.abs(back.y - p.y) < 1e-9, `${p.x},${p.y} -> ${back.x},${back.y}`);
+  }
+  // Hand-worked: (0, 0) is the centre (37 + 320, 12 + 180) = (357, 192).
+  assert.deepEqual(ndcToClient({ x: 0, y: 0 }, rect), { x: 357, y: 192 });
 });

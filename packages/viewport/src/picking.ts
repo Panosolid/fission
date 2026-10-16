@@ -9,6 +9,31 @@ export function isClick(down: { x: number; y: number }, up: { x: number; y: numb
   return Math.hypot(up.x - down.x, up.y - down.y) < CLICK_SLOP_PX;
 }
 
+/** A rectangle on screen in client (CSS) pixels, as getBoundingClientRect gives. */
+export interface ClientRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * A point on screen (client pixels) in a view's normalised device
+ * coordinates: −1…1 across, −1 (bottom) … 1 (top) up, so a raycast from
+ * that view's camera goes through it. Null when the view has no size.
+ * Each view of the one scene (split view, X3) has its own rectangle and
+ * camera, so a point must be measured against the view it was pressed in.
+ */
+export function clientToNdc(client: { x: number; y: number }, rect: ClientRect): { x: number; y: number } | null {
+  if (!(rect.width > 0) || !(rect.height > 0)) return null;
+  return { x: ((client.x - rect.left) / rect.width) * 2 - 1, y: -((client.y - rect.top) / rect.height) * 2 + 1 };
+}
+
+/** The inverse of clientToNdc: a point in a view's device coordinates, in client pixels. */
+export function ndcToClient(ndc: { x: number; y: number }, rect: ClientRect): { x: number; y: number } {
+  return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
+}
+
 /**
  * The kernel face index of the display mesh's triangle `triangle` (from
  * `triangle_faces`), or null when nothing usable was hit: no triangle, or an
