@@ -55,6 +55,6 @@ export const circuitWorkspace: WorkspacePlugin = {
       ],
       startsAfter: "after CAD step 75 (full topological naming, then assemblies and joints)",
     });
-    return () => ctx.properties.replaceChildren();
+    return { unmount: () => ctx.properties.replaceChildren() };
   },
 };

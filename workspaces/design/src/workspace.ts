@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type Selected, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, partOf, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -122,7 +122,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
   slot.replaceChildren(list(browserTree(doc)));
 }
 
-function mount(ctx: WorkspaceContext): () => void {
+function mount(ctx: WorkspaceContext): MountedWorkspace {
   const panel = propertiesPanel(ctx.properties);
   const { inputs } = panel;
   let shape: ShapeKind = "box";
@@ -141,7 +141,10 @@ function mount(ctx: WorkspaceContext): () => void {
   }
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
   const { kernel, viewport } = ctx;
+  /** On screen (awake); false while asleep (X7) and after unmount. */
   let shown = true;
+  /** A build finished while asleep and was not drawn: wake builds again. */
+  let missed = false;
   /** The last body that built, for the selection's surface and curve types. */
   let lastView: BodyView | null = null;
   /** The note about items the last rebuild dropped, and whether that drop is being applied now. */
@@ -242,7 +245,9 @@ function mount(ctx: WorkspaceContext): () => void {
     panel.showFeature(feature);
     try {
       const { current, value: view } = await build(doc);
-      if (!current || !shown) return;
+      if (!current) return;
+      if (!shown) return void (missed = true);
+      missed = false;
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
@@ -268,14 +273,15 @@ function mount(ctx: WorkspaceContext): () => void {
       showSelection();
       viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
     } catch (e) {
-      if (!shown) return;
+      if (!shown) return void (missed = true);
+      missed = false;
       panel.showError(e instanceof Error ? e.message : String(e));
       markStale(true);
     }
   }
 
   // Picking (17b): a click on a face selects it, Shift adds, empty space or Escape clears.
-  viewport.onPick = (pick) => {
+  const onPick: SharedViewport["onPick"] = (pick) => {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
     const c = pickChange(pick, lastFeature(doc).id);
@@ -298,24 +304,47 @@ function mount(ctx: WorkspaceContext): () => void {
     void runAction(COPY_SVG, items);
   };
   const keys = viewport.element.ownerDocument;
-  keys.addEventListener("keydown", onKey);
-  keys.addEventListener("copy", onCopy);
-  const stopWatching = ctx.selection.onChange(() => {
-    // The user's next change of selection retires the note about dropped items.
-    if (!settling && note) panel.showSelectionNote((note = ""));
-    showSelection();
-  });
-
-  inputs.forEach((i) => i.addEventListener("input", () => update()));
-  update();
-  return () => {
+  let stopWatching = () => {};
+  /** Listens to picks, keys, copy and the selection: from mount, and again on each wake. */
+  function listen() {
+    viewport.onPick = onPick;
+    keys.addEventListener("keydown", onKey);
+    keys.addEventListener("copy", onCopy);
+    stopWatching = ctx.selection.onChange(() => {
+      // The user's next change of selection retires the note about dropped items.
+      if (!settling && note) panel.showSelectionNote((note = ""));
+      showSelection();
+    });
+  }
+  function sleep() {
+    if (!shown) return;
     shown = false;
     viewport.onPick = null;
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
     keys.removeEventListener("keydown", onKey);
     keys.removeEventListener("copy", onCopy);
-    for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
+  }
+
+  inputs.forEach((i) => i.addEventListener("input", () => update()));
+  listen();
+  update();
+  return {
+    sleep,
+    wake() {
+      if (shown) return;
+      shown = true;
+      listen();
+      // A build that finished while asleep was not drawn: build again. Otherwise
+      // the body is still in the viewport; redraw what others may have changed.
+      if (missed) return void update();
+      showSelection();
+      markStale();
+    },
+    unmount() {
+      sleep();
+      for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
+    },
   };
 }
 

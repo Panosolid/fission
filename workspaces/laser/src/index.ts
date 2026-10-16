@@ -32,6 +32,6 @@ export const laserWorkspace: WorkspacePlugin = {
       plans: ["Cut, engrave and score layers with power and speed settings", "Flat faces and sketches taken straight from Design, by reference (sheet-metal flat patterns later)", "Job preview with time estimate", "DXF and SVG import and export", "Machine control for common controllers"],
       startsAfter: "after CAD step 31 (when the sketcher is solid)",
     });
-    return () => ctx.properties.replaceChildren();
+    return { unmount: () => ctx.properties.replaceChildren() };
   },
 };

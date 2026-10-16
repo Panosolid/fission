@@ -1,8 +1,10 @@
 // The app shell: one project, one kernel, one viewport, and a switcher
 // between workspaces. Each workspace fills the layout slots around the
-// shared viewport (toolbar above, browser left, properties right) and
-// empties them on hide; the viewport is shared, so switching keeps the
-// camera and what is on screen. Split view (X3) shows a second workspace
+// shared viewport (toolbar above, browser left, properties right); the
+// viewport is shared, so switching keeps the camera and what is on screen.
+// Workspaces stay warm (X7): each gets slots of its own the first time it is
+// shown in a pane, and switching swaps whole slots in and out and puts the
+// workspace to sleep or wakes it, so a switch rebuilds nothing. Split view (X3) shows a second workspace
 // beside the first, in slots of its own, with its own camera on the same
 // scene and the same project and selection. Change notes (X5) show over
 // each pane's viewport, for the workspace in that pane.
@@ -11,8 +13,8 @@ import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
 import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
-import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
-import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
 import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
@@ -67,6 +69,7 @@ const ctx: WorkspaceContext = {
   selection: createSelection(),
   history: historyNotBuilt,
   graph: new DependencyGraph(),
+  // The page's first slots; each workspace gets slots of its own (paneCtx, X7).
   toolbar: $("toolbar"),
   browser: $("browser"),
   properties: $("properties"),
@@ -174,8 +177,49 @@ if (new URLSearchParams(location.search).has("test-hooks"))
   });
 
 type Page = WorkspaceId | "community";
-let hide: () => void = () => {};
 let current: Page = "design";
+
+// Warm workspaces (X7). Each pane has three slots, found by id
+// (#toolbar or #split-toolbar…); a workspace mounted in a pane gets three
+// elements of its own that take the slots' place in the page while it is
+// shown (same id, role and label, so the layout and :empty rules apply
+// unchanged). Asleep, its elements are out of the page, kept as they are.
+type PaneId = "main" | "split";
+type Slots = Pick<WorkspaceContext, "toolbar" | "browser" | "properties">;
+const SLOT_IDS: Record<PaneId, Record<keyof Slots, string>> = {
+  main: { toolbar: "toolbar", browser: "browser", properties: "properties" },
+  split: { toolbar: "split-toolbar", browser: "split-browser", properties: "split-properties" },
+};
+/** Puts `slots` in the page in place of whatever fills `pane`'s slots now. */
+function placeSlots(pane: PaneId, slots: Slots) {
+  for (const key of ["toolbar", "browser", "properties"] as const) {
+    const now = $(SLOT_IDS[pane][key]);
+    if (now !== slots[key]) now.replaceWith(slots[key]);
+  }
+}
+/** Three empty slots shaped like `pane`'s (an element's attributes, no children). */
+const emptySlots = (pane: PaneId): Slots => ({
+  toolbar: $(SLOT_IDS[pane].toolbar).cloneNode(false) as HTMLElement,
+  browser: $(SLOT_IDS[pane].browser).cloneNode(false) as HTMLElement,
+  properties: $(SLOT_IDS[pane].properties).cloneNode(false) as HTMLElement,
+});
+const pool = new WarmPool<WorkspaceId, PaneId, { slots: Slots; view: MountedWorkspace }>({
+  mount(pane, id) {
+    const slots = emptySlots(pane);
+    placeSlots(pane, slots);
+    const view = workspaces.find((w) => w.id === id)!.mount(paneCtx(pane, slots));
+    return { slots, view };
+  },
+  sleep(pane, _id, { view }) {
+    view.sleep?.();
+    placeSlots(pane, emptySlots(pane));
+  },
+  wake(pane, _id, { slots, view }) {
+    placeSlots(pane, slots);
+    view.wake?.();
+  },
+  unmount: (_pane, _id, { view }) => view.unmount(), // asleep: its slots are already out of the page
+});
 const markTab = workspaceSwitcher(
   $("workspaces"),
   workspaces.map((w) => ({ id: w.id, title: w.title, summary: w.summary, placeholder: w.status === "placeholder" })),
@@ -185,14 +229,11 @@ const markTab = workspaceSwitcher(
 function show(page: Page) {
   // Choosing the workspace that is in the second pane swaps the two panes.
   const swap = split?.id === page ? current : null;
-  if (swap) unmountSplit();
-  hide();
-  hide = () => {};
   const workspace = workspaces.find((w) => w.id === page);
-  if (workspace) hide = workspace.mount(ctx);
+  if (workspace) pool.show("main", workspace.id);
   else {
-    showPlaceholder(ctx.properties, communityPage);
-    hide = () => ctx.properties.replaceChildren();
+    pool.hide("main"); // empty slots in its place
+    showPlaceholder($("properties"), communityPage);
   }
   markTab(page);
   $("community").setAttribute("aria-pressed", String(page === "community"));
@@ -215,10 +256,11 @@ $("community").addEventListener("click", () => show("community"));
 // Close split, or a window too narrow for two, goes back to one. The
 // second workspace gets slots of its own and a pane over a second view;
 // the project, selection, history and registries are the first one's.
-let split: { id: WorkspaceId; view: ViewportView; viewport: SharedViewport; hide: () => void } | null = null;
+let split: { id: WorkspaceId; view: ViewportView; viewport: SharedViewport } | null = null;
 const splitEntries = workspaces.map((w) => ({ id: w.id, title: w.title }));
 const shownWorkspace = () => (current === "community" ? null : current);
-function splitCtx(viewport: SharedViewport): WorkspaceContext {
+/** What a workspace in `pane` sees: its own slots and that pane's viewport; the project, selection, history and registries are the one set. */
+function paneCtx(pane: PaneId, slots: Slots): WorkspaceContext {
   return {
     get project() {
       return ctx.project;
@@ -242,14 +284,12 @@ function splitCtx(viewport: SharedViewport): WorkspaceContext {
     kernel: ctx.kernel,
     selection: ctx.selection,
     history: ctx.history,
-    toolbar: $("split-toolbar"),
-    browser: $("split-browser"),
-    properties: $("split-properties"),
-    viewport,
+    ...slots,
+    viewport: pane === "main" ? ctx.viewport : split!.viewport,
     representations: ctx.representations,
     actions: ctx.actions,
     downstream: ctx.downstream,
-    openWorkspace: (id) => openFrom("split", id),
+    openWorkspace: (id) => openFrom(pane, id),
     workspaceTitle,
   };
 }
@@ -258,7 +298,7 @@ function splitCtx(viewport: SharedViewport): WorkspaceContext {
  * open it goes in the other pane, beside the one that asked; otherwise it
  * replaces what is shown. Already on screen: nothing changes.
  */
-function openFrom(asker: "main" | "split", id: WorkspaceId) {
+function openFrom(asker: PaneId, id: WorkspaceId) {
   if (id === current || id === split?.id) return;
   if (split && asker === "main") mountSplit(id);
   else show(id);
@@ -271,8 +311,7 @@ function fillSplitChoice() {
 function mountSplit(id: WorkspaceId) {
   const workspace = workspaces.find((w) => w.id === id);
   if (!workspace) return;
-  if (split) unmountSplit();
-  else {
+  if (!split) {
     $("split").hidden = false;
     $("workspace").dataset.split = "on";
     const view = viewer.addView($("split-viewport"));
@@ -287,22 +326,18 @@ function mountSplit(id: WorkspaceId) {
       view.fit();
     });
     settled.observe($("split-viewport"));
-    split = { id, view, viewport, hide: () => {} };
+    split = { id, view, viewport };
   }
   split!.id = id;
-  split!.hide = workspace.mount(splitCtx(split!.viewport));
+  pool.show("split", id);
   document.body.dataset.split = id; // read by the e2e test
   $("split-toggle").setAttribute("aria-pressed", "true");
   fillSplitChoice();
   showNotes();
 }
-function unmountSplit() {
-  split?.hide();
-  if (split) split.hide = () => {};
-}
 function closeSplit() {
   if (!split) return;
-  unmountSplit();
+  pool.forgetPane("split"); // its viewport goes
   $("split-viewport").querySelector(".view-controls")?.remove();
   viewer.removeView(split.view);
   split = null;
@@ -410,7 +445,8 @@ function openProject(text: string) {
   useGraph(new DependencyGraph(), new ChangeNotes()); // the old notes were about the old project
   keep(newId());
   autosave?.changed(); // store the opened file as it is
-  show(current); // re-mounts the workspace on the opened project
+  pool.forgetAll(); // every warm workspace showed the old project
+  show(current); // mounts the workspace on the opened project
   if (split) mountSplit(split.id); // and the second one
   fileStatus("");
 }
@@ -439,7 +475,8 @@ async function receive(files: File[]) {
   fileStatus("");
   const into = route.importer.workspace;
   if (!into) return; // the shell itself (a project) has already shown it
-  if (split?.id === into) mountSplit(into); // re-mounted where it already is
+  pool.forget(into); // mounted afresh, to show what it opened
+  if (split?.id === into) mountSplit(into); // where it already is
   else show(into);
 }
 const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
