@@ -8,14 +8,16 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 
 - `kernel/`: Rust geometry kernel, compiled to WebAssembly with wasm-pack.
   - `src/tolerance.rs`: every tolerance and the exact predicates. The only place epsilons live.
-  - `src/geom/`: analytic curves (`curve.rs`: Line, Circle), surfaces (`surface.rs`: Plane, Cylinder, Sphere), similarity transforms (`transform.rs`).
+  - `src/geom/`: analytic curves (`curve.rs`: Line, Circle), surfaces (`surface.rs`: Plane, Cylinder, Sphere), similarity transforms (`transform.rs`), placements (`placement.rs`: a rigid motion kept apart from geometry, rotation as a unit quaternion plus a shift).
   - `src/topology.rs`: B-rep arenas (Vertex, Edge, Coedge, Loop, Face, Shell, Body) and Euler counts.
   - `src/validate.rs`: `validate()` and `checked()`. Every operation's result goes through `checked()`.
   - `src/tessellate.rs`: B-rep → watertight triangle mesh (constrained Delaunay in uv space via `spade`).
-  - `src/mesh.rs`: triangle mesh, volume, area, closed-mesh check.
+  - `src/placed.rs`: `Placed` = a body's local geometry plus its placement. Moves and turns change only the placement; volume, area and the mesh's shape come from the untouched geometry; `baked()` gives world geometry where it is needed.
+  - `src/accurate.rs`: double-double arithmetic (exact two-sum/two-product, 3×3 determinants) for sums where large terms cancel.
+  - `src/mesh.rs`: triangle mesh, volume (double-double determinants), area, closed-mesh check.
   - `src/mass.rs`: exact volume and area of a B-rep from its edges (vector area by Stokes, divergence theorem, cylinder flux, Gauss–Bonnet on spheres), written to keep digits for far-away and huge-radius geometry. The app shows these, not mesh values.
   - `src/display.rs`: mesh shaped for the viewer (per-face normals, edge lines).
-  - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate). Each returns `Result<Body, KernelError>` via `ops::finish`.
+  - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate, which take and return `Placed`; a rotation pivot must lie in model space). Each returns `Result<Body, KernelError>` via `ops::finish`.
   - `src/fixtures.rs`: hand-built test bodies (cube, cylinder, sphere, half cylinder, tube, sphere cap/slice/octant) that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
   - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_cylinder`, `make_sphere`, `make_extrude` → `BodyView`, with exact volume and area). Keep it thin.
   - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
@@ -164,7 +166,7 @@ Booleans
 - [ ] 41. Plane–plane and line–plane intersection
 - [ ] 42. Splitting planar faces along intersection lines
 - [ ] 43. Inside/outside classification with exact predicates
-- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set
+- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 10 km frame with 1 µm walls, turned and baked, gives 37231 instead of 40000 today; see the step 12 regressions)
 - [ ] 45. Coplanar faces, touching edges, shared vertices
 - [ ] 46. Plane–cylinder intersection (drill a hole through a box)
 - [ ] 47. Cylinder–cylinder, plane–sphere. Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces
