@@ -15,6 +15,7 @@
 
 import type { KernelCalls } from "../kernel/kernel-client.ts";
 import type { ActionRegistry } from "./actions.ts";
+import type { ChangeNotes } from "./change-notes.ts";
 import type { CommandSpec } from "./commands.ts";
 import type { DownstreamRegistry } from "./downstream.ts";
 import type { DependencyGraph } from "./graph.ts";
@@ -60,6 +61,13 @@ export interface WorkspaceContext {
   actions: ActionRegistry;
   /** The one downstream registry: what other workspaces make from the design, shown as chips in Design's properties panel. */
   downstream: DownstreamRegistry;
+  /**
+   * The project's change notes (docs/integration.md, principle 9). Whoever
+   * calls graph.changed or graph.remove for a user's edit also records it
+   * here with the cause's words; the shell shows the notes about the
+   * workspaces on screen over their viewports.
+   */
+  changeNotes: ChangeNotes;
   /** Opens workspace `id`: beside this one when a split is open, else in place of it. */
   openWorkspace(id: WorkspaceId): void;
   /** A workspace's title as the user sees it ("Slice"). */

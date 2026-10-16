@@ -4,14 +4,15 @@
 // empties them on hide; the viewport is shared, so switching keeps the
 // camera and what is on screen. Split view (X3) shows a second workspace
 // beside the first, in slots of its own, with its own camera on the same
-// scene and the same project and selection.
+// scene and the same project and selection. Change notes (X5) show over
+// each pane's viewport, for the workspace in that pane.
 /// <reference types="vite/client" />
 import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
 import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
-import { ActionRegistry, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
-import { defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
 import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
@@ -71,6 +72,7 @@ const ctx: WorkspaceContext = {
   representations,
   actions,
   downstream,
+  changeNotes: new ChangeNotes(),
   openWorkspace: (id) => openFrom("main", id),
   workspaceTitle,
 };
@@ -107,6 +109,68 @@ viewControls(ctx.viewport).id = "view-controls";
 // What is selected, read by the e2e test (17d draws it on screen).
 ctx.selection.onChange((items) => (document.body.dataset.selection = items.map((r) => r.id).join(" ")));
 
+// Change notes (X5): a strip over each pane's viewport shows the notes about
+// the workspace in that pane (docs/integration.md, principle 9), redrawn
+// after every change to the graph or the notes; × dismisses one. Notes
+// about a workspace not on screen wait until it is shown.
+function notesStrip(host: HTMLElement): HTMLElement {
+  const strip = Object.assign(document.createElement("div"), { className: "notes-strip" });
+  strip.addEventListener("click", (e) => {
+    const id = (e.target as HTMLElement).closest<HTMLElement>("[data-dismiss]")?.dataset.dismiss;
+    if (id) ctx.changeNotes.dismiss(id);
+  });
+  host.append(strip);
+  return strip;
+}
+const notesStrips = { main: notesStrip($("viewport")), split: notesStrip($("split-viewport")) };
+notesStrips.split.classList.add("in-split"); // below the split bar
+const drawn = new WeakMap<HTMLElement, string>();
+/** Draws `notes` in `strip`, keeping open any "Why?" the user opened; nothing changes when nothing would. */
+function drawNotes(strip: HTMLElement, notes: ChangeNote[]) {
+  const html = notes.map(changeNote).join("");
+  if (drawn.get(strip) === html) return;
+  const open = [...strip.querySelectorAll("details[open]")].map((d) => d.closest<HTMLElement>("[data-note]")!.dataset.note!);
+  strip.innerHTML = html;
+  drawn.set(strip, html);
+  for (const id of open) strip.querySelector(`[data-note="${CSS.escape(id)}"] details`)?.setAttribute("open", "");
+}
+let notesQueued = false;
+/** Redraws both strips once the current change is finished (a Design edit changes the graph several times, then records). */
+function showNotes() {
+  if (notesQueued) return;
+  notesQueued = true;
+  queueMicrotask(() => {
+    notesQueued = false;
+    const notes = ctx.changeNotes.current(ctx.graph);
+    drawNotes(notesStrips.main, notes.filter((n) => n.workspace === current));
+    drawNotes(notesStrips.split, notes.filter((n) => n.workspace === split?.id));
+  });
+}
+let stopWatching = () => {};
+/** The graph and notes of the project now open; the strips follow both. */
+function useGraph(graph: DependencyGraph, notes: ChangeNotes) {
+  stopWatching();
+  ctx.graph = graph;
+  ctx.changeNotes = notes;
+  const stops = [graph.onChange(showNotes), notes.onChange(showNotes)];
+  stopWatching = () => stops.forEach((stop) => stop());
+  showNotes();
+}
+useGraph(ctx.graph, ctx.changeNotes);
+// For the browser test only (?test-hooks): the graph and notes, so it can
+// stand in a result in another workspace before any workspace makes one.
+if (new URLSearchParams(location.search).has("test-hooks"))
+  Object.assign(window, {
+    fissionTest: {
+      get graph() {
+        return ctx.graph;
+      },
+      get notes() {
+        return ctx.changeNotes;
+      },
+    },
+  });
+
 type Page = WorkspaceId | "community";
 let hide: () => void = () => {};
 let current: Page = "design";
@@ -137,6 +201,7 @@ function show(page: Page) {
     else mountSplit(swap);
   }
   if (split) fillSplitChoice();
+  showNotes();
   if (!$("assistant").hidden) showAssistant($("assistant"), page, workspace?.title ?? "Community");
   if (location.hash !== `#${page}`) history.replaceState(null, "", `#${page}`);
 }
@@ -164,6 +229,12 @@ function splitCtx(viewport: SharedViewport): WorkspaceContext {
     },
     set graph(g) {
       ctx.graph = g;
+    },
+    get changeNotes() {
+      return ctx.changeNotes;
+    },
+    set changeNotes(n) {
+      ctx.changeNotes = n;
     },
     projectChanged: () => ctx.projectChanged(),
     kernel: ctx.kernel,
@@ -221,6 +292,7 @@ function mountSplit(id: WorkspaceId) {
   document.body.dataset.split = id; // read by the e2e test
   $("split-toggle").setAttribute("aria-pressed", "true");
   fillSplitChoice();
+  showNotes();
 }
 function unmountSplit() {
   split?.hide();
@@ -236,6 +308,7 @@ function closeSplit() {
   $("workspace").dataset.split = "off";
   document.body.dataset.split = "";
   $("split-toggle").setAttribute("aria-pressed", "false");
+  showNotes();
 }
 {
   const toggle = Object.assign(document.createElement("button"), { id: "split-toggle", type: "button", textContent: "Split", title: "Show a second workspace beside this one" });
@@ -330,7 +403,7 @@ $("open-file").addEventListener("change", async () => {
     const project = projectFromJson(await file.text(), workspaces);
     ctx.selection.clear(); // it named the old part's faces
     ctx.project = project;
-    ctx.graph = new DependencyGraph();
+    useGraph(new DependencyGraph(), new ChangeNotes()); // the old notes were about the old project
     keep(newId());
     autosave?.changed(); // store the opened file as it is
     show(current); // re-mounts the workspace on the opened project

@@ -946,6 +946,14 @@ try {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    // The canvas keeps the size it was drawn at until the viewer's resize
+    // observer runs (a frame after layout), so measure only once it has
+    // followed the viewport to phone width; before that it can stick out.
+    await page.waitForFunction(() => {
+      const v = document.querySelector("#viewport");
+      const c = v?.querySelector("canvas");
+      return c && v.clientWidth > 0 && Math.abs(c.getBoundingClientRect().width - v.clientWidth) < 1;
+    });
     const overflow = () =>
       page.evaluate(() =>
         ["html", "body", "#topbar", "#workspace", "#panel-toggles"]
@@ -1490,6 +1498,73 @@ try {
       await wide.setViewportSize({ width: 375, height: 740 });
       assert.equal(await wide.isVisible("#split-toggle"), false);
       assert.equal(await wide.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
+    } finally {
+      await wide.close();
+    }
+  });
+
+  await check("change notes (X5b): none in normal use; one from another workspace shows in its pane, opens its chain, follows the graph and dismisses", async () => {
+    // The app as users get it has no test hook.
+    assert.equal(await page.evaluate(() => "fissionTest" in window), false);
+    const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("console", (m) => {
+      if (m.type() === "error") consoleErrors.push(m.text());
+    });
+    try {
+      await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
+      await wide.goto(url + "?test-hooks#design");
+      const valid = () => wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+      await valid();
+      const notesIn = (pane) => wide.$$eval(`${pane} .notes-strip .change-note`, (els) => els.map((e) => e.querySelector(".note-text").textContent));
+      // Today nothing outside Design reads the design, so an edit makes no note.
+      await wide.fill("#width", "41");
+      await valid();
+      await wide.waitForTimeout(50);
+      assert.deepEqual(await notesIn("#viewport"), []);
+      assert.equal(await wide.isVisible("#viewport .notes-strip"), false, "an empty strip takes no room");
+
+      // Stand in Slice's print plate reading the part, as P2's estimate will.
+      await wide.evaluate(() => window.fissionTest.graph.set({ id: "e2e.plate", label: "Print plate", workspace: "slice", cost: "expensive" }, ["feature-1"]));
+      await wide.fill("#width", "42");
+      await valid();
+      await wide.waitForTimeout(50);
+      // The note is about Slice, which is not on screen: Design's pane shows none.
+      assert.deepEqual(await notesIn("#viewport"), []);
+      const text = "Print plate out of date: you changed the box in Design. Rerun it in Slice.";
+      // Slice beside Design: the note shows over Slice's pane.
+      await wide.click("#split-toggle");
+      await wide.selectOption("#split-choice", "slice");
+      await wide.waitForFunction(() => document.body.dataset.split === "slice");
+      await wide.waitForSelector("#split-viewport .change-note");
+      assert.deepEqual(await notesIn("#split-viewport"), [text]);
+      assert.deepEqual(await notesIn("#viewport"), []);
+      assert.equal(await wide.getAttribute("#split-viewport .change-note", "role"), "status");
+      // Why? opens the chain from the cause to the result.
+      await wide.click("#split-viewport .change-note summary");
+      assert.deepEqual(await wide.$$eval("#split-viewport .change-note li", (li) => li.map((l) => l.textContent)), ["Box: 42 × 30 × 20 mm in Design", "Print plate in Slice"]);
+      assert.equal(await wide.isVisible("#split-viewport .change-note li"), true);
+      await wide.screenshot({ path: "e2e/change-note.png" });
+      // The plate is rebuilt (the graph marks it fresh): the same note says so, its chain still open.
+      await wide.evaluate(() => window.fissionTest.graph.markFresh("e2e.plate"));
+      await wide.waitForFunction(() => document.querySelector("#split-viewport .change-note")?.dataset.state === "updated");
+      assert.deepEqual(await notesIn("#split-viewport"), ["Print plate updated: you changed the box in Design."]);
+      assert.equal(await wide.isVisible("#split-viewport .change-note li"), true, "a redraw keeps Why? open");
+      // × dismisses it, for good.
+      await wide.click("#split-viewport .note-dismiss");
+      await wide.waitForFunction(() => !document.querySelector(".change-note"));
+      assert.equal(await wide.evaluate(() => window.fissionTest.notes.current(window.fissionTest.graph).length), 0);
+      // A newer edit is a new cause: a new note, which the old dismissal doesn't hide.
+      await wide.fill("#width", "43");
+      await valid();
+      await wide.waitForSelector("#split-viewport .change-note");
+      assert.deepEqual(await notesIn("#split-viewport"), [text]);
+      // Close split: Slice is off screen, so is its note; showing Slice brings it back.
+      await wide.click("#split-close");
+      await wide.waitForFunction(() => !document.querySelector(".change-note"));
+      await wide.click("#workspaces [data-workspace=slice]");
+      await wide.waitForSelector("#viewport .change-note");
+      assert.deepEqual(await notesIn("#viewport"), [text]);
     } finally {
       await wide.close();
     }

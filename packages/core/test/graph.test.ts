@@ -61,3 +61,29 @@ test("replacing a node keeps it in the same place", () => {
   g.set({ ...node("mass"), label: "Mass properties" }, ["extrude"]);
   assert.deepEqual([...g.downstreamOf("extrude")].sort(), ["mass", "report", "stress"]);
 });
+
+test("onChange: told after each change that can alter what is shown, and not otherwise", () => {
+  const g = new DependencyGraph();
+  let calls = 0;
+  const stop = g.onChange(() => calls++);
+  // By hand: set, set (2); changed("a") marks b (3); changed("b") marks
+  // nothing (no reader: still 3); markFresh("b") was stale (4); markFresh("b")
+  // again was already fresh (still 4); remove("a") marks b stale and removes a
+  // (two calls: 6); then stopped, so set(c) adds none.
+  g.set(node("a"));
+  g.set(node("b"), ["a"]);
+  assert.equal(calls, 2);
+  g.changed("a");
+  assert.equal(calls, 3);
+  g.changed("b");
+  assert.equal(calls, 3);
+  g.markFresh("b");
+  assert.equal(calls, 4);
+  g.markFresh("b");
+  assert.equal(calls, 4);
+  g.remove("a");
+  assert.equal(calls, 6);
+  stop();
+  g.set(node("c"));
+  assert.equal(calls, 6);
+});

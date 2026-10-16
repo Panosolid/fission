@@ -1,0 +1,5 @@
+/* The strip the shell shows over each pane's viewport, holding that workspace's change notes (X5b). */
+.notes-strip { position: absolute; top: 8px; left: 8px; right: 112px; max-width: 440px; z-index: 1; }
+.notes-strip:empty { display: none; }
+.notes-strip.in-split { top: 48px; }
+.notes-strip .change-note { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }

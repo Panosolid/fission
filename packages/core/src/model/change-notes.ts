@@ -60,6 +60,13 @@ export class ChangeNotes {
   /** Affected node → its note; one per result. */
   private byNode = new Map<string, Recorded>();
   private seq = 0;
+  private listeners = new Set<() => void>();
+
+  /** Calls `listener` after a note is made or dismissed (a note's state changes come from the graph: see DependencyGraph.onChange). Returns a function that stops it. */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  }
 
   /**
    * Notes what `staleness` (the result of graph.changed or graph.remove for
@@ -85,12 +92,18 @@ export class ChangeNotes {
       this.byNode.set(id, note);
       made.push(note.id);
     }
+    if (made.length > 0) for (const l of [...this.listeners]) l();
     return made;
   }
 
   /** Hides a note. False when there is no such note (already dismissed, replaced, or never made). */
   dismiss(id: string): boolean {
-    for (const [node, n] of this.byNode) if (n.id === id) return this.byNode.delete(node);
+    for (const [node, n] of this.byNode)
+      if (n.id === id) {
+        this.byNode.delete(node);
+        for (const l of [...this.listeners]) l();
+        return true;
+      }
     return false;
   }
 

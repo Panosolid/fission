@@ -5,7 +5,7 @@
 // the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DependencyGraph, emptyProject, fetchLinked, breakLink, linkTo, readProject, resolveLink, RepresentationRegistry, type SourceLookup } from "@fission/core";
+import { ChangeNotes, DependencyGraph, emptyProject, fetchLinked, breakLink, linkTo, readProject, resolveLink, RepresentationRegistry, type SourceLookup } from "@fission/core";
 import { designObjects, designWorkspace, lastFeature, partDocument, readDesignDocument, specOf, syncGraph, type DesignDocument } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 
@@ -30,17 +30,18 @@ function journey() {
   designWorkspace.registerRepresentations!(registry, kernel);
   const project = emptyProject("Journey");
   const graph = new DependencyGraph();
+  const notes = new ChangeNotes();
   const design = () => project.workspaces.design as DesignDocument;
   const edit = (doc: DesignDocument) => {
-    syncGraph(graph, doc, (project.workspaces.design as DesignDocument | undefined) ?? null);
+    syncGraph(graph, doc, (project.workspaces.design as DesignDocument | undefined) ?? null, notes);
     project.workspaces.design = doc;
   };
   const lookup: SourceLookup = (s) => designObjects(design()).find((o) => o.id === s.origin.id) ?? null;
-  return { kernel, registry, project, graph, design, edit, lookup };
+  return { kernel, registry, project, graph, notes, design, edit, lookup };
 }
 
 test("a print plate links to a part, gets its STL, and follows an edit", async () => {
-  const { kernel, registry, project, graph, design, edit, lookup } = journey();
+  const { kernel, registry, project, graph, notes, design, edit, lookup } = journey();
   edit(partDocument("box", 40, 30, 20));
 
   // The plate links to the part: live by default, by id, nothing copied.
@@ -64,8 +65,13 @@ test("a print plate links to a part, gets its STL, and follows an edit", async (
   // Edit the part: the plate is marked out of date, and its STL follows.
   edit(partDocument("box", 50, 30, 20));
   assert.equal(graph.isStale("plate-1"), true);
+  // …and a change note in Slice names the cause, with the chain back to it.
+  const [note] = notes.current(graph);
+  assert.equal(note.text, "Print plate updating: you changed the box in Design.");
+  assert.deepEqual(note.chain, ["Box: 50 × 30 × 20 mm in Design", "Print plate in Slice"]);
   close(await stl(), 30000); // 50 · 30 · 20
   graph.markFresh("plate-1");
+  assert.equal(notes.current(graph)[0].text, "Print plate updated: you changed the box in Design.");
 
   // The whole project, links and all, saves and reads back unchanged.
   const reread = readProject(JSON.parse(JSON.stringify(project)));
