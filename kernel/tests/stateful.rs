@@ -126,6 +126,29 @@ impl Ring {
         }
     }
 
+    /// The numbers that are lengths or positions in mm, so bounded by
+    /// MAX_COORD: everything but the bulges. A bulge is tan(sweep / 4), a
+    /// plain number with no unit; any finite one is legal, and the arc it
+    /// makes is held to the range by its radius and extent instead
+    /// (seedbfd7aebc2ed6: bulge 1.1e8 over a 2 µm chord is a 55 m arc,
+    /// well inside the range, but it was counted as a 110 km coordinate).
+    fn coords(&self) -> Vec<f64> {
+        match self {
+            Ring::Path { pts, .. } => pts.iter().flatten().map(|v| v.0).collect(),
+            Ring::Circle { c, r } => vec![c[0].0, c[1].0, r.0],
+        }
+    }
+
+    /// True if one of this ring's arcs certainly has a radius the kernel
+    /// refuses: outside [MIN_FEATURE, MAX_SIZE] by more than rounding,
+    /// worked out with the harness's own formula (`Piece::new`).
+    fn arc_radius_out_of_range(&self) -> bool {
+        self.pieces().iter().any(|p| match *p {
+            Piece::Arc { r, .. } => !(MIN_FEATURE * (1.0 - 1e-9)..=MAX_SIZE * (1.0 + 1e-9)).contains(&r),
+            _ => false,
+        })
+    }
+
     fn boundary(&self) -> Boundary {
         match self {
             Ring::Path { pts, bulges } => Boundary::Path { corners: pts.iter().map(p2).collect(), bulges: bulges.iter().map(|b| b.0).collect() },
@@ -1163,6 +1186,29 @@ enum Expect {
 /// most MAX_PROFILE_CORNERS in all; the outer loop spans ≤ MAX_SIZE; no two
 /// edges cross; every corner is ≥ MIN_FEATURE from every edge it isn't an
 /// end of; every hole is inside the outer loop and not inside another hole.
+/// The model's verdict on an extrusion: certainly out of range, the
+/// generator's own verdict where it gave one, the polygon model for
+/// straight outlines, else too hard to call (curved outlines: the kernel
+/// decides, and its result is then measured).
+fn extrude_expect(shape: &Shape) -> Expect {
+    let Shape::Extrude { outer, holes, dist, expect } = shape else { panic!("not an extrusion") };
+    let rings = || std::iter::once(outer).chain(holes);
+    if !size_ok(dist.0)
+        || shape.clone().numbers().iter().any(|v| !v.0.is_finite())
+        || rings().flat_map(Ring::coords).any(|v| v.abs() > MAX_COORD)
+        || rings().any(Ring::arc_radius_out_of_range)
+        || outer.certainly_too_big()
+    {
+        Expect::Invalid
+    } else if let Some(e) = expect {
+        if *e { Expect::Valid } else { Expect::Invalid }
+    } else if let Some(loops) = rings().map(Ring::polygon).collect::<Option<Vec<_>>>() {
+        profile_expect(&loops, dist.0)
+    } else {
+        Expect::Either
+    }
+}
+
 fn profile_expect(loops: &[Vec<DVec2>], dist: f64) -> Expect {
     if !size_ok(dist)
         || loops.iter().map(Vec::len).sum::<usize>() > tolerance::MAX_PROFILE_CORNERS
@@ -1258,9 +1304,12 @@ fn is_extreme(op: &Op) -> bool {
                 Shape::Box { w, d, h } => [w, d, h].into_iter().any(len_bad),
                 Shape::Cylinder { r, h } => [r, h].into_iter().any(len_bad),
                 Shape::Sphere { r } => len_bad(r),
-                Shape::Extrude { dist, .. } => {
-                    // Any profile number non-finite or beyond MAX_COORD.
-                    len_bad(dist) || shape.clone().numbers().into_iter().any(|v| coord_bad(v))
+                Shape::Extrude { outer, holes, dist, .. } => {
+                    // Any profile number non-finite, or any coordinate or
+                    // radius beyond MAX_COORD (a bulge has no unit).
+                    len_bad(dist)
+                        || shape.clone().numbers().into_iter().any(|v| !v.0.is_finite())
+                        || std::iter::once(outer).chain(holes).flat_map(Ring::coords).any(|v| coord_bad(&Num(v)))
                 }
             };
             sizes_bad || axis_bad(axis) || angle_bad(angle) || at.iter().any(coord_bad)
@@ -1311,20 +1360,8 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 Shape::Box { w, d, h } => size_ok(w.0) && size_ok(d.0) && size_ok(h.0),
                 Shape::Cylinder { r, h } => size_ok(r.0) && size_ok(h.0),
                 Shape::Sphere { r } => size_ok(r.0),
-                Shape::Extrude { outer, holes, dist, expect } => {
-                    let polygons: Option<Vec<Vec<DVec2>>> = std::iter::once(outer).chain(holes).map(Ring::polygon).collect();
-                    let verdict = if !size_ok(dist.0)
-                        || shape.clone().numbers().iter().any(|v| !v.0.is_finite() || v.0.abs() > MAX_COORD)
-                        || outer.certainly_too_big()
-                    {
-                        Expect::Invalid
-                    } else if let Some(e) = expect {
-                        if *e { Expect::Valid } else { Expect::Invalid }
-                    } else if let Some(loops) = polygons {
-                        profile_expect(&loops, dist.0)
-                    } else {
-                        Expect::Either
-                    };
+                Shape::Extrude { .. } => {
+                    let verdict = extrude_expect(shape);
                     match verdict {
                         Expect::Valid => true,
                         Expect::Invalid => false,
@@ -1764,6 +1801,83 @@ fn arc_pieces_by_hand() {
     // 605.0000000228 (3.8e-11 of it too large).
     let Piece::Arc { r, .. } = Piece::new(DVec2::new(0.5, 0.0), DVec2::new(0.5, 0.0022), 1.1e6) else { panic!() };
     assert!((r - (605.0 + 5e-10)).abs() <= 605.0 * 4.0 * f64::EPSILON, "{r}");
+}
+
+fn strip_with_bulges(pts: &[(f64, f64)], bulges: &[f64], dist: f64) -> Shape {
+    let outer = Ring::curved(pts.iter().map(|&(x, y)| DVec2::new(x, y)).collect(), bulges.to_vec());
+    Shape::Extrude { outer, holes: vec![], dist: Num(dist), expect: None }
+}
+
+#[test]
+fn huge_bulge_is_not_a_coordinate_by_hand() {
+    // Regression (seedbfd7aebc2ed6, nightly issue #54): bulge β = 1.1e8 on
+    // the 0.002 mm left end of a 0.5 × 0.002 strip. The model counted β as
+    // a coordinate beyond MAX_COORD (1e8 mm) and called the shape invalid;
+    // the kernel built it, rightly. Worked by hand: r = c(1 + β²)/(4β)
+    // = 0.002 × 1.21e16 / 4.4e8 + 0.002 / 4.4e8 = 55000 mm (+4.5e-12), a
+    // 110 m circle, well inside MAX_SIZE. The sweep φ = 4·atan β is a full
+    // turn less 4/β, so the centre is on the chord's perpendicular
+    // bisector y = 0.001, a whole radius off on the side away from the
+    // strip: (55000, 0.001). The arc runs right round that circle, so the
+    // strip is a slot cut into a disc.
+    let shape = strip_with_bulges(&[(0.0, 0.0), (0.0, 0.002), (0.5, 0.002), (0.5, 0.0)], &[1.1e8, 0.0, -1.0, 0.0], 0.5);
+    let Shape::Extrude { outer, .. } = &shape else { unreachable!() };
+    let Piece::Arc { c, r, .. } = outer.pieces()[0] else { panic!() };
+    assert!((r - 55000.0).abs() <= 55000.0 * 4.0 * f64::EPSILON, "{r}");
+    assert!(c.distance(DVec2::new(55000.0, 0.001)) <= 55000.0 * 4.0 * f64::EPSILON, "{c}");
+    assert_eq!(extrude_expect(&shape), Expect::Either);
+    // Its volume, by hand: the disc πr² less the slot, which is the 0.5 ×
+    // 0.002 rectangle plus the half circle of radius 0.001 that bulge −1
+    // puts on its far end (π·0.001²/2), less the sliver between the 2 µm
+    // chord and the short arc the loop leaves out ((2/3)·c·sag with sag
+    // ≈ (c/2)²/(2r) = 9.1e-12 mm: 1.2e-14 mm², far below rounding), all
+    // times 0.5: 0.5 × (9503317777.109125 − 0.0010015708) = 4751658888.554062.
+    // The slot alone is 5.0e-4 of that, so the allowance (1e-4 mm³,
+    // 2e-14 of the volume, about a hundred ulps) is tight enough to see it.
+    let body = shape.make().expect("the slotted disc is a valid profile");
+    let v = fission_kernel::mass::mass_properties(&body).volume;
+    let by_hand = 0.5 * (PI * 55000.0f64.powi(2) - 0.001 - PI * 0.001f64.powi(2) / 2.0);
+    assert!((v - by_hand).abs() <= 1e-4, "volume {v}, by hand {by_hand}");
+    // A corner at the same 1.1e8 is a coordinate: out of range, both ways.
+    let far = strip_with_bulges(&[(1.1e8, 0.0), (1.1e8, 0.002), (1.1e8 + 0.5, 0.002), (1.1e8 + 0.5, 0.0)], &[0.0; 4], 0.5);
+    assert_eq!(extrude_expect(&far), Expect::Invalid);
+    assert!(matches!(far.make(), Err(KernelError::InvalidInput(_))));
+}
+
+#[test]
+fn arc_radius_limits_boundary() {
+    // A "D": the chord (0,0)→(c,0) and an arc back over it. The model
+    // calls an arc whose radius is outside [MIN_FEATURE, MAX_SIZE] invalid
+    // from its own formula, and the kernel must agree at 0.9× and 1.1× of
+    // each limit (between them the model leaves curved outlines to the
+    // kernel, so only the kernel's answer is checked there).
+    // Bulge for radius r over chord c, from 4rβ = c(1 + β²), the smaller
+    // root: β = (2r − √(4r² − c²))/c, written as c / (2r + √(4r² − c²))
+    // so it doesn't cancel for r ≫ c.
+    let d_shape = |c: f64, r: f64| strip_with_bulges(&[(0.0, 0.0), (c, 0.0)], &[0.0, c / (2.0 * r + (4.0 * r * r - c * c).sqrt())], 1.0);
+    let radius = |s: &Shape| match s {
+        Shape::Extrude { outer, .. } => match outer.pieces()[1] {
+            Piece::Arc { r, .. } => r,
+            _ => panic!(),
+        },
+        _ => unreachable!(),
+    };
+    // MIN_FEATURE: half circles (r = c/2) of 0.9 and 1.1 µm radius. At
+    // 1.1× the arc's top is r = 1.1 µm from the chord, clear of it.
+    for (k, valid) in [(0.9, false), (1.1, true)] {
+        let s = d_shape(2.0 * k * MIN_FEATURE, k * MIN_FEATURE);
+        assert!(tolerance::eq(radius(&s), k * MIN_FEATURE), "{}", radius(&s));
+        assert_eq!(extrude_expect(&s) == Expect::Invalid, !valid, "radius {k} × MIN_FEATURE");
+        assert_eq!(s.make().is_ok(), valid, "kernel, radius {k} × MIN_FEATURE");
+    }
+    // MAX_SIZE: shallow arcs over a 1000 mm chord, sagging c²/(8r) =
+    // 0.139 and 0.114 mm, so only the radius can be wrong with them.
+    for (k, valid) in [(0.9, true), (1.1, false)] {
+        let s = d_shape(1000.0, k * MAX_SIZE);
+        assert!((radius(&s) - k * MAX_SIZE).abs() <= k * MAX_SIZE * 1e-9, "{}", radius(&s));
+        assert_eq!(extrude_expect(&s) == Expect::Invalid, !valid, "radius {k} × MAX_SIZE");
+        assert_eq!(s.make().is_ok(), valid, "kernel, radius {k} × MAX_SIZE");
+    }
 }
 
 #[test]
