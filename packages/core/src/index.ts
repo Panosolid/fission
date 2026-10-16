@@ -32,5 +32,7 @@ export { commandListSchema, commandSchema, parseCommand, parseCommandList } from
 export type { Feature, Intent, Origin, ParameterValue, Provenance, Timeline } from "./model/feature.ts";
 export { describeProvenance } from "./model/feature.ts";
 export { EXACTNESS, isExact, RepresentationRegistry, XY_PLANE } from "./model/representation.ts";
+export type { Action, ActionOutcome, ActionTarget, Selected, SelectionKind } from "./model/actions.ts";
+export { ActionRegistry } from "./model/actions.ts";
 export type { ToolbarItem, ViewportOverlay, WorkspaceContext, WorkspacePlugin } from "./model/workspace.ts";
 export { WORKSPACE_API_VERSION } from "./model/workspace.ts";

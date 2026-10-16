@@ -4,7 +4,7 @@
 // empties them on hide; the viewport is shared, so switching keeps the
 // camera and what is on screen.
 import "@fission/ui/theme.css";
-import { DependencyGraph, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, DependencyGraph, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -38,6 +38,9 @@ const kernel = new KernelClient();
 // The one conversion layer: every workspace says what it can hand over.
 const representations = new RepresentationRegistry();
 for (const w of workspaces) w.registerRepresentations?.(representations, kernel);
+// The one action registry: the verbs each workspace offers for a selection.
+const actions = new ActionRegistry();
+for (const w of workspaces) w.registerActions?.(actions);
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const ctx = {
@@ -52,6 +55,7 @@ const ctx = {
   properties: $("properties"),
   viewport: new Viewer($("viewport")),
   representations,
+  actions,
 };
 
 // The View group: the viewport is shared, so the shell owns its view

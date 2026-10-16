@@ -94,14 +94,29 @@ test("stale numbers are dimmed, and said in words only when the rebuild failed",
   assert.equal($("stale-note").hidden, true);
 });
 
-test("the STL note shows a warning in red and clears", () => {
+test("the action note shows a warning in red and clears", () => {
   const { p, $ } = panel();
-  p.showStlNote("rounded by 2 µm", true);
-  assert.equal($("stl-note").textContent, "rounded by 2 µm");
-  assert.equal($("stl-note").className, "bad");
-  p.showStlNote("", false);
-  assert.equal($("stl-note").textContent, "");
-  assert.equal($("stl-note").className, "");
+  p.showActionNote("rounded by 2 µm", true);
+  assert.equal($("action-note").textContent, "rounded by 2 µm");
+  assert.equal($("action-note").className, "bad");
+  p.showActionNote("", false);
+  assert.equal($("action-note").textContent, "");
+  assert.equal($("action-note").className, "");
+});
+
+test("the selection's verbs are buttons that run their action; none hides the row", () => {
+  const { p, $ } = panel();
+  assert.equal($("selection-actions").hidden, true);
+  const ran: string[] = [];
+  p.showActions([{ id: "design.download-stl", label: "Download STL", title: "Download the body" }], (id) => ran.push(id));
+  const buttons = [...$("selection-actions").querySelectorAll("button")];
+  assert.equal($("selection-actions").hidden, false);
+  assert.deepEqual(buttons.map((b) => [b.textContent, b.dataset.action, b.title]), [["Download STL", "design.download-stl", "Download the body"]]);
+  buttons[0].click();
+  assert.deepEqual(ran, ["design.download-stl"]);
+  p.showActions([], () => {});
+  assert.equal($("selection-actions").hidden, true);
+  assert.equal($("selection-actions").childElementCount, 0);
 });
 
 test("the selection note shows what a rebuild dropped and hides when empty", () => {
