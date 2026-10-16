@@ -51,6 +51,15 @@ Test infrastructure (in place before booleans, which are built against it)
 - [ ] 40. Overnight fuzzing + simulated-user bot (Tier 3), extended as each new feature lands
 
 Booleans
+- [ ] B0. Boolean design review (before 41; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. From an expert's review of the B-rep (2026-10-16):
+  - P-curves: store each edge's curve in every face's uv space, or write down why uv computed on demand from the 3D edge is exact for the supported surfaces (and when that stops holding: 46–47, NURBS).
+  - Model contract: closed, manifold solids only, stated as a rule (validate's "every edge used exactly twice" follows from it). What a boolean does with a non-manifold result (two boxes touching along an edge): an error, or separate bodies (45).
+  - Bodies with several pieces and with voids (a subtraction that splits a part or seals a hollow): how Body and Shell represent them, and what validate and the inside-out check then require.
+  - Curve types for intersection curves: an ellipse (slanted plane through a cylinder, 46) and a representation for general crossings (cylinder–cylinder, 47): fitted spline or procedural "where these two surfaces meet".
+  - Tolerance model: one global LINEAR, or per-edge/per-vertex tolerances for intersection edges that never lie exactly on both surfaces.
+  - Tidying results: merging faces that lie on the same surface, removing sliver faces and tiny edges, and how topological naming (32, 50) survives that.
+  - Point-in-face on curved trimmed faces (42–43) and robust predicates beyond planes (interval arithmetic or error bounds).
+  - Validation in four separate categories, each tested on its own: topological consistency, geometric consistency, solid validity (inside/outside), and correctness against the operation (boolean identities, oracle). The self-intersection check's known limits (`self_intersect.rs` header) are extended where booleans make such faces.
 - [ ] 41. Plane–plane and line–plane intersection
 - [ ] 42. Splitting planar faces along intersection lines
 - [ ] 43. Inside/outside classification with exact predicates
