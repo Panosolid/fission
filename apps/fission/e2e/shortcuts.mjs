@@ -1,5 +1,4 @@
-// Browser check of the one shortcut table (X7b): ? and the Shortcuts button
-// show every key, the workspace on screen first; the list is modal (Escape
+// Browser check of the one shortcut table (X7b): ? shows every key, the workspace on screen first; the list is modal (Escape
 // closes it and nothing else); keys reach only a workspace on screen, never
 // a sleeping one; typing in a field is never taken over; split view sends a
 // workspace's keys to it in either pane.
@@ -69,8 +68,8 @@ try {
       assert.equal(await selection(page), "body:feature-1", "that Escape was the list's alone");
       await page.keyboard.press("Escape");
       assert.equal(await selection(page), "", "the next Escape clears the selection");
-      // The top bar's Shortcuts button opens the same list; Close closes it.
-      await page.click("#shortcuts-toggle");
+      // Close closes it too.
+      await page.keyboard.press("?");
       assert.equal(await listOpen(page), true);
       await page.click("#shortcuts .close");
       assert.equal(await listOpen(page), false);

@@ -542,7 +542,8 @@ document.addEventListener("keydown", (e) => {
   if (chord && !clipboardChords.has(chord)) runShortcut(chord, e);
 });
 for (const type of ["copy", "cut", "paste"] as const) document.addEventListener(type, (e) => runShortcut(CLIPBOARD_CHORDS[type], e));
-// The list of every key (? or Shortcuts in the top bar), the workspaces on screen first.
+// The list of every key (?), the workspaces on screen first. No top-bar button:
+// the bar has no room left for one at 1280 px (the wide-screen smoke check).
 const shortcutDialog = Object.assign(document.createElement("dialog"), { id: "shortcuts", className: "shortcut-list" });
 shortcutDialog.setAttribute("aria-labelledby", "shortcuts-title");
 document.body.append(shortcutDialog);
@@ -557,7 +558,6 @@ function showShortcuts() {
   shortcutDialog.querySelector(".close")!.addEventListener("click", () => shortcutDialog.close());
   shortcutDialog.showModal();
 }
-$("shortcuts-toggle").addEventListener("click", showShortcuts);
 // One assistant panel for every workspace, beside the viewport.
 $("assistant-toggle").addEventListener("click", () => {
   const panel = $("assistant");

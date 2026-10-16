@@ -35,8 +35,9 @@ import urllib.request
 MAIN = "main"
 PREFIX = "claude/"
 HOLD = "hold"
-# The jobs of ci.yml; a head without both has not been tested.
-REQUIRED_CHECKS = ("kernel", "app")
+# The jobs of ci.yml that gate a merge; a head without all of them has not
+# been tested. (ci.yml's coverage job only reports.)
+REQUIRED_CHECKS = ("kernel", "app", "mutants-in-diff")
 PASSING = ("success", "skipped", "neutral")
 MAX_ACTIONS = 20
 
