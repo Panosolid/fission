@@ -39,6 +39,8 @@ const RED = [255, 0, 0];
 const GREEN = [0, 255, 0];
 const BLUE = [0, 0, 255];
 const WHITE = [255, 255, 255];
+/** The viewport's background, 0x14161a (packages/viewport/src/viewer.ts). */
+const BACKGROUND = [20, 22, 26];
 // Top-left red, top-right green, bottom-left blue, bottom-right white (rows run from the top).
 const quarters = (x, y) => [...(y < 50 ? (x < 100 ? RED : GREEN) : x < 100 ? BLUE : WHITE), 255];
 const plate = makePng(200, 100, quarters, 10000); // 10000 px/m = 254 DPI
@@ -158,8 +160,13 @@ try {
     assert.equal(await page.textContent("#image-open"), "Open…");
     assert.equal(await page.textContent("#layers-empty"), "No image open");
     assert.equal(await page.isVisible("#image-empty"), true);
-    // Nothing shown, so the 3D view is as it was.
-    assert.equal(await page.$eval("#viewport", (el) => el.dataset.image ?? null), null);
+    // Image's own empty 2D view: no body, grid or view cube from Design.
+    await settle();
+    assert.ok(designCentre.some((c, i) => Math.abs(c - BACKGROUND[i]) > 20), `the body's centre ${designCentre} should differ from the background`);
+    near(await pixel(0.5, 0.5), BACKGROUND, "the empty view's centre (Design's body was there)");
+    assert.equal(await page.isVisible(".view-cube"), false);
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.image ?? null), "none");
+    await page.screenshot({ path: "e2e/image-empty.png" });
   });
 
   await page.setInputFiles("#image-file", { name: "plate.png", mimeType: "image/png", buffer: plate });
@@ -285,7 +292,7 @@ try {
       el.value = "20";
       el.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    assert.equal(await page.textContent("#image-brightness-value"), "+20 %");
+    assert.equal(await page.inputValue("#image-brightness-number"), "20", "the box follows the slider");
     await page.waitForTimeout(100);
     // +20 % is an offset of round(0.2 × 255) = 51 on each channel: 128 + 51 = 179.
     near(await pixel(0.5, 0.5), [179, 179, 179], "at +20 %");
@@ -295,11 +302,11 @@ try {
   await check("the slider moves by keyboard too: Home goes to −100 % (black), End to +100 % (white)", async () => {
     await page.focus("#image-brightness");
     await page.keyboard.press("Home");
-    assert.equal(await page.textContent("#image-brightness-value"), "\u2212100 %");
+    assert.equal(await page.inputValue("#image-brightness-number"), "-100");
     await page.waitForTimeout(100);
     near(await pixel(0.5, 0.5), [0, 0, 0], "at -100 %");
     await page.keyboard.press("End");
-    assert.equal(await page.textContent("#image-brightness-value"), "+100 %");
+    assert.equal(await page.inputValue("#image-brightness-number"), "100");
     await page.waitForTimeout(100);
     near(await pixel(0.5, 0.5), [255, 255, 255], "at +100 %");
     await page.$eval("#image-brightness", (el) => {
@@ -308,12 +315,36 @@ try {
     });
   });
 
+  await check("an exact Brightness typed in the box: 37 then Enter shows 222 grey and moves the slider; 150 is refused and both go back", async () => {
+    await page.fill("#image-brightness-number", "37");
+    await page.press("#image-brightness-number", "Enter");
+    await page.waitForTimeout(100);
+    // +37 % is an offset of round(0.37 × 255) = round(94.35) = 94: 128 + 94 = 222.
+    near(await pixel(0.5, 0.5), [222, 222, 222], "at +37 %");
+    assert.equal(await page.inputValue("#image-brightness"), "37", "the slider follows the box");
+    assert.equal(await page.textContent("#image-error"), "");
+    await page.fill("#image-brightness-number", "150");
+    await page.press("#image-brightness-number", "Enter");
+    await page.waitForFunction(() => document.querySelector("#image-error").textContent !== "");
+    assert.equal(await page.textContent("#image-error"), 'Brightness must be a whole percent from -100 to +100, not "150".');
+    assert.equal(await page.inputValue("#image-brightness-number"), "37");
+    assert.equal(await page.inputValue("#image-brightness"), "37");
+    near(await pixel(0.5, 0.5), [222, 222, 222], "unchanged after 150");
+    await page.$eval("#image-brightness", (el) => {
+      el.value = "20";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    assert.equal(await page.textContent("#image-error"), "");
+  });
+
   await page.screenshot({ path: "e2e/image-brightness.png" });
 
   await check("Hide on the layer shows the empty viewport's dark background; Show brings it back at +20 %", async () => {
     await page.click("#layer-list .layer-visibility");
     await page.waitForTimeout(100);
     assert.equal(await page.textContent("#layer-list .layer-visibility"), "Show");
+    // The hidden layer's row is dimmed (styles/image.css reaches the page).
+    assert.equal(await page.$eval("#layer-list .layer-hidden .tree-row", (el) => getComputedStyle(el).opacity), "0.5");
     near(await pixel(0.5, 0.5), [20, 22, 26], "hidden");
     await page.click("#layer-list .layer-visibility");
     await page.waitForTimeout(100);
@@ -375,7 +406,7 @@ try {
         .map((el) => `${el.id || el.tagName}: ${el.scrollWidth} > ${el.clientWidth}`),
     );
 
-  await check("1280 px: focus moves top bar, toolbar (Open), browser (Hide), View buttons, Split, properties (DPI, mm per pixel, Brightness)", async () => {
+  await check("1280 px: focus moves top bar, toolbar (Open), browser (Hide), View buttons, Split, properties (DPI, mm per pixel, Brightness box, slider)", async () => {
     const p = await withPlate({ viewport: { width: 1280, height: 800 } });
     try {
       assert.deepEqual(await overflow(p), []);
@@ -384,7 +415,7 @@ try {
       assert.ok(stops.includes("image-open"), `Open is reachable: ${stops}`);
       assert.ok(stops.includes("layer-visibility"), `Hide is reachable: ${stops}`);
       const props = stops.slice(stops.indexOf("image-dpi"));
-      assert.deepEqual(props, ["image-dpi", "image-mmpp", "image-brightness"]);
+      assert.deepEqual(props, ["image-dpi", "image-mmpp", "image-brightness-number", "image-brightness"]);
       await p.screenshot({ path: "e2e/image-1280.png" });
     } finally {
       await p.close();
@@ -397,7 +428,7 @@ try {
       assert.deepEqual(await overflow(p), []);
       const rect = (sel) => p.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
       // Every properties control lies inside the 375 px screen.
-      for (const sel of ["#image-dpi", "#image-mmpp", "#image-brightness", "#image-brightness-value", "#image-not-saved"]) {
+      for (const sel of ["#image-dpi", "#image-mmpp", "#image-brightness", "#image-brightness-number", "#image-not-saved"]) {
         const r = await rect(sel);
         assert.ok(r.left >= 0 && r.right <= 375, `${sel} spans ${r.left}..${r.right}`);
       }
@@ -455,7 +486,7 @@ try {
     }
   });
 
-  await check("split view: Image beside Design shows the image in its own pane while Design's pane keeps the body", async () => {
+  await check("split view: Image beside Design shows its empty view, then the image, in its own pane while Design's pane keeps the body", async () => {
     const p = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     p.on("pageerror", (e) => errors.push(e.message));
     try {
@@ -479,6 +510,13 @@ try {
       await p.click("#split-toggle");
       await p.selectOption("#split-choice", "image");
       await p.waitForSelector("#split-toolbar #image-open");
+      // Image's pane with nothing open is its own empty view; Design's pane keeps the body.
+      await p.waitForTimeout(400);
+      near(await at("#split-viewport", 0.5, 0.5), BACKGROUND, "the empty Image pane's centre");
+      assert.equal(await p.isVisible("#split-viewport .view-cube"), false);
+      assert.equal(await p.$eval("#split-viewport", (el) => el.dataset.image), "none");
+      assert.ok(isBody(await at("#viewport", 0.5, 0.5)), "Design's pane lost the body to an empty Image pane");
+      assert.equal(await p.isVisible("#viewport .view-cube"), true);
       await p.setInputFiles("#split-toolbar #image-file", { name: "plate.png", mimeType: "image/png", buffer: plate });
       await p.waitForFunction(() => document.querySelector("#split-properties #image-mm")?.textContent === "20 × 10 mm");
       await p.waitForTimeout(400);

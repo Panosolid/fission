@@ -34,6 +34,7 @@ function fake(): Fake {
     showSelection() {},
     onPick: () => {},
     showImage(rep) {
+      if (rep === null) return void f.log.push("empty"); // Image's own empty view
       if (f.failShow) throw new Error(f.failShow);
       f.shown.push(rep);
       f.log.push("show");
@@ -71,7 +72,7 @@ const hidden = (ctx: WorkspaceContext, id: string) => (ctx.properties.querySelec
 // 254 DPI = 10000 px/m: 0.1 mm per pixel.
 const plate = png(ihdr(200, 100), phys(10000, 10000, 1), idat(), iend());
 
-test("with nothing open: an Open button, no layers, an invitation, and no image in the viewport", () => {
+test("with nothing open: an Open button, no layers, an invitation, and Image's own empty view (never Design's body)", () => {
   resetImageWorkspace();
   const f = fake();
   const hide = mountImage(f.ctx, decodeAs(1, 1));
@@ -80,8 +81,9 @@ test("with nothing open: an Open button, no layers, an invitation, and no image 
   assert.equal(hidden(f.ctx, "image-empty"), false);
   assert.equal(hidden(f.ctx, "image-size"), true);
   assert.equal(f.ctx.viewport.onPick, null, "nothing to pick in an image yet");
-  assert.deepEqual(f.log, ["clear"]);
+  assert.deepEqual(f.log, ["empty"]); // showImage(null), not clearImage, which would give back Design's body
   hide();
+  assert.deepEqual(f.log, ["empty", "clear"], "hiding gives the view back");
 });
 
 test("opening a 200 × 100 PNG at 254 DPI shows it at 20 × 10 mm, lists its layer and says it is not saved", async () => {
@@ -137,6 +139,7 @@ test("a damaged file shows its message and no image", async () => {
   await pick(f.ctx, plate);
   assert.equal(text(f.ctx, "image-error"), "The file's header says 200 × 100 pixels but it decoded to 100 × 200.");
   assert.equal(f.shown.length, 0);
+  assert.equal(f.log.at(-1), "empty", "still Image's empty view");
   assert.equal(hidden(f.ctx, "image-size"), true);
   hide();
 });
@@ -198,18 +201,75 @@ test("Brightness at +20 % shows 50 % grey as 179 at once, without moving the cam
   assert.equal(hidden(f.ctx, "image-adjust"), false);
   const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
   assert.deepEqual([slider.min, slider.max, slider.step, slider.value], ["-100", "100", "1", "0"]);
-  assert.equal(text(f.ctx, "image-brightness-value"), "0 %");
+  assert.deepEqual(amount(f), ["0", "0 %"]);
   const fits = f.log.filter((l) => l === "fit").length;
   slider.value = "20";
   slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
   // +20 % is an offset of round(0.2 × 255) = 51: grey 128 + 51 = 179; white 255 + 51 clips to 255; alpha stays 255.
   assert.deepEqual([...f.shown.at(-1)!.rgba], [179, 179, 179, 255, 255, 255, 255, 255]);
-  assert.equal(text(f.ctx, "image-brightness-value"), "+20 %");
+  assert.deepEqual(amount(f), ["20", "+20 %"], "the box follows the slider");
   assert.equal(f.log.filter((l) => l === "fit").length, fits, "a live edit keeps the camera");
   slider.value = "0";
   slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
   assert.deepEqual([...f.shown.at(-1)!.rgba], [128, 128, 128, 255, 255, 255, 255, 255], "non-destructive");
-  assert.equal(text(f.ctx, "image-brightness-value"), "0 %");
+  assert.deepEqual(amount(f), ["0", "0 %"]);
+  hide();
+});
+
+/** The number box's value and the slider's spoken value ("+20 %"). */
+const amount = (f: Fake) => [
+  (f.ctx.properties.querySelector("#image-brightness-number") as HTMLInputElement).value,
+  f.ctx.properties.querySelector("#image-brightness")!.getAttribute("aria-valuetext"),
+];
+
+/** Types `value` into the Brightness box and enters it (a change event, as Enter or leaving the box gives). */
+function typeBrightness(f: Fake, value: string) {
+  const box = f.ctx.properties.querySelector("#image-brightness-number") as HTMLInputElement;
+  box.value = value;
+  box.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("change"));
+}
+
+test("an exact Brightness typed in the box: 37 % shows 50 % grey as 222 and moves the slider; the camera stays", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  const hide = mountImage(f.ctx, decodeGrey);
+  await pick(f.ctx, greyPlate);
+  const box = f.ctx.properties.querySelector("#image-brightness-number") as HTMLInputElement;
+  assert.deepEqual([box.type, box.min, box.max, box.step], ["number", "-100", "100", "1"], "the slider's range and step");
+  const fits = f.log.filter((l) => l === "fit").length;
+  typeBrightness(f, "37");
+  // +37 % is an offset of round(0.37 × 255) = round(94.35) = 94: grey 128 + 94 = 222; white clips at 255.
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [222, 222, 222, 255, 255, 255, 255, 255]);
+  assert.equal((f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement).value, "37", "the slider follows the box");
+  assert.deepEqual(amount(f), ["37", "+37 %"]);
+  assert.equal(text(f.ctx, "image-error"), "");
+  assert.equal(f.log.filter((l) => l === "fit").length, fits, "an exact edit keeps the camera");
+  // The ends are allowed: −100 % is an offset of −255, so 128 − 255 clips to 0; +100 % clips to 255.
+  typeBrightness(f, "-100");
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [0, 0, 0, 255, 0, 0, 0, 255]);
+  typeBrightness(f, "100");
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [255, 255, 255, 255, 255, 255, 255, 255]);
+  assert.equal(text(f.ctx, "image-error"), "");
+  hide();
+});
+
+test("a typed Brightness outside -100…+100, not whole, or empty is refused with the slider's message; both go back to the image's value", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  const hide = mountImage(f.ctx, decodeGrey);
+  await pick(f.ctx, greyPlate);
+  typeBrightness(f, "20");
+  for (const bad of ["101", "-101", "150", "12.5", ""]) {
+    typeBrightness(f, bad);
+    assert.equal(text(f.ctx, "image-error"), `Brightness must be a whole percent from -100 to +100, not ${JSON.stringify(bad)}.`, bad);
+    assert.deepEqual(amount(f), ["20", "+20 %"], `after ${JSON.stringify(bad)} the box and slider show the image's value`);
+    assert.equal((f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement).value, "20");
+    assert.deepEqual([...f.shown.at(-1)!.rgba], [179, 179, 179, 255, 255, 255, 255, 255], "the image stays at +20 %");
+  }
+  // A good value afterwards clears the message.
+  typeBrightness(f, "0");
+  assert.equal(text(f.ctx, "image-error"), "");
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [128, 128, 128, 255, 255, 255, 255, 255]);
   hide();
 });
 
@@ -243,7 +303,7 @@ test("Hide on the layer shows nothing (fully transparent) and Show brings it bac
   assert.deepEqual([...f.shown.at(-1)!.rgba], [0, 0, 0, 0, 0, 0, 0, 0], "hidden: every pixel transparent");
   assert.deepEqual([eye().textContent, eye().getAttribute("aria-label"), eye().getAttribute("aria-pressed")], ["Show", "Show Layer 1", "true"]);
   assert.equal(f.ctx.browser.querySelector("#layer-list li")!.className, "layer-hidden");
-  assert.equal(text(f.ctx, "image-brightness-value"), "+20 %", "hiding keeps the brightness");
+  assert.deepEqual(amount(f), ["20", "+20 %"], "hiding keeps the brightness");
   eye().click();
   assert.deepEqual([...f.shown.at(-1)!.rgba], [179, 179, 179, 255, 255, 255, 255, 255]);
   assert.equal(f.log.filter((l) => l === "fit").length, fits, "neither toggle moves the camera");
@@ -262,7 +322,7 @@ test("brightness and visibility are kept across a switch away and back", async (
   hide();
   hide = mountImage(f.ctx, decodeGrey);
   assert.equal((f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement).value, "-30");
-  assert.equal(text(f.ctx, "image-brightness-value"), "\u221230 %");
+  assert.deepEqual(amount(f), ["-30", "\u221230 %"]);
   assert.equal((f.ctx.browser.querySelector("#layer-list .layer-visibility") as HTMLButtonElement).textContent, "Show");
   assert.deepEqual([...f.shown.at(-1)!.rgba], [0, 0, 0, 0, 0, 0, 0, 0]);
   hide();

@@ -44,11 +44,12 @@ export class ViewportView {
   private resizer: ResizeObserver;
   private queuedHover = 0;
   /**
-   * The image this view shows (showImage), on a layer only this view's
-   * camera sees, so another view of the same scene keeps the body; and this
-   * view's 3D camera to give back when it goes.
+   * This view's 2D mode (showImage): the sheet it shows, or null for the
+   * empty view of a workspace with no image open yet, on a layer only this
+   * view's camera sees, so another view of the same scene keeps the body;
+   * and this view's 3D camera to give back when it goes.
    */
-  private image: { mesh: THREE.Mesh; texture: THREE.DataTexture; layer: number; widthMm: number; heightMm: number; saved: { position: THREE.Vector3; target: THREE.Vector3; near: number; far: number } } | null = null;
+  private image: { sheet: { mesh: THREE.Mesh; texture: THREE.DataTexture; widthMm: number; heightMm: number } | null; layer: number; saved: { position: THREE.Vector3; target: THREE.Vector3; near: number; far: number } } | null = null;
 
   private host: ViewHost;
 
@@ -235,9 +236,11 @@ export class ViewportView {
    * a crisp square, smoothed with mipmaps when zoomed out. The texture is
    * sRGB and the material unlit, so the screen shows the image's own
    * colours. The sheet is in the one scene, on a layer only this view's
-   * camera sees, and this view stops seeing the body.
+   * camera sees, and this view stops seeing the body. Null shows the same
+   * 2D view with no sheet: only the background.
    */
-  showImage(image: ImageRep) {
+  showImage(image: ImageRep | null) {
+    if (image === null) return this.showEmpty();
     checkTextureSize(image.width, image.height, this.renderer.capabilities.maxTextureSize);
     const sheet = imageSheet(image.width, image.height, image.mmPerPixel);
     const layer = this.image?.layer ?? freeImageLayers.shift();
@@ -257,29 +260,44 @@ export class ViewportView {
     texture.needsUpdate = true;
     const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: texture, transparent: true }));
     mesh.layers.set(layer);
-    const first = !this.image;
-    const saved = this.image?.saved ?? { position: this.camera.position.clone(), target: this.controls.target.clone(), near: this.camera.near, far: this.camera.far };
-    this.removeImage();
-    this.image = { mesh, texture, layer, widthMm: sheet.widthMm, heightMm: sheet.heightMm, saved };
+    const first = !this.image?.sheet;
+    this.enter2d(layer);
+    this.removeSheet();
+    this.image!.sheet = { mesh, texture, widthMm: sheet.widthMm, heightMm: sheet.heightMm };
     this.host.scene.add(mesh);
     this.element.dataset.image = `${image.width} x ${image.height} px, ${+sheet.widthMm.toPrecision(12)} x ${+sheet.heightMm.toPrecision(12)} mm`; // read by the e2e test
-    if (first) {
-      this.camera.layers.set(layer); // only the image: no body, grid or axes
-      this.cube.element.hidden = true;
-      // Top-down 2D: the left button pans instead of orbiting.
-      this.controls.enableRotate = false;
-      this.controls.screenSpacePanning = true;
-      this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
-      this.controls.touches.ONE = THREE.TOUCH.PAN;
-      this.frameImage();
-    }
+    if (first) this.frameImage();
   }
 
-  /** Removes this view's image and gives back the body and the 3D camera as they were; does nothing when no image is shown. */
+  /** The 2D view with no sheet (showImage(null)): the background alone, never the body; an image shown before goes, the camera stays. */
+  private showEmpty() {
+    const layer = this.image?.layer ?? freeImageLayers.shift();
+    if (layer === undefined) throw new Error("Too many views are showing images at once.");
+    this.enter2d(layer);
+    this.removeSheet();
+    this.element.dataset.image = "none"; // read by the e2e test
+  }
+
+  /** Switches this view to the top-down 2D mode on `layer`, keeping its 3D camera to give back; does nothing more when already there. */
+  private enter2d(layer: number) {
+    if (this.image) return;
+    const saved = { position: this.camera.position.clone(), target: this.controls.target.clone(), near: this.camera.near, far: this.camera.far };
+    this.image = { sheet: null, layer, saved };
+    this.camera.layers.set(layer); // only the image: no body, grid or axes
+    this.cube.element.hidden = true;
+    // Top-down 2D: the left button pans instead of orbiting.
+    this.controls.enableRotate = false;
+    this.controls.screenSpacePanning = true;
+    this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+    this.controls.touches.ONE = THREE.TOUCH.PAN;
+    this.place([0, 0, this.camera.position.distanceTo(this.controls.target)], [0, 0, 0], [0, 1, 0]); // looking straight down
+  }
+
+  /** Leaves the 2D mode, removing any image, and gives back the body and the 3D camera as they were; does nothing when not in it. */
   clearImage() {
     if (!this.image) return;
     const { saved, layer } = this.image;
-    this.removeImage();
+    this.removeSheet();
     this.image = null;
     freeImageLayers.push(layer);
     delete this.element.dataset.image;
@@ -299,18 +317,20 @@ export class ViewportView {
     this.controls.update();
   }
 
-  private removeImage() {
-    if (!this.image) return;
-    this.host.scene.remove(this.image.mesh);
-    this.image.mesh.geometry.dispose();
-    (this.image.mesh.material as THREE.Material).dispose();
-    this.image.texture.dispose();
+  private removeSheet() {
+    const sheet = this.image?.sheet;
+    if (!sheet) return;
+    this.host.scene.remove(sheet.mesh);
+    sheet.mesh.geometry.dispose();
+    (sheet.mesh.material as THREE.Material).dispose();
+    sheet.texture.dispose();
+    this.image!.sheet = null;
   }
 
   /** Looks straight down on the image's sheet, the whole of it in view; +Y up on screen. */
   private frameImage(): Framing | null {
-    if (!this.image) return null;
-    const { widthMm, heightMm } = this.image;
+    if (!this.image?.sheet) return null;
+    const { widthMm, heightMm } = this.image.sheet;
     const dist = topDownDistance(widthMm, heightMm, this.camera.fov, this.camera.aspect);
     this.place([0, 0, dist], [0, 0, 0], [0, 1, 0]);
     const range = imageZoomRange(dist);
@@ -537,8 +557,8 @@ export class Viewer implements SharedViewport {
     return this.main.fitSelection();
   }
 
-  /** Shows an image in the main view (see ViewportView.showImage). */
-  showImage(image: ImageRep) {
+  /** Shows an image, or the empty 2D view for null, in the main view (see ViewportView.showImage). */
+  showImage(image: ImageRep | null) {
     this.main.showImage(image);
   }
 
