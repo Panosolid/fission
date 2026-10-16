@@ -7,17 +7,23 @@ name: Random testing
 # stateful harness plus the OpenCascade oracle, a fresh random seed per round)
 # in two legs, because a GitHub job may last at most 6 hours, until 22:35 UTC;
 # alongside the first leg, 4 jobs run cargo mutants over the whole kernel
-# (lib tests, one shard each). Every job is cut off at 22:35 UTC however late
-# it started (GitHub sometimes starts scheduled runs late), so the last
-# results are on the branch before 23:00 UTC.
+# (lib tests, one shard each: ~2600 mutants, ~75 minutes a shard). Every job
+# is cut off at 22:35 UTC however late it started (GitHub sometimes starts
+# scheduled runs late), so the last results are on the branch before 23:00
+# UTC.
 #
 # "Run workflow" on the Actions tab (or workflow_dispatch from a thread) tests
-# any branch: 4 jobs for `minutes`, mutation testing only if asked.
+# any branch: 4 jobs for `minutes`, mutation testing only if asked. Mutation
+# shards are not held to `minutes`: a shard cut off part way says nothing
+# about the code it didn't reach, so they get up to 330 minutes, like a
+# nightly shard.
 #
 # A final job adds everything to the `test-results` branch
 # (.github/scripts/collect-results.sh: log.csv, summary.txt, failures/<seed>/,
-# mutants/) and opens an issue when something new was found. Scheduled runs
-# only fire from the default branch.
+# mutants/), files one issue per kind of problem found
+# (.github/scripts/file_issues.py: new kinds get an issue, known ones a
+# comment, fixed ones that come back on main are reopened) and opens one for
+# new mutation survivors. Scheduled runs only fire from the default branch.
 on:
   schedule:
     - cron: "0 15 * * *"
@@ -45,6 +51,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       deadline: ${{ steps.plan.outputs.deadline }}
+      mutants_deadline: ${{ steps.plan.outputs.mutants_deadline }}
       jobs: ${{ steps.plan.outputs.jobs }}
       second_leg: ${{ steps.plan.outputs.second_leg }}
       shards: ${{ steps.plan.outputs.shards }}
@@ -70,9 +77,14 @@ jobs:
           # leg runs when the first can't reach the deadline.
           second_leg=false
           [ $(( deadline - now )) -gt $(( 330 * 60 )) ] && second_leg=true
-          echo "Testing until $(date -u -d "@$deadline" '+%F %H:%M UTC'); second leg: $second_leg; mutation shards: $shards"
+          # Mutation shards run in one job each (limit 350 minutes): at most
+          # 330 minutes, and never past the night's deadline.
+          mutants_deadline=$(( now + 330 * 60 ))
+          [ "$NIGHTLY" = true ] && [ $deadline -lt $mutants_deadline ] && mutants_deadline=$deadline
+          echo "Testing until $(date -u -d "@$deadline" '+%F %H:%M UTC'); second leg: $second_leg; mutation shards: $shards, until $(date -u -d "@$mutants_deadline" '+%H:%M UTC')"
           {
             echo "deadline=$deadline"
+            echo "mutants_deadline=$mutants_deadline"
             echo "jobs=$jobs"
             echo "second_leg=$second_leg"
             echo "shards=$(if [ $shards -gt 0 ]; then seq -s, 0 $((shards - 1)) | sed 's/.*/[&]/'; else echo '[]'; fi)"
@@ -95,7 +107,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install cadquery-ocp
+      - run: pip install cadquery-ocp mpmath
       - name: Random rounds until the time is up
         working-directory: kernel
         env:
@@ -126,7 +138,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install cadquery-ocp
+      - run: pip install cadquery-ocp mpmath
       - name: Random rounds until the time is up
         working-directory: kernel
         env:
@@ -157,7 +169,7 @@ jobs:
       - name: Mutation testing, one shard of the whole kernel
         working-directory: kernel
         env:
-          DEADLINE: ${{ needs.plan.outputs.deadline }}
+          DEADLINE: ${{ needs.plan.outputs.mutants_deadline }}
           SHARDS: ${{ strategy.job-total }}
           # Unoptimised builds are about five times faster and give the same
           # result (kernel/CLAUDE.md, Mutation testing).
@@ -211,5 +223,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # Copied out first: the script switches this checkout to test-results.
         run: |
-          cp .github/scripts/collect-results.sh "$RUNNER_TEMP/collect.sh"
-          bash "$RUNNER_TEMP/collect.sh"
+          cp .github/scripts/collect-results.sh .github/scripts/file_issues.py "$RUNNER_TEMP/"
+          bash "$RUNNER_TEMP/collect-results.sh"
