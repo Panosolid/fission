@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -66,6 +66,26 @@ test("placeholders declare no representations; working workspaces produce every 
   }
 });
 
+// The one action registry (X1): placeholders offer no verbs, and every verb
+// a workspace registers is its own (id and workspace name it).
+test("placeholders register no actions; a working workspace's verbs are its own", () => {
+  for (const p of plugins) {
+    const registry = new ActionRegistry();
+    p.registerActions?.(registry);
+    if (p.status === "placeholder") {
+      assert.equal(p.registerActions, undefined, `${p.id} is a placeholder and must not offer verbs`);
+      continue;
+    }
+    for (const id of plugins.map((q) => q.id)) {
+      const theirs = registry.byWorkspace(id);
+      if (id !== p.id) assert.deepEqual(theirs, [], `${p.id} registered verbs for ${id}`);
+    }
+  }
+  const design = new ActionRegistry();
+  plugins.find((p) => p.id === "design")!.registerActions!(design);
+  assert.deepEqual(design.byWorkspace("design").map((a) => a.id), ["design.download-stl"]);
+});
+
 // Mounting into the layout slots (step 16a): every plugin fills the slots
 // it uses and leaves all three empty on hide, so the next workspace starts
 // clean. A real DOM (happy-dom) stands in for the browser.
@@ -114,6 +134,7 @@ function testContext(): WorkspaceContext {
     properties: el(),
     viewport,
     representations: new RepresentationRegistry(),
+    actions: new ActionRegistry(),
   };
 }
 
@@ -250,6 +271,47 @@ test("Design shows a kernel failure in its panel rather than throwing", async ()
   // Its toolbar (16b): the command groups, with the part's shape pressed.
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[role=group]")].map((g) => g.getAttribute("aria-label")), ["Create", "Export"]);
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[aria-pressed=true]")].map((b) => b.textContent), ["Box"]);
+  hide();
+});
+
+// Verbs, not apps (X1): the selection shows what the action registry offers
+// for it, and Design's toolbar STL button runs the same registered verb.
+test("Design offers the registry's verbs for the selection, and its STL button runs the registered verb", async () => {
+  const ctx = testContext();
+  const design = plugins.find((p) => p.id === "design")!;
+  design.registerActions!(ctx.actions);
+  const hide = design.mount(ctx);
+  await settle();
+  const verbs = () => [...ctx.properties.querySelectorAll("#selection-actions button")].map((b) => (b as HTMLElement).dataset.action);
+  const row = ctx.properties.querySelector("#selection-actions") as HTMLElement;
+  const note = () => ctx.properties.querySelector("#action-note")!.textContent;
+  assert.deepEqual(verbs(), [], "nothing selected: no verbs");
+  assert.equal(row.hidden, true);
+  ctx.viewport.onPick!({ face: 1, shift: false });
+  assert.deepEqual(verbs(), [], "a face: no verbs yet");
+  (ctx.browser.querySelector("[data-node=body-1]") as HTMLElement).click();
+  assert.deepEqual(verbs(), ["design.download-stl"]);
+  assert.equal(row.hidden, false);
+  // The kernel fails in this test: the verb's outcome shows in the note, nothing throws.
+  (ctx.properties.querySelector("[data-action='design.download-stl']") as HTMLElement).click();
+  await settle();
+  assert.equal(note(), "no kernel in this test");
+  ctx.properties.querySelector<HTMLElement>("#action-note")!.textContent = "";
+  ctx.selection.clear();
+  assert.deepEqual(verbs(), []);
+  // The toolbar's STL button exports the whole part with nothing selected, through the registry.
+  let ran = 0;
+  const real = ctx.actions.get("design.download-stl")!;
+  const run = real.run;
+  real.run = (targets, c) => {
+    ran++;
+    assert.deepEqual(targets.map((t) => t.id), ["body:feature-1"]);
+    return run(targets, c);
+  };
+  (ctx.toolbar.querySelector("[data-op=export_stl]") as HTMLElement).click();
+  await settle();
+  assert.equal(ran, 1);
+  assert.equal(note(), "no kernel in this test");
   hide();
 });
 

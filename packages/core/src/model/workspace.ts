@@ -14,6 +14,7 @@
 // other workspaces.
 
 import type { KernelCalls } from "../kernel/kernel-client.ts";
+import type { ActionRegistry } from "./actions.ts";
 import type { CommandSpec } from "./commands.ts";
 import type { DependencyGraph } from "./graph.ts";
 import type { RepresentationKind, RepresentationRegistry } from "./representation.ts";
@@ -54,6 +55,8 @@ export interface WorkspaceContext {
   viewport: SharedViewport;
   /** The one conversion layer between workspaces. */
   representations: RepresentationRegistry;
+  /** The one action registry: the verbs every workspace offers for what is selected. */
+  actions: ActionRegistry;
 }
 
 export interface WorkspacePlugin {
@@ -69,6 +72,8 @@ export interface WorkspacePlugin {
   representations: { produces: RepresentationKind[]; accepts: RepresentationKind[] };
   /** Registers its producers with the shared registry; called once at start-up. */
   registerRepresentations?(registry: RepresentationRegistry, kernel: KernelCalls): void;
+  /** Registers the verbs it offers on a selection (actions.ts); called once at start-up. Placeholders register none. */
+  registerActions?(registry: ActionRegistry): void;
   /**
    * Brings its own part of a loaded project (project.workspaces[id]) up to
    * the version this build writes; throws a clear error for data it can't read.

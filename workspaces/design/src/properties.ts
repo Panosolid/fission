@@ -33,13 +33,15 @@ export function parameterRows(shape: ShapeKind): ParameterRow[] {
   ];
 }
 
-// The ids are read by the e2e test (#width, #stats[data-stale], #stl-note…).
+// The ids are read by the e2e test (#width, #stats[data-stale], #action-note…).
 const DEFAULT_SIZES: Record<SizeKey, string> = { width: "40", depth: "30", height: "20" };
 const HTML = `
   <h2>Selection</h2>
   <p id="selection-empty">Nothing selected: click a face or an edge, or Body 1 in the browser.</p>
   <ul id="selection-list" class="selection-list"></ul>
   <p id="selection-note" class="bad" hidden></p>
+  <div id="selection-actions" class="verbs" role="group" aria-label="Actions for the selection" hidden></div>
+  <p id="action-note"></p>
   <h2>Parameters</h2>
   ${SIZE_KEYS.map((k) => `<label id="${k}-row"><span id="${k}-label"></span> <input id="${k}" type="number" value="${DEFAULT_SIZES[k]}" step="any" /> mm</label>`).join("\n  ")}
   <h2>Feature</h2>
@@ -55,8 +57,14 @@ const HTML = `
     <dt>Validation</dt><dd id="status">…</dd>
   </dl>
   <p id="stale-note" hidden>Out of date: these numbers are for the last part that built.</p>
-  <p id="error"></p>
-  <p id="stl-note"></p>`;
+  <p id="error"></p>`;
+
+/** A verb as a button shows it: the action's id, label and one-line title. */
+export interface Verb {
+  id: string;
+  label: string;
+  title: string;
+}
 
 export interface PropertiesPanel {
   /** The size inputs, in SIZE_KEYS order. */
@@ -73,8 +81,10 @@ export interface PropertiesPanel {
   showError(message: string): void;
   /** Dims the body's numbers while stale; says so in words when the rebuild failed. */
   markStale(stale: boolean, failed: boolean): void;
-  /** The last STL export's warning or error ("" for none). */
-  showStlNote(text: string, bad: boolean): void;
+  /** The verbs the action registry offers for the selection, as buttons (none hides the row). */
+  showActions(verbs: readonly Verb[], onRun: (id: string) => void): void;
+  /** What the last action said: a warning or an error, or "" for nothing. */
+  showActionNote(text: string, bad: boolean): void;
 }
 
 /** Fills the properties slot and returns the handle that updates it. */
@@ -130,8 +140,23 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
       $("stats").dataset.stale = String(stale);
       $("stale-note").hidden = !(stale && failed);
     },
-    showStlNote(text, bad) {
-      const note = $("stl-note");
+    showActions(verbs, onRun) {
+      const row = $("selection-actions");
+      row.hidden = verbs.length === 0;
+      row.replaceChildren(
+        ...verbs.map((v) => {
+          const b = slot.ownerDocument.createElement("button");
+          b.type = "button";
+          b.textContent = v.label;
+          b.title = v.title;
+          b.dataset.action = v.id; // read by the e2e test
+          b.addEventListener("click", () => onRun(v.id));
+          return b;
+        }),
+      );
+    },
+    showActionNote(text, bad) {
+      const note = $("action-note");
       note.textContent = text;
       note.className = bad ? "bad" : "";
     },

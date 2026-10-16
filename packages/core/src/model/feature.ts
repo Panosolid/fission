@@ -71,6 +71,9 @@ const workspaceNames: Record<WorkspaceId, string> = {
   layout: "Layout",
 };
 
+/** A workspace's name as people read it, e.g. "Design". */
+export const workspaceName = (id: WorkspaceId): string => workspaceNames[id];
+
 const where = (o: Origin) => `${o.label} in ${workspaceNames[o.workspace]}`;
 
 /**
