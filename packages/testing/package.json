@@ -18,6 +18,7 @@
     "@fission/circuit": "*",
     "@fission/design": "*",
     "@fission/image": "*",
+    "@fission/layout": "*",
     "@fission/laser": "*",
     "@fission/manufacture": "*",
     "@fission/render": "*",

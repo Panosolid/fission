@@ -45,8 +45,8 @@ const plugins: WorkspacePlugin[] = await Promise.all(
   }),
 );
 
-test("all nine workspaces are plugins with a matching id", () => {
-  assert.deepEqual(plugins.map((p) => p.id).sort(), ["circuit", "design", "image", "laser", "manufacture", "render", "simulate", "slice", "vector"]);
+test("all ten workspaces are plugins with a matching id", () => {
+  assert.deepEqual(plugins.map((p) => p.id).sort(), ["circuit", "design", "image", "laser", "layout", "manufacture", "render", "simulate", "slice", "vector"]);
 });
 
 test("placeholders declare no representations; working workspaces produce every kind they declare", () => {
