@@ -10,6 +10,11 @@ const url = "http://localhost:4174/";
 const sandboxChromium = "/opt/pw-browsers/chromium";
 const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
+// The app opens the project it autosaved last (19c); the checks on `page`
+// each expect a fresh app, so every load of it forgets what was stored.
+// IndexedDB runs requests on one database in order, so this delete comes
+// before the app's own open. The autosave check uses a page of its own.
+await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
 
 const consoleErrors = [];
 page.on("pageerror", (e) => consoleErrors.push(e.message));
@@ -85,7 +90,8 @@ async function check(name, fn) {
 
 try {
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("#status")?.textContent !== "…");
+  // The panel appears once the app has looked for a stored project (19c), so wait for it to exist too.
+  await page.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "…") !== "…");
 
   await check("default 40×30×20 box shows hand-worked numbers", async () => {
     // V = 40·30·20 = 24000; A = 2(40·30 + 30·20 + 40·20) = 5200.
@@ -263,7 +269,7 @@ try {
     await pickTopAndEdge();
     await setSize("width", 44);
     // V = 44·30·20 = 26400: the box rebuilt, still 8 V · 12 E · 6 F.
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "26,400 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "26,400 mm³");
     assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4", "a resize keeps face 1 and edge 4");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges 4");
     assert.equal(await page.isVisible("#selection-note"), false);
@@ -282,7 +288,7 @@ try {
     // Back to the 40 mm box, framed afresh by the change of shape, for the hand-worked positions.
     await setSize("width", 40);
     await page.click("#toolbar [data-shape=box]");
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
 
   await check("the selection survives switching workspaces", async () => {
@@ -491,9 +497,9 @@ try {
     // 41 mm and back: two rebuilds well inside the framed sphere, so neither re-frames.
     const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
     await setSize("width", 41);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,600 mm³"); // 41·30·20
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,600 mm³"); // 41·30·20
     await setSize("width", 40);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     await settle();
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius, "not re-framed");
     assert.ok((await canvasImage()) === front, "Front is kept across rebuilds");
@@ -509,7 +515,7 @@ try {
   await check("editing a size rebuilds the body", async () => {
     await setSize("width", 100);
     // V = 100·30·20 = 60000.
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "60,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "60,000 mm³");
   });
 
   await check("bad input shows an error instead of crashing", async () => {
@@ -540,17 +546,17 @@ try {
     // must end on the last: 77 × 30 × 20 = 46200.
     for (let w = 1; w <= 20; w++) await setSize("width", w);
     await setSize("width", 77);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "46,200 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "46,200 mm³");
     await page.waitForTimeout(300);
     assert.equal(await text("volume"), "46,200 mm³");
     await setSize("width", 40);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
 
   await check("a 1 µm cube is measured and framed", async () => {
     // 0.001³ = 1e-9 mm³ and 6 · 0.001² = 6e-6 mm²: never shown as 0.
     for (const id of ["width", "depth", "height"]) await setSize(id, 0.001);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "1 × 10⁻⁹ mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "1 × 10⁻⁹ mm³");
     assert.equal(await text("area"), "6 × 10⁻⁶ mm²");
     // The camera re-framed on it: radius = half the diagonal = √3·0.001/2
     // ≈ 8.66e-4 (float32 mesh positions, so compare to 1e-6 relative).
@@ -565,7 +571,7 @@ try {
     // 40 × 30 × 0.001: r = √(1600 + 900)/2 = 25, centre moved 15; 15 + 25 = 40 > 30 → re-frame.
     // 40 × 30 × 20: r = √2900/2 ≈ 26.93, centre moved 10; 36.93 ≤ 37.5 → kept, r0 = 25.
     for (const [id, v] of [["width", 40], ["depth", 30], ["height", 20]]) await setSize(id, v);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     const back = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
     assert.ok(Math.abs(back - 25) < 1e-4, `framed radius ${back}`);
   });
@@ -576,7 +582,7 @@ try {
   const pick = async (kind, volumeNot) => {
     await page.click(`#toolbar [data-shape=${kind}]`);
     await page.waitForFunction(
-      ([k, v]) => document.querySelector("#viewport").dataset.shape === k && document.querySelector("#volume").textContent !== v,
+      ([k, v]) => document.querySelector("#viewport").dataset.shape === k && document.querySelector("#volume")?.textContent !== v,
       [kind, volumeNot],
     );
     // The toolbar shows the shape on screen pressed, and only that one.
@@ -707,7 +713,7 @@ try {
     for (const [id, v] of [["width", 40], ["depth", 30]]) await setSize(id, v);
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");
     await page.click("#toolbar [data-shape=box]");
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
 
   /** Clicks the toolbar's STL button; returns the file's name and its triangles (f32 corners). */
@@ -732,7 +738,7 @@ try {
     await page.fill("#width", "40");
     await page.fill("#depth", "30");
     await page.fill("#height", "20");
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     const f = await downloadStl();
     // 12 triangles: 84 + 12 × 50 = 684 bytes. Corners 0/40, 0/30, 0/20 are
     // exact in single precision, so the volume is exactly 40 × 30 × 20.
@@ -791,7 +797,7 @@ try {
     assert.ok((await amber()) > 10000, `the part should be painted amber (${await amber()} px)`);
     await page.screenshot({ path: "e2e/stl-overlay.png" });
     for (const [id, v] of [["width", 40], ["depth", 30], ["height", 20]]) await page.fill(`#${id}`, String(v));
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     // Editing the part clears the overlay: it described the part before the edit.
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.overlays), "");
     assert.equal(await page.isVisible(".overlay-legend"), false);
@@ -823,7 +829,7 @@ try {
     // Back to a known body, then remember the camera's view of it.
     await page.click("#toolbar [data-shape=box]");
     await page.fill("#width", "40");
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     await page.waitForTimeout(300); // let orbit damping settle
     const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
     const before = await pixel(0.5, 0.5);
@@ -852,7 +858,7 @@ try {
   await check("back in Design the part, its numbers and the camera are as they were", async () => {
     const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
     await page.click("[data-workspace=design]");
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     assert.equal(await page.inputValue("#width"), "40");
     assert.equal(await page.getAttribute("#toolbar [data-shape=box]", "aria-pressed"), "true");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius);
@@ -944,7 +950,7 @@ try {
     await page.click("#properties-toggle");
     await setSize("width", 50);
     // V = 50·30·20 = 30000.
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "30,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
     // A placeholder fills only properties: no browser toggle, its page shows.
     await page.click("[data-workspace=laser]");
     assert.equal(await page.isVisible("#browser-toggle"), false);
@@ -1052,10 +1058,10 @@ try {
   await check("Save, reload, Open: the saved part and its numbers come back, re-framed", async () => {
     await page.goto(url + "#design");
     await page.reload(); // the same URL keeps the page, so start from a fresh app
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     await setSize("width", 50);
     // V = 50·30·20 = 30000.
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "30,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
     assert.equal(download.suggestedFilename(), "Untitled.fission.json");
     const saved = "e2e/saved.fission.json";
@@ -1065,9 +1071,9 @@ try {
     assert.deepEqual(file.workspaces.design.timeline.features[0].intent.parameters, { width: 50, depth: 30, height: 20 });
     // A fresh app shows the default 40 × 30 × 20 box again.
     await page.reload();
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     await page.setInputFiles("#open-file", saved);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "30,000 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
     assert.equal(await page.inputValue("#width"), "50");
     assert.equal(await page.textContent("#browser [data-node=feature-1]"), "1. Box: 50 × 30 × 20 mm");
     assert.equal(await text("intent"), "Box: 50 × 30 × 20 mm");
@@ -1077,7 +1083,7 @@ try {
     assert.ok(Math.abs(r - Math.sqrt(3800) / 2) < 1e-6, `framed radius ${r}`);
     // Editing the opened part works as usual: 50·30·25 = 37500.
     await setSize("height", 25);
-    await page.waitForFunction(() => document.querySelector("#volume").textContent === "37,500 mm³");
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "37,500 mm³");
     await page.screenshot({ path: "e2e/opened-file.png" });
   });
 
@@ -1089,6 +1095,45 @@ try {
     await page.waitForFunction(() => /newer Fission/.test(document.querySelector("#file-status").textContent));
     assert.equal(await text("volume"), "37,500 mm³");
     assert.equal(await page.inputValue("#height"), "25");
+  });
+
+  await check("autosave: edit the width, wait for Saved, reload, the same part and numbers come back", async () => {
+    const kept = await browser.newPage({ viewport: { width: 1000, height: 640 } }); // its own storage, kept across reloads
+    kept.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await kept.goto(url + "#design");
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      // A new browser: the default part is stored as a new project.
+      await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+      assert.equal(await kept.textContent("#save-status"), "Saved");
+      const id = await kept.evaluate(() => document.body.dataset.projectId);
+      await kept.fill("#width", "50");
+      assert.equal(await kept.textContent("#save-status"), "Saving…", "not saved until things are quiet");
+      // V = 50·30·20 = 30000.
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
+      await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+      await kept.reload();
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
+      assert.equal(await kept.inputValue("#width"), "50");
+      assert.equal(await kept.textContent("#browser [data-node=feature-1]"), "1. Box: 50 × 30 × 20 mm");
+      assert.equal(await kept.textContent("#area"), "6,200 mm²"); // A = 2(50·30 + 30·20 + 50·20) = 2·3100
+      assert.equal(await kept.evaluate(() => document.body.dataset.projectId), id, "the same stored project");
+      assert.equal(await kept.textContent("#save-status"), "Saved");
+      // Opening a file makes a new stored project; the autosaved one is kept.
+      await kept.setInputFiles("#open-file", "e2e/saved.fission.json");
+      await kept.waitForFunction((old) => document.body.dataset.projectId !== old, id);
+      await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+      const stored = await kept.evaluate(async () => {
+        const db = await new Promise((ok, no) => Object.assign(indexedDB.open("fission"), { onsuccess: (e) => ok(e.target.result), onerror: no }));
+        const store = db.transaction(db.objectStoreNames[0]).objectStore(db.objectStoreNames[0]);
+        const keys = await new Promise((ok) => (store.getAllKeys().onsuccess = (e) => ok(e.target.result)));
+        db.close();
+        return keys.filter((k) => String(k).startsWith("project/")).length;
+      });
+      assert.equal(stored, 2);
+    } finally {
+      await kept.close();
+    }
   });
 
   await check("no errors in the browser console", async () => {

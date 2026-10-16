@@ -217,7 +217,9 @@ function mount(ctx: WorkspaceContext): () => void {
     loaded = undefined;
     saved = { doc, shape, sizes: inputs.map((i) => i.value) };
     syncGraph(ctx.graph, doc, before);
+    const changed = ctx.project.workspaces.design !== doc;
     ctx.project.workspaces.design = doc;
+    if (changed) ctx.projectChanged(); // the shell autosaves (19c)
     browser(ctx.browser, doc, selectRow);
     showSelection();
     markStale();

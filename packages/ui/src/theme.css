@@ -13,6 +13,9 @@ body { display: flex; flex-direction: column; }
 #topbar button.soon { color: #6f7680; }
 #file-status { color: #f5b14c; font-size: 12px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #file-status:empty { display: none; }
+#save-status { color: #b5bbc4; font-size: 12px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#save-status:empty { display: none; }
+#save-status[data-state="error"] { color: #f5b14c; }
 #topbar button.soon[aria-selected="true"] { color: #b5bbc4; }
 
 /* Workspace: toolbar above, browser left, properties right of the shared
@@ -91,6 +94,15 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #workspace #assistant { width: auto; order: 5; flex-shrink: 0; border-left: none; border-top: 1px solid #2a2e35; }
   #topbar { gap: 8px; padding: 0 8px; }
   #topbar h1 #version { display: none; }
+  /* The save status as one small mark beside the name, taking no room from
+     the tabs (the words stay for screen readers and the tooltip); 19d
+     revisits the phone top bar. */
+  #topbar { position: relative; }
+  #save-status { position: absolute; left: 62px; top: 8px; font-size: 0; max-width: none; overflow: visible; }
+  #save-status::before { font-size: 11px; }
+  #save-status[data-state="saved"]::before { content: "✓"; }
+  #save-status[data-state="saving"]::before { content: "…"; }
+  #save-status[data-state="error"]::before { content: "!"; }
 }
 [hidden] { display: none !important; }
 .link-badge { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: #23272e; }

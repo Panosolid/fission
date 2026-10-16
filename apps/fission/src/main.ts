@@ -8,6 +8,7 @@ import { DependencyGraph, emptyProject, projectFromJson, projectToJson, Represen
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
+import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
 import { showAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
@@ -41,6 +42,7 @@ for (const w of workspaces) w.registerRepresentations?.(representations, kernel)
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const ctx = {
   project: emptyProject(),
+  projectChanged: () => autosave?.changed(),
   kernel,
   selection: createSelection(),
   history: historyNotBuilt,
@@ -110,6 +112,25 @@ function show(page: Page) {
 
 $("community").addEventListener("click", () => show("community"));
 
+// Autosave (19c): the project is kept in this browser and saved a moment
+// after each change; the top bar says "Saving…", "Saved" or what went wrong.
+// Each project has its own stored id: an opened file becomes a new stored
+// project rather than overwriting the one that was open.
+const store = localStore(workspaces);
+let autosave: Autosave | null = null;
+const saveStatus = (s: AutosaveStatus) => {
+  const el = $("save-status");
+  el.dataset.state = s.state; // read by the e2e test
+  el.textContent = s.state === "saving" ? "Saving…" : s.state === "saved" ? "Saved" : `Not saved: ${s.message}`;
+  el.title = el.textContent; // the top bar cuts a long one short
+};
+const newId = () => globalThis.crypto?.randomUUID?.() ?? `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+function keep(id: string) {
+  autosave?.stop();
+  autosave = startAutosave(store, id, () => ctx.project, saveStatus);
+  document.body.dataset.projectId = id; // read by the e2e test
+}
+
 // Save and Open: the whole project, every workspace's data, as one
 // .fission.json file (docs/project-format.md). Opening replaces the project
 // only once all of it has read cleanly; a refused file leaves the open
@@ -140,6 +161,8 @@ $("open-file").addEventListener("change", async () => {
     ctx.selection.clear(); // it named the old part's faces
     ctx.project = project;
     ctx.graph = new DependencyGraph();
+    keep(newId());
+    autosave!.changed(); // store the opened file as it is
     show(current); // re-mounts the workspace on the opened project
     fileStatus("");
   } catch (e) {
@@ -172,5 +195,21 @@ const fromHash = (): Page => {
 };
 // Links (and back/forward) can name a workspace: #design, #slice, …
 window.addEventListener("hashchange", () => show(fromHash()));
-show(fromHash());
+// Start on the project saved most recently in this browser, or a new one.
+// One that can't be read is left stored as it is, and a new project starts.
+async function start() {
+  try {
+    const newest = (await store.list())[0];
+    if (newest) {
+      ctx.project = await store.open(newest.id);
+      keep(newest.id);
+      saveStatus({ state: "saved" });
+    } else keep(newId());
+  } catch (e) {
+    keep(newId());
+    fileStatus(`Couldn't open the last project (${e instanceof Error ? e.message : String(e)}), so a new one was started.`);
+  }
+  show(fromHash());
+}
+void start();
 ctx.kernel.call("kernel_version").then((v) => ($("version").textContent = `kernel v${v}`));

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, projectToJson, type DataReader, type Project } from "@fission/core";
-import { memoryKeyValue, projectStore, startAutosave } from "../src/index.ts";
+import { memoryKeyValue, projectStore } from "../src/index.ts";
 
 // A stand-in Design reader: marks its part as read, and refuses a part
 // without a version, the way readDesignDocument refuses bad data.
@@ -136,8 +136,4 @@ test("a failing key-value store's message reaches the caller", async () => {
     throw new Error("browser storage is full: can't save \"project/p\"");
   };
   await assert.rejects(projectStore(kv, [design]).save("p", part("P")), /browser storage is full/);
-});
-
-test("autosave is still a placeholder (step 19c) and says so", () => {
-  assert.throws(() => startAutosave(projectStore(memoryKeyValue(), []), "p", () => emptyProject()), /not implemented/);
 });
