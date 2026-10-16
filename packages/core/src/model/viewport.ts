@@ -12,6 +12,34 @@ export interface Framing {
   radius: number;
 }
 
+/**
+ * What a click (not a camera drag) in the viewport hit: the kernel index of
+ * the body's edge within a few pixels of the pointer (step 17c), else of the
+ * face under it, or neither for empty space; and whether Shift was held. An
+ * edge wins over the face behind it, so at most one of the two is set. The
+ * workspace on show decides what that selects.
+ */
+export interface ViewportPick {
+  face: number | null;
+  /** Absent or null when no edge was picked. */
+  edge?: number | null;
+  shift: boolean;
+}
+
+/**
+ * What the viewport draws in the selection colour (step 17d): the whole
+ * body, and faces and edges by kernel index. Indices the body on screen
+ * does not have draw nothing. Analysis overlays stay visible under it.
+ */
+export interface ViewportHighlight {
+  body: boolean;
+  faces: readonly number[];
+  edges: readonly number[];
+}
+
+/** Nothing highlighted. */
+export const NO_HIGHLIGHT: ViewportHighlight = Object.freeze({ body: false, faces: [], edges: [] });
+
 export interface SharedViewport {
   /** The element the viewport fills. */
   readonly element: HTMLElement;
@@ -23,4 +51,12 @@ export interface SharedViewport {
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
   setOverlay(overlay: AnalysisOverlay): void;
   clearOverlay(id: string): void;
+  /** Draws the selection; it stays (across new bodies) until the next call. The shown workspace sets it and puts back NO_HIGHLIGHT on hide. */
+  showSelection(highlight: ViewportHighlight): void;
+  /**
+   * Called on every click in the viewport; the shown workspace sets it and
+   * puts back null on hide. While it is set, the face or edge under the
+   * pointer is drawn hovered.
+   */
+  onPick: ((pick: ViewportPick) => void) | null;
 }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolveReference } from "../src/model/references.ts";
 import type { StableId } from "../src/model/references.ts";
-import { historyNotBuilt, selectionNotBuilt } from "../src/model/session.ts";
+import { historyNotBuilt } from "../src/model/session.ts";
 import { emptyProject } from "../src/model/project.ts";
 
 // Placeholders must say so, never pretend to work.
@@ -10,9 +10,8 @@ test("resolving a reference is not implemented yet", () => {
   assert.throws(() => resolveReference({ kind: "face", id: "f1" as StableId }), /not implemented/);
 });
 
-test("selection and undo/redo are not built yet and say so", () => {
-  assert.throws(() => selectionNotBuilt.items, /not implemented/);
-  assert.throws(() => selectionNotBuilt.set([]), /not implemented/);
+// The selection is built (step 17a, tested in selection.test.ts); undo/redo waits for step 20.
+test("undo/redo is not built yet and says so", () => {
   assert.throws(() => historyNotBuilt.canUndo(), /not implemented/);
   assert.throws(() => historyNotBuilt.undo(), /not implemented/);
 });

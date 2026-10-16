@@ -6,6 +6,8 @@ export interface DisplayMesh {
   indices: number[];
   triangle_faces: number[];
   edge_lines: number[];
+  /** B-rep edge index of each segment in `edge_lines` (one per pair of points). */
+  edge_line_edges: number[];
 }
 
 export interface BodyView {
@@ -15,6 +17,10 @@ export interface BodyView {
   vertices: number;
   edges: number;
   faces: number;
+  /** Each face's surface type by kernel face index: "plane", "cylinder", "sphere". */
+  face_types: string[];
+  /** Each edge's curve type by kernel edge index: "line", "circle". */
+  edge_types: string[];
   errors: string[];
 }
 

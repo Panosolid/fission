@@ -30,7 +30,7 @@ function panel() {
 }
 
 const view = (errors: string[] = []): BodyView => ({
-  mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [] },
+  mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [], edge_line_edges: [] },
   volume: 24000,
   area: 5200,
   vertices: 8,
@@ -102,4 +102,14 @@ test("the STL note shows a warning in red and clears", () => {
   p.showStlNote("", false);
   assert.equal($("stl-note").textContent, "");
   assert.equal($("stl-note").className, "");
+});
+
+test("the selection note shows what a rebuild dropped and hides when empty", () => {
+  const { p, $ } = panel();
+  assert.equal($("selection-note").hidden, true);
+  p.showSelectionNote("Taken out of the selection: Face 1.");
+  assert.equal($("selection-note").hidden, false);
+  assert.equal($("selection-note").textContent, "Taken out of the selection: Face 1.");
+  p.showSelectionNote("");
+  assert.equal($("selection-note").hidden, true);
 });

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, selectionNotBuilt, type KernelCalls, type SharedViewport, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -76,6 +76,9 @@ type Slots = Pick<WorkspaceContext, "toolbar" | "browser" | "properties">;
 /** Names of the slots still holding something after a hide. */
 const leftovers = (slots: Slots) => (["toolbar", "browser", "properties"] as const).filter((k) => slots[k].childNodes.length > 0);
 
+/** The last highlight each test viewport was asked to draw. */
+const shownHighlights = new WeakMap<SharedViewport, ViewportHighlight>();
+
 function testContext(): WorkspaceContext {
   const doc = new Window().document as unknown as Document;
   const el = () => doc.createElement("div") as unknown as HTMLElement;
@@ -86,12 +89,16 @@ function testContext(): WorkspaceContext {
     fit: () => null,
     setOverlay() {},
     clearOverlay() {},
+    showSelection(h) {
+      shownHighlights.set(viewport, h);
+    },
+    onPick: null,
   };
   return {
     project: emptyProject(),
     // Every kernel call fails, as when the kernel is not loaded: the workspace must show it, not crash.
     kernel: { call: (() => Promise.reject(new Error("no kernel in this test"))) as KernelCalls["call"] },
-    selection: selectionNotBuilt,
+    selection: createSelection(),
     history: historyNotBuilt,
     graph: new DependencyGraph(),
     toolbar: el(),
@@ -123,6 +130,108 @@ test("every workspace mounts into the layout slots and leaves them all empty on 
       assert.deepEqual(leftovers(ctx), [], `${p.id} cleared every slot on hide (round ${round + 1})`);
     }
   }
+});
+
+// The one selection (step 17a): it belongs to the shell, so mounting and
+// hiding a workspace keeps what is selected (I4), and a workspace that
+// listens for changes stops listening on hide.
+test("every workspace leaves the shared selection as it found it and drops its listeners on hide", async () => {
+  for (const p of plugins) {
+    const ctx = testContext();
+    const picked = { kind: "face", id: "face:feature-1/0" } as GeometryReference;
+    ctx.selection.set([picked]);
+    let open = 0;
+    const real = ctx.selection;
+    ctx.selection = {
+      get items() {
+        return real.items;
+      },
+      set: (items) => real.set(items),
+      toggle: (item) => real.toggle(item),
+      clear: () => real.clear(),
+      onChange(listener) {
+        open++;
+        const off = real.onChange(listener);
+        return () => {
+          open--;
+          off();
+        };
+      },
+    };
+    const hide = p.mount(ctx);
+    await settle();
+    assert.deepEqual(ctx.selection.items, [picked], `${p.id} keeps the selection while shown`);
+    hide();
+    assert.deepEqual(ctx.selection.items, [picked], `${p.id} keeps the selection after hide`);
+    assert.equal(open, 0, `${p.id} drops every selection listener on hide`);
+  }
+});
+
+// Picking (17b): the shown workspace owns the viewport's click handler, so
+// a hidden one must hand it back or its clicks would edit the selection.
+test("every workspace puts the viewport's pick handler back to none on hide", async () => {
+  for (const p of plugins) {
+    const ctx = testContext();
+    const hide = p.mount(ctx);
+    await settle();
+    hide();
+    assert.equal(ctx.viewport.onPick, null, `${p.id} cleared onPick on hide`);
+  }
+});
+
+test("Design turns viewport picks and Escape into the shared selection", async () => {
+  const ctx = testContext();
+  const hide = plugins.find((p) => p.id === "design")!.mount(ctx);
+  await settle();
+  const ids = () => ctx.selection.items.map((r) => r.id);
+  ctx.viewport.onPick!({ face: 1, shift: false });
+  ctx.viewport.onPick!({ face: 4, shift: true });
+  assert.deepEqual(ids(), ["face:feature-1/1", "face:feature-1/4"]);
+  const doc = ctx.viewport.element.ownerDocument;
+  doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
+  assert.deepEqual(ids(), []);
+  ctx.viewport.onPick!({ face: 2, shift: false });
+  hide();
+  doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
+  assert.deepEqual(ids(), ["face:feature-1/2"], "Escape after hide no longer clears");
+});
+
+// Highlighting (17d): the selection drawn in the viewport, lit in the
+// browser and listed in properties, from whichever of them changed it.
+test("Design draws the selection, selects Body 1 from the browser, and stops drawing on hide", async () => {
+  const ctx = testContext();
+  const hide = plugins.find((p) => p.id === "design")!.mount(ctx);
+  await settle();
+  const drawn = () => shownHighlights.get(ctx.viewport);
+  const lit = () => [...ctx.browser.querySelectorAll("[aria-current=true]")].map((r) => (r as HTMLElement).dataset.node);
+  const listed = () => [...ctx.properties.querySelectorAll("#selection-list li")].map((li) => li.textContent);
+  assert.deepEqual(drawn(), NO_HIGHLIGHT);
+  assert.equal((ctx.properties.querySelector("#selection-empty") as HTMLElement).hidden, false);
+  ctx.viewport.onPick!({ face: 1, shift: false });
+  ctx.viewport.onPick!({ face: null, edge: 4, shift: true });
+  assert.deepEqual(drawn(), { body: false, faces: [1], edges: [4] });
+  // No body was built (the kernel fails here), so the types are unknown.
+  assert.deepEqual(listed(), ["Face 1 · … face:feature-1/1", "Edge 4 · … edge:feature-1/4"]);
+  assert.deepEqual(lit(), []);
+  const row = ctx.browser.querySelector("[data-node=body-1]") as HTMLElement;
+  row.click();
+  assert.deepEqual(ctx.selection.items.map((r) => r.id), ["body:feature-1"]);
+  assert.deepEqual(drawn(), { body: true, faces: [], edges: [] });
+  assert.deepEqual(lit(), ["body-1"]);
+  assert.deepEqual(listed(), ["Body 1 · solid body:feature-1"]);
+  assert.equal((ctx.properties.querySelector("#selection-empty") as HTMLElement).hidden, true);
+  // Shift on the row takes the body out again; a face pick unlights the row.
+  row.dispatchEvent(new (ctx.browser.ownerDocument.defaultView as unknown as typeof globalThis).MouseEvent("click", { shiftKey: true }));
+  assert.deepEqual(ctx.selection.items, []);
+  row.click();
+  ctx.viewport.onPick!({ face: 2, shift: false });
+  assert.deepEqual(lit(), []);
+  // Origin and timeline rows select nothing yet: they are not buttons.
+  assert.equal(ctx.browser.querySelector("[data-node=origin-z]")!.tagName, "SPAN");
+  hide();
+  assert.deepEqual(drawn(), NO_HIGHLIGHT, "hide stops drawing the selection");
+  ctx.selection.set([{ kind: "face", id: "face:feature-1/3" as StableId }]);
+  assert.deepEqual(drawn(), NO_HIGHLIGHT, "a change after hide draws nothing");
 });
 
 test("Design shows a kernel failure in its panel rather than throwing", async () => {

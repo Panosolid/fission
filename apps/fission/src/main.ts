@@ -4,7 +4,7 @@
 // empties them on hide; the viewport is shared, so switching keeps the
 // camera and what is on screen.
 import "@fission/ui/theme.css";
-import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -40,7 +40,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const ctx = {
   project: emptyProject(),
   kernel,
-  selection: selectionNotBuilt,
+  selection: createSelection(),
   history: historyNotBuilt,
   graph: new DependencyGraph(),
   toolbar: $("toolbar"),
@@ -49,6 +49,9 @@ const ctx = {
   viewport: new Viewer($("viewport")),
   representations,
 };
+
+// What is selected, read by the e2e test (17d draws it on screen).
+ctx.selection.onChange((items) => (document.body.dataset.selection = items.map((r) => r.id).join(" ")));
 
 type Page = WorkspaceId | "community";
 let hide: () => void = () => {};
