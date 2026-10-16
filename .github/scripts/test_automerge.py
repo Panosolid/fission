@@ -24,7 +24,7 @@ def check(name, status="completed", conclusion="success", app="github-actions"):
 
 class CiState(unittest.TestCase):
     def test_cases(self):
-        both = [check("kernel"), check("app"), check("mutants-in-diff")]
+        both = [check("kernel"), check("app"), check("mutants-in-diff"), check("baseline")]
         self.assertEqual(ci_state(both), "success")
         self.assertEqual(ci_state([]), "none")
         # Only one of the two CI jobs has reported: not tested yet.
@@ -34,8 +34,13 @@ class CiState(unittest.TestCase):
         self.assertEqual(ci_state([check("kernel"), check("app", conclusion="cancelled")]), "failure")
         # Mutation survivors in the changed kernel code block the merge; a
         # head the mutation job never ran on has not been tested.
-        self.assertEqual(ci_state([check("kernel"), check("app"), check("mutants-in-diff", conclusion="failure")]),
+        self.assertEqual(ci_state([check("kernel"), check("app"), check("baseline"), check("mutants-in-diff", conclusion="failure")]),
                          "failure")
+        # So do a slowdown or memory growth past tests/baseline.json's margins;
+        # a head without the baseline job (a branch from before it) is untested.
+        self.assertEqual(ci_state([check("kernel"), check("app"), check("mutants-in-diff"), check("baseline", conclusion="failure")]),
+                         "failure")
+        self.assertEqual(ci_state([check("kernel"), check("app"), check("mutants-in-diff")]), "none")
         self.assertEqual(ci_state([check("kernel"), check("app")]), "none")
         # On a push run the job is skipped, which passes; the coverage
         # report never blocks.
@@ -120,7 +125,7 @@ def fake_repo(behind=False, ci="success"):
     raw = dict(number=1, draft=False, labels=[],
                head=dict(ref="claude/a", sha="h1", repo=dict(full_name="o/r")),
                base=dict(ref="main", repo=dict(full_name="o/r")))
-    runs = [check("kernel"), check("mutants-in-diff"), check("app", conclusion=None if ci == "pending" else ci,
+    runs = [check("kernel"), check("mutants-in-diff"), check("baseline"), check("app", conclusion=None if ci == "pending" else ci,
                                    status="in_progress" if ci == "pending" else "completed")]
     return Fake({
         "/pulls?state=open&per_page=100": [raw],

@@ -139,6 +139,8 @@ export function readDesignDocument(data: unknown): DesignDocument {
   if (d.version !== 1) throw new Error(`Design data version ${String(d.version)} is not one this Fission reads (1)`);
   if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features) || d.timeline.features.length === 0)
     throw new Error("Design data has no timeline");
+  for (const [i, profile] of d.profiles.entries())
+    if (typeof profile !== "object" || profile === null || Array.isArray(profile)) throw new Error(`Design profile ${i + 1} is not an object`);
   for (const [i, f] of d.timeline.features.entries()) {
     const intent = (f as Partial<Feature> | null)?.intent;
     if (typeof f?.id !== "string" || typeof intent?.type !== "string" || typeof intent.summary !== "string" || typeof intent.parameters !== "object" || intent.parameters === null)
