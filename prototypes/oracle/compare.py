@@ -8,7 +8,12 @@ and area from its B-rep, volume and area of its display mesh, bounds, face
 count, and the mesh's largest deviation from the exact surface).
 
 OpenCascade isn't always right either: disagreements are logged for review,
-not treated as kernel failures.
+not treated as kernel failures. Every shape the harness makes also has an
+exact volume and area (exact.py, 50 digits, needs mpmath), which referees:
+Fission is compared with the exact value, and a case where only
+OpenCascade is off is its own rounding, listed as "occ-rounding" at the end
+of the file but not counted as a disagreement (without mpmath, OpenCascade
+is the reference, as before).
 
 Usage: python compare.py cases.jsonl [disagreements.txt]
 Needs: pip install cadquery-ocp
@@ -35,6 +40,11 @@ from OCP.GProp import GProp_GProps
 from OCP.TopAbs import TopAbs_FACE
 from OCP.TopExp import TopExp_Explorer
 from OCP.gp import gp_Ax2, gp_Circ, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+
+try:
+    import exact
+except ImportError:  # pip install mpmath
+    exact = None
 
 # Faces Fission uses per primitive vs OpenCascade. Fission splits a sphere
 # into two hemispheres (one face with no edges can't satisfy Euler-Poincare
@@ -199,7 +209,7 @@ def compare(case):
     # the exact value worked out in fractions). The kernel's own placement
     # rounding is still covered: its mesh numbers are from the placed body.
     vol, area = measure(build(centred(case["shape"]))[1])[:2]
-    issues = []
+    issues, occ_only = [], []
     if (case["faces"], faces) != FACES[kind]:
         issues.append(f"faces: fission {case['faces']}, occ {faces}, expected {FACES[kind]}")
     reach = max(abs(x) for x in lo + hi) or 1.0
@@ -214,60 +224,79 @@ def compare(case):
     vslack = case["volume_slack"] + REL * vol
     aslack = case["area_slack"] + REL * area
     # The kernel's exact volume and area (from its B-rep, not its mesh)
-    # have no chords to allow for: they must match to rounding.
-    if abs(case["exact_volume"] - vol) > vslack:
-        issues.append(f"exact volume: fission {case['exact_volume']}, occ {vol}, allowed {vslack:.3g}")
-    if abs(case["exact_area"] - area) > aslack:
-        issues.append(f"exact area: fission {case['exact_area']}, occ {area}, allowed {aslack:.3g}")
+    # have no chords to allow for: they must match to rounding. The exact
+    # value referees when Fission and OpenCascade differ.
+    ev, ea = (exact.volume_area(case["shape"]) if exact else None) or (None, None)
+    for name, ours, theirs, ref, slack in (("exact volume", case["exact_volume"], vol, ev, vslack),
+                                           ("exact area", case["exact_area"], area, ea, aslack)):
+        if exact:
+            verdict = exact.judge(ours, theirs, ref, slack)
+        else:
+            verdict = "agree" if abs(ours - theirs) <= slack else "fission"
+        note = f"{name}: fission {ours}, occ {theirs}" + (f", exact {float(ref)!r}" if ref is not None else "")
+        if verdict == "fission":
+            issues.append(f"{note}, allowed {slack:.3g}")
+        elif verdict == "occ":
+            occ_only.append(f"{note}, allowed {slack:.3g}")
+    # The mesh checks below measure against the exact value when there is
+    # one, so OpenCascade's rounding can't hide or fake a mesh error.
+    who = "occ"
+    if ev is not None:
+        vol, area, who = float(ev), float(ea), "exact"
     if kind == "Extrude" and curved(case["shape"]["Extrude"]):
         # Arcs bulge either way (concave walls too), so the mesh can be on
         # either side of the exact solid, by at most the harness's chord
         # allowance (arc length x chord sag, see Piece::curve).
         if abs(case["volume"] - vol) > case["curve_volume_slack"] + vslack:
-            issues.append(f"volume: fission {case['volume']}, occ {vol}, allowed {case['curve_volume_slack'] + vslack:.3g}")
+            issues.append(f"volume: fission {case['volume']}, {who} {vol}, allowed {case['curve_volume_slack'] + vslack:.3g}")
         if abs(case["area"] - area) > case["curve_area_slack"] + aslack:
-            issues.append(f"area: fission {case['area']}, occ {area}, allowed {case['curve_area_slack'] + aslack:.3g}")
-        return kind, issues
+            issues.append(f"area: fission {case['area']}, {who} {area}, allowed {case['curve_area_slack'] + aslack:.3g}")
+        return kind, issues, occ_only
     # An inscribed mesh of a convex solid never has more volume or area
     # than the solid itself.
     if case["volume"] > vol + vslack:
-        issues.append(f"volume above exact: fission {case['volume']}, occ {vol}, allowed {vslack:.3g}")
+        issues.append(f"volume above exact: fission {case['volume']}, {who} {vol}, allowed {vslack:.3g}")
     if case["area"] > area + aslack:
-        issues.append(f"area above exact: fission {case['area']}, occ {area}, allowed {aslack:.3g}")
+        issues.append(f"area above exact: fission {case['area']}, {who} {area}, allowed {aslack:.3g}")
     # And it can't fall short by more than (surface area) x (largest gap
     # between mesh and surface), plus rounding. Boxes are exact.
     if vol - case["volume"] > area * dev * 1.5 + vslack:
-        issues.append(f"volume deficit too large: fission {case['volume']}, occ {vol}, deviation {dev}")
+        issues.append(f"volume deficit too large: fission {case['volume']}, {who} {vol}, deviation {dev}")
     # Boxes and extrusions are polyhedra: the mesh is exact, area too.
     if kind in ("Box", "Extrude") and abs(case["area"] - area) > aslack:
-        issues.append(f"area: fission {case['area']}, occ {area}, allowed {aslack:.3g}")
-    return kind, issues
+        issues.append(f"area: fission {case['area']}, {who} {area}, allowed {aslack:.3g}")
+    return kind, issues, occ_only
 
 
 def main():
     path = sys.argv[1]
     out = sys.argv[2] if len(sys.argv) > 2 else None
-    total, bad, per_kind, lines = 0, 0, Counter(), []
+    total, bad, per_kind, lines, occ_lines = 0, 0, Counter(), [], []
     with open(path) as f:
         for n, line in enumerate(f, 1):
             case = json.loads(line)
             try:
-                kind, issues = compare(case)
+                kind, issues, occ_only = compare(case)
             except Exception as e:  # an oracle crash is itself worth a look
-                kind, issues = "?", [f"oracle error: {e!r}"]
+                kind, issues, occ_only = "?", [f"oracle error: {e!r}"], []
             total += 1
             per_kind[kind] += 1
             if issues:
                 bad += 1
                 lines.append(f"line {n}: {json.dumps(case['shape'])}\n  " + "\n  ".join(issues))
+            if occ_only:
+                occ_lines.append(f"occ-rounding, line {n}: {json.dumps(case['shape'])}\n  " + "\n  ".join(occ_only))
     print(f"Oracle: {total} bodies compared with OpenCascade, {bad} disagreement(s)")
+    if exact is None:
+        print("  (mpmath not installed: no exact referee, OpenCascade is the reference)")
+    print(f"  {len(occ_lines)} more where only OpenCascade was off the exact value (its own rounding, not counted)")
     for k, v in sorted(per_kind.items()):
         print(f"  {k:<9} {v}")
     for l in lines[:20]:
         print(l)
     if out:
         with open(out, "w") as f:
-            f.write("\n".join(lines) + "\n")
+            f.write("\n".join(lines + occ_lines) + "\n")
         print(f"Disagreements written to {out}")
 
 
