@@ -1,6 +1,6 @@
 # Fission roadmap
 
-Every step of the plan, done and to do. The next stretch (step 15 to step 37, and the integration items that land with it) lives in `CLAUDE.md` instead, so each session reads only what is coming up; items are kept in one place only and move between the two files as work reaches them. Mark items [x] when done.
+Every step of the plan, done and to do, as detailed as it needs to be: this file is read only when a session needs it. The next couple of steps (now 15–17) live in `CLAUDE.md` instead, which every session reads; each item is in one file only, and items move into CLAUDE.md as work reaches them and back here once done. Mark items [x] when done.
 
 Kernel foundations
 - [x] 1. Testing rules in repo; tolerance module with exact predicates
@@ -17,6 +17,33 @@ Kernel foundations
 - [x] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 44). Acceptance case: today a 26.5 × 0.0124 × 27 box placed 37.8 km out and moved back loses 8.7e-8 of its volume to rounding there (OpenCascade oracle, seed 0x5eed, 3000 cases); after this step it must not
 - [x] 13. STL export + download button + round-trip test
 - [x] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
+- 15: in CLAUDE.md
+
+App shell (16 and 17: in CLAUDE.md)
+- [ ] 18. View controls: home, top/front/right, fit, view cube
+- [ ] 19. Save/load JSON documents + autosave
+- [ ] 20. Undo/redo (document snapshots for now; switches to timeline edits at 32–33)
+
+Sketcher
+- [ ] 21. Sketch on ground plane: lines with grid snapping. Sketches must produce Outline through the existing representation registry (I8), with a test; no sketch-only path (register `design.sketch` with `outlineProducer`; the stand-in test in workspaces/design/test/document.test.ts shows the shape)
+- [ ] 22. Rectangle and circle tools
+- [ ] 23. Arc tools (3-point, tangent)
+- [ ] 24. Sketch on any planar face
+- [ ] 25. Project/include edges into a sketch (copies for now; linked to their source through the naming scheme from 32)
+- [ ] 26. Profile detection (closed regions, nested)
+- [ ] 27. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical
+- [ ] 28. Parallel, perpendicular, equal, tangent
+- [ ] 29. Editable dimensions (length, radius, angle)
+- [ ] 30. Constraint status colours
+- [ ] 31. Trim, extend, offset, mirror
+
+Parametric
+- [ ] 32. Feature timeline (sketch → extrude replayed on rebuild). Decide the topological naming ID scheme here (e.g. "face created by feature X, from profile edge Y, side Z") and give every face/edge such an ID, so 50 is an upgrade, not a rewrite. Undo/redo becomes "undo this timeline edit"
+- [ ] 33. Edit any feature and rebuild after it; projected edges and sketch planes re-resolve through their IDs
+- [ ] 34. User parameters and expressions
+- [ ] 35. Cone and torus surfaces
+- [ ] 36. Revolve
+- [ ] 37. Per-feature error display on the timeline
 
 Test infrastructure (in place before booleans, which are built against it)
 - [ ] 38. Golden models in tests/golden/ + tests/baseline.json metrics
@@ -82,7 +109,11 @@ Extras
 - [ ] 84. Cloud saving, versions, sharing
 
 Integration (the priority whenever a workspace is built; each item lands before the workspace that first needs it)
+- [ ] I1. Project file holds every workspace's data; save/load round-trips it (with step 19)
+- [ ] I2. Stable-ID references, re-resolved after every rebuild, warning when unresolved (rule: packages/CLAUDE.md, "Ecosystem"; with steps 32–33, completed at 50)
 - [ ] I3. One materials library used by Design appearances (62) and every later workspace
+- [ ] I4. One selection and one undo/redo history across workspaces (with steps 17 and 20)
+- [ ] I5. Switching workspaces keeps camera and selection; a workspace's view of the design updates live after an edit
 - [ ] I6. Cross-workspace tests: edit the design, check every workspace's references still resolve (or warn) in the harness and e2e
 
 Integration foundations (owner's spec "Ecosystem integration — design and foundations"; build NOW = before step 16, in packages/core, small commits, every test green; everything not marked NOW is a typed DRAFT interface that throws "not implemented")
