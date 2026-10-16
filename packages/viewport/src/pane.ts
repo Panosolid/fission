@@ -1,8 +1,9 @@
 // Split view (X3): each workspace on screen gets a SharedViewport of its
 // own over one view of the one viewer. Scene methods (body, selection,
 // overlays) go to the viewer, so every view draws the same thing; camera
-// methods (fit, setView, fitSelection) go to that pane's view only.
-import type { AnalysisOverlay, DisplayMesh, Framing, SharedViewport, ViewName, ViewportHighlight, ViewportPick } from "@fission/core";
+// methods (fit, setView, fitSelection) and an image (showImage, clearImage)
+// go to that pane's view only.
+import type { AnalysisOverlay, DisplayMesh, Framing, ImageRep, SharedViewport, ViewName, ViewportHighlight, ViewportPick } from "@fission/core";
 
 /** What a pane needs of its view: the element it fills and its camera. */
 export interface PaneCamera {
@@ -10,6 +11,8 @@ export interface PaneCamera {
   fit(): Framing | null;
   setView(name: ViewName): Framing | null;
   fitSelection(): Framing | null;
+  showImage(image: ImageRep): void;
+  clearImage(): void;
 }
 
 type PickHandler = (pick: ViewportPick) => void;
@@ -35,6 +38,8 @@ export function paneViewports(scene: SharedViewport): (view: PaneCamera) => Shar
       fit: () => view.fit(),
       setView: (name: ViewName) => view.setView(name),
       fitSelection: () => view.fitSelection(),
+      showImage: (image: ImageRep) => view.showImage(image),
+      clearImage: () => view.clearImage(),
       setOverlay: (overlay: AnalysisOverlay) => scene.setOverlay(overlay),
       clearOverlay: (id: string) => scene.clearOverlay(id),
       showSelection: (highlight: ViewportHighlight) => scene.showSelection(highlight),

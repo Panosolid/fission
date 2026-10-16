@@ -1,14 +1,18 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
+import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type ImageRep, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, segmentsNear, unhidden } from "./picking.ts";
 import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
 import { selectionFraming } from "./framing.ts";
+import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+
+/** Layers 1–31 show one view's image (layer 0 is the body, grid and axes); each view showing an image takes one. */
+const freeImageLayers = Array.from({ length: 31 }, (_, i) => i + 1);
 
 /** What a view needs from the viewer it shows: the one scene, body, selection and picking. */
 interface ViewHost {
@@ -39,6 +43,12 @@ export class ViewportView {
   private legend = document.createElement("ul");
   private resizer: ResizeObserver;
   private queuedHover = 0;
+  /**
+   * The image this view shows (showImage), on a layer only this view's
+   * camera sees, so another view of the same scene keeps the body; and this
+   * view's 3D camera to give back when it goes.
+   */
+  private image: { mesh: THREE.Mesh; texture: THREE.DataTexture; layer: number; widthMm: number; heightMm: number; saved: { position: THREE.Vector3; target: THREE.Vector3; near: number; far: number } } | null = null;
 
   private host: ViewHost;
 
@@ -93,7 +103,7 @@ export class ViewportView {
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
       this.renderer.render(this.host.scene, this.camera);
-      this.cube.render(this.renderer, this.camera);
+      if (!this.image) this.cube.render(this.renderer, this.camera);
     });
   }
 
@@ -118,7 +128,7 @@ export class ViewportView {
   private faceAt(clientX: number, clientY: number): number | null {
     const mesh = this.host.mesh();
     const faceMesh = this.host.faceMesh();
-    if (!mesh || !faceMesh) return null;
+    if (!mesh || !faceMesh || this.image) return null; // the body is not drawn under an image
     const ndc = clientToNdc({ x: clientX, y: clientY }, this.renderer.domElement.getBoundingClientRect());
     if (!ndc) return null;
     this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
@@ -134,7 +144,7 @@ export class ViewportView {
   private edgeAt(clientX: number, clientY: number): number | null {
     const mesh = this.host.mesh();
     const faceMesh = this.host.faceMesh();
-    if (!mesh || !faceMesh) return null;
+    if (!mesh || !faceMesh || this.image) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
     const lines = mesh.edge_lines;
@@ -160,13 +170,14 @@ export class ViewportView {
     return null;
   }
 
-  /** Frames the current body from the home view; returns what it framed (null if none). */
+  /** Frames the current body from the home view (or the image from above while this view shows one); returns what it framed (null if none). */
   fit(): Framing | null {
     return this.setView("home");
   }
 
-  /** Turns this view's camera to a standard view, framing the current body; returns what it framed (null if none). */
+  /** Turns this view's camera to a standard view, framing the current body; while this view shows an image every view frames it from above. Returns what it framed (null if none). */
   setView(name: ViewName): Framing | null {
+    if (this.image) return this.frameImage();
     const framing = this.host.bodyFraming();
     if (!(framing.radius > 0)) return null;
     const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
@@ -182,7 +193,7 @@ export class ViewportView {
   fitSelection(): Framing | null {
     const { body, faces, edges } = this.host.highlight();
     const mesh = this.host.mesh();
-    if (!mesh) return null;
+    if (!mesh || this.image) return null;
     const framing = faces.length || edges.length ? selectionFraming(mesh, faces, edges) : body ? this.host.bodyFraming() : null;
     if (!framing || !(framing.radius > 0)) return null;
     this.spendDamping();
@@ -218,6 +229,99 @@ export class ViewportView {
     this.controls.update();
   }
 
+  /**
+   * Shows an image as a flat sheet at its real size in this view (see
+   * SharedViewport): nearest-neighbour when zoomed in, so each pixel stays
+   * a crisp square, smoothed with mipmaps when zoomed out. The texture is
+   * sRGB and the material unlit, so the screen shows the image's own
+   * colours. The sheet is in the one scene, on a layer only this view's
+   * camera sees, and this view stops seeing the body.
+   */
+  showImage(image: ImageRep) {
+    checkTextureSize(image.width, image.height, this.renderer.capabilities.maxTextureSize);
+    const sheet = imageSheet(image.width, image.height, image.mmPerPixel);
+    const layer = this.image?.layer ?? freeImageLayers.shift();
+    if (layer === undefined) throw new Error("Too many views are showing images at once.");
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(sheet.positions, 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(sheet.uvs, 2));
+    geometry.setIndex(sheet.indices);
+    // The same bytes viewed as Uint8Array, no copy; decoded pixels never live in shared memory.
+    const bytes = new Uint8Array(image.rgba.buffer as ArrayBuffer, image.rgba.byteOffset, image.rgba.byteLength);
+    const texture = new THREE.DataTexture(bytes, image.width, image.height, THREE.RGBAFormat);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.unpackAlignment = 1;
+    texture.needsUpdate = true;
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: texture, transparent: true }));
+    mesh.layers.set(layer);
+    const first = !this.image;
+    const saved = this.image?.saved ?? { position: this.camera.position.clone(), target: this.controls.target.clone(), near: this.camera.near, far: this.camera.far };
+    this.removeImage();
+    this.image = { mesh, texture, layer, widthMm: sheet.widthMm, heightMm: sheet.heightMm, saved };
+    this.host.scene.add(mesh);
+    this.element.dataset.image = `${image.width} x ${image.height} px, ${+sheet.widthMm.toPrecision(12)} x ${+sheet.heightMm.toPrecision(12)} mm`; // read by the e2e test
+    if (first) {
+      this.camera.layers.set(layer); // only the image: no body, grid or axes
+      this.cube.element.hidden = true;
+      // Top-down 2D: the left button pans instead of orbiting.
+      this.controls.enableRotate = false;
+      this.controls.screenSpacePanning = true;
+      this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+      this.controls.touches.ONE = THREE.TOUCH.PAN;
+      this.frameImage();
+    }
+  }
+
+  /** Removes this view's image and gives back the body and the 3D camera as they were; does nothing when no image is shown. */
+  clearImage() {
+    if (!this.image) return;
+    const { saved, layer } = this.image;
+    this.removeImage();
+    this.image = null;
+    freeImageLayers.push(layer);
+    delete this.element.dataset.image;
+    this.camera.layers.set(0);
+    this.cube.element.hidden = false;
+    this.controls.enableRotate = true;
+    this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    this.controls.touches.ONE = THREE.TOUCH.ROTATE;
+    this.controls.minDistance = 0;
+    this.controls.maxDistance = Infinity;
+    this.spendDamping();
+    this.controls.target.copy(saved.target);
+    this.camera.position.copy(saved.position);
+    this.camera.near = saved.near;
+    this.camera.far = saved.far;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+  }
+
+  private removeImage() {
+    if (!this.image) return;
+    this.host.scene.remove(this.image.mesh);
+    this.image.mesh.geometry.dispose();
+    (this.image.mesh.material as THREE.Material).dispose();
+    this.image.texture.dispose();
+  }
+
+  /** Looks straight down on the image's sheet, the whole of it in view; +Y up on screen. */
+  private frameImage(): Framing | null {
+    if (!this.image) return null;
+    const { widthMm, heightMm } = this.image;
+    const dist = topDownDistance(widthMm, heightMm, this.camera.fov, this.camera.aspect);
+    this.place([0, 0, dist], [0, 0, 0], [0, 1, 0]);
+    const range = imageZoomRange(dist);
+    this.controls.minDistance = range.minDistance;
+    this.controls.maxDistance = range.maxDistance;
+    this.camera.near = range.near;
+    this.camera.far = range.far;
+    this.camera.updateProjectionMatrix();
+    return { centre: [0, 0, 0], radius: Math.hypot(widthMm, heightMm) / 2 };
+  }
+
   private resize() {
     const { clientWidth: w, clientHeight: h } = this.element;
     if (w === 0 || h === 0) return;
@@ -228,6 +332,7 @@ export class ViewportView {
 
   /** Stops drawing and takes this view's canvas, cube and legend out of its element. */
   dispose() {
+    this.clearImage();
     this.renderer.setAnimationLoop(null);
     if (this.queuedHover) cancelAnimationFrame(this.queuedHover);
     this.resizer.disconnect();
@@ -430,5 +535,15 @@ export class Viewer implements SharedViewport {
   /** Frames the selection in the main view, from its current direction. */
   fitSelection(): Framing | null {
     return this.main.fitSelection();
+  }
+
+  /** Shows an image in the main view (see ViewportView.showImage). */
+  showImage(image: ImageRep) {
+    this.main.showImage(image);
+  }
+
+  /** Takes the main view's image away. */
+  clearImage() {
+    this.main.clearImage();
   }
 }
