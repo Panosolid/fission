@@ -29,6 +29,8 @@ export { SEVERITY_COLOURS, triangleColours } from "./model/overlay.ts";
 export type { Converter, DataRep, Delivery, ImageRep, MeshRep, OutlineRep, Plane, Producer, Producible, Representation, RepresentationKind, RepresentationOf, SolidRep } from "./model/representation.ts";
 export type { Cost, GraphNode, Staleness } from "./model/graph.ts";
 export { DependencyGraph } from "./model/graph.ts";
+export type { DownstreamSource, DownstreamState, DownstreamSummary } from "./model/downstream.ts";
+export { DownstreamRegistry, summarize } from "./model/downstream.ts";
 export type { Command, CommandSpec, ParamSpec, Parsed } from "./model/commands.ts";
 export { commandListSchema, commandSchema, parseCommand, parseCommandList } from "./model/commands.ts";
 export type { Feature, Intent, Origin, ParameterValue, Provenance, Timeline } from "./model/feature.ts";

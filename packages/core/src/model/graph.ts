@@ -57,6 +57,11 @@ export class DependencyGraph {
     return this.nodes.has(id);
   }
 
+  /** The node with this id, or undefined. */
+  node(id: string): GraphNode | undefined {
+    return this.nodes.get(id);
+  }
+
   /** Ids `id` reads, directly or through others. */
   upstreamOf(id: string): Set<string> {
     const seen = new Set<string>();
