@@ -1,10 +1,10 @@
 # Fission
 
-A free, open-source suite for making things. Parametric CAD is at its heart, and rendering, simulation, CNC machining, laser cutting and 3D printing are workspaces of the same app, all sharing one project. It runs in the browser, needs no installation and has no subscription.
+A personal learning project: a parametric CAD program that runs in the browser, built to learn the maths behind each algorithm. Other workspaces (rendering, simulation, machining, laser cutting, printing) are planned as parts of the same app, sharing one project.
 
-Fission is early. The geometry kernel's foundations are built and heavily tested, and the app shows and exports kernel-made solids. The sketcher, the parametric timeline and booleans come next. The [roadmap](docs/roadmap.md) lists every step and which ones are done.
+It is early. The geometry kernel's foundations are built and heavily tested, and the app shows and exports kernel-made solids. The sketcher, the parametric timeline and booleans come next. The [roadmap](docs/roadmap.md) lists every step and which ones are done.
 
-## What makes it different
+## Design notes
 
 **A kernel written from scratch, correctness first.** The geometry kernel is Rust compiled to WebAssembly. It is a boundary representation (B-rep): faces are exact planes, cylinders and spheres, and edges are exact lines and circles. Triangles exist only for drawing and for export. Volume and area are calculated from the exact shape (divergence theorem, Stokes, Gauss–Bonnet) in double-double arithmetic, so the numbers shown are the shape's true values, not mesh estimates.
 
@@ -26,7 +26,7 @@ These limits were chosen from measurements of how many digits intersections lose
 
 Inputs outside the range get a clear error, never quietly wrong geometry. A body's shape is stored apart from its position, so moving a part far away and back loses nothing.
 
-**No crashes by design.** Bad input returns an error. Every operation has a bounded cost, so no input can freeze the app.
+**Errors, not crashes.** Bad input returns an error. Every operation has a bounded cost, so no input can freeze the app.
 
 ## How it is tested
 
