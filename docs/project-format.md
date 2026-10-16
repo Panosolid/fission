@@ -33,6 +33,10 @@ A Fission project is one JSON document. The format is open: anyone may read and 
 
 Today a part is feature #1 of a one-step timeline. Step 32 adds features to the same list, so no migration is needed.
 
+## Saving and opening
+
+Save writes the project as `<name>.fission.json` (`projectToJson`): keys sorted at every level and two-space indents, so the same project always gives the same bytes. A number JSON can't hold (NaN, Infinity) is refused when saving instead of being written as `null`. Open (`projectFromJson`) parses the text, runs `readProject` (the migrations below), then hands each workspace its own part (`readData`); a part no workspace in this build reads is kept as it is. Bad JSON, a non-project, a newer format or a workspace refusing its part refuses the whole file with one message; the open project stays as it was.
+
 ## Migration rules
 
 1. Any change a version-N reader can't read is a new version, N + 1.

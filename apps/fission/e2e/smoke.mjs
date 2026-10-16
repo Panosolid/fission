@@ -1049,6 +1049,48 @@ try {
     await page.setViewportSize({ width: 1000, height: 640 });
   });
 
+  await check("Save, reload, Open: the saved part and its numbers come back, re-framed", async () => {
+    await page.goto(url + "#design");
+    await page.reload(); // the same URL keeps the page, so start from a fresh app
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await setSize("width", 50);
+    // V = 50·30·20 = 30000.
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "30,000 mm³");
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
+    assert.equal(download.suggestedFilename(), "Untitled.fission.json");
+    const saved = "e2e/saved.fission.json";
+    await download.saveAs(saved);
+    const file = JSON.parse(readFileSync(saved, "utf8"));
+    assert.equal(file.formatVersion, 2);
+    assert.deepEqual(file.workspaces.design.timeline.features[0].intent.parameters, { width: 50, depth: 30, height: 20 });
+    // A fresh app shows the default 40 × 30 × 20 box again.
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await page.setInputFiles("#open-file", saved);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "30,000 mm³");
+    assert.equal(await page.inputValue("#width"), "50");
+    assert.equal(await page.textContent("#browser [data-node=feature-1]"), "1. Box: 50 × 30 × 20 mm");
+    assert.equal(await text("intent"), "Box: 50 × 30 × 20 mm");
+    assert.equal(await text("file-status"), "");
+    // Re-framed on the opened part: r = √(50² + 30² + 20²)/2 = √3800/2 ≈ 30.82.
+    const r = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
+    assert.ok(Math.abs(r - Math.sqrt(3800) / 2) < 1e-6, `framed radius ${r}`);
+    // Editing the opened part works as usual: 50·30·25 = 37500.
+    await setSize("height", 25);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "37,500 mm³");
+    await page.screenshot({ path: "e2e/opened-file.png" });
+  });
+
+  await check("a file that is not a project is refused with its message, keeping the open part", async () => {
+    await page.setInputFiles("#open-file", { name: "half.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 2, "name": "Cut') });
+    await page.waitForFunction(() => document.querySelector("#file-status").textContent !== "");
+    assert.match(await text("file-status"), /^Couldn't open half\.fission\.json: not a Fission project: the file is not valid JSON/);
+    await page.setInputFiles("#open-file", { name: "new.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 99}') });
+    await page.waitForFunction(() => /newer Fission/.test(document.querySelector("#file-status").textContent));
+    assert.equal(await text("volume"), "37,500 mm³");
+    assert.equal(await page.inputValue("#height"), "25");
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });

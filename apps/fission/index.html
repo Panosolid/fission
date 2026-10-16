@@ -10,6 +10,10 @@
     <header id="topbar">
       <h1>Fission <span id="version"></span></h1>
       <nav id="workspaces" aria-label="Workspaces"></nav>
+      <button id="save" type="button" title="Save the whole project as a .fission.json file">Save</button>
+      <button id="open" type="button" title="Open a .fission.json project file">Open</button>
+      <input id="open-file" type="file" accept=".json,application/json" hidden />
+      <span id="file-status" role="alert"></span>
       <button id="assistant-toggle" type="button" aria-pressed="false" title="The optional AI assistant (coming soon). No AI provider is active: nothing is sent anywhere.">AI <span id="ai-status">off</span></button>
       <button id="community" type="button" title="Shared models, free to download (coming soon)">Community</button>
     </header>

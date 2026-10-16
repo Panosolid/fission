@@ -11,6 +11,8 @@ body { display: flex; flex-direction: column; }
 #topbar button:hover { color: #e6e8eb; }
 #topbar button[aria-selected="true"], #topbar button[aria-pressed="true"] { color: #e6e8eb; border-bottom-color: #4aa8ff; }
 #topbar button.soon { color: #6f7680; }
+#file-status { color: #f5b14c; font-size: 12px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#file-status:empty { display: none; }
 #topbar button.soon[aria-selected="true"] { color: #b5bbc4; }
 
 /* Workspace: toolbar above, browser left, properties right of the shared

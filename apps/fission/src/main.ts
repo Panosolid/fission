@@ -4,7 +4,7 @@
 // empties them on hide; the viewport is shared, so switching keeps the
 // camera and what is on screen.
 import "@fission/ui/theme.css";
-import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -109,6 +109,43 @@ function show(page: Page) {
 }
 
 $("community").addEventListener("click", () => show("community"));
+
+// Save and Open: the whole project, every workspace's data, as one
+// .fission.json file (docs/project-format.md). Opening replaces the project
+// only once all of it has read cleanly; a refused file leaves the open
+// project as it was and says why.
+const fileStatus = (message: string) => {
+  $("file-status").textContent = message;
+  $("file-status").title = message; // the top bar cuts a long one short
+};
+$("save").addEventListener("click", () => {
+  try {
+    const url = URL.createObjectURL(new Blob([projectToJson(ctx.project)], { type: "application/json" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: `${ctx.project.name.replace(/[\\/:*?"<>|]/g, "-") || "Untitled"}.fission.json` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    fileStatus("");
+  } catch (e) {
+    fileStatus(e instanceof Error ? e.message : String(e));
+  }
+});
+$("open").addEventListener("click", () => $("open-file").click());
+$("open-file").addEventListener("change", async () => {
+  const input = $<HTMLInputElement>("open-file");
+  const file = input.files?.[0];
+  input.value = ""; // so choosing the same file again opens it again
+  if (!file) return;
+  try {
+    const project = projectFromJson(await file.text(), workspaces);
+    ctx.selection.clear(); // it named the old part's faces
+    ctx.project = project;
+    ctx.graph = new DependencyGraph();
+    show(current); // re-mounts the workspace on the opened project
+    fileStatus("");
+  } catch (e) {
+    fileStatus(`Couldn't open ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+});
 // One assistant panel for every workspace, beside the viewport.
 $("assistant-toggle").addEventListener("click", () => {
   const panel = $("assistant");
