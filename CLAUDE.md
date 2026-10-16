@@ -42,6 +42,8 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 - Tier 1 (after every change): `cd kernel && cargo clippy --all-targets && cargo test <module>`
 - Before pushing kernel changes, also build for the browser: `cd kernel && cargo build --target wasm32-unknown-unknown` (code gated with `#[cfg(not(target_arch = "wasm32"))]`, like `debug_dump`, must not be called from code that is built there). CI uses the latest stable Rust, whose clippy may have lints the local toolchain lacks: `rustup update stable` first.
 - All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored)
+- After every push that changes `kernel/`, start a "Random testing" run on the pushed branch (GitHub Actions, `nightly.yml`, workflow_dispatch with `ref` = the branch). Scheduled runs only test `main`, so work not yet merged is tested only this way. Check its results on the `test-results` branch at the start of the next session.
+- Precision measurement: `cd kernel && cargo run --release --example precision_budget` (how far intersection points land from both pieces, by part size and distance from the origin; evidence for the modelling range).
 - Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
 - Install (repo root, npm workspaces): `npm install`
 - Build the app: `cd apps/fission && npm run build`
