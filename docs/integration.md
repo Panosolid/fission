@@ -1,6 +1,6 @@
 # How Fission's workspaces work together
 
-Fission is nine workspaces sharing one project: Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector and Image. The goal is that anything made in one workspace can go straight into any other, stays linked to its source, and never loses information, without anyone exporting a file. This page is for contributors. It explains the model and where each piece lives. The code in `packages/core/src/model/` is the reference.
+Fission is ten workspaces sharing one project: Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image and Layout. The goal is that anything made in one workspace can go straight into any other, stays linked to its source, and never loses information, without anyone exporting a file. This page is for contributors. It explains the model and where each piece lives. The code in `packages/core/src/model/` is the reference.
 
 ## The rules
 

@@ -10,7 +10,7 @@
 import type { Link } from "./links.ts";
 import type { Material } from "./material.ts";
 
-export type WorkspaceId = "design" | "render" | "simulate" | "manufacture" | "laser" | "slice" | "circuit" | "vector" | "image";
+export type WorkspaceId = "design" | "render" | "simulate" | "manufacture" | "laser" | "slice" | "circuit" | "vector" | "image" | "layout";
 
 /** One units system for every workspace. The kernel always works in mm. */
 export type LengthUnit = "mm" | "cm" | "m" | "in";

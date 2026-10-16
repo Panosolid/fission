@@ -68,6 +68,7 @@ const workspaceNames: Record<WorkspaceId, string> = {
   circuit: "Circuit",
   vector: "Vector",
   image: "Image",
+  layout: "Layout",
 };
 
 const where = (o: Origin) => `${o.label} in ${workspaceNames[o.workspace]}`;

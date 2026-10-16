@@ -28,7 +28,7 @@ test("specialist models are placeholders, one list covering the spec's tasks", a
   assert.throws(() => loadSpecialist("upscaling"), /not implemented/);
   assert.deepEqual(SPECIALISTS.map((s) => s.task), ["background-removal", "segmentation", "upscaling", "inpainting", "tracing", "print-failure"]);
   // Every workspace and the suite has its planned AI features listed.
-  assert.deepEqual(Object.keys(AI_FEATURES).sort(), ["circuit", "design", "image", "laser", "manufacture", "render", "simulate", "slice", "suite", "vector"]);
+  assert.deepEqual(Object.keys(AI_FEATURES).sort(), ["circuit", "design", "image", "laser", "layout", "manufacture", "render", "simulate", "slice", "suite", "vector"]);
   assert.match(AI_FEATURES.manufacture.join(" "), /Never runs a machine/);
   assert.match(AI_FEATURES.circuit.join(" "), /AI draft — review required/);
 });

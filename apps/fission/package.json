@@ -25,6 +25,7 @@
     "@fission/circuit": "*",
     "@fission/vector": "*",
     "@fission/image": "*",
+    "@fission/layout": "*",
     "three": "^0.170.0"
   },
   "devDependencies": {

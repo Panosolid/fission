@@ -802,7 +802,7 @@ try {
     assert.equal(await text("stl-note"), ""); // the warning goes once the part fits again
   });
 
-  await check("the switcher lists the nine workspaces, Design first and working", async () => {
+  await check("the switcher lists the ten workspaces, Design first and working", async () => {
     const tabs = await page.$$eval("#workspaces [role=tab]", (ts) => ts.map((t) => [t.textContent, t.classList.contains("soon")]));
     assert.deepEqual(tabs, [
       ["Design", false],
@@ -814,6 +814,7 @@ try {
       ["Circuit", true],
       ["Vector", true],
       ["Image", true],
+      ["Layout", true],
     ]);
     assert.equal(await page.getAttribute("[data-workspace=design]", "aria-selected"), "true");
   });
@@ -826,7 +827,7 @@ try {
     await page.waitForTimeout(300); // let orbit damping settle
     const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
     const before = await pixel(0.5, 0.5);
-    for (const [id, title] of [["render", "Render"], ["simulate", "Simulate"], ["manufacture", "Manufacture"], ["laser", "Laser"], ["slice", "Slice"], ["circuit", "Circuit"], ["vector", "Vector"], ["image", "Image"]]) {
+    for (const [id, title] of [["render", "Render"], ["simulate", "Simulate"], ["manufacture", "Manufacture"], ["laser", "Laser"], ["slice", "Slice"], ["circuit", "Circuit"], ["vector", "Vector"], ["image", "Image"], ["layout", "Layout"]]) {
       await page.click(`[data-workspace=${id}]`);
       assert.equal(await page.textContent(".placeholder h2"), title);
       assert.equal(await page.textContent(".placeholder .coming-soon"), "Coming soon");

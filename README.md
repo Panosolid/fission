@@ -54,6 +54,7 @@ Geometry bugs are silent: a face a micrometre out looks fine until a later opera
 | Circuit | Schematics and circuit boards, designed together with the enclosure | Placeholder |
 | Vector | Logos and 2D artwork that become embosses, engravings, decals and silkscreen | Placeholder |
 | Image | Photo and texture editing with real-world sizes | Placeholder |
+| Layout | Posters, social posts and slides from live-linked artwork, photos and renders | Placeholder |
 
 Design is the source of truth for geometry. Other workspaces never copy it: they refer to bodies, faces and edges by stable IDs, so a load stays on its face and a toolpath stays on its pocket when the design changes. A reference that can't be found any more shows a warning instead of breaking silently.
 

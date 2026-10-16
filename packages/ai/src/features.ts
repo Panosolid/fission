@@ -21,6 +21,7 @@ export const AI_FEATURES: Record<WorkspaceId | "suite", string[]> = {
   circuit: ["Datasheet and component questions", "Explaining design-rule errors", 'Drafting schematics, marked "AI draft — review required"'],
   vector: ["Tracing", "Cleaning up shapes", "Layout suggestions", "Optional image generation, only with your own API key"],
   image: ["Background removal", "Upscaling", "Smart selection", "Inpainting"],
+  layout: ["Layout and alignment suggestions", "Resizing a design for another format", "Writing and shortening text"],
   suite: [
     '"What breaks if I change this?" from the dependency graph',
     "Questions about the whole project: total filament, cost, parts",
