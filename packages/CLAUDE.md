@@ -10,9 +10,10 @@ Read with the root CLAUDE.md (top rules, general testing rules, git workflow). w
 - `packages/ui`: shared UI kit: number formatting, theme (`theme.css`), workspace switcher, placeholder page.
 - `packages/testing`: the Workspace API boundary test, the "zero exports" journeys (`journeys/*.journey.ts`, on the real kernel through `src/node-kernel.ts`; `JOURNEYS`/`ROUND_TRIPS` list the ones waiting), and DRAFT harness interfaces.
 - `packages/ai`: the optional AI assistant (docs/ai.md): providers (placeholders), `askForCommands`, `buildContext`, specialist models and per-workspace plans; the panel itself is `apps/fission/src/assistant.ts`.
-- `packages/storage`, `packages/community`: placeholders (interfaces only; every function throws "not implemented").
+- `packages/storage`: projects kept in the browser. `store.ts` (`projectStore(kv, readers, now)`: list, open, save, remove; each project is `project/<id>`, its exact .fission.json text, and `summary/<id>`, name and save time; open goes through `projectFromJson`) over the `KeyValue` interface in `key-value.ts` (`memoryKeyValue()` for unit tests); `indexeddb.ts` is the thin browser adapter, checked by `apps/fission/e2e/storage.mjs`; `localStore(readers)` is the two together. `startAutosave` is still a placeholder (19c).
+- `packages/community`: placeholder (interfaces only; every function throws "not implemented").
 - `workspaces/design`: the CAD workspace (`workspace.ts`; `profiles.ts` ready-made outlines until the sketcher). `workspaces/render`, `simulate`, `manufacture`, `laser`, `slice`, `circuit`, `vector`, `image`, `layout`: placeholders.
-- `apps/fission`: the app shell (`src/main.ts`: top bar with Save/Open, workspace switcher, the toolbar/browser/properties slots around the shared viewport; `#design`, `#slice`… links open a workspace), `e2e/smoke.mjs` browser test, `e2e/dump-viewer.mjs` browser check of the kernel's failure-dump page (both run by `npm run e2e`).
+- `apps/fission`: the app shell (`src/main.ts`: top bar with Save/Open, workspace switcher, the toolbar/browser/properties slots around the shared viewport; `#design`, `#slice`… links open a workspace), `e2e/smoke.mjs` browser test, `e2e/dump-viewer.mjs` browser check of the kernel's failure-dump page, `e2e/storage.mjs` browser check of the IndexedDB store (all run by `npm run e2e`).
 
 ## Commands
 
@@ -21,7 +22,7 @@ Read with the root CLAUDE.md (top rules, general testing rules, git workflow). w
 - Dev server: `cd apps/fission && npm run dev`
 - Unit tests of every package and workspace: `npm test` (repo root)
 - Type-check every package, including ones the app does not import yet: `npm run typecheck` (repo root, after a build)
-- Browser smoke test: `cd apps/fission && npm run build && npm run e2e`
+- Browser smoke test: `cd apps/fission && npm run build && npm run e2e` (the build needs `wasm-pack` and the `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown && cargo install wasm-pack --locked` in a fresh container)
 - "Zero exports" journeys on the real kernel: `npm run journeys` (repo root, after a build)
 
 ## Ecosystem: one project, many workspaces
