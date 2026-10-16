@@ -138,7 +138,7 @@ Extras
 - [ ] 83. Sheet metal
 - [ ] 84. Cloud saving, versions, sharing
 
-Integration (the priority whenever a workspace is built; each item lands before the workspace that first needs it)
+Integration (the priority whenever a workspace is built; each item lands before the workspace that first needs it). Every link between workspaces, with what flows and when it can be built, is planned in `docs/integration-map.md`; a workspace's rows there become its integration tests
 - [ ] I1. Project file holds every workspace's data; save/load round-trips it (with step 19)
 - [ ] I2. Stable-ID references, re-resolved after every rebuild, warning when unresolved (rule: packages/CLAUDE.md, "Ecosystem"; with steps 32–33, completed at 50)
 - [ ] I3. One materials library used by Design appearances (62) and every later workspace
