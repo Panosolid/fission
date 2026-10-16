@@ -10,4 +10,6 @@ export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
 export { historyNotBuilt, selectionNotBuilt } from "./model/session.ts";
 export type { Framing, SharedViewport } from "./model/viewport.ts";
+export type { Converter, DataRep, Delivery, ImageRep, MeshRep, OutlineRep, Plane, Producer, Producible, Representation, RepresentationKind, RepresentationOf, SolidRep } from "./model/representation.ts";
+export { EXACTNESS, isExact, RepresentationRegistry, XY_PLANE } from "./model/representation.ts";
 export type { ToolbarItem, ViewportOverlay, WorkspaceContext, WorkspacePlugin } from "./model/workspace.ts";
