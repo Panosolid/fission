@@ -1,0 +1,5 @@
+# The app shell
+
+Contents of `apps/fission`; the rules are in packages/CLAUDE.md and the root CLAUDE.md. Keep this list current when you add or change a file here.
+
+- the app shell (`src/main.ts`: top bar with Save/Open (behind Menu at phone width) and the save status, workspace switcher, the toolbar/browser/properties slots around the shared viewport, and Split's second pane with slots of its own; `#design`, `#slice`… links open a workspace), `e2e/smoke.mjs` browser test, `e2e/dump-viewer.mjs` browser check of the kernel's failure-dump page, `e2e/storage.mjs` browser check of the IndexedDB store (all run by `npm run e2e`).
