@@ -21,7 +21,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate, which take and return `Placed`; a rotation pivot must lie in model space). Each returns `Result<Body, KernelError>` via `ops::finish`.
   - `src/fixtures.rs`: hand-built test bodies (cube, cylinder, sphere, half cylinder, tube, sphere cap/slice/octant) that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
   - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_cylinder`, `make_sphere`, `make_extrude` → `BodyView`, with exact volume and area; `export_stl(spec, name)` → `StlFile`, where a `BodySpec` names the same shapes). Keep it thin.
-  - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
+  - `src/debug_dump.rs`: failure dumps: ASCII STL per body plus `index.html`, a viewer that loads nothing (plain 2D canvas, works offline, draws relative to the scene's middle in doubles). In red: faces and edges a validation error names, vertices off their edges, every face of an inside-out shell, the mesh's open or flipped edges; dashed red: a named edge's own curve. `checked` writes one (`dump_invalid`, at most 20 per process) into `kernel/target/failure-dumps/` before panicking and names it in the panic; the harness writes its own there too, and `endless.sh` copies them into each nightly failure folder. `examples/dump_demo.rs` writes the two dumps the browser check opens.
   - `tests/stateful.rs`: stateful random-testing harness (see its header). When a kernel operation lands, add it to `Op`, `Scene::transitions`, `apply_op` and `replay_op` the same day.
   - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
   - `scripts/overnight.sh`: Tier 3 run. `scripts/endless.sh`: the same, round after round with random seeds, logging to `endless-results/`.
@@ -32,7 +32,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `packages/ui`: shared UI kit: number formatting, theme (`theme.css`), workspace switcher, placeholder page.
   - `packages/storage`, `packages/ai`, `packages/testing`, `packages/community`: placeholders (interfaces only; every function throws "not implemented").
   - `workspaces/design`: the CAD workspace (`workspace.ts`; `profiles.ts` ready-made outlines until the sketcher). `workspaces/render`, `simulate`, `manufacture`, `laser`, `slice`: placeholders.
-  - `apps/fission`: the app shell (`src/main.ts`: top bar, workspace switcher, side panel, shared viewport; `#design`, `#slice`… links open a workspace), `e2e/smoke.mjs` browser test.
+  - `apps/fission`: the app shell (`src/main.ts`: top bar, workspace switcher, side panel, shared viewport; `#design`, `#slice`… links open a workspace), `e2e/smoke.mjs` browser test, `e2e/dump-viewer.mjs` browser check of the kernel's failure-dump page (both run by `npm run e2e`).
 - `docs/community.md`: open questions for the community library's server.
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing": every 6 hours, 4 jobs × ~5 h of `endless.sh`; results accumulate on the `test-results` branch: `summary.txt`, `log.csv`, `failures/<seed>/`; an issue is opened when something is found).
@@ -127,7 +127,7 @@ Kernel foundations
 - [x] 11. Sphere primitive; accurate volume and area
 - [x] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 44). Acceptance case: today a 26.5 × 0.0124 × 27 box placed 37.8 km out and moved back loses 8.7e-8 of its volume to rounding there (OpenCascade oracle, seed 0x5eed, 3000 cases); after this step it must not
 - [x] 13. STL export + download button + round-trip test
-- [ ] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
+- [x] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
 - [ ] 15. Self-intersection check in validate(). Easy for planes/cylinders/spheres; must be extended for general surfaces when NURBS arrive (63–64)
 
 App shell

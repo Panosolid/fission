@@ -8,7 +8,7 @@
     "dev": "npm run kernel && vite",
     "build": "npm run kernel && tsc && vite build",
     "preview": "vite preview",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/smoke.mjs && node e2e/dump-viewer.mjs"
   },
   "dependencies": {
     "@fission/core": "*",

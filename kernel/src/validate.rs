@@ -92,6 +92,14 @@ impl ValidationError {
         }
     }
 
+    /// Vertices this error is about, for highlighting.
+    pub fn vertices(&self) -> Vec<usize> {
+        match *self {
+            ValidationError::VertexOffEdge { vertex, .. } => vec![vertex],
+            _ => vec![],
+        }
+    }
+
     /// Faces this error is about, for highlighting.
     pub fn faces(&self) -> Vec<FaceId> {
         use ValidationError::*;
@@ -137,7 +145,9 @@ pub fn checked(body: Body) -> Result<Body, Vec<ValidationError>> {
         Err(errs) => {
             if cfg!(debug_assertions) {
                 let list: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-                panic!("kernel produced an invalid body:\n  {}", list.join("\n  "));
+                let dump = crate::debug_dump::dump_invalid(&body, &list.join("\n"))
+                    .map_or_else(|| "none written".to_string(), |p| p.display().to_string());
+                panic!("kernel produced an invalid body:\n  {}\nfailure dump: {dump}", list.join("\n  "));
             }
             Err(errs)
         }
@@ -636,6 +646,19 @@ mod tests {
                 assert!(msg.contains(w), "{msg:?} should mention {w:?}");
             }
         }
+    }
+
+    #[test]
+    fn checked_writes_a_failure_dump_before_panicking() {
+        // Vertex 7 lifted off its edges: the panic names the dump, and the
+        // dump's page lists the same errors.
+        let mut b = hand_cube();
+        b.vertices[7].point.z += 0.25;
+        let message = std::panic::catch_unwind(|| checked(b)).unwrap_err();
+        let message = message.downcast_ref::<String>().unwrap();
+        let path = message.split("failure dump: ").nth(1).expect("the panic names its dump");
+        let html = std::fs::read_to_string(std::path::Path::new(path).join("index.html")).unwrap();
+        assert!(html.contains("vertex 7 is 2.5e-1 mm off edge 5"), "{message}");
     }
 
     #[test]
