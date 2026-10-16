@@ -1,4 +1,4 @@
-finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run
+finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run,commit,branch
 2026-10-15 13:25:23,42857449215529,2000,pass,4604,0,448,https://github.com/benpy28/fission/actions/runs/38741380058
 2026-10-15 13:32:36,274325251498577,2000,pass,4551,0,433,https://github.com/benpy28/fission/actions/runs/38741380058
 2026-10-15 13:19:19,102788882230238,2000,FAIL,780,0,89,https://github.com/benpy28/fission/actions/runs/38741380058
@@ -604,3 +604,31 @@ finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run
 2026-10-16 09:07:05,77896999187239,2000,pass,4090,0,287,https://github.com/benpy28/fission/actions/runs/38850103442
 2026-10-16 09:07:19,255851514287285,2000,FAIL,197,0,14,https://github.com/benpy28/fission/actions/runs/38850103442
 2026-10-16 09:12:09,78383784993956,2000,pass,4053,0,290,https://github.com/benpy28/fission/actions/runs/38850103442
+2026-10-16 10:43:16,255221301049162,2000,pass,4062,0,290,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:48:00,47114561486709,2000,pass,4056,0,284,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:52:48,233980277297772,2000,pass,4065,1,288,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:57:26,260633930472476,2000,pass,4108,0,278,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:02:02,169565586939479,2000,pass,4103,2,276,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:07:01,231675209118370,2000,pass,4126,0,299,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:38:47,35562243199665,2000,FAIL,540,0,24,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:41:45,50230605376933,2000,pass,4088,2,178,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:44:50,116830582977618,2000,pass,4135,0,185,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:47:47,41837158141380,2000,pass,4162,0,177,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:50:47,70283751155488,2000,pass,4086,0,180,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:53:47,238775366261443,2000,pass,4101,0,180,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:56:35,264849801442610,2000,pass,3992,0,168,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:59:25,166616125762369,2000,pass,4053,0,170,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:00:29,20360720481265,2000,FAIL,1458,0,64,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:03:23,94848458372914,2000,pass,4012,0,174,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:43:14,127315560157361,2000,pass,4062,0,288,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:47:51,38959983057031,2000,pass,4028,0,277,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:52:28,270912549203582,2000,pass,4025,1,277,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:57:20,251711391442703,2000,pass,4011,0,292,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:02:16,233787562567068,2000,pass,4114,0,296,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:06:50,139693579711427,2000,pass,4147,0,274,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:43:19,222209749513000,2000,pass,4065,0,287,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:48:00,12922221550726,2000,pass,3952,0,281,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:52:40,271631415709033,2000,pass,4086,1,280,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 10:56:26,264759042423720,2000,FAIL,3234,0,226,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:01:01,235647239417377,2000,pass,4088,0,275,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b
+2026-10-16 11:06:00,67300520594508,2000,pass,4095,0,299,https://github.com/benpy28/fission/actions/runs/38888447152,e7b8c38,claude/project-thread-zhls6b

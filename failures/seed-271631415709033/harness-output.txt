@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2012 cases over 1 seed(s) ["0xf70c1e0b0d69"] in 276.4s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1173 / 82      →  93.5%   302.2ms  slowest 562.1µs
+  add cylinder     1125 / 93      →  92.4%     25.4s  slowest 58.3ms
+  add extrude       635 / 617     →  50.7%     11.7s  slowest 175.8ms
+  add sphere       1153 / 116     →  90.9%     83.6s  slowest 164.6ms
+  move             2318 / 199     →  92.1%     27.8s  slowest 75.6ms
+  rotate           2408 / 128     →  95.0%     28.0s  slowest 83.6ms
+  ~extreme input      76 / 334     →  18.5%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 0.029416169468234995, d: 24.207647650634687, h: 17.0 }, axis: [-0.16923668890607704, 0.7929136144774017, -0.9198702360183064], angle: -7.323691347360439, at: [15.856775433050501, 79.49998199999999, -6.0] }
+  slowest add cylinder: Add { shape: Cylinder { r: 11902.515798744702, h: 0.5 }, axis: [9.000000000000001e-10, 0.0, 1.0], angle: -3.389938513751846, at: [-432.41915980086037, 8.0, 2.000011] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-20.45860878908369, 2452.061837852377], [7224.226904768047, 2452.061837852377], [7224.226904768047, 8.5], [-20.45860878908369, 8.5]], bulges: [] }, holes: [Circle { c: [1201.3223101371048, 1230.2809189261884], r: 1178.7809189261884 }, Circle { c: [3601.8841479894813, 1230.2809189261884], r: 1178.7809189261884 }, Circle { c: [6002.445985841858, 1230.2809189261884], r: 1178.7809189261884 }], dist: 55.0, expect: Some(true) }, axis: [0.038866804588865385, -0.6890076535508105, 0.8373162799431078], angle: 6.283185307179586, at: [11.0, -0.06329282986410208, 12.5] }
+  slowest add sphere: Add { shape: Sphere { r: 493.4120624307879 }, axis: [0.9921828139053968, 0.7086637634351798, 0.7133544703639183], angle: 3.141592653589793, at: [-4.0, -124.43591539996129, 8.0] }
+  slowest move: Move { target: 0, by: [-1.4523748278570634, 0.002075373667714291, 18.499989] }
+  slowest rotate: Rotate { target: 1, pivot: [-53.73391985079983, 9.5, 55.999991], axis: [-0.4844905361397646, -0.47036604092908363, -0.3222541613205716], angle: 2.079167861009539 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 276.42s
+

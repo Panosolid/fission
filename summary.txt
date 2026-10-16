@@ -1,14 +1,22 @@
-Fission random testing, all runs so far (updated 2026-10-16 09:12 UTC)
+Fission random testing, all runs so far (updated 2026-10-16 11:07 UTC)
 
-hours of testing:                 39.8
-rounds:                           605
-random operation chains:          1210000
-rounds where the harness failed:  226
-bodies compared with OpenCascade: 1944792
-OpenCascade disagreements:        248
-last problem found:               2026-10-16 09:07:19 (seed 255851514287285)
+hours of testing:                 41.6
+rounds:                           633
+random operation chains:          1266000
+rounds where the harness failed:  229
+bodies compared with OpenCascade: 2051846
+OpenCascade disagreements:        255
+last problem found:               2026-10-16 10:56:26 (seed 264759042423720, commit e7b8c38 on claude/project-thread-zhls6b)
 
 Every round is a line in log.csv. Each round that found a problem has a
 folder in failures/ named after its seed: report.txt says what went wrong,
 the .json file is the shortest chain of operations that shows it, and
 failure-dumps/*/index.html is a 3D view with the problem in red.
+The commit and branch columns of log.csv (and commit.txt in each
+failures folder) say which code a round tested.
+
+Latest mutation run (whole kernel, lib tests), 2026-10-16 11:07 UTC, commit e7b8c38 on claude/project-thread-zhls6b:
+  shards finished: 0 of 4 (incomplete: survivors list not replaced)
+  caught 865, missed 28, timed out 0, unviable 32
+  survivors not in the previous complete run: 0
+mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
