@@ -1124,7 +1124,7 @@ try {
   await check("a file that is not a project is refused with its message, keeping the open part", async () => {
     await page.setInputFiles("#open-file", { name: "half.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 2, "name": "Cut') });
     await page.waitForFunction(() => document.querySelector("#file-status").textContent !== "");
-    assert.match(await text("file-status"), /^Couldn't open half\.fission\.json: not a Fission project: the file is not valid JSON/);
+    assert.match(await text("file-status"), /^Couldn't open “half\.fission\.json”: not a Fission project: the file is not valid JSON/); // the same words as a drop (X6)
     await page.setInputFiles("#open-file", { name: "new.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 99}') });
     await page.waitForFunction(() => /newer Fission/.test(document.querySelector("#file-status").textContent));
     assert.equal(await text("volume"), "37,500 mm³");

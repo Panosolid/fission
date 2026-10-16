@@ -76,9 +76,11 @@ export interface SharedViewport {
    * top-down 2D view (pan and zoom, no orbit; the standard views and fit
    * all frame the sheet). The body is hidden meanwhile. A second call
    * replaces the image and keeps the camera. Throws a readable Error when
-   * the screen's graphics can't hold an image that large.
+   * the screen's graphics can't hold an image that large. Null shows the
+   * same 2D view with nothing in it (a workspace with no image open yet):
+   * the background only, never the body.
    */
-  showImage(image: ImageRep): void;
-  /** Removes the image and gives back the body and the 3D camera as they were before showImage. Does nothing when no image is shown. */
+  showImage(image: ImageRep | null): void;
+  /** Leaves the 2D view, removing any image, and gives back the body and the 3D camera as they were before showImage. Does nothing when no image is shown. */
   clearImage(): void;
 }

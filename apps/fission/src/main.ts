@@ -13,7 +13,7 @@ import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
 import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
-import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS, ShortcutTable, type Chord, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS, ShortcutTable, type Chord, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { changeNote, shortcutList, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -431,6 +431,12 @@ $("save").addEventListener("click", () => {
     fileStatus(e instanceof Error ? e.message : String(e));
   }
 });
+// Open takes what a drop or paste takes (X6): every format with an importer,
+// routed by its contents, so a PNG opens in Image and a project as a project.
+$<HTMLInputElement>("open-file").accept = FILE_FORMATS.filter((f) => representations.importerFor(f.format))
+  .flatMap((f) => (f.format === "project" ? [".json"] : f.extensions))
+  .join(",");
+$("open").title = `Open ${FILE_FORMATS.filter((f) => representations.importerFor(f.format)).map((f) => f.many).join(", ")}`;
 $("open").addEventListener("click", () => $("open-file").click());
 /** Replaces the open project with the one in `text`; throws, leaving the open project as it was, when it doesn't read cleanly. */
 function openProject(text: string) {
@@ -449,12 +455,7 @@ $("open-file").addEventListener("change", async () => {
   const input = $<HTMLInputElement>("open-file");
   const file = input.files?.[0];
   input.value = ""; // so choosing the same file again opens it again
-  if (!file) return;
-  try {
-    openProject(await file.text());
-  } catch (e) {
-    fileStatus(`Couldn't open ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
-  }
+  if (file) await receive([file]);
 });
 
 // Files from outside (X6): a file dropped anywhere on the app, or pasted
