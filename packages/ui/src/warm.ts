@@ -39,6 +39,12 @@ export class WarmPool<Id extends string, Pane extends string, T> {
     return this.shown.get(pane) ?? null;
   }
 
+  /** The instance on screen in `pane` (awake), if any. */
+  awake(pane: Pane): T | null {
+    const id = this.shown.get(pane);
+    return id === undefined ? null : this.warm.get(id)!.instance;
+  }
+
   /** The pane workspace `id` lives in (awake or asleep), if it is mounted. */
   paneOf(id: Id): Pane | null {
     return this.warm.get(id)?.pane ?? null;

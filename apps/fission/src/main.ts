@@ -13,8 +13,8 @@ import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
 import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
-import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
-import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
+import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS, ShortcutTable, type Chord, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { changeNote, shortcutList, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
 import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
@@ -337,6 +337,7 @@ function mountSplit(id: WorkspaceId) {
 }
 function closeSplit() {
   if (!split) return;
+  activePane = "main";
   pool.forgetPane("split"); // its viewport goes
   $("split-viewport").querySelector(".view-controls")?.remove();
   viewer.removeView(split.view);
@@ -498,14 +499,65 @@ window.addEventListener("drop", (e) => {
   dropHint(false);
   void receive([...e.dataTransfer!.files]);
 });
-document.addEventListener("paste", (e) => {
-  const target = e.target as HTMLElement | null;
-  if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
-  const files = [...(e.clipboardData?.files ?? [])];
-  if (files.length === 0) return;
-  e.preventDefault();
-  void receive(files);
+
+// One shortcut table (X7b): the shell's keys and every workspace's. A key
+// goes to the workspace in the pane last clicked or focused, then the other
+// one on screen, then the shell; a sleeping workspace never hears one.
+// Copy, cut and paste come from the clipboard events, so the browser's Edit
+// menu runs them too. Keys are left alone while typing in a field, unless a
+// shortcut says otherwise.
+const shortcuts = new ShortcutTable(SHELL_SHORTCUTS, workspaces);
+for (const c of shortcuts.clashes()) console.error(`Shortcut clash: ${c.message}`); // a unit test keeps this empty
+let activePane: PaneId = "main";
+for (const type of ["pointerdown", "focusin"] as const)
+  document.addEventListener(type, (e) => {
+    if (!(e.target instanceof Element)) return;
+    if (e.target.closest("#split")) activePane = "split";
+    else if (e.target.closest("#workspace")) activePane = "main";
+  }, true);
+/** The panes showing a workspace, the one in use first. */
+const panesInUse = (): PaneId[] => (activePane === "split" ? ["split", "main"] : ["main", "split"]).filter((p): p is PaneId => pool.showing(p as PaneId) !== null);
+const inText = (t: EventTarget | null) => t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])") !== null;
+const shellShortcuts: Record<string, (e: Event) => boolean> = {
+  shortcuts: () => (showShortcuts(), true),
+  "paste-files": (e) => {
+    const files = [...((e as ClipboardEvent).clipboardData?.files ?? [])];
+    if (files.length === 0) return false; // text pastes as usual
+    void receive(files);
+    return true;
+  },
+};
+function runShortcut(chord: Chord, e: Event) {
+  if (shortcutDialog.open) return; // the list is modal: Escape closes it, nothing else runs
+  const panes = panesInUse();
+  const entry = shortcuts.lookup(chord, panes.map((p) => pool.showing(p)!));
+  if (!entry || (!entry.inText && inText(e.target))) return;
+  const done = entry.scope === "app" ? shellShortcuts[entry.id]?.(e) : pool.awake(panes.find((p) => pool.showing(p) === entry.scope)!)?.view.shortcut?.(entry.id, e);
+  if (done !== false && done !== undefined) e.preventDefault();
+}
+const clipboardChords = new Set<string>(Object.values(CLIPBOARD_CHORDS));
+document.addEventListener("keydown", (e) => {
+  if (e.isComposing) return;
+  const chord = chordOf(e);
+  if (chord && !clipboardChords.has(chord)) runShortcut(chord, e);
 });
+for (const type of ["copy", "cut", "paste"] as const) document.addEventListener(type, (e) => runShortcut(CLIPBOARD_CHORDS[type], e));
+// The list of every key (? or Shortcuts in the top bar), the workspaces on screen first.
+const shortcutDialog = Object.assign(document.createElement("dialog"), { id: "shortcuts", className: "shortcut-list" });
+shortcutDialog.setAttribute("aria-labelledby", "shortcuts-title");
+document.body.append(shortcutDialog);
+const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+function showShortcuts() {
+  const groups = shortcuts.help(panesInUse().map((p) => pool.showing(p)!)).map((g) => ({
+    title: g.scope === "app" ? "Everywhere" : workspaceTitle(g.scope),
+    onScreen: g.onScreen,
+    rows: g.entries.map((e) => ({ keys: chordLabel(e.chord, mac), label: e.label })),
+  }));
+  shortcutDialog.innerHTML = `<header><h2 id="shortcuts-title">Keyboard shortcuts</h2><button type="button" class="close">Close</button></header>${shortcutList(groups)}`;
+  shortcutDialog.querySelector(".close")!.addEventListener("click", () => shortcutDialog.close());
+  shortcutDialog.showModal();
+}
+$("shortcuts-toggle").addEventListener("click", showShortcuts);
 // One assistant panel for every workspace, beside the viewport.
 $("assistant-toggle").addEventListener("click", () => {
   const panel = $("assistant");
