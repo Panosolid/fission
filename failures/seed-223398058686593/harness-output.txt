@@ -1,0 +1,59 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+proptest: Saving this and future failures in tests/regressions/stateful-seeds.txt
+proptest: If this test was run on a CI system, you may wish to add the following line to your copy of the file.
+cc 3d52ee7d46ec00af515759a03bc31ac5a9acef5ad777b1b819d9e83a88c8470e
+Stateful kernel test: 1003 cases over 1 seed(s) ["0xcb2de9ee7881"] in 122.4s
+Failures: 1
+  seed 0xcb2de9ee7881: step 1 (Add { shape: Extrude { outer: Path { pts: [[0.0, -99999999.0], [0.5, -99999999.0], [0.5, -99999996.0], [0.0, -99999996.0]], bulges: [0.0, 1.0, 0.0, 1.0] }, holes: [], dist: 0.5, expect: Some(false) }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): sizes valid = false but kernel accepted (minimal chain: 1 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seedcb2de9ee7881-7c64f2fceced5add.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seedcb2de9ee7881/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box           539 / 34      →  94.1%   133.2ms  slowest 296.8µs
+  add cylinder      487 / 51      →  90.5%     12.1s  slowest 58.1ms
+  add extrude       286 / 270     →  51.4%      5.6s  slowest 166.9ms
+  add sphere        480 / 33      →  93.6%     34.6s  slowest 158.1ms
+  move             1029 / 74      →  93.3%     13.0s  slowest 66.5ms
+  rotate           1081 / 57      →  95.0%     13.7s  slowest 74.8ms
+  ~extreme input      29 / 146     →  16.6%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 0.0063643864952954024, d: 64.9999991, h: 80.0 }, axis: [0.2242916001525152, 0.29135453498413677, 0.29372086092651284], angle: 8.489715978475314, at: [5.0, -0.43125672940514986, 0.43125782940514984] }
+  slowest add cylinder: Add { shape: Cylinder { r: 32050.404777123258, h: 20.0 }, axis: [0.8131838725537051, 0.6983830710777033, 0.5551147807688573], angle: -1.9922874896888842, at: [-121.24877773326008, 935.5519120731668, 11.5] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-22271.421809263058, -7.4999989], [6464019.715329592, -7.4999989], [6464019.715329592, 2162089.5464473846], [-22271.421809263058, 2162089.5464473846]], bulges: [] }, holes: [Circle { c: [1058777.1014138793, 1081041.0232242423], r: 1081048.5221231424 }, Circle { c: [3220874.1467601643, 1081041.0232242423], r: 1081048.5221231424 }, Circle { c: [5382971.192106449, 1081041.0232242423], r: 1081048.5221231424 }], dist: 23.0, expect: Some(true) }, axis: [1.0, 1.0, 0.0], angle: -1.5707963267948966, at: [-757.2571313276409, -808.6435091982404, -15.5] }
+  slowest add sphere: Add { shape: Sphere { r: 484.052235661178 }, axis: [0.0, 3.0, 4.0], angle: 4.71238898038469, at: [17.5, -572.3326506000018, -5.0] }
+  slowest move: Move { target: 0, by: [508.6873583718601, 14.0, 17.4999991] }
+  slowest rotate: Rotate { target: 0, pivot: [-418.635113141924, -10.0, -7.0], axis: [0.870967915614377, -0.10630193771759844, -0.9854217380834825], angle: -2.6471250063092486 }
+
+
+thread 'stateful_random_chains' (7092) panicked at tests/stateful.rs:1674:5:
+Stateful kernel test: 1003 cases over 1 seed(s) ["0xcb2de9ee7881"] in 122.4s
+Failures: 1
+  seed 0xcb2de9ee7881: step 1 (Add { shape: Extrude { outer: Path { pts: [[0.0, -99999999.0], [0.5, -99999999.0], [0.5, -99999996.0], [0.0, -99999996.0]], bulges: [0.0, 1.0, 0.0, 1.0] }, holes: [], dist: 0.5, expect: Some(false) }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): sizes valid = false but kernel accepted (minimal chain: 1 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seedcb2de9ee7881-7c64f2fceced5add.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seedcb2de9ee7881/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box           539 / 34      →  94.1%   133.2ms  slowest 296.8µs
+  add cylinder      487 / 51      →  90.5%     12.1s  slowest 58.1ms
+  add extrude       286 / 270     →  51.4%      5.6s  slowest 166.9ms
+  add sphere        480 / 33      →  93.6%     34.6s  slowest 158.1ms
+  move             1029 / 74      →  93.3%     13.0s  slowest 66.5ms
+  rotate           1081 / 57      →  95.0%     13.7s  slowest 74.8ms
+  ~extreme input      29 / 146     →  16.6%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 0.0063643864952954024, d: 64.9999991, h: 80.0 }, axis: [0.2242916001525152, 0.29135453498413677, 0.29372086092651284], angle: 8.489715978475314, at: [5.0, -0.43125672940514986, 0.43125782940514984] }
+  slowest add cylinder: Add { shape: Cylinder { r: 32050.404777123258, h: 20.0 }, axis: [0.8131838725537051, 0.6983830710777033, 0.5551147807688573], angle: -1.9922874896888842, at: [-121.24877773326008, 935.5519120731668, 11.5] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-22271.421809263058, -7.4999989], [6464019.715329592, -7.4999989], [6464019.715329592, 2162089.5464473846], [-22271.421809263058, 2162089.5464473846]], bulges: [] }, holes: [Circle { c: [1058777.1014138793, 1081041.0232242423], r: 1081048.5221231424 }, Circle { c: [3220874.1467601643, 1081041.0232242423], r: 1081048.5221231424 }, Circle { c: [5382971.192106449, 1081041.0232242423], r: 1081048.5221231424 }], dist: 23.0, expect: Some(true) }, axis: [1.0, 1.0, 0.0], angle: -1.5707963267948966, at: [-757.2571313276409, -808.6435091982404, -15.5] }
+  slowest add sphere: Add { shape: Sphere { r: 484.052235661178 }, axis: [0.0, 3.0, 4.0], angle: 4.71238898038469, at: [17.5, -572.3326506000018, -5.0] }
+  slowest move: Move { target: 0, by: [508.6873583718601, 14.0, 17.4999991] }
+  slowest rotate: Rotate { target: 0, pivot: [-418.635113141924, -10.0, -7.0], axis: [0.870967915614377, -0.10630193771759844, -0.9854217380834825], angle: -2.6471250063092486 }
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+stateful_random_chains --- FAILED
+
+failures:
+
+failures:
+    stateful_random_chains
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 122.35s
+
+[1m[91merror[0m: test failed, to rerun pass `--test stateful`

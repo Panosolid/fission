@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2011 cases over 1 seed(s) ["0x5216f1407a9b"] in 290.5s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1129 / 96      →  92.2%   292.9ms  slowest 442.0µs
+  add cylinder     1191 / 86      →  93.3%     28.8s  slowest 63.9ms
+  add extrude       690 / 607     →  53.2%     13.3s  slowest 180.4ms
+  add sphere       1144 / 95      →  92.3%     80.7s  slowest 157.0ms
+  move             2311 / 198     →  92.1%     30.2s  slowest 95.5ms
+  rotate           2370 / 155     →  93.9%     31.8s  slowest 90.5ms
+  ~extreme input      69 / 303     →  18.5%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 37.0, d: 37.0000011, h: 18.5 }, axis: [0.0, 0.0, 1.0], angle: -8.924309318625394, at: [-8.0, 438.756115219434, 14.0] }
+  slowest add cylinder: Add { shape: Cylinder { r: 6847599.143951842, h: 91.0 }, axis: [0.834132155838434, 0.18278378513576057, 0.6432236464184268], angle: 3.9269908169872414, at: [-2.0, -10.0, 0.5] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[559.9464614009297, 374.42957833956024], [2444.9999076721238, 374.42957833956024], [2444.9999076721238, 1069.1140604299583], [559.9464614009297, 1069.1140604299583]], bulges: [] }, holes: [Circle { c: [907.2887024461287, 721.7718193847593], r: 247.84224104519896 }, Circle { c: [1502.4731845365268, 721.7718193847593], r: 247.84224104519896 }, Circle { c: [2097.6576666269248, 721.7718193847593], r: 247.84224104519896 }], dist: 0.03271262172325641, expect: Some(true) }, axis: [-1.1000000000000001e-9, 0.0, 1.0], angle: 8.849625579670084, at: [-9.5, 17.0000011, -0.04461164715690182] }
+  slowest add sphere: Add { shape: Sphere { r: 133113.15293140753 }, axis: [0.9842663312542994, 0.2607779307706836, 0.07954238415374426], angle: 5.165931592983665, at: [-15.0, -16.5, -5.0] }
+  slowest move: Move { target: 2, by: [-1006.1201413353172, -12.0, -16.0] }
+  slowest rotate: Rotate { target: 1, pivot: [-99999999.0, -61.4999991, 12066619.533026373], axis: [0.7554948069848658, -0.739651823670365, 0.7874177266989012], angle: 4.71238898038469 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 290.55s
+

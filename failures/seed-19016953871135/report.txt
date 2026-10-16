@@ -1,0 +1,16 @@
+Stateful kernel test: 2011 cases over 1 seed(s) ["0x114bbac7bb1f"] in 279.5s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1207 / 85      →  93.4%   309.2ms  slowest 415.0µs
+  add cylinder     1119 / 109     →  91.1%     27.1s  slowest 60.4ms
+  add extrude       668 / 626     →  51.6%     13.4s  slowest 179.0ms
+  add sphere       1080 / 101     →  91.4%     79.3s  slowest 189.8ms
+  move             2340 / 180     →  92.9%     29.9s  slowest 88.5ms
+  rotate           2319 / 138     →  94.4%     31.3s  slowest 92.1ms
+  ~extreme input      64 / 297     →  17.7%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 29.5, d: 80.5000011, h: 3.0 }, axis: [-0.24492771412725733, 0.7657839716446535, 0.8702943022165261], angle: -0.05726361577960293, at: [56.21345062004711, 12.5, -88.0000009] }
+  slowest add cylinder: Add { shape: Cylinder { r: 2501115.872796587, h: 80.82103300611807 }, axis: [-1.0, 0.0, 0.0], angle: 3.9269908169872414, at: [-15.0, 1.0, -265.4889714292226] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-724.8493614572559, 1361697.6859164825], [2829333.497738278, 1361697.6859164825], [2829333.497738278, -661.0921136521306], [-724.8493614572559, -661.0921136521306]], bulges: [] }, holes: [Circle { c: [680454.53965361, 680518.2969014151], r: 52670.39551973318 }, Circle { c: [1414304.3241884105, 680518.2969014151], r: 52670.39551973318 }, Circle { c: [2148154.1087232106, 680518.2969014151], r: 52670.39551973318 }], dist: 17.4999989, expect: Some(true) }, axis: [1.0, 0.0, 0.0], angle: 4.046303526116284, at: [122.78590676604453, -19.0, 217.5621333736432] }
+  slowest add sphere: Add { shape: Sphere { r: 9999999.99999 }, axis: [-9.000000000000001e-10, 0.0, 1.0], angle: 3.141592653589793, at: [-14.0, -12.0, -13.0] }
+  slowest move: Move { target: 0, by: [11.0, 1e-6, -10.5] }
+  slowest rotate: Rotate { target: 0, pivot: [-1416446.516302455, -38.05801422981542, 15.0], axis: [1.0, 1.0, 1.0], angle: -1.5707963267948966 }

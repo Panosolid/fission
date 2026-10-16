@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2011 cases over 1 seed(s) ["0x42b2eb23fcf3"] in 288.5s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1200 / 79      →  93.8%   296.8ms  slowest 396.5µs
+  add cylinder     1133 / 114     →  90.9%     26.7s  slowest 59.3ms
+  add extrude       660 / 619     →  51.6%     13.2s  slowest 171.8ms
+  add sphere       1150 / 115     →  90.9%     86.3s  slowest 158.8ms
+  move             2247 / 185     →  92.4%     28.7s  slowest 87.7ms
+  rotate           2451 / 137     →  94.7%     29.8s  slowest 85.8ms
+  ~extreme input      82 / 339     →  19.5%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 58.0, d: 353.5986696512027, h: 91.0000011 }, axis: [9.000000000000001e-10, 0.0, 1.0], angle: 0.7853981633974483, at: [8.0, -306.58891854548625, 69.47530606802046] }
+  slowest add cylinder: Add { shape: Cylinder { r: 5075496.017295473, h: 0.19979897174575367 }, axis: [0.0, 3.0, 4.0], angle: 0.0, at: [-285.0896245279766, 198526.21259010935, -5075983.343236116] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[2.5, 12.5], [126675.85698628129, 12.5], [126675.85698628129, 51718.75314955461], [2.5, 51718.75314955461]], bulges: [] }, holes: [Circle { c: [25855.626574777307, 25865.626574777307], r: 11630.42534358603 }, Circle { c: [63339.178493140644, 25865.626574777307], r: 11630.42534358603 }, Circle { c: [100822.73041150399, 25865.626574777307], r: 11630.42534358603 }], dist: 20.0, expect: Some(true) }, axis: [0.0, 1.0, 0.0], angle: 6.283185307179586, at: [1.5, -9.0, 337.0502448961196] }
+  slowest add sphere: Add { shape: Sphere { r: 9999999.99999 }, axis: [0.0, 0.0, -1.0], angle: -1.5707963267948966, at: [-205.62270452403737, 892.9281494340074, 45.9999978] }
+  slowest move: Move { target: 0, by: [-2.0, 3.5, -73.1176078390994] }
+  slowest rotate: Rotate { target: 0, pivot: [51697.253148654614, -9.5, -1.5], axis: [1.0, 1.0, 0.0], angle: 4.71238898038469 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 288.53s
+

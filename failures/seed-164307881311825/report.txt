@@ -1,0 +1,16 @@
+Stateful kernel test: 2011 cases over 1 seed(s) ["0x956fe8e63e51"] in 288.9s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1159 / 101     →  92.0%   300.1ms  slowest 408.0µs
+  add cylinder     1165 / 108     →  91.5%     27.5s  slowest 60.1ms
+  add extrude       619 / 602     →  50.7%     12.7s  slowest 175.8ms
+  add sphere       1150 / 120     →  90.6%     85.4s  slowest 159.7ms
+  move             2207 / 186     →  92.2%     29.7s  slowest 87.2ms
+  rotate           2353 / 153     →  93.9%     30.4s  slowest 84.2ms
+  ~extreme input      62 / 349     →  15.1%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 632333.243914851, d: 41.0, h: 179.0000011 }, axis: [-1.0, 0.0, 0.0], angle: 6.036177956261081, at: [7.5, -15.0, -2.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 2179.4856176101043, h: 14.5 }, axis: [9.000000000000001e-10, 0.0, 1.0], angle: -0.9406374824856641, at: [-999.341509363685, 7.0, -6.5] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[748.724634843246, 4.5], [5064.941236768576, 4.5], [5064.941236768576, 1443.2396006417766], [748.724634843246, 1443.2396006417766]], bulges: [] }, holes: [Circle { c: [1468.0944351641342, 723.8698003208883], r: 719.3687003208884 }, Circle { c: [2906.832935805911, 723.8698003208883], r: 719.3687003208884 }, Circle { c: [4345.571436447688, 723.8698003208883], r: 719.3687003208884 }], dist: 57.0, expect: Some(true) }, axis: [0.670309374495169, 0.4641405446982448, 0.49409822903898], angle: -4.71238898038469, at: [17.5, 12.0, 2084.4403919809934] }
+  slowest add sphere: Add { shape: Sphere { r: 543.0973472829859 }, axis: [0.6000921118650685, 0.3248749024570439, -0.7238546434403724], angle: -5.972873947751785, at: [-13.0, 268.6742740099787, -1765.1199758934458] }
+  slowest move: Move { target: 0, by: [8.0, -802.9861647566865, 6.0] }
+  slowest rotate: Rotate { target: 1, pivot: [-19.5, -11274.904480305138, -59.0], axis: [0.0, 0.0, 1.0], angle: -6.448765800673426 }

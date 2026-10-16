@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2011 cases over 1 seed(s) ["0xb46af97ecc86"] in 294.7s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1215 / 96      →  92.7%   311.1ms  slowest 395.8µs
+  add cylinder     1087 / 118     →  90.2%     26.0s  slowest 61.5ms
+  add extrude       672 / 644     →  51.1%     13.5s  slowest 184.9ms
+  add sphere       1206 / 113     →  91.4%     87.6s  slowest 176.5ms
+  move             2308 / 197     →  92.1%     31.4s  slowest 89.1ms
+  rotate           2337 / 130     →  94.7%     31.0s  slowest 87.8ms
+  ~extreme input      64 / 326     →  16.4%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 81.0, d: 0.001, h: 2.0 }, axis: [0.7721547198879867, 0.9751404964039543, -0.12259238885781318], angle: 4.71238898038469, at: [-3.0, -50000000.0, 10.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 32319.003220948565, h: 1.0646579130233202 }, axis: [0.0, 0.0, 1.0], angle: -4.71238898038469, at: [130.0762215321853, 7.0, -199.0762215321853] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-2.0, 2478.026197388064], [7488.578592164191, 2478.026197388064], [7488.578592164191, -19.5], [-2.0, -19.5]], bulges: [] }, holes: [Circle { c: [1246.763098694032, 1229.263098694032], r: 1247.763098694032 }, Circle { c: [3743.2892960820955, 1229.263098694032], r: 1247.763098694032 }, Circle { c: [6239.81549347016, 1229.263098694032], r: 1247.763098694032 }], dist: 2172.0648427709816, expect: Some(true) }, axis: [0.010023675477156078, 0.780598018894512, -0.06150210719709844], angle: 0.0, at: [11568.314607418037, -4.5, 363.0261299663334] }
+  slowest add sphere: Add { shape: Sphere { r: 139.0000009 }, axis: [1.0, 0.0, 0.0], angle: -1.5707963256948965, at: [8.0, -23.904969234062193, 157.31674399551562] }
+  slowest move: Move { target: 2, by: [4077.736015253846, 505.12717763167126, 19058.893199582228] }
+  slowest rotate: Rotate { target: 0, pivot: [-104.0, 9.5, -201300.85130652087], axis: [1.1000000000000001e-9, 0.0, 1.0], angle: -4.71238898038469 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 294.67s
+

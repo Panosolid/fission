@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2011 cases over 1 seed(s) ["0x9762d94333b3"] in 297.2s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1168 / 96      →  92.4%   295.3ms  slowest 341.2µs
+  add cylinder     1160 / 100     →  92.1%     29.2s  slowest 61.2ms
+  add extrude       660 / 685     →  49.1%     13.1s  slowest 158.3ms
+  add sphere       1139 / 112     →  91.0%     86.0s  slowest 158.5ms
+  move             2340 / 207     →  91.9%     31.6s  slowest 72.4ms
+  rotate           2477 / 135     →  94.8%     32.4s  slowest 79.8ms
+  ~extreme input      84 / 344     →  19.6%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 122130.55322031019, d: 24.5, h: 26.5 }, axis: [0.20223585318320533, -0.38002202127250395, 0.9061421782715621], angle: 1.5707963267948966, at: [-8.0000009, -416.3184992386558, 5.0] }
+  slowest add cylinder: Add { shape: Cylinder { r: 67243.03486954013, h: 57.5 }, axis: [0.10516030775143746, 0.9803285995704129, 0.9197046356930105], angle: -3.141592653589793, at: [97.5, 936.0842534123616, 7.0] }
+  slowest add extrude: Add { shape: Extrude { outer: Circle { c: [617.6809241426084, 276851.6599392562], r: 1310146.6395217567 }, holes: [Circle { c: [1309887.8385021212, 276851.6599392562], r: 868.4819437783433 }], dist: 68.0, expect: Some(true) }, axis: [0.9228466609590851, -0.5404928494549422, 0.12472012669566002], angle: -4.71238898038469, at: [6.0, -205.65945775301142, 10.5] }
+  slowest add sphere: Add { shape: Sphere { r: 153.0 }, axis: [0.5934772326082368, -0.30553722014286483, -0.24920213891363646], angle: 6.283185307179586, at: [2.0, -11.0, -3.0] }
+  slowest move: Move { target: 2, by: [3275134.7715491434, 13.5, 279.1611133035021] }
+  slowest rotate: Rotate { target: 0, pivot: [-18.5000011, 50000000.0, 101649.80226112113], axis: [-0.9551188980371185, -0.24038126346778407, 0.03477967598768256], angle: 3.141592653589793 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 297.17s
+
