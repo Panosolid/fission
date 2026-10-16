@@ -6,6 +6,8 @@
 // turn), or circles.
 
 export type ShapeKind = "box" | "cylinder" | "sphere" | "l-bracket" | "plate" | "slot" | "star";
+/** The shapes made by extruding a ready-made profile. */
+export type ProfileKind = Exclude<ShapeKind, "box" | "cylinder" | "sphere">;
 
 import type { Loop, Outline } from "@fission/core";
 
@@ -24,7 +26,7 @@ function polygon(cx: number, cy: number, radii: number[], sides: number): number
   return out;
 }
 
-export function outline(kind: Exclude<ShapeKind, "box" | "cylinder" | "sphere">, w: number, d: number): Outline {
+export function outline(kind: ProfileKind, w: number, d: number): Outline {
   switch (kind) {
     case "l-bracket":
       // Arms 0.3 of the width and depth thick.

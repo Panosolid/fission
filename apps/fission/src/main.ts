@@ -2,10 +2,11 @@
 // between workspaces. Each workspace fills the side panel; the viewport is
 // shared, so switching keeps the camera and what is on screen.
 import "@fission/ui/theme.css";
-import { emptyProject, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
+import { showAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
@@ -28,19 +29,27 @@ const workspaces: WorkspacePlugin[] = [
   imageWorkspace,
 ];
 
+const kernel = new KernelClient();
+// The one conversion layer: every workspace says what it can hand over.
+const representations = new RepresentationRegistry();
+for (const w of workspaces) w.registerRepresentations?.(representations, kernel);
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const panel = $("panel");
 const ctx = {
   project: emptyProject(),
-  kernel: new KernelClient(),
+  kernel,
   selection: selectionNotBuilt,
   history: historyNotBuilt,
+  graph: new DependencyGraph(),
   panel,
   viewport: new Viewer($("viewport")),
+  representations,
 };
 
 type Page = WorkspaceId | "community";
 let hide: () => void = () => {};
+let current: Page = "design";
 const markTab = workspaceSwitcher(
   $("workspaces"),
   workspaces.map((w) => ({ id: w.id, title: w.title, summary: w.summary, placeholder: w.status === "placeholder" })),
@@ -56,10 +65,19 @@ function show(page: Page) {
   markTab(page);
   $("community").setAttribute("aria-pressed", String(page === "community"));
   document.body.dataset.activeWorkspace = page; // read by the e2e test
+  current = page;
+  if (!$("assistant").hidden) showAssistant($("assistant"), page, workspace?.title ?? "Community");
   if (location.hash !== `#${page}`) history.replaceState(null, "", `#${page}`);
 }
 
 $("community").addEventListener("click", () => show("community"));
+// One assistant panel for every workspace, beside the viewport.
+$("assistant-toggle").addEventListener("click", () => {
+  const panel = $("assistant");
+  panel.hidden = !panel.hidden;
+  $("assistant-toggle").setAttribute("aria-pressed", String(!panel.hidden));
+  if (!panel.hidden) showAssistant(panel, current, workspaces.find((w) => w.id === current)?.title ?? "Community");
+});
 const pages: string[] = [...workspaces.map((w) => w.id), "community"];
 const fromHash = (): Page => {
   const id = location.hash.slice(1);

@@ -7,6 +7,22 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "journeys": "node --experimental-strip-types --no-warnings --test journeys/*.journey.ts"
+  },
+  "dependencies": {
+    "@fission/core": "*",
+    "@fission/ai": "*"
+  },
+  "devDependencies": {
+    "@fission/design": "*",
+    "@fission/render": "*",
+    "@fission/simulate": "*",
+    "@fission/manufacture": "*",
+    "@fission/laser": "*",
+    "@fission/slice": "*",
+    "@fission/circuit": "*",
+    "@fission/vector": "*",
+    "@fission/image": "*"
   }
 }

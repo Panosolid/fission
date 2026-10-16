@@ -28,6 +28,42 @@
 //!   steps 46–47); points on it are not reported.
 //! - A shell wholly inside another (a body inside a body, not touching)
 //!   meets nothing, so it passes; voids come with booleans.
+//!
+//! Mutation testing (`cargo mutants`, lib tests) leaves these survivors,
+//! all equivalent or ties at exactly a threshold:
+//! - `check`, the sphere face box, `- pad` → `/ pad`: by precedence that is
+//!   centre − r/LINEAR, a far bigger box, so it only stops pruning; so does
+//!   `&&` → `||` in `overlapping`'s box test.
+//! - `edges_meet`, `along_each_other`'s `&&` → `||`: one edge within LINEAR
+//!   of the other's whole line or circle but not the reverse happens only
+//!   at slants inside tolerance, and there the four ends (always candidates)
+//!   find what the samples would. Checked: 1200 pairs of star prisms (with
+//!   and without arcs), cubes and half cylinders turned by 1e-6, 1e-3 and
+//!   1 rad and moved by as much gave identical reports.
+//! - `> LINEAR` → `>= LINEAR` from a known vertex in `edge_meets_face`: a
+//!   candidate exactly LINEAR from a shared vertex. (The same tie in
+//!   `edges_meet` is killed by
+//!   `validate::tests::vertex_exactly_linear_off_its_edges_is_on`.)
+//! - `edge_meets_face`, the `==` in the `known` dedup → `!=`: drops the
+//!   second shared vertex when both ends are f's vertices. That vertex is on
+//!   f's boundary, so `classify` never calls it inside; only dividing out
+//!   its root could matter, at an edge tangent there. Checked: 1200 edges
+//!   tangent to balls of radius 100 mm to 1 km, 10 mm to 10 m long, in 100
+//!   turns, arriving at the vertex with it left out of `known` altogether,
+//!   report nothing (rounding splits the root only where the edge starts,
+//!   `a_tangent_edge_at_a_shared_vertex_is_not_a_meeting`).
+//! - `faces_meet`, `size(i) <= size(j)` → `>`: only the order of two
+//!   `classify` calls that must both say inside.
+//! - `classify`, `d < best` → `<=`: a tie between equally near edges; the
+//!   path from either nearest point crosses no edge, so either decides the
+//!   same. `* ±1` → `/ ±1` (normal, edge direction): exact. `> 0.0` →
+//!   `>= 0.0`: the path is perpendicular to the edge at an inner nearest
+//!   point, so the product is 0 only for a path of length 0, already the
+//!   boundary.
+//! - `corner_contains`, `a > 0.0` → `>=`, `a < angle(..)` → `<=`: a path
+//!   leaving exactly along one of the corner's edges.
+//! - `along_surface`, `+ PI` → `- PI` in the cylinder's turn: d − π and
+//!   d + π differ by 2π, the same after `rem_euclid(TAU)`.
 
 use crate::geom::{Curve, Surface};
 use crate::intersect::{closed_meetings, curve_curve, curve_surface};
@@ -654,6 +690,28 @@ mod tests {
     }
 
     #[test]
+    fn classify_at_a_sharp_corner_by_hand() {
+        // The triangle (0,0) (4,0) (0,1), extruded 1; its top is face 1.
+        // At (4, 0) the edges meet at atan(¼) ≈ 14°. q = (4.1, 0.3) is
+        // nearest that corner: past the end of the edge along y = 0
+        // (x > 4), and before the start of the edge to (0, 1), since
+        // (q − (4,0))·(−4, 1) = −0.4 + 0.3 < 0. It is outside (x + 4y =
+        // 5.3 > 4), although it lies on the face's side of the edge
+        // arriving at the corner (y > 0): only the corner between both
+        // edges decides. Mirrored below y = 0, (4.1, −0.3) is outside too,
+        // and (3.9, 0.02) is inside (x + 4y = 3.98 < 4).
+        let tri = [(0.0, 0.0), (4.0, 0.0), (0.0, 1.0)];
+        let b = extrude(&Profile::polygon(tri.iter().map(|&(x, y)| DVec2::new(x, y)).collect(), vec![]), 1.0).unwrap();
+        let top = (0..b.faces.len())
+            .find(|&f| matches!(b.faces[f].surface, Surface::Plane { normal, .. } if normal.z * if b.faces[f].sense { 1.0 } else { -1.0 } > 0.5))
+            .unwrap();
+        let at = |x: f64, y: f64| classify(&b, top, DVec3::new(x, y, 1.0));
+        assert_eq!(at(4.1, 0.3), Where::Outside);
+        assert_eq!(at(4.1, -0.3), Where::Outside);
+        assert_eq!(at(3.9, 0.02), Where::Inside);
+    }
+
+    #[test]
     fn classify_on_a_cylinder_by_hand() {
         // The half cylinder's curved face (face 3): radius 1, angles 0 to π
         // (y ≥ 0), heights 0 to 2. At angle π/2, height 1: inside. At angle
@@ -729,6 +787,202 @@ mod tests {
             b.add_line(0, top);
             let b = b.transformed(&turn);
             assert_eq!(edge_meets_face(&b, 1, 0, &[0]), None, "turn {k}");
+        }
+    }
+
+    #[test]
+    fn a_doubled_edge_meets_its_twin_between_their_vertices() {
+        // A second edge from cube vertex 0 (0, 0, 0) to vertex 1 (1, 0, 0)
+        // lies along the cube's edge 0–1: they share both vertices and
+        // every point between, so they meet away from the shared vertices.
+        // The first sample more than LINEAR from both is a quarter of the
+        // way along: (¼, 0, 0).
+        let mut b = hand_cube();
+        let twin = (0..b.edges.len()).find(|&e| [b.edges[e].start, b.edges[e].end] == [0, 1] || [b.edges[e].start, b.edges[e].end] == [1, 0]).unwrap();
+        let e = b.add_line(0, 1);
+        let p = edges_meet(&b, twin, e).expect("they overlap");
+        assert!(p.distance(DVec3::new(0.25, 0.0, 0.0)) <= LINEAR, "{p}");
+    }
+
+    #[test]
+    fn a_diagonal_across_a_face_meets_it_between_its_vertices() {
+        // An edge from cube vertex 0 (0, 0, 0) to vertex 3 (1, 1, 0) runs
+        // across the bottom (face 0, vertices 0, 1, 2, 3), in its plane. Its
+        // ends are the face's own vertices; a quarter of the way along,
+        // (¼, ¼, 0), is ¼ from the bottom's edges, inside it: the first
+        // meeting found.
+        let mut b = hand_cube();
+        let e = b.add_line(0, 3);
+        let p = edge_meets_face(&b, e, 0, &[0, 1, 2, 3]).expect("it crosses the face");
+        assert!(p.distance(DVec3::new(0.25, 0.25, 0.0)) <= LINEAR, "{p}");
+    }
+
+    #[test]
+    fn along_surface_by_hand() {
+        // Plane through (5, −3, 2) with normal n = (0, 0.6, 0.8); q is p
+        // moved 2 along x (in the plane) and 0.5 along n (off it): the part
+        // in the plane is (2, 0, 0).
+        let n = DVec3::new(0.0, 0.6, 0.8);
+        let plane = Surface::Plane { origin: DVec3::new(5.0, -3.0, 2.0), normal: n, x_dir: DVec3::X };
+        let p = DVec3::new(5.0, -3.0, 2.0);
+        let got = along_surface(&plane, p, p + DVec3::new(2.0, 0.0, 0.0) + n * 0.5);
+        assert!(got.distance(DVec3::new(2.0, 0.0, 0.0)) <= LINEAR, "{got}");
+        // Ball of radius 2 round c = (4, −2, 7): p = c + 2x, q = c + 2y. The
+        // tangent plane at p is x = 6, so the chord q − p = (−2, 2, 0) loses
+        // its x part: the great circle leaves p along (0, 2, 0).
+        let c = DVec3::new(4.0, -2.0, 7.0);
+        let ball = Surface::Sphere { center: c, axis: DVec3::Z, x_dir: DVec3::X, radius: 2.0 };
+        let got = along_surface(&ball, c + DVec3::X * 2.0, c + DVec3::Y * 2.0);
+        assert!(got.distance(DVec3::new(0.0, 2.0, 0.0)) <= LINEAR, "{got}");
+        // Rod of radius 2.5 along z through o = (1, 2, 3). p at angle π/3,
+        // height 1; q at angle π/3 + 0.4, height 1.7. Unrolled, the path
+        // runs 2.5 · 0.4 = 1 round, along the circle's direction at p,
+        // (−sin π/3, cos π/3, 0) = (−√3/2, ½, 0), and 0.7 up: (−√3/2, ½, 0.7).
+        let o = DVec3::new(1.0, 2.0, 3.0);
+        let rod = Surface::Cylinder { origin: o, axis: DVec3::Z, x_dir: DVec3::X, radius: 2.5 };
+        let at = |a: f64, h: f64| o + DVec3::new(2.5 * a.cos(), 2.5 * a.sin(), h);
+        let a = PI / 3.0;
+        let got = along_surface(&rod, at(a, 1.0), at(a + 0.4, 1.7));
+        assert!(got.distance(DVec3::new(-(3f64.sqrt()) / 2.0, 0.5, 0.7)) <= LINEAR, "{got}");
+        // Across angle 0: from angle 0.2 to 2π − 0.2 the short way is −0.4,
+        // 1 back round: −(−sin 0.2, cos 0.2, 0), at the same height.
+        let got = along_surface(&rod, at(0.2, 1.0), at(TAU - 0.2, 1.0));
+        assert!(got.distance(DVec3::new(0.2f64.sin(), -(0.2f64.cos()), 0.0)) <= LINEAR, "{got}");
+    }
+
+    /// A rigid motion off the origin and turned about a skew axis: the
+    /// classify cases above sit at the origin, where p − c and p + c agree,
+    /// on unit or axis-aligned shapes. Rigid, so LINEAR offsets survive.
+    fn rigid() -> Transform {
+        Transform::rotation(DVec3::new(0.3, -1.0, 0.6), 1.1).then(Transform::translation(DVec3::new(12.5, -7.0, 3.25)))
+    }
+
+    #[test]
+    fn classify_by_hand_anywhere() {
+        let tf = rigid();
+        // The half cylinder of radius 2.5 and height 3 (curved face 3:
+        // angles 0 to π). At angle θ, height h the point is
+        // (2.5 cos θ, 2.5 sin θ, h). Round from the line at angle 0 by
+        // 0.9·LINEAR (θ = 0.9·LINEAR/2.5): boundary; 1.1·LINEAR in: inside;
+        // 1.1·LINEAR out: outside. 0.1 rad past either line: outside;
+        // 0.1 rad in: inside. Below the bottom and round past the line
+        // (θ = −0.1, h = −0.1, nearest the corner at (2.5, 0, 0)): outside.
+        let r = 2.5;
+        let b = hand_half_cylinder(r, 3.0).transformed(&tf);
+        let at = |angle: f64, h: f64| classify(&b, 3, tf.point(DVec3::new(r * angle.cos(), r * angle.sin(), h)));
+        assert_eq!(at(FRAC_PI_2, 1.5), Where::Inside);
+        assert_eq!(at(-FRAC_PI_2, 1.5), Where::Outside);
+        assert_eq!(at(FRAC_PI_2, 3.5), Where::Outside);
+        assert_eq!(at(FRAC_PI_2, -0.5), Where::Outside);
+        assert_eq!(at(0.9 * LINEAR / r, 1.5), Where::Boundary);
+        assert_eq!(at(1.1 * LINEAR / r, 1.5), Where::Inside);
+        assert_eq!(at(-1.1 * LINEAR / r, 1.5), Where::Outside);
+        assert_eq!(at(PI - 1.1 * LINEAR / r, 1.5), Where::Inside);
+        assert_eq!(at(PI + 1.1 * LINEAR / r, 1.5), Where::Outside);
+        for (angle, want) in [(0.1, Where::Inside), (-0.1, Where::Outside), (PI - 0.1, Where::Inside), (PI + 0.1, Where::Outside)] {
+            for h in [0.3, 1.5, 2.7] {
+                assert_eq!(at(angle, h), want, "angle {angle}, height {h}");
+            }
+        }
+        assert_eq!(at(-0.1, -0.1), Where::Outside);
+        assert_eq!(at(0.1, 0.05), Where::Inside);
+        assert_eq!(at(FRAC_PI_2, 3.0 - 0.9 * LINEAR), Where::Boundary);
+        assert_eq!(at(FRAC_PI_2, 3.0 - 1.1 * LINEAR), Where::Inside);
+        // A ball of radius 2.5: the upper half (face 0) holds the north
+        // pole, not the south; 1.1·LINEAR above the equator (along the
+        // sphere) is inside face 0 and outside face 1, 0.9·LINEAR is the
+        // boundary.
+        let ball = hand_sphere(r).transformed(&tf);
+        let above = |h: f64| tf.point(DVec3::new((r * r - h * h).sqrt(), 0.0, h));
+        assert_eq!(classify(&ball, 0, tf.point(DVec3::Z * r)), Where::Inside);
+        assert_eq!(classify(&ball, 0, tf.point(-DVec3::Z * r)), Where::Outside);
+        assert_eq!(classify(&ball, 1, tf.point(-DVec3::Z * r)), Where::Inside);
+        assert_eq!(classify(&ball, 0, above(1.1 * LINEAR)), Where::Inside);
+        assert_eq!(classify(&ball, 0, above(0.9 * LINEAR)), Where::Boundary);
+        assert_eq!(classify(&ball, 1, above(1.1 * LINEAR)), Where::Outside);
+        // The sphere octant of radius 3, moved: its middle is inside, its
+        // mirror across the arc x = 0 outside, and from the corner (3, 0, 0)
+        // 1e-3 rad up and round into the octant inside, round to y < 0
+        // outside.
+        let oct = hand_sphere_octant(3.0).transformed(&tf);
+        let face = (0..oct.faces.len()).find(|&f| matches!(oct.faces[f].surface, Surface::Sphere { .. })).unwrap();
+        let m = 3.0 / 3f64.sqrt();
+        assert_eq!(classify(&oct, face, tf.point(DVec3::new(m, m, m))), Where::Inside);
+        assert_eq!(classify(&oct, face, tf.point(DVec3::new(-m, m, m))), Where::Outside);
+        let near = |lon: f64, lat: f64| tf.point(DVec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()) * 3.0);
+        assert_eq!(classify(&oct, face, near(1e-3, 1e-3)), Where::Inside);
+        assert_eq!(classify(&oct, face, near(-1e-3, 1e-3)), Where::Outside);
+        // The unit cube's top (face 1), moved: the plane is off the origin.
+        let cube = hand_cube().transformed(&tf);
+        let top = |x: f64, y: f64| classify(&cube, 1, tf.point(DVec3::new(x, y, 1.0)));
+        assert_eq!(top(0.5, 0.5), Where::Inside);
+        assert_eq!(top(2.0, 0.5), Where::Outside);
+        assert_eq!(top(2.0, 2.0), Where::Outside);
+        assert_eq!(top(1.0 - 0.9 * LINEAR, 0.5), Where::Boundary);
+        assert_eq!(top(1.0 - 1.1 * LINEAR, 0.5), Where::Inside);
+        assert_eq!(top(1.0 + 1.1 * LINEAR, 0.5), Where::Outside);
+    }
+
+    #[test]
+    fn unmeasurable_cylinder_edges_give_unknown() {
+        // On a cylinder, classify can only measure along lines along it and
+        // circles round it. Swap one edge of the half cylinder's curved face
+        // for each other kind (the body is no longer valid; classify is
+        // asked directly): a slanted line, a circle tilted off the axis, one
+        // off the axis, and one of another radius. Each gives Unknown, where
+        // the point would otherwise be inside.
+        let b = hand_half_cylinder(1.0, 2.0);
+        let q = DVec3::new(0.0, 1.0, 1.0);
+        assert_eq!(classify(&b, 3, q), Where::Inside);
+        let bottom = b.faces[3].loops[0].coedges[0].edge; // the bottom arc
+        let side = b.faces[3].loops[0].coedges[1].edge; // the line at −x
+        let swapped = |edge: EdgeId, curve: Curve| {
+            let mut b2 = b.clone();
+            b2.edges[edge].curve = curve;
+            classify(&b2, 3, q)
+        };
+        let slanted = Curve::Line { origin: DVec3::new(-1.0, 0.0, 0.0), dir: DVec3::new(0.0, 0.6, 0.8) };
+        assert_eq!(swapped(side, slanted), Where::Unknown);
+        let arc = |center: DVec3, axis: DVec3, radius: f64| Curve::Circle { center, axis, x_dir: DVec3::X, radius };
+        assert_eq!(swapped(bottom, arc(DVec3::ZERO, DVec3::new(0.0, 0.6, 0.8), 1.0)), Where::Unknown);
+        assert_eq!(swapped(bottom, arc(DVec3::new(0.1, 0.0, 0.0), DVec3::Z, 1.0)), Where::Unknown);
+        assert_eq!(swapped(bottom, arc(DVec3::ZERO, DVec3::Z, 1.1)), Where::Unknown);
+        // Within tolerance of round the axis is still measurable.
+        assert_eq!(swapped(bottom, arc(DVec3::new(0.5 * LINEAR, 0.0, 0.0), DVec3::Z, 1.0 + 0.5 * LINEAR)), Where::Inside);
+    }
+
+    #[test]
+    fn edges_just_past_a_ball_s_poles_are_seen() {
+        // A ball's face boxes reach past its edges' boxes to the poles (an
+        // upper hemisphere bulges above its equator). A cube's bottom edge
+        // passing 0.5·LINEAR over the north pole of a radius-1 ball centred
+        // at (3, 3, 3), or its top edge 0.5·LINEAR under the south pole,
+        // touches the ball there: reported. Each edge's box comes within
+        // LINEAR of the pole only through its own padding, so the face box
+        // must be padded by LINEAR too.
+        let ball = moved(hand_sphere(1.0), DVec3::splat(3.0));
+        let g = 0.5 * LINEAR;
+        for (lift, label) in [(4.0 + g, "over the north pole"), (2.0 - g - 1.0, "under the south pole")] {
+            let cube = moved(hand_cube(), DVec3::new(2.5, 3.0, lift));
+            let errs = errors(&two_shells(&ball, &cube));
+            assert!(!errs.is_empty(), "{label}");
+            let pole = DVec3::new(3.0, 3.0, if lift > 3.0 { 4.0 } else { 2.0 });
+            assert!(points_of(&errs).iter().all(|p| p.distance(pole) <= 2.0 * LINEAR), "{label}: {errs:?}");
+        }
+    }
+
+    #[test]
+    fn the_cap_counts_only_this_check_s_reports() {
+        // `check` adds at most MAX_REPORTED errors of its own, however many
+        // validate already found.
+        let ngon = |turn: f64| -> Vec<DVec2> { (0..40).map(|i| DVec2::from_angle(TAU * i as f64 / 40.0 + turn) * 10.0).collect() };
+        let a = extrude(&Profile::polygon(ngon(0.0), vec![]), 2.0).unwrap();
+        let b = moved(extrude(&Profile::polygon(ngon(TAU / 80.0), vec![]), 2.0).unwrap(), DVec3::Z);
+        let body = two_shells(&a, &b);
+        for already in [1, 3, MAX_REPORTED + 2] {
+            let mut errs = vec![ValidationError::EdgesMeet { a: 0, b: 1, point: DVec3::ZERO }; already];
+            check(&body, &mut errs);
+            assert_eq!(errs.len(), already + MAX_REPORTED, "{already} found before");
         }
     }
 }

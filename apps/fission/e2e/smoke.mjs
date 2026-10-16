@@ -58,6 +58,8 @@ try {
     assert.equal(await text("area"), "5,200 mm²");
     assert.equal(await text("topology"), "8 V · 12 E · 6 F");
     assert.equal(await text("status"), "valid");
+    assert.equal(await text("intent"), "Box: 40 × 30 × 20 mm");
+    assert.equal(await text("provenance"), "Feature 1 (box) was made in Design.");
   });
 
   await check("the box is actually drawn", async () => {
@@ -78,9 +80,14 @@ try {
   await check("bad input shows an error instead of crashing", async () => {
     await setSize("width", 0);
     await page.waitForFunction(() => document.querySelector("#error").textContent.includes("width must be"));
+    // The old numbers stay on screen, but marked out of date, never shown as current.
+    assert.equal(await page.$eval("#stats", (el) => el.dataset.stale), "true");
+    assert.equal(await page.isVisible("#stale-note"), true);
     await setSize("width", 40);
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");
     assert.equal(await text("volume"), "24,000 mm³");
+    assert.equal(await page.$eval("#stats", (el) => el.dataset.stale), "false");
+    assert.equal(await page.isVisible("#stale-note"), false);
   });
 
   await check("the kernel runs in a Web Worker, not on the main thread", async () => {
@@ -149,6 +156,9 @@ try {
     assert.equal(await text("topology"), "12 V · 18 E · 8 F");
     assert.equal(await text("status"), "valid");
     assert.equal(await text("height-label"), "Extrude by");
+    // The part is feature #1 of the timeline, and knows what it is and where it came from.
+    assert.equal(await text("intent"), "Extrude: L-bracket profile 40 × 30 mm, by 20 mm");
+    assert.equal(await text("provenance"), "Feature 1 (extrude) comes from L-bracket profile in Design.");
     // A new shape is framed: r = √(40² + 30² + 20²)/2 ≈ 26.93.
     const r = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
     assert.ok(Math.abs(r - Math.sqrt(2900) / 2) < 1e-4, `framed radius ${r}`);
@@ -288,17 +298,44 @@ try {
   });
 
   await check("a part too big for single precision is exported with a warning", async () => {
-    // A 999,999.3 mm box (just inside the 1 km limit): the far corners round
+    // A 999,999.3 mm cube (just inside the 1 km limit): the far corners round
     // to 999,999.3125 in single precision (spacing 1/16 there), 0.0125 mm
-    // off, over the 1 µm smallest feature.
+    // off, over the 1 µm smallest feature. A cube, so its faces are big
+    // enough on screen to see the overlay.
     await page.selectOption("#shape", "box");
-    await page.fill("#width", "999999.3");
+    for (const id of ["width", "depth", "height"]) await page.fill(`#${id}`, "999999.3");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
     const f = await downloadStl();
     assert.equal(f.tris.length, 12);
     assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 1\.250e-2 mm/);
-    await page.fill("#width", "40");
+    // The analysis overlay marks the part itself, with a legend.
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.overlays), "design.stl-precision");
+    assert.equal(await page.textContent(".overlay-legend"), "Too big for an accurate STL");
+    // Count amber pixels: red well above blue (the plain part is blue-grey,
+    // the background dark).
+    await page.waitForTimeout(300);
+    const amber = () =>
+      page.evaluate(() => {
+        const src = document.querySelector("#viewport canvas");
+        const c = document.createElement("canvas");
+        [c.width, c.height] = [src.width, src.height];
+        const ctx = c.getContext("2d");
+        ctx.drawImage(src, 0, 0);
+        const d = ctx.getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] > d[i + 2] + 40) n++;
+        return n;
+      });
+    assert.ok((await amber()) > 10000, `the part should be painted amber (${await amber()} px)`);
+    await page.screenshot({ path: "e2e/stl-overlay.png" });
+    for (const [id, v] of [["width", 40], ["depth", 30], ["height", 20]]) await page.fill(`#${id}`, String(v));
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    // Editing the part clears the overlay: it described the part before the edit.
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.overlays), "");
+    assert.equal(await page.isVisible(".overlay-legend"), false);
+    await page.waitForTimeout(300);
+    // Only the red X axis line is left (a few dozen pixels).
+    assert.ok((await amber()) < 1000, `nothing amber once the overlay is cleared (${await amber()} px)`);
     await downloadStl();
     assert.equal(await text("stl-note"), ""); // the warning goes once the part fits again
   });
@@ -363,6 +400,30 @@ try {
     await page.goto(`${url}#laser`);
     assert.equal(await page.textContent(".placeholder h2"), "Laser");
     assert.equal(await page.getAttribute("[data-workspace=laser]", "aria-selected"), "true");
+  });
+
+  await check("the assistant is optional, off, and follows the active workspace", async () => {
+    await page.goto(url + "#design");
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    // Off by default: nothing is sent anywhere.
+    assert.equal(await page.textContent("#assistant-toggle"), "AI off");
+    assert.equal(await page.isVisible("#assistant"), false);
+    await page.click("#assistant-toggle");
+    assert.match(await page.textContent("#assistant"), /Coming soon/);
+    assert.match(await page.textContent("#ai-status-detail"), /Nothing is sent anywhere/);
+    assert.match(await page.textContent("#assistant"), /In Design.*Plain-English commands/s);
+    // The settings list the four providers and say which keep data local.
+    assert.equal(await page.locator("#assistant [data-provider]").count(), 4);
+    assert.match(await page.textContent('[data-provider="ollama"]'), /stays on your machine.*OLLAMA_ORIGINS/s);
+    assert.match(await page.textContent('[data-provider="api-key"]'), /sends your request to the provider.*Consumer chat subscriptions can't be used/s);
+    await page.screenshot({ path: "e2e/assistant.png" });
+    // Switching workspace keeps the panel and changes what it lists.
+    await page.click('[data-workspace="laser"]');
+    assert.match(await page.textContent("#assistant"), /In Laser.*finger-joint boxes/s);
+    assert.doesNotMatch(await page.textContent("#assistant"), /In Design/);
+    await page.click("#assistant-toggle");
+    assert.equal(await page.isVisible("#assistant"), false);
+    await page.click('[data-workspace="design"]');
   });
 
   await check("no errors in the browser console", async () => {

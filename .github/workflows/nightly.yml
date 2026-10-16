@@ -70,6 +70,10 @@ jobs:
         env:
           IN: ${{ runner.temp }}/incoming
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # The code every round of this run tested, so old failures can be
+          # told apart from current ones.
+          COMMIT: ${{ github.sha }}
+          BRANCH: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
@@ -79,20 +83,25 @@ jobs:
           else
             git switch --orphan test-results
           fi
-          [ -f log.csv ] || echo "finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run" >log.csv
+          [ -f log.csv ] || echo "finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run,commit,branch" >log.csv
+          # Logs from before the commit column was added: widen the header
+          # (their old rows just leave the last two columns empty).
+          head -1 log.csv | grep -q ',commit,branch$' || sed -i '1s/$/,commit,branch/' log.csv
+          short=$(echo "$COMMIT" | cut -c1-7)
           found=0 list=""
           for d in "$IN"/*/; do
-            [ -f "$d/log.csv" ] && tail -n +2 "$d/log.csv" | sed "s|\$|,$RUN_URL|" >>log.csv
+            [ -f "$d/log.csv" ] && tail -n +2 "$d/log.csv" | sed "s|\$|,$RUN_URL,$short,$BRANCH|" >>log.csv
             for f in "$d"seed-*; do
               [ -d "$f" ] || continue
               mkdir -p failures && cp -r "$f" failures/
+              echo "tested commit $COMMIT on branch $BRANCH ($RUN_URL)" >"failures/$(basename "$f")/commit.txt"
               found=$((found + 1))
               list="$list- failures/$(basename "$f"): $(grep -h -m1 'step\|line ' "$f/report.txt" "$f/oracle-disagreements.txt" 2>/dev/null | head -c 400)"$'\n'
             done
           done
           awk -F, -v now="$(date -u '+%Y-%m-%d %H:%M UTC')" 'NR > 1 {
               rounds++; cases += $3; fails += ($4 == "FAIL"); bodies += $5; dis += $6; secs += $7
-              if ($4 == "FAIL" || $6 > 0) last = $1 " (seed " $2 ")"
+              if ($4 == "FAIL" || $6 > 0) last = $1 " (seed " $2 ($9 ? ", commit " $9 " on " $10 : "") ")"
             } END {
               print "Fission random testing, all runs so far (updated " now ")"
               print ""
@@ -108,11 +117,13 @@ jobs:
               print "folder in failures/ named after its seed: report.txt says what went wrong,"
               print "the .json file is the shortest chain of operations that shows it, and"
               print "failure-dumps/*/index.html is a 3D view with the problem in red."
+              print "The commit and branch columns of log.csv (and commit.txt in each"
+              print "failures folder) say which code a round tested."
             }' log.csv >summary.txt
           cat summary.txt >>"$GITHUB_STEP_SUMMARY"
           git add -A log.csv summary.txt failures 2>/dev/null || git add -A log.csv summary.txt
           git commit -qm "Random testing run ${{ github.run_id }}: $found round(s) found something" || exit 0
           for i in 1 2 3 4; do git push -q origin test-results && break; sleep $((2 ** i)); done
           if [ "$found" -gt 0 ]; then
-            gh issue create --title "Random testing found $found problem(s)" --body "$(printf 'Run: %s\n\n%s\nDetails are on the test-results branch, in the failures folder.\n' "$RUN_URL" "$list")"
+            gh issue create --title "Random testing found $found problem(s)" --body "$(printf 'Run: %s (commit %s on %s)\n\n%s\nDetails are on the test-results branch, in the failures folder.\n' "$RUN_URL" "$short" "$BRANCH" "$list")"
           fi

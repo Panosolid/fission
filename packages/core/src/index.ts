@@ -1,13 +1,35 @@
 // @fission/core: the shared document model and the bridge to the kernel.
-export { KernelClient, latestOnly, type KernelOps, type KernelRequest, type KernelResponse } from "./kernel/kernel-client.ts";
+export { KernelClient, latestOnly, type KernelCalls, type KernelOps, type KernelRequest, type KernelResponse } from "./kernel/kernel-client.ts";
 export type { BodySpec, BodyView, DisplayMesh, Loop, Outline, StlFile } from "./kernel/kernel-types.ts";
 // DRAFT model interfaces (see each file).
-export type { Material } from "./model/material.ts";
+export type { Material, MaterialLibrary } from "./model/material.ts";
+export { materialLibrary } from "./model/material.ts";
+export type { HumanConfirmation, Job, Machine, MachineKind, MachineLibrary } from "./model/machines.ts";
+export { machineLibrary } from "./model/machines.ts";
+export type { SearchHit } from "./model/search.ts";
+export { searchProject } from "./model/search.ts";
+export type { DesignFeedback, FeedbackKind } from "./model/feedback.ts";
+export { reportFeedback } from "./model/feedback.ts";
+export type { Parameter, ParameterSweep, ProjectParameters } from "./model/parameters.ts";
+export { projectParameters } from "./model/parameters.ts";
 export type { LengthUnit, Project, WorkspaceId } from "./model/project.ts";
-export { emptyProject } from "./model/project.ts";
+export { emptyProject, FORMAT_VERSION, readProject } from "./model/project.ts";
+export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup } from "./model/links.ts";
+export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
 export type { BodyReference, EdgeReference, FaceReference, GeometryReference, Resolution, StableId } from "./model/references.ts";
 export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
 export { historyNotBuilt, selectionNotBuilt } from "./model/session.ts";
 export type { Framing, SharedViewport } from "./model/viewport.ts";
+export type { AnalysisOverlay, OverlayMark, OverlaySeverity, OverlayTarget } from "./model/overlay.ts";
+export { SEVERITY_COLOURS, triangleColours } from "./model/overlay.ts";
+export type { Converter, DataRep, Delivery, ImageRep, MeshRep, OutlineRep, Plane, Producer, Producible, Representation, RepresentationKind, RepresentationOf, SolidRep } from "./model/representation.ts";
+export type { Cost, GraphNode, Staleness } from "./model/graph.ts";
+export { DependencyGraph } from "./model/graph.ts";
+export type { Command, CommandSpec, ParamSpec, Parsed } from "./model/commands.ts";
+export { commandListSchema, commandSchema, parseCommand, parseCommandList } from "./model/commands.ts";
+export type { Feature, Intent, Origin, ParameterValue, Provenance, Timeline } from "./model/feature.ts";
+export { describeProvenance } from "./model/feature.ts";
+export { EXACTNESS, isExact, RepresentationRegistry, XY_PLANE } from "./model/representation.ts";
 export type { ToolbarItem, ViewportOverlay, WorkspaceContext, WorkspacePlugin } from "./model/workspace.ts";
+export { WORKSPACE_API_VERSION } from "./model/workspace.ts";

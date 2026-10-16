@@ -23,6 +23,8 @@ export const laserWorkspace: WorkspacePlugin = {
   title: "Laser",
   summary: "2D jobs for laser and vinyl cutters: cut, engrave and score layers, preview and machine control.",
   status: "placeholder",
+  representations: { produces: [], accepts: [] },
+  commands: [],
   mount(ctx) {
     showPlaceholder(ctx.panel, {
       title: "Laser",

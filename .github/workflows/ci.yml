@@ -41,6 +41,7 @@ jobs:
       - run: npm run build
         working-directory: apps/fission
       - run: npm run typecheck
+      - run: npm run journeys
       - run: npx playwright install --with-deps chromium
         working-directory: apps/fission
       - run: npm run e2e

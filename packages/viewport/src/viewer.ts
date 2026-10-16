@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { DisplayMesh, Framing, SharedViewport } from "@fission/core";
+import { triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport } from "@fission/core";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -11,13 +11,23 @@ export class Viewer implements SharedViewport {
   private camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
   private controls: OrbitControls;
   private body = new THREE.Group();
+  private mesh: DisplayMesh | null = null;
+  private faces: THREE.BufferGeometry | null = null;
+  private overlays = new Map<string, AnalysisOverlay>();
+  private legend = document.createElement("ul");
   readonly element: HTMLElement;
 
-  constructor(private container: HTMLElement) {
+  private container: HTMLElement;
+
+  constructor(container: HTMLElement) {
+    this.container = container;
     this.element = container;
     this.scene.background = new THREE.Color(0x14161a);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(this.renderer.domElement);
+    this.legend.className = "overlay-legend";
+    this.legend.hidden = true;
+    container.appendChild(this.legend);
 
     this.camera.position.set(80, -100, 70);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -49,8 +59,10 @@ export class Viewer implements SharedViewport {
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.positions, 3));
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(mesh.normals, 3));
     geometry.setIndex(mesh.indices);
+    this.mesh = mesh;
+    this.faces = geometry;
     const material = new THREE.MeshStandardMaterial({
-      color: 0x9aa7b8,
+      vertexColors: true,
       metalness: 0.1,
       roughness: 0.6,
       polygonOffset: true, // keep edges drawn on top of faces
@@ -63,6 +75,43 @@ export class Viewer implements SharedViewport {
       new THREE.Mesh(geometry, material),
       new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x0b0c0e })),
     );
+    this.paint();
+  }
+
+  setOverlay(overlay: AnalysisOverlay) {
+    this.overlays.set(overlay.id, overlay);
+    this.paint();
+  }
+
+  clearOverlay(id: string) {
+    if (this.overlays.delete(id)) this.paint();
+  }
+
+  /** Colours the body's faces from the overlays and lists them in the legend. */
+  private paint() {
+    const overlays = [...this.overlays.values()];
+    this.element.dataset.overlays = overlays.map((o) => o.id).join(" "); // read by the e2e test
+    this.legend.hidden = overlays.length === 0;
+    this.legend.replaceChildren(
+      ...overlays.map((o) => {
+        const li = document.createElement("li");
+        li.textContent = o.label;
+        if (o.detail) li.title = o.detail;
+        return li;
+      }),
+    );
+    if (!this.mesh || !this.faces) return;
+    // Vertices belong to one face each (display.rs), so per-vertex colour is per-face colour.
+    // Vertex colours are linear; THREE.Color converts from sRGB.
+    const base = new THREE.Color(0x9aa7b8).toArray();
+    const linear = (c: [number, number, number]) => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace).toArray();
+    const perTriangle = triangleColours(this.mesh.triangle_faces, overlays);
+    const colours = new Float32Array(this.mesh.positions.length).fill(0);
+    for (let i = 0; i < colours.length / 3; i++) colours.set(base, 3 * i);
+    perTriangle.forEach((c, t) => {
+      if (c) for (let k = 0; k < 3; k++) colours.set(linear(c), 3 * this.mesh!.indices[3 * t + k]);
+    });
+    this.faces.setAttribute("color", new THREE.BufferAttribute(colours, 3));
   }
 
   /** Sphere around the current body's bounding box (radius 0 if none). */
