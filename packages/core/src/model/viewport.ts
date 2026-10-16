@@ -14,11 +14,15 @@ export interface Framing {
 
 /**
  * What a click (not a camera drag) in the viewport hit: the kernel index of
- * the body's face under the pointer, or null for empty space, and whether
- * Shift was held. The workspace on show decides what that selects.
+ * the body's edge within a few pixels of the pointer (step 17c), else of the
+ * face under it, or neither for empty space; and whether Shift was held. An
+ * edge wins over the face behind it, so at most one of the two is set. The
+ * workspace on show decides what that selects.
  */
 export interface ViewportPick {
   face: number | null;
+  /** Absent or null when no edge was picked. */
+  edge?: number | null;
   shift: boolean;
 }
 

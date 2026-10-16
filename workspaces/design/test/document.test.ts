@@ -55,7 +55,7 @@ test("step 32 extends the list: a second feature needs no conversion of the firs
 /** Kernel stand-in for unit tests: a one-triangle mesh for whatever is asked. */
 const fakeKernel: KernelCalls = {
   call: (async () =>
-    ({ mesh: { positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], normals: [], indices: [0, 1, 2], triangle_faces: [0], edge_lines: [] } }) as unknown as BodyView) as KernelCalls["call"],
+    ({ mesh: { positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], normals: [], indices: [0, 1, 2], triangle_faces: [0], edge_lines: [], edge_line_edges: [] } }) as unknown as BodyView) as KernelCalls["call"],
 };
 
 test("Design produces exact Solids for its features and Outlines for its profiles", async () => {

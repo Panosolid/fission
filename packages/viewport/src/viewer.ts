@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportPick } from "@fission/core";
-import { faceOfTriangle, isClick } from "./picking.ts";
+import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -55,7 +55,8 @@ export class Viewer implements SharedViewport {
       const start = down;
       down = null;
       if (!start || start.id !== e.pointerId || !isClick(start, { x: e.clientX, y: e.clientY })) return;
-      this.onPick?.({ face: this.faceAt(e.clientX, e.clientY), shift: e.shiftKey });
+      const edge = this.edgeAt(e.clientX, e.clientY);
+      this.onPick?.({ face: edge === null ? this.faceAt(e.clientX, e.clientY) : null, edge, shift: e.shiftKey });
     });
 
     new ResizeObserver(() => this.resize()).observe(container);
@@ -142,6 +143,36 @@ export class Viewer implements SharedViewport {
     // Nearest hit first; for indexed geometry faceIndex is the triangle number.
     const [hit] = this.raycaster.intersectObject(this.faceMesh, false);
     return faceOfTriangle(this.mesh.triangle_faces, hit?.faceIndex);
+  }
+
+  /**
+   * The kernel edge index whose line passes within a few pixels of a point
+   * on screen (client pixels) and is not hidden by a face there, or null.
+   */
+  private edgeAt(clientX: number, clientY: number): number | null {
+    if (!this.mesh || !this.faceMesh) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    const lines = this.mesh.edge_lines;
+    const point = (i: number) => new THREE.Vector3(lines[3 * i], lines[3 * i + 1], lines[3 * i + 2]);
+    // Every segment end on screen; NaN for ends outside the camera's depth range.
+    const screen = new Float64Array((lines.length / 3) * 2);
+    for (let i = 0; i < lines.length / 3; i++) {
+      const v = point(i).project(this.camera);
+      const drawable = v.z >= -1 && v.z <= 1;
+      screen[2 * i] = drawable ? rect.left + ((v.x + 1) / 2) * rect.width : NaN;
+      screen[2 * i + 1] = drawable ? rect.top + ((1 - v.y) / 2) * rect.height : NaN;
+    }
+    for (const { segment, t } of segmentsNear(screen, { x: clientX, y: clientY })) {
+      // The edge's point nearest the pointer, and the first face towards it.
+      const target = point(2 * segment).lerp(point(2 * segment + 1), t);
+      const towards = target.clone().sub(this.camera.position);
+      const distance = towards.length();
+      this.raycaster.set(this.camera.position, towards.normalize());
+      const [hit] = this.raycaster.intersectObject(this.faceMesh, false);
+      if (unhidden(distance, hit ? hit.distance : null)) return edgeOfSegment(this.mesh.edge_line_edges, segment);
+    }
+    return null;
   }
 
   /** Sphere around the current body's bounding box (radius 0 if none). */

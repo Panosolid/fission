@@ -30,7 +30,7 @@ function panel() {
 }
 
 const view = (errors: string[] = []): BodyView => ({
-  mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [] },
+  mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [], edge_line_edges: [] },
   volume: 24000,
   area: 5200,
   vertices: 8,

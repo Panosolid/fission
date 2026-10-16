@@ -71,7 +71,7 @@ try {
     assert.notDeepEqual(centre, background, "centre of the view should show the body");
   });
 
-  await check("clicking faces selects them: click, Shift-click, drag, empty space, Escape", async () => {
+  await check("clicking faces and edges selects them: click, Shift-click, drag, empty space, Escape, hidden edges", async () => {
     // Where a point of the box lands on screen, worked out here from the
     // framing in viewer.ts fit() rather than asked of the viewer: the
     // 40×30×20 box is framed as a sphere at its centre (20, 15, 10) with
@@ -117,6 +117,41 @@ try {
     await page.mouse.click(top.x, top.y);
     await page.keyboard.press("Escape");
     assert.equal(await selection(), "", "Escape clears");
+    // The drag above turned the camera; re-frame it (a shape change re-fits)
+    // so the hand-worked screen positions hold again.
+    await page.click("#toolbar [data-shape=cylinder]");
+    await page.click("#toolbar [data-shape=box]");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
+    await page.keyboard.press("Escape");
+    // Edges (17c). Kernel edge order for a box (primitives.rs): the −Z face
+    // makes edges 0–3, the +Z face 4–7 (first 4: corner 4 (0,0,20) to 5
+    // (40,0,20), the top front edge), the −Y face adds 8: corner 1 (40,0,0)
+    // to 5 (40,0,20), the front right upright, and 9.
+    const topFront = screen([20, 0, 20]);
+    const upright = screen([40, 0, 10]);
+    await page.mouse.click(topFront.x, topFront.y);
+    assert.equal(await selection(), "edge:feature-1/4", "a click on the top front edge selects edge 4");
+    await page.keyboard.down("Shift");
+    await page.mouse.click(upright.x + 2, upright.y); // 2 px off the line still picks it
+    await page.keyboard.up("Shift");
+    assert.equal(await selection(), "edge:feature-1/4 edge:feature-1/8", "Shift-click adds the upright");
+    // 3 px from the top front edge, towards the top face's middle: the edge still wins over the face.
+    const inward = { x: top.x - topFront.x, y: top.y - topFront.y };
+    const along = (d) => ({ x: topFront.x + (inward.x / Math.hypot(inward.x, inward.y)) * d, y: topFront.y + (inward.y / Math.hypot(inward.x, inward.y)) * d });
+    await page.mouse.click(along(3).x, along(3).y);
+    assert.equal(await selection(), "edge:feature-1/4", "3 px off the edge picks the edge");
+    // 20 px in is well inside the top face.
+    await page.mouse.click(along(20).x, along(20).y);
+    assert.equal(await selection(), "face:feature-1/1", "20 px off the edge picks the face");
+    // The back left edge along the floor, corner 0 (0,0,0) to 2 (0,30,0)
+    // (edge 0), is hidden: going from its middle (0,15,0) towards the
+    // camera, along (0.6,−0.8,0.55), y reaches 0 after 15/0.8 = 18.75 steps,
+    // at x = 11.25, z = 10.3, inside the front face and over 10 mm from its
+    // edges, so the line of sight leaves through the −Y face (face 2).
+    const hidden = screen([0, 15, 0]);
+    await page.mouse.click(hidden.x, hidden.y);
+    assert.equal(await selection(), "face:feature-1/2", "a hidden edge is not picked; the face in front is");
+    await page.keyboard.press("Escape");
     // Put the camera back where fit() left it for the checks below.
     await page.click("#toolbar [data-shape=cylinder]");
     await page.click("#toolbar [data-shape=box]");

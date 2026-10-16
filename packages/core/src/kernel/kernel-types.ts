@@ -6,6 +6,8 @@ export interface DisplayMesh {
   indices: number[];
   triangle_faces: number[];
   edge_lines: number[];
+  /** B-rep edge index of each segment in `edge_lines` (one per pair of points). */
+  edge_line_edges: number[];
 }
 
 export interface BodyView {

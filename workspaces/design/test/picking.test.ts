@@ -12,6 +12,17 @@ test("a pick on a face names that face of the feature on screen", () => {
   assert.deepEqual(pickChange({ face: null, shift: true }, "feature-1"), { change: "keep" });
 });
 
+test("a pick on an edge names that edge, and wins over a face", () => {
+  // The default box's top front edge joins corners 4 and 5 (primitives.rs:
+  // the −Z face makes edges 0-3, the +Z face 4-7, and its first is 4→5).
+  assert.deepEqual(pickChange({ face: null, edge: 4, shift: false }, "feature-1"), { change: "set", item: { kind: "edge", id: "edge:feature-1/4" } });
+  assert.deepEqual(pickChange({ face: null, edge: 4, shift: true }, "feature-1"), { change: "toggle", item: { kind: "edge", id: "edge:feature-1/4" } });
+  assert.deepEqual(pickChange({ face: 1, edge: 4, shift: false }, "feature-1"), { change: "set", item: { kind: "edge", id: "edge:feature-1/4" } });
+  assert.deepEqual(pickChange({ face: 1, edge: null, shift: false }, "feature-1"), { change: "set", item: { kind: "face", id: "face:feature-1/1" } });
+  assert.deepEqual(pickChange({ face: null, edge: null, shift: false }, "feature-1"), { change: "clear" });
+  assert.throws(() => pickChange({ face: null, edge: -2, shift: false }, "feature-1"), /kernel index/);
+});
+
 test("click, Shift-click, Shift-click again and a click on nothing, applied to a real selection", () => {
   const selection = createSelection();
   const apply = (c: SelectionChange) => {
