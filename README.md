@@ -2,7 +2,7 @@
 
 A free, open-source suite for making things. Parametric CAD is at its heart, and rendering, simulation, CNC machining, laser cutting and 3D printing are workspaces of the same app, all sharing one project. It runs in the browser, needs no installation and has no subscription.
 
-Fission is early. The geometry kernel's foundations are built and heavily tested, and the app shows and exports kernel-made solids. The sketcher, the parametric timeline and booleans come next. The [roadmap](CLAUDE.md#roadmap-mark-items-x-when-done) lists every step and which ones are done.
+Fission is early. The geometry kernel's foundations are built and heavily tested, and the app shows and exports kernel-made solids. The sketcher, the parametric timeline and booleans come next. The [roadmap](docs/roadmap.md) lists every step and which ones are done.
 
 ## What makes it different
 
@@ -85,7 +85,7 @@ npm run dev                                   # start the app locally
 npm run build && npm run e2e                  # browser tests
 ```
 
-`CLAUDE.md` holds the full set of commands, the testing rules and the roadmap.
+`CLAUDE.md` holds the full set of commands, the testing rules and the next steps; `docs/roadmap.md` holds the whole roadmap.
 
 ## Licence
 
