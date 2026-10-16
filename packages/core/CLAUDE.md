@@ -17,6 +17,7 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
   - `downstream.ts`: downstream summaries: what another workspace makes from the design, its state from the graph; the chips in Design's properties panel.
   - `change-notes.ts`: change notes: one dismissible note per result another workspace's change updated, naming the cause, with the dependency chain from `graph.path`.
   - `files.ts`: files dropped or pasted: `identifyFile` by contents and name, `FILE_FORMATS`, `routeFiles` through the importers registered on the representation registry; a workspace opens a format by `registry.registerImporter` in its `registerRepresentations`.
+  - `svg.ts`: `outlineToSvg`: an Outline as an SVG file in mm (one path, holes by evenodd, y flipped, arcs as quarter turns at most so rounding never moves a centre, the viewBox the exact box); Design's Copy as SVG writes it.
   - `links.ts`.
   - `ownership.ts`: one owner per linked value: `proposeEdit`, `acceptProposal`/`rejectProposal`, `setOwnedValue`, `transferOwnership`.
   - `overlay.ts`.
