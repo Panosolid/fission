@@ -169,6 +169,29 @@ try {
     await page.screenshot({ path: "e2e/l-bracket.png" });
   });
 
+  await check("the browser lists the timeline, Body 1 and the origin; a click highlights one row", async () => {
+    // The L-bracket part from the check above: feature #1 with its intent.
+    const rows = async (group) => page.$$eval(`#browser [data-node=${group}] .tree-row`, (els) => els.map((e) => e.textContent));
+    assert.deepEqual(await rows("timeline"), ["1. Extrude: L-bracket profile 40 × 30 mm, by 20 mm"]);
+    assert.deepEqual(await rows("bodies"), ["Body 1"]);
+    assert.deepEqual(await rows("origin"), ["XY plane", "XZ plane", "YZ plane", "X axis", "Y axis", "Z axis"]);
+    const current = () => page.$$eval("#browser [aria-current=true]", (els) => els.map((e) => e.dataset.node));
+    assert.deepEqual(await current(), []);
+    await page.click("#browser [data-node=body-1]");
+    assert.deepEqual(await current(), ["body-1"]);
+    await page.click("#browser [data-node=origin-z]");
+    assert.deepEqual(await current(), ["origin-z"]);
+    // Folding a group keeps it folded when an edit rebuilds the tree.
+    await page.click("#browser [data-node=origin] summary");
+    await setSize("height", 21);
+    await page.waitForFunction(() => document.querySelector("#browser [data-node=feature-1]").textContent.endsWith("by 21 mm"));
+    assert.equal(await page.$eval("#browser [data-node=origin]", (el) => el.open), false);
+    assert.deepEqual(await current(), ["origin-z"]);
+    await page.click("#browser [data-node=origin] summary");
+    await setSize("height", 20);
+    await page.screenshot({ path: "e2e/browser.png" });
+  });
+
   await check("plate with two round holes: area minus the holes, times the distance", async () => {
     // The numbers shown are exact (from the B-rep, not the mesh). Holes of
     // radius 0.15·30 = 4.5: profile 1200 − 2·π·4.5² = 1200 − 40.5π,
@@ -395,6 +418,7 @@ try {
     assert.equal(await page.inputValue("#width"), "40");
     assert.equal(await page.getAttribute("#toolbar [data-shape=box]", "aria-pressed"), "true");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius);
+    assert.equal(await page.textContent("#browser [data-node=feature-1]"), "1. Box: 40 × 30 × 20 mm");
     await page.screenshot({ path: "e2e/workspace-design.png" });
   });
 

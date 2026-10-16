@@ -12,6 +12,7 @@ import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
 import { toolbarGroups, type ToolButton } from "./toolbar.ts";
+import { browserTree, type BrowserNode } from "./browser.ts";
 
 const PANEL = `
   <label><span id="width-label">Width</span> <input id="width" type="number" value="40" step="any" /> mm</label>
@@ -75,6 +76,53 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void): [ToolButt
   return made;
 }
 
+/** The browser row the user last clicked; only highlighted until selection (step 17). */
+let highlighted: string | null = null;
+/** Browser groups the user folded, kept across rebuilds and workspace switches. */
+const folded = new Set<string>();
+
+/**
+ * Fills the browser slot with the document's tree: groups fold (native
+ * details/summary), rows are buttons, and a click on a row highlights it.
+ * Rebuilt on every edit; the highlight and folding are kept by id.
+ */
+function browser(slot: HTMLElement, doc: DesignDocument) {
+  const document = slot.ownerDocument;
+  const list = (nodes: BrowserNode[]) => {
+    const ul = document.createElement("ul");
+    ul.className = "tree";
+    for (const n of nodes) {
+      const li = document.createElement("li");
+      if (n.children) {
+        const details = document.createElement("details");
+        details.open = !folded.has(n.id);
+        details.dataset.node = n.id; // read by the e2e test
+        details.addEventListener("toggle", () => (details.open ? folded.delete(n.id) : folded.add(n.id)));
+        const summary = document.createElement("summary");
+        summary.textContent = n.label;
+        details.append(summary, list(n.children));
+        li.append(details);
+      } else {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "tree-row";
+        row.textContent = n.label;
+        row.dataset.node = n.id;
+        if (n.id === highlighted) row.setAttribute("aria-current", "true");
+        row.addEventListener("click", () => {
+          highlighted = n.id;
+          for (const r of slot.querySelectorAll(".tree-row")) r.removeAttribute("aria-current");
+          row.setAttribute("aria-current", "true");
+        });
+        li.append(row);
+      }
+      ul.append(li);
+    }
+    return ul;
+  };
+  slot.replaceChildren(list(browserTree(doc)));
+}
+
 function mount(ctx: WorkspaceContext): () => void {
   // Until 16c–16d split it up, the rest of the old side panel sits in the properties slot.
   ctx.properties.innerHTML = PANEL;
@@ -135,6 +183,7 @@ function mount(ctx: WorkspaceContext): () => void {
     const doc = documentFor(partCommand());
     syncGraph(ctx.graph, doc, (ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
     ctx.project.workspaces.design = doc;
+    browser(ctx.browser, doc);
     markStale();
     const feature = lastFeature(doc);
     $("intent").textContent = feature.intent.summary;

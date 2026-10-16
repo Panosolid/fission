@@ -44,6 +44,12 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 .tool-group + .tool-group { border-left: 1px solid #2a2e35; padding-left: 10px; margin-left: 4px; }
 .tool-group-name { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; margin-right: 4px; }
 #toolbar button[aria-pressed="true"] { background: #23384f; border-color: #4aa8ff; }
+.tree { list-style: none; margin: 0; padding: 0; }
+.tree .tree { padding-left: 14px; }
+.tree summary { cursor: pointer; padding: 4px 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
+#workspace .tree-row { display: block; width: 100%; text-align: left; padding: 4px 6px; background: none; border: 1px solid transparent; overflow-wrap: anywhere; }
+#workspace .tree-row:hover { background: #262a31; }
+#workspace .tree-row[aria-current="true"] { background: #23384f; border-color: #4aa8ff; }
 #stl-note { margin: 0; font-size: 13px; min-height: 1em; }
 #stl-note.bad { color: #ff6b6b; }
 
