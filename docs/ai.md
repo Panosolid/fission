@@ -94,3 +94,50 @@ Each one is downloaded on first use, after its size is shown. They are placehold
 - **Command fuzzing.** `packages/testing/test/command-fuzz.test.ts` and `journeys/command-fuzz.journey.ts` check that random and malformed commands and answer texts always give a clean error or a valid command. Valid ones are built on the real kernel, which must return a valid body or a clean error.
 - **Evaluation** (`packages/testing/src/ai-eval.ts`). `EVAL_CASES` holds fixed prompts, each with a project state and the expected commands. `runEval` scores any provider, and `successRates` gives the rate for each task type, which is tracked over time like the fuzzer's metrics. Cases that need commands not built yet name what they wait for.
 - **Still to come** (with steps 20 and 32): tests that an accepted action is exactly one undo step, and that a rejected preview leaves the project unchanged.
+
+## Fission's own model (planned, starts after step 32)
+
+Users can bring any provider in the table above. Fission will also ship a model of its own: a small one that runs on the user's device and is held to the rules below. It is one more entry in `PROVIDERS`, so nothing else in the app changes when it arrives.
+
+### Why it exists
+
+The point is to let anyone drive Fission in plain English, for free, without their designs leaving their computer. A general model has to know everything. This one only has to know Fission's commands, which is why it can be small: 0.5 to 1.5 billion parameters, about 300 MB to 1 GB to download after quantising it to 4 bits.
+
+If an existing open model already passes the evaluation gate (phase 1 below) without training, Fission ships that model instead and trains nothing. Having a model of our own is a fallback for quality, not a goal in itself.
+
+### Rules for Fission's model
+
+These rules are in addition to the ones at the top of this page.
+
+1. **Training is the user's choice.** A switch decides whether a user's data may help train the model. It is off by default, and turning it off also deletes anything already shared. Only command examples are ever sent: the request text, the proposed commands, and whether they were accepted. Geometry and files are never sent. Training is an automatic pipeline with no human review step. Sending something for a person to look at, such as a bug report, is a separate button the user clicks.
+2. **Free with no limits.** It runs on the user's own hardware, so it costs the project nothing to run.
+3. **It never changes behind the user's back.** It is a file on the user's machine and works offline. It updates only when the user chooses, and old versions stay downloadable. Each model is labelled with the command API version it learned.
+4. **Mistakes are caught.** A model can still be wrong. The rules at the top of this page (commands only, kernel validation, preview, one undo step, never a machine) mean a wrong answer costs a rejected preview, not a broken project.
+5. **Full working out.** It explains its reasoning in plain words first, for example: "the top face is F12, its centre is at x 20 y 15, so the hole goes there". The commands follow, then the kernel's checks. The user can edit the commands before accepting them.
+6. **Open.** The model weights, the training scripts and the generated training data are open source, like the rest of Fission.
+7. **Honest and concise.** No flattery or padding. Claims carry evidence ("this wall is 0.8 mm and your nozzle is 0.4 mm").
+8. **Small.** It runs on hardware the user already owns. On a computer too weak for it, the assistant is simply unavailable, and every feature still works without it.
+
+### How it is made
+
+- **Base model.** Start from the best small open model available when work begins. Its licence must let us modify it and give it away for free.
+- **Fine-tuning, not pretraining.** Pretraining a model from scratch at a useful size costs hundreds of thousands of dollars. Instead, LoRA (a cheap kind of fine-tuning that trains a small add-on to the model) teaches the base model Fission's commands. One run takes hours on a single GPU, which is free on hosted notebook tiers or costs tens of dollars rented.
+- **Training data is generated and checked.** A script samples random valid commands from every workspace's `CommandSpec` list, using the same machinery as the command fuzzer. Each command is built on the real kernel, and only commands that produce a valid result are kept. The English side of each example comes from templates, plus paraphrases from a model whose terms allow that use. Opted-in user examples (rule 1) are added once a server for them exists; it is the same open question as in `community.md`.
+- **Evaluation.** The model is scored with `runEval` on `EVAL_CASES`, plus a larger held-out set written by hand that never comes from the data generator. Four rates are reported per task type: valid on the first try, exactly the intended command, the right stable id, and needing the retry. It ships only if it clearly beats the untrained base model.
+- **Delivered** in two formats: one for the in-browser provider (WebGPU) and one for Ollama. The download is hosted for free, and the size is shown before it starts.
+- **Kept apart.** The generator and the training scripts live in a separate repository, so Fission's own tests and CI never depend on them.
+
+### Phases
+
+The roadmap tracks these as A10 to A13.
+
+- **A10, the gate** (with A7, after step 32). Score two or three off-the-shelf small models through Ollama on the evaluation suite, using constrained output. If one is good enough, it becomes the in-browser default and the phases stop here.
+- **A11, the data generator.** Only if A10 falls short.
+- **A12, the training runs.** Free tiers first, with a cap of about 100 US dollars until the model ships.
+- **A13, shipping.** "Fission model" joins `PROVIDERS` and becomes the default only if it wins on the evaluations. From then on, it is retrained as each workspace adds commands (A8). A retrain is a rerun of the scripts, not a new project.
+
+### Guardrails for the main project
+
+- No work on this starts before step 32. There are no commands worth teaching until then.
+- The CAD roadmap always comes first, and the work runs in one thread at a time.
+- Check the base model's licence and the source of all training data before training, not after.
