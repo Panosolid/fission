@@ -630,7 +630,10 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
         let w = 2.0 * half;
         let pts = vec![c, c + DVec2::new(len, 0.0), c + DVec2::new(len, w), c + DVec2::new(0.0, w)];
         let bulges = vec![0.0, 1.0, 0.0, 1.0];
-        let r = reach(&pts, w / 2.0);
+        // The round ends bulge sideways only: x from c.x − w/2 to c.x + len
+        // + w/2, y from c.y to c.y + w. (Adding w/2 every way, as this once
+        // did, called a slot 99999999 out "past MAX_COORD"; seed 0xa3452331.)
+        let r = (c.x - w / 2.0).abs().max((c.x + len + w / 2.0).abs()).max(c.y.abs()).max((c.y + w).abs());
         let (pts, bulges) = if flip { reverse(pts, bulges) } else { (pts, bulges) };
         // Thinnest: the end radius w/2 and the straight sides' length.
         let expect = verdict((w / 2.0).min(len), len + w, r);
@@ -676,7 +679,10 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
         let pts = vec![c - DVec2::new(half, 0.0), c + DVec2::new(half, 0.0)];
         let (pts, bulges) = if flip { reverse(pts, vec![beta, beta]) } else { (pts, vec![beta, beta]) };
         let hole = Ring::straight(square.iter().map(|&q| c + q).collect());
-        (Ring::curved(pts, bulges), vec![hole], verdict(thinnest, 2.0 * half, c.abs().max_element() + half))
+        // The arcs reach half sideways and bulge β·half (their sagitta) up
+        // and down.
+        let r = (c.x.abs() + half).max(c.y.abs() + beta * half);
+        (Ring::curved(pts, bulges), vec![hole], verdict(thinnest, 2.0 * half, r))
     });
     let bulge = prop_oneof![
         3 => Just(0.0),
