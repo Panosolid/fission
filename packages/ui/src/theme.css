@@ -14,7 +14,7 @@ body { display: flex; flex-direction: column; }
 #workspaces { display: flex; gap: 2px; flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 /* Save, Open, AI and Community sit in the top bar on wide screens and behind Menu on phones. */
 /* Tabs a little tighter than the other buttons, so all ten fit a 1280 px screen in the wider system fonts too. */
-#workspaces [role="tab"] { padding-left: 8px; padding-right: 8px; }
+#workspaces [role="tab"] { padding-left: 6px; padding-right: 6px; }
 #topbar-actions { display: contents; }
 #menu-toggle { display: none; }
 #topbar button { background: none; border: none; border-bottom: 2px solid transparent; color: #b5bbc4; padding: 12px 10px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
