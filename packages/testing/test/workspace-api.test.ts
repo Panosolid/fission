@@ -7,7 +7,9 @@ import { join } from "node:path";
 import { RepresentationRegistry, type KernelCalls, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
-const workspaceDirs = readdirSync(join(root, "workspaces"));
+const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
+  .filter((d) => d.isDirectory())
+  .map((d) => d.name);
 
 /** Every import in a workspace's source files. */
 function importsOf(dir: string): { file: string; spec: string }[] {
