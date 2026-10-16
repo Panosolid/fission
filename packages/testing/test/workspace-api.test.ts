@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, selectionNotBuilt, type KernelCalls, type SharedViewport, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, type GeometryReference, type KernelCalls, type SharedViewport, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -91,7 +91,7 @@ function testContext(): WorkspaceContext {
     project: emptyProject(),
     // Every kernel call fails, as when the kernel is not loaded: the workspace must show it, not crash.
     kernel: { call: (() => Promise.reject(new Error("no kernel in this test"))) as KernelCalls["call"] },
-    selection: selectionNotBuilt,
+    selection: createSelection(),
     history: historyNotBuilt,
     graph: new DependencyGraph(),
     toolbar: el(),
@@ -122,6 +122,41 @@ test("every workspace mounts into the layout slots and leaves them all empty on 
       await settle(); // a reply arriving after hide must not write into the slots
       assert.deepEqual(leftovers(ctx), [], `${p.id} cleared every slot on hide (round ${round + 1})`);
     }
+  }
+});
+
+// The one selection (step 17a): it belongs to the shell, so mounting and
+// hiding a workspace keeps what is selected (I4), and a workspace that
+// listens for changes stops listening on hide.
+test("every workspace leaves the shared selection as it found it and drops its listeners on hide", async () => {
+  for (const p of plugins) {
+    const ctx = testContext();
+    const picked = { kind: "face", id: "face:feature-1/0" } as GeometryReference;
+    ctx.selection.set([picked]);
+    let open = 0;
+    const real = ctx.selection;
+    ctx.selection = {
+      get items() {
+        return real.items;
+      },
+      set: (items) => real.set(items),
+      toggle: (item) => real.toggle(item),
+      clear: () => real.clear(),
+      onChange(listener) {
+        open++;
+        const off = real.onChange(listener);
+        return () => {
+          open--;
+          off();
+        };
+      },
+    };
+    const hide = p.mount(ctx);
+    await settle();
+    assert.deepEqual(ctx.selection.items, [picked], `${p.id} keeps the selection while shown`);
+    hide();
+    assert.deepEqual(ctx.selection.items, [picked], `${p.id} keeps the selection after hide`);
+    assert.equal(open, 0, `${p.id} drops every selection listener on hide`);
   }
 });
 

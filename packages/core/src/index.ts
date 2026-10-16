@@ -19,7 +19,7 @@ export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
 export type { BodyReference, EdgeReference, FaceReference, GeometryReference, Resolution, StableId } from "./model/references.ts";
 export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
-export { historyNotBuilt, selectionNotBuilt } from "./model/session.ts";
+export { createSelection, historyNotBuilt } from "./model/session.ts";
 export type { Framing, SharedViewport } from "./model/viewport.ts";
 export type { AnalysisOverlay, OverlayMark, OverlaySeverity, OverlayTarget } from "./model/overlay.ts";
 export { SEVERITY_COLOURS, triangleColours } from "./model/overlay.ts";

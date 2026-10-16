@@ -9,3 +9,4 @@ export { buildSpec, specFor } from "./spec.ts";
 export { lastFeature, partDocument, profileLabel, readDesignDocument, specOf, type DesignDocument, type ReadyProfile } from "./document.ts";
 export { PART_VIEW, syncGraph } from "./graph.ts";
 export { designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
+export { designReference, PLACEHOLDER_ID_NOTE } from "./references.ts";
