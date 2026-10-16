@@ -1,0 +1,35 @@
+# Temporary: re-measures the journey timing baseline on GitHub's runners.
+# Removed again before the pull request is ready.
+name: Measure journeys
+on:
+  push:
+    branches: [claude/project-thread-5z968c]
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+        working-directory: apps/fission
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/fission
+      - name: Journeys, 3 runs of 5 walks
+        working-directory: apps/fission
+        run: for i in 1 2 3; do node --experimental-strip-types --no-warnings e2e/journeys.mjs | grep -E "times|slowest" || true; done
