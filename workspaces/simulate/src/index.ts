@@ -27,6 +27,7 @@ export const simulateWorkspace: WorkspacePlugin = {
   summary: "Finite element analysis on the kernel's exact geometry: static stress first, then thermal and modal.",
   status: "placeholder",
   representations: { produces: [], accepts: [] },
+  commands: [],
   mount(ctx) {
     showPlaceholder(ctx.panel, {
       title: "Simulate",

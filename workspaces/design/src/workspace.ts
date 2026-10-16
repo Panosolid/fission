@@ -8,6 +8,7 @@ import { needsRefit } from "@fission/viewport";
 import { lastFeature, partDocument, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
 import { registerDesign } from "./representations.ts";
+import { DESIGN_COMMANDS } from "./commands.ts";
 import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
 
@@ -167,5 +168,6 @@ export const designWorkspace: WorkspacePlugin = {
   representations: { produces: ["solid", "mesh", "outline"], accepts: [] },
   registerRepresentations: registerDesign,
   readData: readDesignDocument,
+  commands: DESIGN_COMMANDS,
   mount,
 };

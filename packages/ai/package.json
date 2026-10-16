@@ -8,5 +8,8 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@fission/core": "*"
   }
 }

@@ -40,6 +40,7 @@ export const circuitWorkspace: WorkspacePlugin = {
   summary,
   status: "placeholder",
   representations: { produces: [], accepts: [] },
+  commands: [],
   mount(ctx) {
     showPlaceholder(ctx.panel, {
       title: "Circuit",

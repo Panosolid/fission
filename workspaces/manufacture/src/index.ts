@@ -26,6 +26,7 @@ export const manufactureWorkspace: WorkspacePlugin = {
   summary: "CNC toolpaths from the design: setups, stock, tools, strategies, simulation and G-code.",
   status: "placeholder",
   representations: { produces: [], accepts: [] },
+  commands: [],
   mount(ctx) {
     showPlaceholder(ctx.panel, {
       title: "Manufacture",

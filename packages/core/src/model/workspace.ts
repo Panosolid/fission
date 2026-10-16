@@ -13,6 +13,7 @@
 // other workspaces.
 
 import type { KernelCalls } from "../kernel/kernel-client.ts";
+import type { CommandSpec } from "./commands.ts";
 import type { DependencyGraph } from "./graph.ts";
 import type { RepresentationKind, RepresentationRegistry } from "./representation.ts";
 import type { History, Selection } from "./session.ts";
@@ -66,6 +67,8 @@ export interface WorkspacePlugin {
    * the version this build writes; throws a clear error for data it can't read.
    */
   readData?(data: unknown): unknown;
+  /** The actions a user can take here, as data: the panel, scripts and the AI assistant all go through these. */
+  commands: readonly CommandSpec[];
   toolbar?(): ToolbarItem[];
   overlays?(): ViewportOverlay[];
 }
