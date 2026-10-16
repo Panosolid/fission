@@ -33,6 +33,27 @@ A Fission project is one JSON document. The format is open: anyone may read and 
 
 Today a part is feature #1 of a one-step timeline. Step 32 adds features to the same list, so no migration is needed.
 
+## Planned: recipes, origin and remixes (a later version; nothing reads these yet)
+
+A shared design is a complete recipe (docs/integration.md, principle 7). These fields are planned now so the format grows into them without a redesign. They arrive as one format bump with a migration (old files get an empty recipe and no origin), no earlier than step 19's save and load, and are used by sharing (C2–C4).
+
+```json
+{
+  "recipe": {
+    "contents": ["design", "slice", "laser", "render", "instructions"],
+    "instructions": [{ "step": 1, "text": "Print the base", "uses": ["slice:plate-1"] }],
+    "machineNeeds": [{ "kind": "printer", "bedAtLeastMm": [180, 180], "material": "PLA" }]
+  },
+  "origin": { "projectId": "…", "author": "…", "version": "…", "fetchedAt": "…" },
+  "lineage": [{ "projectId": "…", "version": "…", "base": "…" }]
+}
+```
+
+- `recipe.contents`: which workspaces' data the recipe carries, so a reader knows what it gets before opening it. The data itself stays under `workspaces`, as today.
+- `recipe.machineNeeds`: what the recipe was made for, so "Make it for my machine" can swap in the user's own printers, lasers, materials and units, and say what it changed.
+- `origin`: where a downloaded or remixed project came from. It never changes after download.
+- `lineage`: the chain of remixes back to the original. Each entry keeps the `base` version it started from, so an "Update available from the author" can be brought in as a three-way merge: the author's changes since `base`, with the remixer's own changes kept on top. Because features store intent and ids, the merge works on timeline features and parameters, not on geometry.
+
 ## Migration rules
 
 1. Any change a version-N reader can't read is a new version, N + 1.

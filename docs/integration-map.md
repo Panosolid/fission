@@ -28,7 +28,7 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
-| 8 | Vector → Design | a logo or shape to sketch on, emboss or deboss | Outline | none | cheap | V3; exact splines need 63–65 (decision 2) |
+| 8 | Vector → Design | a logo or shape to sketch on, emboss or deboss | Outline (biarc-fitted until 65, decision 2) | none | cheap | V3 |
 | 9 | Design → Vector | a face outline or sketch as editable paths (to draw artwork that fits a part) | Outline | none | cheap | V1 + 21 |
 | 10 | Vector → Laser | paths to cut, engrave or score; layers map to operations | Outline | none | cheap | V1 + L1 |
 | 11 | Vector → Render | a decal on a face | Outline, rasterised by a converter at render resolution | none | cheap | V1 + R1 |
@@ -37,7 +37,7 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 | 14 | Image → Vector | trace a photo or scan to paths | Image in, Outline out (trace converter; classic algorithm first, A4 model optional) | none; the image is untouched | expensive | G1 + V1 |
 | 15 | Image → Laser | raster engraving | Image with mm per pixel; Laser does the dithering | none | cheap | G1 + L1 |
 | 16 | Image → Render | textures and material maps | Image | none | cheap | G1 + R1 |
-| 17 | Image → Design | a lithophane or relief from brightness | Image in, a Design feature builds the Solid (decision 3) | none | cheap preview, exact build on demand | G2 + 32 |
+| 17 | Image → Design | a lithophane or relief from brightness | Image in, a Design feature builds a mesh body (decisions 3 and 4) | none | cheap | G2 + 32 |
 | 18 | Image → Layout | photos on a page | Image | none | cheap | G1 + Y1 |
 | 19 | Render → Layout and Image | a rendered picture | Image (marked out of date when the scene changes) | none | expensive | R2 + Y2 / G1 |
 | 20 | Design → Layout | a design view or a drawing view; parameters as text fields | Outline for drawings (77–79), Image for shaded views, Data for parameters | none | cheap | Y2 + 77 for drawings |
@@ -93,10 +93,12 @@ The registry already turns Solid into Mesh (tessellation). The rows above also n
 - Laser box: a parametric finger-joint box whose slots follow the sheet thickness parameter (rows 2, 30).
 - Product poster: render the part, place the render and the logo on a poster, change the part, the poster marks the render out of date (rows 6, 19, 13).
 
-## Open decisions (the owner's)
+## Decisions (the owner's, 2026-10-16)
 
-1. **Two-way links.** Each value has one owner. An edit from the other side (moving a pad in Circuit when the screw post lives in Design) becomes a previewed command on the owner, which the user accepts. No true two-way sync, because two owners can disagree and nothing would say which wins. Recommended.
-2. **Vector curves in Design before NURBS (63–65).** Vector's Béziers go into Design as arcs fitted within the kernel's tolerance, with a note saying so, and become exact when NURBS land. The Vector original stays the source, so the round trip stays lossless. The alternative is refusing until 65. Recommended: fit arcs.
-3. **Where lithophanes are made.** As a Design feature ("relief from image"), so Slice, Render and Manufacture all get it like any other body. The alternative is a Slice-only tool. Recommended: Design feature.
-4. **Meshes stay meshes.** A scan or an STL never turns into a B-rep automatically; Design can show it, measure it and sketch over it. Recommended.
-5. **One 2D curve library.** The sketcher (21–31), Vector, Laser and Layout share one curve package (lines, arcs, Béziers, offsets, path booleans) in `packages/`, so an outline means the same thing everywhere. This would let Vector's base start before step 31 by building that package first. Recommended.
+All five are approved, with additions; the full text and reasons are in [integration.md](integration.md), "The owner's five decisions".
+
+1. One owner per value; edits from the other side are previewed commands for the owner; "Owned by …" shown; ownership transferable per value.
+2. Vector curves fitted with biarcs (tangent-continuous) until NURBS at step 65, with a note; the faces from one curve are one logical face for naming.
+3. Lithophanes are a Design feature, "relief from image", whose output is a mesh body until exact surfaces exist.
+4. Mesh bodies are a marked, separate kind of body with a fixed list of operations (mesh booleans with exact solids allowed, giving a marked mesh); never turned exact automatically; a later user-started "fit exact surfaces" feature.
+5. One 2D curve library, in the Rust kernel with its tolerances, in the stateful harness.

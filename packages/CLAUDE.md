@@ -36,6 +36,13 @@ Ten workspaces (Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Ve
 - One of each: selection, undo history, units, materials library, machine library, viewport (with analysis overlays). Switching workspaces keeps camera and selection.
 - Placeholders stay placeholders: a page saying what the workspace will do, when work starts and "Coming soon", DRAFT interfaces whose functions throw "not implemented", no stub code that pretends to work, and a test that it says so. Keep DRAFT interfaces small; they change as real workspaces are built.
 - No private shortcuts: our workspaces are plugins on the same public Workspace API.
+- Integration is the flagship, never at the cost of CAD reliability or the kernel roadmap. The links planned between workspaces are in `docs/integration-map.md`; a link not there is added there first.
+- One owner per linked value: an edit from the other side is a previewed command for the owner, never a two-way sync; the UI says "Owned by …"; ownership can be transferred per value, as an undoable command.
+- Vector curves in Design before NURBS (65): biarc-fitted within tolerance, with a note; all faces from one fitted curve are one logical face for naming, so references never point at single arc faces.
+- Mesh bodies (scans, STL imports, "relief from image") are a separate, marked kind of body with the operation list in docs/integration.md; never turned into exact solids automatically (only by a later, user-started "fit exact surfaces").
+- 2D curve maths (sketcher, Vector, Laser, Layout) lives in the kernel's 2D curve library, never re-implemented in TypeScript.
+- Experience rules (reasons in docs/integration.md): actions on a selection come from the one action registry in core, never a workspace's private buttons; an object arriving in a workspace is already set up (no blank setups when the project holds the information); every automatic update shows a dismissible note naming its cause; files dropped or pasted, and copies out, go through the representation registry; shortcuts, gizmos, selection, units and undo behave the same in every workspace; switching workspaces stays under 100 ms (browser test); animations are about half a second, skippable and off under reduced motion.
+- Magic-moment journeys are browser tests with a click count and a time limit; ones waiting for a workspace are pending, never passing.
 
 The AI assistant's rules are in `docs/ai.md` (read it before changing `packages/ai`): optional; commands only, previewed, one undo step; never starts or controls a machine; local providers keep everything local, remote ones show what will be sent first; API keys only in the user's browser, never logged.
 
