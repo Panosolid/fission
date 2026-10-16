@@ -96,7 +96,7 @@ test("placeholders register no actions; a working workspace's verbs are its own"
   }
   const design = new ActionRegistry();
   plugins.find((p) => p.id === "design")!.registerActions!(design);
-  assert.deepEqual(design.byWorkspace("design").map((a) => a.id), ["design.download-stl"]);
+  assert.deepEqual(design.byWorkspace("design").map((a) => a.id), ["design.download-stl", "design.copy-svg"]);
 });
 
 // Downstream chips (X4b): no workspace makes anything from the design yet,
@@ -177,7 +177,7 @@ test("every workspace mounts into the layout slots and leaves them all empty on 
   for (const p of plugins) {
     const ctx = testContext();
     for (let round = 0; round < 2; round++) {
-      const hide = p.mount(ctx);
+      const view = p.mount(ctx);
       await settle(); // let a workspace's first kernel call fail and be shown
       const shown = ctx.toolbar.textContent! + ctx.browser.textContent! + ctx.properties.textContent!;
       assert.ok(shown.includes(p.title) || p.status === "working", `${p.id} shows its page`);
@@ -187,7 +187,7 @@ test("every workspace mounts into the layout slots and leaves them all empty on 
         assert.equal(ctx.properties.querySelector(".placeholder h2")?.textContent, p.title, p.id);
         assert.deepEqual(leftovers(ctx), ["properties"], `${p.id} leaves toolbar and browser empty`);
       }
-      hide();
+      view.unmount();
       await settle(); // a reply arriving after hide must not write into the slots
       assert.deepEqual(leftovers(ctx), [], `${p.id} cleared every slot on hide (round ${round + 1})`);
     }
@@ -220,10 +220,10 @@ test("every workspace leaves the shared selection as it found it and drops its l
         };
       },
     };
-    const hide = p.mount(ctx);
+    const view = p.mount(ctx);
     await settle();
     assert.deepEqual(ctx.selection.items, [picked], `${p.id} keeps the selection while shown`);
-    hide();
+    view.unmount();
     assert.deepEqual(ctx.selection.items, [picked], `${p.id} keeps the selection after hide`);
     assert.equal(open, 0, `${p.id} drops every selection listener on hide`);
   }
@@ -234,16 +234,104 @@ test("every workspace leaves the shared selection as it found it and drops its l
 test("every workspace puts the viewport's pick handler back to none on hide", async () => {
   for (const p of plugins) {
     const ctx = testContext();
-    const hide = p.mount(ctx);
+    const view = p.mount(ctx);
     await settle();
-    hide();
+    view.unmount();
     assert.equal(ctx.viewport.onPick, null, `${p.id} cleared onPick on hide`);
   }
 });
 
+// Warm workspaces (X7): switching away puts a workspace to sleep instead of
+// unmounting it. Asleep it listens to nothing and touches nothing; its slots
+// keep the very same nodes (the shell takes them off screen), so waking
+// shows them again exactly as they were.
+test("every workspace, put to sleep and woken twice, keeps the same slot nodes, listens only while awake, and empties on unmount", async () => {
+  for (const p of plugins) {
+    const ctx = testContext();
+    let open = 0;
+    const real = ctx.selection;
+    ctx.selection = {
+      get items() {
+        return real.items;
+      },
+      set: (items) => real.set(items),
+      toggle: (item) => real.toggle(item),
+      clear: () => real.clear(),
+      onChange(listener) {
+        open++;
+        const off = real.onChange(listener);
+        return () => {
+          open--;
+          off();
+        };
+      },
+    };
+    const view = p.mount(ctx);
+    await settle();
+    const listening = open;
+    const picking = ctx.viewport.onPick !== null;
+    const nodes = () => [ctx.toolbar, ctx.browser, ctx.properties].flatMap((slot) => [...slot.childNodes]);
+    const html = () => ctx.toolbar.innerHTML + ctx.browser.innerHTML + ctx.properties.innerHTML;
+    const before = nodes();
+    assert.ok(before.length > 0, `${p.id} filled a slot`);
+    // The same node objects, compared by identity (a deep compare would walk the whole DOM).
+    const same = () => nodes().length === before.length && nodes().every((n, i) => n === before[i]);
+    for (let round = 1; round <= 2; round++) {
+      const shown = html();
+      view.sleep?.();
+      assert.equal(open, 0, `${p.id} listens to the selection while asleep (round ${round})`);
+      assert.equal(ctx.viewport.onPick, null, `${p.id} kept the pick handler while asleep (round ${round})`);
+      ctx.selection.set([{ kind: "face", id: "face:feature-1/3" as StableId }]);
+      await settle(); // replies and selection changes while asleep write nothing
+      assert.equal(html(), shown, `${p.id} changed its slots while asleep (round ${round})`);
+      assert.ok(same(), `${p.id} kept the same nodes asleep (round ${round})`);
+      view.wake?.();
+      await settle();
+      assert.equal(open, listening, `${p.id} listens again on wake (round ${round})`);
+      assert.equal(ctx.viewport.onPick !== null, picking, `${p.id} picks again on wake (round ${round})`);
+      assert.ok(same(), `${p.id} woke with the same nodes, not a rebuilt page (round ${round})`);
+      ctx.selection.clear();
+    }
+    view.sleep?.();
+    view.unmount();
+    assert.deepEqual(leftovers(ctx), [], `${p.id} emptied every slot on unmount from asleep`);
+    assert.equal(open, 0, `${p.id} listens to nothing after unmount`);
+  }
+});
+
+test("Design asleep draws no selection and no kernel reply; on wake it draws the selection made meanwhile and builds again", async () => {
+  const ctx = testContext();
+  let calls = 0;
+  ctx.kernel = { call: (() => (calls++, Promise.reject(new Error("no kernel in this test")))) as KernelCalls["call"] };
+  const view = plugins.find((p) => p.id === "design")!.mount(ctx);
+  const drawn = () => shownHighlights.get(ctx.viewport);
+  const error = () => ctx.properties.querySelector("#error")!.textContent;
+  // Asleep before the first build's reply comes back: the reply is not drawn.
+  view.sleep!();
+  await settle();
+  assert.equal(calls, 1);
+  assert.equal(error(), "", "a reply arriving asleep is not drawn");
+  assert.deepEqual(drawn(), NO_HIGHLIGHT, "sleep takes the selection's colours off the viewport");
+  // Face 3 selected in another workspace meanwhile: drawn on wake (worked out:
+  // face 3 alone gives { body: false, faces: [3], edges: [] }).
+  ctx.selection.set([{ kind: "face", id: "face:feature-1/3" as StableId }]);
+  assert.deepEqual(drawn(), NO_HIGHLIGHT, "nothing drawn while asleep");
+  view.wake!();
+  assert.deepEqual(drawn(), { body: false, faces: [3], edges: [] });
+  await settle();
+  assert.equal(calls, 2, "the missed build runs again on wake");
+  assert.match(error()!, /no kernel in this test/);
+  // A build that was drawn is not repeated: sleep and wake again, no kernel call.
+  view.sleep!();
+  view.wake!();
+  await settle();
+  assert.equal(calls, 2, "waking with nothing missed builds nothing");
+  view.unmount();
+});
+
 test("Design turns viewport picks and Escape into the shared selection", async () => {
   const ctx = testContext();
-  const hide = plugins.find((p) => p.id === "design")!.mount(ctx);
+  const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   const ids = () => ctx.selection.items.map((r) => r.id);
   ctx.viewport.onPick!({ face: 1, shift: false });
@@ -253,7 +341,7 @@ test("Design turns viewport picks and Escape into the shared selection", async (
   doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
   assert.deepEqual(ids(), []);
   ctx.viewport.onPick!({ face: 2, shift: false });
-  hide();
+  view.unmount();
   doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
   assert.deepEqual(ids(), ["face:feature-1/2"], "Escape after hide no longer clears");
 });
@@ -262,7 +350,7 @@ test("Design turns viewport picks and Escape into the shared selection", async (
 // browser and listed in properties, from whichever of them changed it.
 test("Design draws the selection, selects Body 1 from the browser, and stops drawing on hide", async () => {
   const ctx = testContext();
-  const hide = plugins.find((p) => p.id === "design")!.mount(ctx);
+  const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   const drawn = () => shownHighlights.get(ctx.viewport);
   const lit = () => [...ctx.browser.querySelectorAll("[aria-current=true]")].map((r) => (r as HTMLElement).dataset.node);
@@ -290,7 +378,7 @@ test("Design draws the selection, selects Body 1 from the browser, and stops dra
   assert.deepEqual(lit(), []);
   // Origin and timeline rows select nothing yet: they are not buttons.
   assert.equal(ctx.browser.querySelector("[data-node=origin-z]")!.tagName, "SPAN");
-  hide();
+  view.unmount();
   assert.deepEqual(drawn(), NO_HIGHLIGHT, "hide stops drawing the selection");
   ctx.selection.set([{ kind: "face", id: "face:feature-1/3" as StableId }]);
   assert.deepEqual(drawn(), NO_HIGHLIGHT, "a change after hide draws nothing");
@@ -298,13 +386,13 @@ test("Design draws the selection, selects Body 1 from the browser, and stops dra
 
 test("Design shows a kernel failure in its panel rather than throwing", async () => {
   const ctx = testContext();
-  const hide = plugins.find((p) => p.id === "design")!.mount(ctx);
+  const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   assert.match(ctx.properties.querySelector("#error")!.textContent!, /no kernel in this test/);
   // Its toolbar (16b): the command groups, with the part's shape pressed.
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[role=group]")].map((g) => g.getAttribute("aria-label")), ["Create", "Export"]);
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[aria-pressed=true]")].map((b) => b.textContent), ["Box"]);
-  hide();
+  view.unmount();
 });
 
 // Verbs, not apps (X1): the selection shows what the action registry offers
@@ -313,7 +401,7 @@ test("Design offers the registry's verbs for the selection, and its STL button r
   const ctx = testContext();
   const design = plugins.find((p) => p.id === "design")!;
   design.registerActions!(ctx.actions);
-  const hide = design.mount(ctx);
+  const view = design.mount(ctx);
   await settle();
   const verbs = () => [...ctx.properties.querySelectorAll("#selection-actions button")].map((b) => (b as HTMLElement).dataset.action);
   const row = ctx.properties.querySelector("#selection-actions") as HTMLElement;
@@ -345,7 +433,7 @@ test("Design offers the registry's verbs for the selection, and its STL button r
   await settle();
   assert.equal(ran, 1);
   assert.equal(note(), "no kernel in this test");
-  hide();
+  view.unmount();
 });
 
 // Autosave (19c): the shell saves when told the project changed, so a
@@ -354,7 +442,7 @@ test("Design offers the registry's verbs for the selection, and its STL button r
 test("Design says the project changed when it writes the part; placeholders never do", async () => {
   for (const p of plugins) {
     const ctx = testContext();
-    const hide = p.mount(ctx);
+    const view = p.mount(ctx);
     await settle();
     if (p.id !== "design") {
       assert.equal(changes.get(ctx) ?? 0, 0, `${p.id} changed nothing`);
@@ -369,7 +457,7 @@ test("Design says the project changed when it writes the part; placeholders neve
       assert.notEqual(ctx.project.workspaces.design, before, "the edit wrote a new document");
       assert.equal(changes.get(ctx), 2, "and said so once");
     }
-    hide();
+    view.unmount();
   }
 });
 
@@ -390,11 +478,11 @@ test("Design shows registered downstream summaries as chips, redrawn on every ed
   const design = plugins.find((p) => p.id === "design")!;
 
   // Nothing registered: no section, no chips.
-  let hide = design.mount(ctx);
+  let view = design.mount(ctx);
   await settle();
   assert.equal(section().hidden, true);
   assert.deepEqual(chips(), []);
-  hide();
+  view.unmount();
 
   // A new project (a fresh context), with three fake Slice summaries. The graph after Design mounts (graph.ts):
   // feature-1 → design.part-view → slice.print (expensive), and
@@ -412,7 +500,7 @@ test("Design shows registered downstream summaries as chips, redrawn on every ed
   ctx.downstream.register(source("print", "slice.print", () => "2 h 14 m · 38 g"));
   ctx.downstream.register(source("material", "slice.material", () => grams));
   ctx.downstream.register(source("gone", "slice.not-there", () => "old"));
-  hide = design.mount(ctx);
+  view = design.mount(ctx);
   await settle();
   assert.equal(section().hidden, false);
   assert.deepEqual(chips(), ["slice.print needs-rerun 2 h 14 m · 38 g", "slice.material fresh 38 g", "slice.gone missing –"]);
@@ -431,6 +519,6 @@ test("Design shows registered downstream summaries as chips, redrawn on every ed
   // A click asks the shell to open Slice.
   ctx.properties.querySelector<HTMLElement>("[data-chip='slice.material']")!.click();
   assert.deepEqual(opened.get(ctx), ["slice"]);
-  hide();
+  view.unmount();
   assert.equal(ctx.properties.childNodes.length, 0);
 });

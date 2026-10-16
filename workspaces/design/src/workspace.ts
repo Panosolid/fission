@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type Selected, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, partOf, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -14,9 +14,9 @@ import { toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
-import { designReference } from "./references.ts";
+import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
-import { DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
+import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
 /**
  * What the user last entered (as typed), kept while other workspaces are
@@ -61,7 +61,8 @@ const folded = new Set<string>();
 
 /** The browser rows that stand for selectable geometry, and the reference each selects. */
 function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  return node === "body-1" ? designReference("body", lastFeature(doc).id) : null;
+  if (node === "body-1") return designReference("body", lastFeature(doc).id);
+  return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
 }
 
 /** Lights the browser rows whose geometry is selected (aria-current), and only those. */
@@ -75,7 +76,7 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
 
 /**
  * Fills the browser slot with the document's tree: groups fold (native
- * details/summary). A row for selectable geometry (Body 1) is a button
+ * details/summary). A row for selectable geometry (Body 1, a profile) is a button
  * that selects it (Shift adds or takes out); the others are plain rows
  * until features (step 32) and origin planes (step 21) can be selected.
  * Rebuilt on every edit; folding is kept by id.
@@ -121,7 +122,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
   slot.replaceChildren(list(browserTree(doc)));
 }
 
-function mount(ctx: WorkspaceContext): () => void {
+function mount(ctx: WorkspaceContext): MountedWorkspace {
   const panel = propertiesPanel(ctx.properties);
   const { inputs } = panel;
   let shape: ShapeKind = "box";
@@ -140,7 +141,10 @@ function mount(ctx: WorkspaceContext): () => void {
   }
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
   const { kernel, viewport } = ctx;
+  /** On screen (awake); false while asleep (X7) and after unmount. */
   let shown = true;
+  /** A build finished while asleep and was not drawn: wake builds again. */
+  let missed = false;
   /** The last body that built, for the selection's surface and curve types. */
   let lastView: BodyView | null = null;
   /** The note about items the last rebuild dropped, and whether that drop is being applied now. */
@@ -161,7 +165,7 @@ function mount(ctx: WorkspaceContext): () => void {
     const items = ctx.selection.items;
     viewport.showSelection(highlightOf(items, featureId));
     lightRows(ctx.browser, doc, items);
-    panel.showSelection(selectionRows(items, featureId, lastView));
+    panel.showSelection(selectionRows(items, featureId, lastView, doc.profiles));
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -241,7 +245,9 @@ function mount(ctx: WorkspaceContext): () => void {
     panel.showFeature(feature);
     try {
       const { current, value: view } = await build(doc);
-      if (!current || !shown) return;
+      if (!current) return;
+      if (!shown) return void (missed = true);
+      missed = false;
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
@@ -255,7 +261,7 @@ function mount(ctx: WorkspaceContext): () => void {
       }
       panel.showBody(view);
       // Faces and edges the edit renumbered leave the selection, with a note (17e).
-      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView, view);
+      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView, view, doc.profiles.map((p) => p.id));
       lastView = view;
       note = droppedNote(dropped);
       if (dropped.length > 0) {
@@ -267,14 +273,15 @@ function mount(ctx: WorkspaceContext): () => void {
       showSelection();
       viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
     } catch (e) {
-      if (!shown) return;
+      if (!shown) return void (missed = true);
+      missed = false;
       panel.showError(e instanceof Error ? e.message : String(e));
       markStale(true);
     }
   }
 
   // Picking (17b): a click on a face selects it, Shift adds, empty space or Escape clears.
-  viewport.onPick = (pick) => {
+  const onPick: SharedViewport["onPick"] = (pick) => {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
     const c = pickChange(pick, lastFeature(doc).id);
@@ -285,23 +292,59 @@ function mount(ctx: WorkspaceContext): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") ctx.selection.clear();
   };
+  // Copy (Ctrl+C, or the browser's Edit menu) with one profile selected runs
+  // Copy as SVG; in a text field, or with anything else selected, the
+  // browser copies as usual.
+  const onCopy = (e: ClipboardEvent) => {
+    const target = e.target as Element | null;
+    if (target?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
+    const items = ctx.selection.items;
+    if (items.length !== 1 || items[0].kind !== "outline") return;
+    e.preventDefault();
+    void runAction(COPY_SVG, items);
+  };
   const keys = viewport.element.ownerDocument;
-  keys.addEventListener("keydown", onKey);
-  const stopWatching = ctx.selection.onChange(() => {
-    // The user's next change of selection retires the note about dropped items.
-    if (!settling && note) panel.showSelectionNote((note = ""));
-    showSelection();
-  });
-
-  inputs.forEach((i) => i.addEventListener("input", () => update()));
-  update();
-  return () => {
+  let stopWatching = () => {};
+  /** Listens to picks, keys, copy and the selection: from mount, and again on each wake. */
+  function listen() {
+    viewport.onPick = onPick;
+    keys.addEventListener("keydown", onKey);
+    keys.addEventListener("copy", onCopy);
+    stopWatching = ctx.selection.onChange(() => {
+      // The user's next change of selection retires the note about dropped items.
+      if (!settling && note) panel.showSelectionNote((note = ""));
+      showSelection();
+    });
+  }
+  function sleep() {
+    if (!shown) return;
     shown = false;
     viewport.onPick = null;
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
     keys.removeEventListener("keydown", onKey);
-    for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
+    keys.removeEventListener("copy", onCopy);
+  }
+
+  inputs.forEach((i) => i.addEventListener("input", () => update()));
+  listen();
+  update();
+  return {
+    sleep,
+    wake() {
+      if (shown) return;
+      shown = true;
+      listen();
+      // A build that finished while asleep was not drawn: build again. Otherwise
+      // the body is still in the viewport; redraw what others may have changed.
+      if (missed) return void update();
+      showSelection();
+      markStale();
+    },
+    unmount() {
+      sleep();
+      for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
+    },
   };
 }
 

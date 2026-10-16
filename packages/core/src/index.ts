@@ -18,7 +18,7 @@ export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup }
 export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
 export type { Answer, EditRoute, LinkedValue, OwnershipChange, ProposedEdit, Transfer } from "./model/ownership.ts";
 export { TRANSFER_OWNERSHIP, acceptProposal, linkOwner, linkedValue, ownedBy, proposeEdit, rejectProposal, setOwnedValue, transferOwnership } from "./model/ownership.ts";
-export type { BodyReference, EdgeReference, FaceReference, GeometryReference, Resolution, StableId } from "./model/references.ts";
+export type { BodyReference, EdgeReference, FaceReference, GeometryReference, OutlineReference, Resolution, StableId } from "./model/references.ts";
 export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
 export { createSelection, historyNotBuilt } from "./model/session.ts";
@@ -39,8 +39,10 @@ export type { Feature, Intent, Origin, ParameterValue, Provenance, Timeline } fr
 export { describeProvenance, workspaceName } from "./model/feature.ts";
 export type { FileFormat, FileFormatInfo, FileHead, FileImporter, FileRoute, Identified } from "./model/files.ts";
 export { claimedFormat, FILE_FORMATS, formatInfo, HEAD_BYTES, identifyFile, routeFiles } from "./model/files.ts";
+export type { SvgFile } from "./model/svg.ts";
+export { outlineToSvg, svgNumber } from "./model/svg.ts";
 export { EXACTNESS, isExact, RepresentationRegistry, XY_PLANE } from "./model/representation.ts";
 export type { Action, ActionOutcome, ActionTarget, Selected, SelectionKind } from "./model/actions.ts";
 export { ActionRegistry } from "./model/actions.ts";
-export type { ToolbarItem, ViewportOverlay, WorkspaceContext, WorkspacePlugin } from "./model/workspace.ts";
+export type { ToolbarItem, ViewportOverlay, MountedWorkspace, WorkspaceContext, WorkspacePlugin } from "./model/workspace.ts";
 export { WORKSPACE_API_VERSION } from "./model/workspace.ts";
