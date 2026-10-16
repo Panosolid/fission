@@ -52,6 +52,33 @@ const ctx = {
   representations,
 };
 
+// The View group: the viewport is shared, so the shell owns its view
+// buttons, over the viewport's corner. Fit frames the selection when there
+// is one (from the current direction), else the whole body from home.
+{
+  const group = document.createElement("div");
+  group.id = "view-controls";
+  group.setAttribute("role", "toolbar");
+  group.setAttribute("aria-label", "View");
+  const views = [
+    ["home", "Home", "Three-quarter view of the whole body"],
+    ["top", "Top", "Look down on the body"],
+    ["front", "Front", "Look at the body from the front"],
+    ["right", "Right", "Look at the body from the right"],
+  ] as const;
+  for (const [name, label, title] of views) {
+    const b = Object.assign(document.createElement("button"), { type: "button", textContent: label, title });
+    b.dataset.view = name;
+    b.addEventListener("click", () => ctx.viewport.setView(name));
+    group.append(b);
+  }
+  const fit = Object.assign(document.createElement("button"), { type: "button", textContent: "Fit", title: "Frame the selection, or the whole body when nothing is selected" });
+  fit.dataset.view = "fit";
+  fit.addEventListener("click", () => ctx.viewport.fitSelection() ?? ctx.viewport.fit());
+  group.append(fit);
+  $("viewport").append(group);
+}
+
 // What is selected, read by the e2e test (17d draws it on screen).
 ctx.selection.onChange((items) => (document.body.dataset.selection = items.map((r) => r.id).join(" ")));
 

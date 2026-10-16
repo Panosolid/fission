@@ -40,6 +40,12 @@ export interface ViewportHighlight {
 /** Nothing highlighted. */
 export const NO_HIGHLIGHT: ViewportHighlight = Object.freeze({ body: false, faces: [], edges: [] });
 
+/** A corner of the view cube: an isometric view from that corner (front is −Y, right is +X). */
+export type CornerView = `${"top" | "bottom"}-${"front" | "back"}-${"left" | "right"}`;
+
+/** The standard views: "home" (three-quarter, the default), the six faces of the view cube and its eight corners. */
+export type ViewName = "home" | "top" | "bottom" | "front" | "back" | "left" | "right" | CornerView;
+
 export interface SharedViewport {
   /** The element the viewport fills. */
   readonly element: HTMLElement;
@@ -48,6 +54,10 @@ export interface SharedViewport {
   bodyFraming(): Framing;
   /** Frames the current body; returns what it framed (null if none). */
   fit(): Framing | null;
+  /** Turns the camera to a standard view framing the current body; returns what it framed (null if none). */
+  setView(name: ViewName): Framing | null;
+  /** Frames the selection (as last shown) from the current direction; null, camera untouched, when nothing is selected. */
+  fitSelection(): Framing | null;
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
   setOverlay(overlay: AnalysisOverlay): void;
   clearOverlay(id: string): void;

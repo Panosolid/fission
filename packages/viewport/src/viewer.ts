@@ -2,6 +2,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
+import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
+import { ViewCube } from "./viewcube.ts";
+import { selectionFraming } from "./framing.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -37,6 +40,8 @@ export class Viewer implements SharedViewport {
     this.legend.className = "overlay-legend";
     this.legend.hidden = true;
     container.appendChild(this.legend);
+    const cube = new ViewCube((name) => this.setView(name));
+    container.appendChild(cube.element);
 
     this.camera.position.set(80, -100, 70);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -87,6 +92,7 @@ export class Viewer implements SharedViewport {
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
+      cube.render(this.renderer, this.camera);
     });
   }
 
@@ -245,25 +251,61 @@ export class Viewer implements SharedViewport {
     return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
   }
 
-  /** Frames the current body; returns what it framed (null if none). */
+  /** Frames the current body from the home view; returns what it framed (null if none). */
   fit(): Framing | null {
+    return this.setView("home");
+  }
+
+  /** Turns the camera to a standard view, framing the current body; returns what it framed (null if none). */
+  setView(name: ViewName): Framing | null {
     const framing = this.bodyFraming();
     if (!(framing.radius > 0)) return null;
-    // Spend any orbit still easing out (damping) first, so the camera does
-    // not drift away from the new framing over the next frames.
+    const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
+    this.place(position, target, up);
+    return framing;
+  }
+
+  /**
+   * Frames what is selected (faces and edges; a selected body is the whole
+   * body) from the current direction; returns what it framed, or null when
+   * nothing is selected, leaving the camera alone.
+   */
+  fitSelection(): Framing | null {
+    const { body, faces, edges } = this.highlight;
+    if (!this.mesh) return null;
+    const framing = faces.length || edges.length ? selectionFraming(this.mesh, faces, edges) : body ? this.bodyFraming() : null;
+    if (!framing || !(framing.radius > 0)) return null;
+    this.spendDamping();
+    const towardCamera = this.camera.position.clone().sub(this.controls.target).normalize();
+    const dist = fitDistance(framing.radius, this.camera.fov, this.camera.aspect);
+    const target = new THREE.Vector3(...framing.centre);
+    const position = target.clone().addScaledVector(towardCamera, dist);
+    // The camera's current screen-up keeps the roll when looking straight down.
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    this.place(position.toArray(), framing.centre, up.toArray());
+    return framing;
+  }
+
+  /** Spends any orbit still easing out (damping), so the camera does not drift from a new framing over the next frames. */
+  private spendDamping() {
     this.controls.enableDamping = false;
     this.controls.update();
     this.controls.enableDamping = true;
-    const centre = new THREE.Vector3(...framing.centre);
-    const radius = framing.radius;
-    const dist = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2));
-    const dir = new THREE.Vector3(0.6, -0.8, 0.55).normalize();
-    this.camera.position.copy(centre).addScaledVector(dir, dist);
-    this.controls.target.copy(centre);
+  }
+
+  private place(position: readonly number[], target: readonly number[], up: readonly number[]) {
+    this.spendDamping();
+    // The orbit stays about Z (camera.up); straight down or up, the view's
+    // own up picks the camera's roll (orbitSafeOffset).
+    const raw = new THREE.Vector3(...position).sub(new THREE.Vector3(...target));
+    const dist = raw.length();
+    const offset = new THREE.Vector3(...orbitSafeOffset(raw.toArray(), [up[0], up[1], up[2]]));
+    this.controls.target.set(target[0], target[1], target[2]);
+    this.camera.position.copy(this.controls.target).add(offset);
     this.camera.near = dist / 1000;
     this.camera.far = dist * 100;
     this.camera.updateProjectionMatrix();
-    return framing;
+    this.controls.update();
   }
 
   private resize() {
