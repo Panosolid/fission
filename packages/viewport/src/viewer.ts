@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
-import { orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
+import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
 import { selectionFraming } from "./framing.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
@@ -260,7 +260,7 @@ export class Viewer implements SharedViewport {
   setView(name: ViewName): Framing | null {
     const framing = this.bodyFraming();
     if (!(framing.radius > 0)) return null;
-    const { position, target, up } = viewBasis(name, framing, this.camera.fov);
+    const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
     this.place(position, target, up);
     return framing;
   }
@@ -277,7 +277,7 @@ export class Viewer implements SharedViewport {
     if (!framing || !(framing.radius > 0)) return null;
     this.spendDamping();
     const towardCamera = this.camera.position.clone().sub(this.controls.target).normalize();
-    const dist = framing.radius / Math.sin((this.camera.fov * Math.PI) / 360);
+    const dist = fitDistance(framing.radius, this.camera.fov, this.camera.aspect);
     const target = new THREE.Vector3(...framing.centre);
     const position = target.clone().addScaledVector(towardCamera, dist);
     // The camera's current screen-up keeps the roll when looking straight down.

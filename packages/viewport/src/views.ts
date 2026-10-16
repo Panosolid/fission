@@ -45,14 +45,27 @@ export interface ViewBasis {
 }
 
 /**
- * The camera for a standard view of a framed sphere: it looks at the centre
- * from `radius / sin(fov / 2)` away, the distance at which the sphere just
- * fits the vertical field of view (vertical fov in degrees).
+ * How far from a sphere's centre a camera must sit for the sphere to just
+ * fit the narrower of its two fields of view: `radius / sin(half-angle)`,
+ * where the half-angle is half the vertical fov (degrees), or on a canvas
+ * taller than wide (aspect = width / height < 1) the horizontal half-angle
+ * atan(tan(fov / 2) × aspect).
  */
-export function viewBasis(name: ViewName, framing: Framing, fovDeg = 45): ViewBasis {
+export function fitDistance(radius: number, fovDeg: number, aspect = 1): number {
+  const half = (fovDeg * Math.PI) / 360;
+  const narrower = aspect < 1 ? Math.atan(Math.tan(half) * aspect) : half;
+  return radius / Math.sin(narrower);
+}
+
+/**
+ * The camera for a standard view of a framed sphere: it looks at the centre
+ * from `fitDistance` away, so the sphere just fits the canvas whatever its
+ * shape (vertical fov in degrees, aspect = width / height).
+ */
+export function viewBasis(name: ViewName, framing: Framing, fovDeg = 45, aspect = 1): ViewBasis {
   const { towardCamera, up } = VIEWS[name];
   const n = Math.hypot(...towardCamera);
-  const dist = framing.radius / Math.sin((fovDeg * Math.PI) / 360);
+  const dist = fitDistance(framing.radius, fovDeg, aspect);
   const target: Vec3 = [...framing.centre];
   const position = target.map((c, i) => c + (towardCamera[i] / n) * dist) as Vec3;
   return { position, target, up: [...up] };

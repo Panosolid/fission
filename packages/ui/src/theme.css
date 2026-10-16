@@ -69,8 +69,9 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 /* Toggles for the side panels, shown only at phone width. */
 #panel-toggles { display: none; }
 
-/* Phone width: one column (toolbar, panel toggles, viewport, then the open
-   panels), never wider than the screen. The toolbar scrolls sideways inside
+/* Phone width: one column (toolbar, panel toggles, the browser when open,
+   viewport, properties), never wider than the screen; the column keeps the
+   document order, so keyboard focus moves down it as it is drawn. The toolbar scrolls sideways inside
    itself; a closed panel is hidden, and a toggle for an empty slot too. */
 @media (max-width: 640px) {
   #workspace { display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
@@ -80,9 +81,9 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #panel-toggles { display: flex; gap: 6px; padding: 6px 12px; order: 1; flex-shrink: 0; background: #1c1f24; border-bottom: 1px solid #2a2e35; }
   #panel-toggles button[aria-expanded="true"] { background: #23384f; border-color: #4aa8ff; }
   #workspace:has(#browser:empty) #browser-toggle, #workspace:has(#properties:empty) #properties-toggle { display: none; }
-  #viewport { height: 55vh; flex-shrink: 0; order: 2; }
+  #viewport { height: 55vh; flex-shrink: 0; order: 3; }
   #browser, #properties { width: auto; flex-shrink: 0; border-left: none; border-right: none; border-top: 1px solid #2a2e35; overflow-y: visible; }
-  #browser { order: 3; }
+  #browser { order: 2; }
   #properties { order: 4; }
   #workspace[data-browser="closed"] #browser, #workspace[data-properties="closed"] #properties { display: none; }
   #workspace #assistant { width: auto; order: 5; flex-shrink: 0; border-left: none; border-top: 1px solid #2a2e35; }

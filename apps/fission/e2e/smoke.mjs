@@ -26,7 +26,9 @@ const setSize = async (id, value) => {
 // here from the framing in viewer.ts fit() rather than asked of the viewer:
 // the box is framed as a sphere at its centre (20, 15, 10) with
 // r = √(40² + 30² + 20²)/2 = √2900/2, the camera sits r / sin(22.5°) away
-// along (0.6, −0.8, 0.55), looks at the centre with Z up, fov 45°.
+// along (0.6, −0.8, 0.55), looks at the centre with Z up, fov 45°. On a
+// canvas taller than wide the sphere is fitted to the narrower horizontal
+// field of view instead: half-angle atan(tan 22.5° × width / height).
 // `box` is the canvas's bounding box. `view` names another direction to
 // the camera and screen-up (the standard views of views.ts), and another
 // framed sphere (Fit on a selection).
@@ -38,7 +40,9 @@ function screenPoint(box, [px, py, pz], view = HOME) {
   const { centre } = view;
   const n = Math.hypot(...view.toward);
   const dir = view.toward.map((d) => d / n);
-  const dist = view.radius / Math.sin(Math.PI / 8);
+  const aspect = box.width / box.height;
+  const half = aspect < 1 ? Math.atan(Math.tan(Math.PI / 8) * aspect) : Math.PI / 8;
+  const dist = view.radius / Math.sin(half);
   const cam = centre.map((c, i) => c + dir[i] * dist);
   const fwd = dir.map((d) => -d);
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -464,6 +468,40 @@ try {
     await page.mouse.up();
     await settle();
     assert.ok((await canvasImage()) === before, "a drag on the cube changes nothing");
+    await page.click("#view-controls [data-view=home]");
+    await settle();
+  });
+
+  await check("the camera survives switching workspaces and a rebuild that does not re-frame", async () => {
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const canvasImage = () => page.evaluate(() => document.querySelector("#viewport canvas").toDataURL());
+    const settle = async () => {
+      await page.mouse.move(box.x + 2, box.y + box.height - 2); // nothing hovered
+      await page.waitForTimeout(200);
+    };
+    await page.click("#view-controls [data-view=front]");
+    await settle();
+    const front = await canvasImage();
+    // Laser shows the same viewport; back in Design the camera is where it was.
+    await page.click("[data-workspace=laser]");
+    await page.click("[data-workspace=design]");
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    await settle();
+    assert.ok((await canvasImage()) === front, "Front is kept across a workspace switch");
+    // 41 mm and back: two rebuilds well inside the framed sphere, so neither re-frames.
+    const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
+    await setSize("width", 41);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,600 mm³"); // 41·30·20
+    await setSize("width", 40);
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await settle();
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius, "not re-framed");
+    assert.ok((await canvasImage()) === front, "Front is kept across rebuilds");
+    // Still Front: (20, 0, 10) picks the front face.
+    const s = screenPoint(box, [20, 0, 10], FRONT);
+    await page.mouse.click(s.x, s.y);
+    assert.equal(await page.evaluate(() => document.body.dataset.selection ?? ""), "face:feature-1/2");
+    await page.keyboard.press("Escape");
     await page.click("#view-controls [data-view=home]");
     await settle();
   });
@@ -923,7 +961,7 @@ try {
       await phone.goto(url + "#design");
       await phone.waitForFunction(() => document.querySelector("#viewport")?.dataset.shape === "box");
       const box = await phone.locator("#viewport canvas").boundingBox();
-      const top = screenPoint(box, [20, 15, 20]); // face 1 (fit() frames the same way at any aspect)
+      const top = screenPoint(box, [20, 15, 20]); // face 1 (framed to the narrower, horizontal fov)
       await phone.touchscreen.tap(top.x, top.y);
       assert.equal(await phone.evaluate(() => document.body.dataset.selection ?? ""), "face:feature-1/1");
       await phone.screenshot({ path: "e2e/design-375-tap.png" });
@@ -933,6 +971,81 @@ try {
     } finally {
       await phone.close();
     }
+  });
+
+  await check("phone width: View buttons and cube reachable, clear of the panel toggles; a tap on the cube turns the view", async () => {
+    const phone = await browser.newPage({ viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true });
+    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await phone.goto(url + "#design");
+      await phone.waitForFunction(() => document.querySelector("#viewport")?.dataset.shape === "box");
+      const rect = (sel) => phone.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
+      const [viewport, cube, buttons, toggles] = await Promise.all(["#viewport", "#viewport .view-cube", "#view-controls", "#panel-toggles"].map(rect));
+      const inside = (a, b) => a.left >= b.left && a.right <= b.right && a.top >= b.top && a.bottom <= b.bottom;
+      const apart = (a, b) => a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top;
+      assert.ok(inside(cube, viewport) && inside(buttons, viewport), "cube and buttons over the viewport");
+      assert.ok(apart(cube, toggles) && apart(buttons, toggles), "neither covers the panel toggles");
+      assert.ok(apart(cube, buttons), "the cube and the View buttons do not overlap");
+      assert.ok(toggles.bottom <= viewport.top, "the toggles sit above the viewport");
+      // Every View button is whole on screen and at least 24 px tall to tap.
+      for (const b of await phone.$$eval("#view-controls button", (els) => els.map((e) => e.getBoundingClientRect().toJSON()))) {
+        assert.ok(b.left >= 0 && b.right <= 375 && b.height >= 24, JSON.stringify(b));
+      }
+      const wide = await phone.evaluate(() => document.documentElement.scrollWidth);
+      assert.equal(wide, 375, "no sideways scroll");
+      const image = () => phone.evaluate(() => document.querySelector("#viewport canvas").toDataURL());
+      const settle = () => phone.waitForTimeout(250);
+      await phone.tap("#view-controls [data-view=top]");
+      await settle();
+      const fromButton = await image();
+      await phone.tap("#view-controls [data-view=home]");
+      await settle();
+      assert.ok((await image()) !== fromButton, "home and top differ on screen");
+      // The cube's Top face in home: 22.1 px above the centre of the 96 px cube (as on the desktop).
+      const k = cube.height / 2 / 1.9;
+      await phone.touchscreen.tap(cube.left + cube.width / 2, cube.top + cube.height / 2 - 0.8762 * k);
+      await settle();
+      assert.ok((await image()) === fromButton, "a tap on the cube's Top gives the Top button's camera");
+      assert.equal(await phone.evaluate(() => document.body.dataset.selection ?? ""), "", "the tap did not pick");
+      await phone.screenshot({ path: "e2e/design-375-top.png" });
+    } finally {
+      await phone.close();
+    }
+  });
+
+  await check("phone width: focus moves top bar, toolbar, panel toggles, View buttons, properties", async () => {
+    await page.setViewportSize({ width: 375, height: 740 });
+    await page.goto(url + "#design");
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    // Tab from the top and note each region and how far down the page it is drawn.
+    const tabRegions = async () => {
+      // Start on the page's first focusable element (in the top bar), whatever was clicked last.
+      await page.evaluate(() => document.querySelector("#topbar :is(a[href], button, input, select)").focus());
+      const regions = [{ id: "topbar", top: 0 }];
+      for (let i = 0; i < 120 && regions.at(-1)?.id !== "properties"; i++) {
+        await page.keyboard.press("Tab");
+        const r = await page.evaluate(() => {
+          const el = document.activeElement?.closest("#topbar, #toolbar, #panel-toggles, #browser, #view-controls, #properties");
+          return el ? { id: el.id, top: el.getBoundingClientRect().top + document.querySelector("#workspace").scrollTop } : { id: "other", top: -1 };
+        });
+        if (r.id !== regions.at(-1)?.id) regions.push(r);
+      }
+      return regions;
+    };
+    const ids = (regions) => regions.map((r) => r.id);
+    const downward = (regions) => regions.every((r, i) => i === 0 || r.top >= regions[i - 1].top);
+    if ((await page.getAttribute("#browser-toggle", "aria-expanded")) === "true") await page.click("#browser-toggle");
+    let regions = await tabRegions();
+    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "view-controls", "properties"], "browser folded: no stops in it");
+    assert.ok(downward(regions), JSON.stringify(regions));
+    // Opened, the browser sits under its toggle, above the viewport, so focus still moves down the screen.
+    await page.click("#browser-toggle");
+    await page.screenshot({ path: "e2e/design-375-browser-open.png" });
+    regions = await tabRegions();
+    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "browser", "view-controls", "properties"]);
+    assert.ok(downward(regions), JSON.stringify(regions));
+    await page.click("#browser-toggle");
+    await page.setViewportSize({ width: 1000, height: 640 });
   });
 
   await check("no errors in the browser console", async () => {

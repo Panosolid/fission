@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CUBE_CORNER, VIEW_NAMES, cubeView, orbitSafeOffset, viewBasis, type ViewBasis } from "../src/views.ts";
+import { CUBE_CORNER, VIEW_NAMES, cubeView, fitDistance, orbitSafeOffset, viewBasis, type ViewBasis } from "../src/views.ts";
 
 type Vec3 = [number, number, number];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -124,6 +124,30 @@ test("a corner view looks from that corner along the cube's diagonal, Z up", () 
   // The opposite corner looks the other way.
   const w = viewBasis("bottom-back-left", box);
   assert.deepEqual(w.position.map((p, i) => Math.round(p - w.target[i] + (v.position[i] - v.target[i]))), [0, 0, 0]);
+});
+
+test("fitDistance: the sphere fits the narrower of the two fields of view", () => {
+  // fov 90°: the vertical half-angle is 45°, so on a square or wide canvas
+  // the distance is r / sin 45° = √2 r, whatever the width.
+  assert.ok(Math.abs(fitDistance(1, 90, 1) - Math.SQRT2) < 1e-12);
+  assert.ok(Math.abs(fitDistance(1, 90, 2) - Math.SQRT2) < 1e-12);
+  // Twice as tall as wide: tan(horizontal half-angle) = tan 45° × 0.5 = 0.5,
+  // so sin = 0.5 / √(1 + 0.25) = 1/√5 and the distance is √5 r = 2.2361 r.
+  assert.ok(Math.abs(fitDistance(1, 90, 0.5) - Math.sqrt(5)) < 1e-12);
+  // The default box on the 375 × 407 phone canvas, fov 45°: tan h = 0.414214 × 375/407
+  // = 0.381647, sin h = 0.381647 / √(1 + 0.145655) = 0.356563, r / sin h = 26.9258 / 0.356563 = 75.5148.
+  assert.ok(Math.abs(fitDistance(Math.sqrt(2900) / 2, 45, 375 / 407) - 75.5148) < 1e-3);
+});
+
+test("viewBasis on a tall canvas: the sphere's sides touch the left and right edges", () => {
+  // Aspect 0.5, fov 45°. The sphere's silhouette is tangent to the frustum's
+  // side planes: the angle from the view axis to a tangent is asin(r / d),
+  // which must equal the horizontal half-angle atan(tan 22.5° × 0.5) = 11.7°.
+  const v = viewBasis("front", box, 45, 0.5);
+  const d = Math.hypot(...v.position.map((p, i) => p - v.target[i]));
+  assert.ok(Math.abs(Math.asin(box.radius / d) - Math.atan(Math.tan(Math.PI / 8) * 0.5)) < 1e-12);
+  // Framed to the vertical fov only (the old way) the sphere would spill sideways.
+  assert.ok(Math.asin(box.radius / dist) > Math.atan(Math.tan(Math.PI / 8) * 0.5));
 });
 
 test("15 views: home, six faces, eight corners", () => {
