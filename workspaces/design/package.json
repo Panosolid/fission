@@ -13,5 +13,8 @@
     "@fission/core": "*",
     "@fission/ui": "*",
     "@fission/viewport": "*"
+  },
+  "devDependencies": {
+    "happy-dom": "20.14.5"
   }
 }

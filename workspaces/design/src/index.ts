@@ -3,6 +3,7 @@ export { outline, type ProfileKind, type ShapeKind, type Loop, type Outline } fr
 export { designWorkspace } from "./workspace.ts";
 export { DESIGN_COMMANDS, documentFor, SHAPES } from "./commands.ts";
 export { browserTree, type BrowserNode } from "./browser.ts";
+export { parameterRows, propertiesPanel, SIZE_KEYS, type ParameterRow, type PropertiesPanel, type SizeKey } from "./properties.ts";
 export { toolbarGroups, type ToolButton, type ToolGroup } from "./toolbar.ts";
 export { buildSpec, specFor } from "./spec.ts";
 export { lastFeature, partDocument, profileLabel, readDesignDocument, specOf, type DesignDocument, type ReadyProfile } from "./document.ts";

@@ -2,8 +2,7 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { describeProvenance, latestOnly, type Command, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
-import { formatQuantity as fmt } from "@fission/ui";
+import { latestOnly, type Command, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -13,24 +12,7 @@ import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
 import { toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
-
-const PANEL = `
-  <label><span id="width-label">Width</span> <input id="width" type="number" value="40" step="any" /> mm</label>
-  <label id="depth-row">Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
-  <label id="height-row"><span id="height-label">Height</span> <input id="height" type="number" value="20" step="any" /> mm</label>
-  <dl id="feature-info">
-    <dt>Feature</dt><dd id="intent">…</dd>
-    <dt>Made from</dt><dd id="provenance">…</dd>
-  </dl>
-  <dl id="stats">
-    <dt>Volume</dt><dd id="volume">…</dd>
-    <dt>Area</dt><dd id="area">…</dd>
-    <dt>Topology</dt><dd id="topology">…</dd>
-    <dt>Validation</dt><dd id="status">…</dd>
-  </dl>
-  <p id="stale-note" hidden>Out of date: these numbers are for the last part that built.</p>
-  <p id="error"></p>
-  <p id="stl-note"></p>`;
+import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 
 /** Hands `bytes` to the browser as a file download. */
 function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
@@ -124,10 +106,8 @@ function browser(slot: HTMLElement, doc: DesignDocument) {
 }
 
 function mount(ctx: WorkspaceContext): () => void {
-  // Until 16c–16d split it up, the rest of the old side panel sits in the properties slot.
-  ctx.properties.innerHTML = PANEL;
-  const $ = <T extends HTMLElement>(id: string) => ctx.properties.querySelector<T>(`#${id}`)!;
-  const inputs = ["width", "depth", "height"].map((id) => $<HTMLInputElement>(id));
+  const panel = propertiesPanel(ctx.properties);
+  const { inputs } = panel;
   let shape: ShapeKind = saved?.shape ?? "box";
   if (saved) inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
@@ -139,10 +119,7 @@ function mount(ctx: WorkspaceContext): () => void {
 
   /** Never shows stale numbers unmarked: dims them while out of date, and says so if the rebuild failed. */
   function markStale(failed = false) {
-    const stale = ctx.graph.isStale(PART_VIEW);
-    $("stats").classList.toggle("stale", stale);
-    $("stats").dataset.stale = String(stale); // read by the e2e test
-    $("stale-note").hidden = !(stale && failed);
+    panel.markStale(ctx.graph.isStale(PART_VIEW), failed);
   }
 
   /** The STL-precision overlay: the whole part, while its last export warned. */
@@ -164,7 +141,7 @@ function mount(ctx: WorkspaceContext): () => void {
     if (command.op === "export_stl") return exportStl();
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
     shape = command.shape as ShapeKind;
-    for (const [i, key] of ["width", "depth", "height"].entries()) if (typeof command[key] === "number") inputs[i].value = String(command[key]);
+    for (const [i, key] of SIZE_KEYS.entries()) if (typeof command[key] === "number") inputs[i].value = String(command[key]);
     return update();
   }
 
@@ -173,12 +150,7 @@ function mount(ctx: WorkspaceContext): () => void {
     saved = { shape, sizes: inputs.map((i) => i.value) };
     for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
-    const primitive = kind === "box" || kind === "cylinder" || kind === "sphere";
-    $("height-label").textContent = primitive ? "Height" : "Extrude by";
-    const round = kind === "cylinder" || kind === "sphere";
-    $("width-label").textContent = round ? "Diameter" : "Width";
-    $("depth-row").hidden = round;
-    $("height-row").hidden = kind === "sphere";
+    panel.setShape(kind);
     // The panel edits feature #1 of the one-step timeline; the project holds it.
     const doc = documentFor(partCommand());
     syncGraph(ctx.graph, doc, (ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
@@ -186,8 +158,7 @@ function mount(ctx: WorkspaceContext): () => void {
     browser(ctx.browser, doc);
     markStale();
     const feature = lastFeature(doc);
-    $("intent").textContent = feature.intent.summary;
-    $("provenance").textContent = describeProvenance(feature.provenance);
+    panel.showFeature(feature);
     try {
       const { current, value: view } = await build(doc);
       if (!current || !shown) return;
@@ -202,37 +173,28 @@ function mount(ctx: WorkspaceContext): () => void {
         framedKind = kind;
         viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
       }
-      $("volume").textContent = `${fmt(view.volume)} mm³`;
-      $("area").textContent = `${fmt(view.area)} mm²`;
-      $("topology").textContent = `${view.vertices} V · ${view.edges} E · ${view.faces} F`;
-      const status = $("status");
-      status.textContent = view.errors.length === 0 ? "valid" : `${view.errors.length} problem(s)`;
-      status.className = view.errors.length === 0 ? "ok" : "bad";
-      $("error").textContent = view.errors.join("\n");
+      panel.showBody(view);
       viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
     } catch (e) {
       if (!shown) return;
-      $("error").textContent = e instanceof Error ? e.message : String(e);
+      panel.showError(e instanceof Error ? e.message : String(e));
       markStale(true);
     }
   }
 
   async function exportStl() {
     const kind = shape;
-    const note = $("stl-note");
     try {
       const doc = documentFor(partCommand());
       const file = await kernel.call("export_stl", specOf(doc, lastFeature(doc)), kind);
       download(file.bytes, `fission-${kind}.stl`);
-      note.textContent = file.warning ?? "";
-      note.className = file.warning ? "bad" : "";
+      panel.showStlNote(file.warning ?? "", Boolean(file.warning));
       // Mark the part on screen too: every face moves in single precision.
       if (file.warning)
         viewport.setOverlay({ id: STL_OVERLAY, label: "Too big for an accurate STL", detail: file.warning, marks: [{ target: { body: true }, severity: "warning" }] });
       else viewport.clearOverlay(STL_OVERLAY);
     } catch (e) {
-      note.textContent = e instanceof Error ? e.message : String(e);
-      note.className = "bad";
+      panel.showStlNote(e instanceof Error ? e.message : String(e), true);
     }
   }
 
