@@ -2,7 +2,7 @@
 // for now). Edits return a new document and never change the old one or
 // the original pixels, so undo (step 20) can keep snapshots and links can
 // always rebuild from the original. Not saved with the project yet: images
-// join the project file at roadmap G3.
+// join the project file at roadmap G6.
 
 import type { ImageRep } from "@fission/core";
 import { type Adjustment, applyAdjustments, checkAdjustment } from "./adjust.ts";
