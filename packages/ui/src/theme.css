@@ -163,6 +163,14 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 .downstream-chip .chip-mark { color: #f5b14c; }
 .downstream-chip.updating .chip-value, .downstream-chip.needs-rerun .chip-value { opacity: 0.6; }
 .downstream-chip.missing .chip-mark { color: #ff6b6b; }
+.change-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; padding: 6px 8px; margin-bottom: 6px; border-radius: 6px; border-left: 3px solid #4aa8ff; background: #23272e; }
+.change-note.needs-rerun { border-left-color: #f5b14c; }
+.change-note .note-body { flex: 1; }
+.change-note details { margin-top: 4px; color: #aab0b8; }
+.change-note summary { cursor: pointer; }
+.change-note ol { margin: 4px 0 0; padding-left: 18px; }
+.change-note .note-dismiss { font: inherit; font-size: 14px; line-height: 1; background: none; border: none; color: inherit; cursor: pointer; padding: 0 2px; opacity: 0.7; }
+.change-note .note-dismiss:hover, .change-note .note-dismiss:focus-visible { opacity: 1; }
 #assistant { width: 320px; padding: 16px; background: #1c1f24; border-left: 1px solid #2a2e35; overflow-y: auto; }
 #assistant[hidden] { display: none; }
 #assistant h4 { margin: 12px 0 4px; }

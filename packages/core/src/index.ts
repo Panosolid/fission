@@ -31,6 +31,8 @@ export type { Cost, GraphNode, Staleness } from "./model/graph.ts";
 export { DependencyGraph } from "./model/graph.ts";
 export type { DownstreamSource, DownstreamState, DownstreamSummary } from "./model/downstream.ts";
 export { DownstreamRegistry, summarize } from "./model/downstream.ts";
+export type { ChangeCause, ChangeNote, ChangeNoteState } from "./model/change-notes.ts";
+export { ChangeNotes, noteText } from "./model/change-notes.ts";
 export type { Command, CommandSpec, ParamSpec, Parsed } from "./model/commands.ts";
 export { commandListSchema, commandSchema, parseCommand, parseCommandList } from "./model/commands.ts";
 export type { Feature, Intent, Origin, ParameterValue, Provenance, Timeline } from "./model/feature.ts";
