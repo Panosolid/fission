@@ -80,7 +80,7 @@ The panel and the assistant reach the same result through these commands (`docum
 
    The `"small"` level fits small local models. `"large"` gives more.
 2. **Ask** (`commands.ts`). `askForCommands` uses the schema as constrained output where the provider supports it, and otherwise puts the schema in the instructions. It checks the answer. If the answer is bad, it retries once and tells the model what was wrong. After a second bad answer it fails clearly with "… Nothing was changed."
-3. **Preview and decide** (`actions.ts`, draft). `proposeAction(commands)` builds the result off to the side, shows it, and then either accepts it as one undo step or rejects it, leaving the project unchanged. This needs undo (step 20) and the timeline (step 32).
+3. **Preview and decide** (`actions.ts`). `proposeAction(commands, …)` shows what would change (until the timeline, step 32, a diff of parameters before and after; ghosted geometry and highlights come with stable ids), and then either accepts it as one undo step (`acceptCommands`, through the workspace's own `run`) or rejects it, leaving the project unchanged. An accept after the project changed since the preview is refused. The panel (`apps/fission/src/assistant.ts`) does this for Design's `set_part`; `systemPrompt` (`prompt.ts`) is the one instruction text, shared with the evaluation.
 
 ## Specialist models (`specialists.ts`)
 
@@ -100,7 +100,7 @@ Each one is downloaded on first use, after its size is shown. They are placehold
 
 - **Command fuzzing.** `packages/testing/test/command-fuzz.test.ts` and `journeys/command-fuzz.journey.ts` check that random and malformed commands and answer texts always give a clean error or a valid command. Valid ones are built on the real kernel, which must return a valid body or a clean error.
 - **Evaluation** (`packages/testing/src/ai-eval.ts`). `EVAL_CASES` holds fixed prompts, each with a project state and the expected commands. `runEval` scores any provider, and `successRates` gives the rate for each task type, which is tracked over time like the fuzzer's metrics. Cases that need commands not built yet name what they wait for.
-- **Still to come** (with steps 20 and 32): tests that an accepted action is exactly one undo step, and that a rejected preview leaves the project unchanged.
+- **Preview and undo.** `packages/ai/test/propose.test.ts` checks that an accepted action is exactly one undo step and a rejected or stale one leaves the project unchanged; `apps/fission/e2e/assistant.mjs` checks the same in the browser, with the model's answers stood in by the test.
 
 ## Fission's own model (planned, starts after step 32)
 

@@ -16,7 +16,7 @@
 import type { KernelCalls } from "../kernel/kernel-client.ts";
 import type { ActionRegistry } from "./actions.ts";
 import type { ChangeNotes } from "./change-notes.ts";
-import type { CommandSpec } from "./commands.ts";
+import type { Command, CommandSpec } from "./commands.ts";
 import type { DownstreamRegistry } from "./downstream.ts";
 import type { DependencyGraph } from "./graph.ts";
 import type { ShortcutSpec } from "./shortcuts.ts";
@@ -104,6 +104,13 @@ export interface MountedWorkspace {
    * it would have done. A workspace never listens to the keyboard itself.
    */
   shortcut?(id: string, event: Event): boolean | void;
+  /**
+   * Does one of the plugin's `commands` exactly as its own buttons would:
+   * how the AI assistant applies an accepted change (inside one undo step).
+   * The project must have changed by the time it returns; work it starts
+   * afterwards (a rebuild) may finish later. Throws for a command it lacks.
+   */
+  run?(command: Command): void | Promise<void>;
   /** Gone for good (a project opened, its pane closed): stops listening if awake, and empties every slot it filled. */
   unmount(): void;
 }
