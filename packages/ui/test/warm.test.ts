@@ -38,6 +38,8 @@ test("hand-worked: Design, Image, Design again wakes the first Design; nothing i
     "wake image#2 in main",
   ]);
   assert.equal(pool.showing("main"), "image");
+  assert.equal(pool.awake("main"), 2, "Image #2 is the one on screen, so it gets the keys");
+  assert.equal(pool.awake("split"), null, "nothing in the split pane");
   assert.equal(pool.paneOf("design"), "main");
 });
 
@@ -164,6 +166,12 @@ test("seeded random switching matches a model: one instance per workspace, awake
       const living = lives.filter((l) => !l.gone);
       for (const id of ids) assert.ok(living.filter((l) => l.id === id).length <= 1, `seed ${seed}: one instance of ${id}`);
       for (const l of living) assert.equal(l.awake, shown.get(l.pane) === l.id, `seed ${seed} step ${step}: ${l.id} awake exactly when shown`);
+      // Keys go to `awake(pane)` (X7b): it must be the awake instance, never a sleeping one.
+      for (const pane of panes) {
+        const n = pool.awake(pane);
+        if (n === null) assert.equal(shown.get(pane), undefined, `seed ${seed} step ${step}: nothing awake in ${pane}`);
+        else assert.ok(lives[n - 1].awake && !lives[n - 1].gone && lives[n - 1].pane === pane, `seed ${seed} step ${step}: ${pane}'s keys go to an awake instance`);
+      }
     }
   }
 });

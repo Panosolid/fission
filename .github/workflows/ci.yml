@@ -21,8 +21,99 @@ jobs:
         working-directory: kernel
       - run: cargo test
         working-directory: kernel
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install mpmath
       - run: python3 prototypes/vectors.py
       - run: python3 -m unittest discover -s .github/scripts
+      - run: python3 -m unittest discover -s prototypes/oracle -p 'test_*.py'
+
+  # Mutation testing of the kernel code this change touches: every mutant
+  # cargo mutants makes in the changed lines must be caught by a lib test
+  # (kernel/CLAUDE.md, Mutation testing). Equivalent mutants, which no test
+  # can catch, are excluded in kernel/.cargo/mutants.toml with the reason.
+  # Pushes are tested by the pull request run of the same commit; auto-merge's
+  # workflow_dispatch runs it on the commit it makes.
+  mutants-in-diff:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: Mutants in the changed kernel code
+        working-directory: kernel
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          # Unoptimised builds are about five times faster and give the same
+          # result (kernel/CLAUDE.md, Mutation testing).
+          CARGO_PROFILE_DEV_OPT_LEVEL: "0"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+        run: |
+          base=${BASE:-$(git merge-base origin/main HEAD)}
+          git diff --relative "$base" HEAD -- src >"$RUNNER_TEMP/kernel.diff"
+          if [ ! -s "$RUNNER_TEMP/kernel.diff" ]; then
+            echo "No kernel source changed since $base." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          code=0
+          cargo mutants --in-diff "$RUNNER_TEMP/kernel.diff" -j 4 --output "$RUNNER_TEMP" -- --lib || code=$?
+          out="$RUNNER_TEMP/mutants.out"
+          {
+            echo "### Mutation testing of the changed kernel code"
+            for f in caught missed timeout unviable; do echo "- $f: $(cat "$out/$f.txt" 2>/dev/null | grep -c .)"; done
+            if [ -s "$out/missed.txt" ]; then
+              echo; echo "Survivors (each needs a test, or an entry in kernel/.cargo/mutants.toml saying why it is equivalent):"
+              sed 's/^/    /' "$out/missed.txt"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+          if [ -s "$out/missed.txt" ]; then cat "$out/missed.txt"; exit 1; fi
+          # 0: all caught; 3: some timed out (a mutant that loops forever is
+          # caught). Anything else (4: the unmutated tests failed) fails.
+          case $code in 0 | 3) ;; *) echo "cargo mutants exit code $code"; exit 1 ;; esac
+
+  # Which kernel code no test runs at all: a line-by-line report (HTML and
+  # lcov artifacts) and a per-file table in the job summary. Report only, for
+  # now; a floor goes into tests/baseline.json once that exists.
+  coverage:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Kernel test coverage
+        working-directory: kernel
+        run: |
+          cargo llvm-cov --no-report
+          cargo llvm-cov report --summary-only | tee "$RUNNER_TEMP/coverage.txt"
+          cargo llvm-cov report --lcov --output-path "$RUNNER_TEMP/lcov.info"
+          cargo llvm-cov report --html --output-dir "$RUNNER_TEMP/coverage-html"
+          { echo "### Kernel test coverage"; echo '```'; cat "$RUNNER_TEMP/coverage.txt"; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-coverage
+          path: |
+            ${{ runner.temp }}/coverage.txt
+            ${{ runner.temp }}/lcov.info
+            ${{ runner.temp }}/coverage-html/
 
   app:
     runs-on: ubuntu-latest
