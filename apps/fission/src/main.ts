@@ -2,11 +2,13 @@
 // between workspaces. Each workspace fills the layout slots around the
 // shared viewport (toolbar above, browser left, properties right) and
 // empties them on hide; the viewport is shared, so switching keeps the
-// camera and what is on screen.
+// camera and what is on screen. Split view (X3) shows a second workspace
+// beside the first, in slots of its own, with its own camera on the same
+// scene and the same project and selection.
 import "@fission/ui/theme.css";
-import { ActionRegistry, DependencyGraph, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
-import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
-import { Viewer } from "@fission/viewport";
+import { ActionRegistry, DependencyGraph, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
+import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
 import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
 import { showAssistant } from "./assistant.ts";
@@ -43,7 +45,11 @@ const actions = new ActionRegistry();
 for (const w of workspaces) w.registerActions?.(actions);
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const ctx = {
+// The one viewer (one scene); each workspace on screen sees it through a
+// pane of its own: its own camera, the viewer's body, selection and picks.
+const viewer = new Viewer($("viewport"));
+const pane = paneViewports(viewer);
+const ctx: WorkspaceContext = {
   project: emptyProject(),
   projectChanged: () => autosave?.changed(),
   kernel,
@@ -53,17 +59,17 @@ const ctx = {
   toolbar: $("toolbar"),
   browser: $("browser"),
   properties: $("properties"),
-  viewport: new Viewer($("viewport")),
+  viewport: pane(viewer.main),
   representations,
   actions,
 };
 
-// The View group: the viewport is shared, so the shell owns its view
-// buttons, over the viewport's corner. Fit frames the selection when there
-// is one (from the current direction), else the whole body from home.
-{
+// The View group: the shell owns each pane's view buttons, over its
+// viewport's corner. Fit frames the selection when there is one (from the
+// current direction), else the whole body from home.
+function viewControls(viewport: SharedViewport): HTMLElement {
   const group = document.createElement("div");
-  group.id = "view-controls";
+  group.className = "view-controls";
   group.setAttribute("role", "toolbar");
   group.setAttribute("aria-label", "View");
   const views = [
@@ -75,15 +81,17 @@ const ctx = {
   for (const [name, label, title] of views) {
     const b = Object.assign(document.createElement("button"), { type: "button", textContent: label, title });
     b.dataset.view = name;
-    b.addEventListener("click", () => ctx.viewport.setView(name));
+    b.addEventListener("click", () => viewport.setView(name));
     group.append(b);
   }
   const fit = Object.assign(document.createElement("button"), { type: "button", textContent: "Fit", title: "Frame the selection, or the whole body when nothing is selected" });
   fit.dataset.view = "fit";
-  fit.addEventListener("click", () => ctx.viewport.fitSelection() ?? ctx.viewport.fit());
+  fit.addEventListener("click", () => viewport.fitSelection() ?? viewport.fit());
   group.append(fit);
-  $("viewport").append(group);
+  viewport.element.append(group);
+  return group;
 }
+viewControls(ctx.viewport).id = "view-controls";
 
 // What is selected, read by the e2e test (17d draws it on screen).
 ctx.selection.onChange((items) => (document.body.dataset.selection = items.map((r) => r.id).join(" ")));
@@ -98,6 +106,9 @@ const markTab = workspaceSwitcher(
 );
 
 function show(page: Page) {
+  // Choosing the workspace that is in the second pane swaps the two panes.
+  const swap = split?.id === page ? current : null;
+  if (swap) unmountSplit();
   hide();
   hide = () => {};
   const workspace = workspaces.find((w) => w.id === page);
@@ -110,11 +121,118 @@ function show(page: Page) {
   $("community").setAttribute("aria-pressed", String(page === "community"));
   document.body.dataset.activeWorkspace = page; // read by the e2e test
   current = page;
+  if (swap) {
+    if (swap === "community") closeSplit();
+    else mountSplit(swap);
+  }
+  if (split) fillSplitChoice();
   if (!$("assistant").hidden) showAssistant($("assistant"), page, workspace?.title ?? "Community");
   if (location.hash !== `#${page}`) history.replaceState(null, "", `#${page}`);
 }
 
 $("community").addEventListener("click", () => show("community"));
+
+// Split view (X3): Split (over the viewport, wide screens only) puts a
+// second workspace beside the first; the choice in its pane changes which;
+// Close split, or a window too narrow for two, goes back to one. The
+// second workspace gets slots of its own and a pane over a second view;
+// the project, selection, history and registries are the first one's.
+let split: { id: WorkspaceId; view: ViewportView; viewport: SharedViewport; hide: () => void } | null = null;
+const splitEntries = workspaces.map((w) => ({ id: w.id, title: w.title }));
+const shownWorkspace = () => (current === "community" ? null : current);
+function splitCtx(viewport: SharedViewport): WorkspaceContext {
+  return {
+    get project() {
+      return ctx.project;
+    },
+    set project(p) {
+      ctx.project = p;
+    },
+    get graph() {
+      return ctx.graph;
+    },
+    set graph(g) {
+      ctx.graph = g;
+    },
+    projectChanged: () => ctx.projectChanged(),
+    kernel: ctx.kernel,
+    selection: ctx.selection,
+    history: ctx.history,
+    toolbar: $("split-toolbar"),
+    browser: $("split-browser"),
+    properties: $("split-properties"),
+    viewport,
+    representations: ctx.representations,
+    actions: ctx.actions,
+  };
+}
+function fillSplitChoice() {
+  const select = $<HTMLSelectElement>("split-choice");
+  select.replaceChildren(...splitChoices(splitEntries, shownWorkspace()).map((e) => new Option(e.title, e.id, false, e.id === split?.id)));
+}
+/** Shows workspace `id` in the second pane, opening the split if it is closed (the camera of an open one stays). */
+function mountSplit(id: WorkspaceId) {
+  const workspace = workspaces.find((w) => w.id === id);
+  if (!workspace) return;
+  if (split) unmountSplit();
+  else {
+    $("split").hidden = false;
+    $("workspace").dataset.split = "on";
+    const view = viewer.addView($("split-viewport"));
+    const viewport = pane(view);
+    viewControls(viewport);
+    // The new view framed the body at home before the grid had settled its
+    // size; frame it again once it has (the view's own resize runs first,
+    // as its observer was registered first).
+    const settled = new ResizeObserver(([entry]) => {
+      if (!entry || entry.contentRect.width === 0 || split?.view !== view) return;
+      settled.disconnect();
+      view.fit();
+    });
+    settled.observe($("split-viewport"));
+    split = { id, view, viewport, hide: () => {} };
+  }
+  split!.id = id;
+  split!.hide = workspace.mount(splitCtx(split!.viewport));
+  document.body.dataset.split = id; // read by the e2e test
+  $("split-toggle").setAttribute("aria-pressed", "true");
+  fillSplitChoice();
+}
+function unmountSplit() {
+  split?.hide();
+  if (split) split.hide = () => {};
+}
+function closeSplit() {
+  if (!split) return;
+  unmountSplit();
+  $("split-viewport").querySelector(".view-controls")?.remove();
+  viewer.removeView(split.view);
+  split = null;
+  $("split").hidden = true;
+  $("workspace").dataset.split = "off";
+  document.body.dataset.split = "";
+  $("split-toggle").setAttribute("aria-pressed", "false");
+}
+{
+  const toggle = Object.assign(document.createElement("button"), { id: "split-toggle", type: "button", textContent: "Split", title: "Show a second workspace beside this one" });
+  toggle.setAttribute("aria-pressed", "false");
+  toggle.addEventListener("click", () => {
+    if (split) return closeSplit();
+    const id = defaultSplit(splitEntries, shownWorkspace())?.id;
+    if (id) mountSplit(id);
+  });
+  $("viewport").append(toggle);
+  $("split-choice").addEventListener("change", () => mountSplit($<HTMLSelectElement>("split-choice").value as WorkspaceId));
+  $("split-close").addEventListener("click", () => {
+    closeSplit();
+    toggle.focus();
+  });
+  $("workspace").dataset.split = "off";
+  const wide = matchMedia(`(min-width: ${SPLIT_MIN_WIDTH_PX}px)`);
+  wide.addEventListener("change", () => {
+    if (!wide.matches) closeSplit();
+  });
+}
 
 // At phone width Save, Open, AI and Community fold behind Menu (theme.css),
 // leaving the top bar's row to the workspace tabs. Choosing one, Escape or
@@ -192,6 +310,7 @@ $("open-file").addEventListener("change", async () => {
     keep(newId());
     autosave?.changed(); // store the opened file as it is
     show(current); // re-mounts the workspace on the opened project
+    if (split) mountSplit(split.id); // and the second one
     fileStatus("");
   } catch (e) {
     fileStatus(`Couldn't open ${file.name}: ${e instanceof Error ? e.message : String(e)}`);

@@ -32,13 +32,14 @@ body { display: flex; flex-direction: column; }
    viewport. Columns are placed explicitly so an empty slot (hidden) leaves
    the others where they are. */
 #workspace { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
-#toolbar { grid-column: 1 / -1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; background: #1c1f24; border-bottom: 1px solid #2a2e35; }
+#toolbar { grid-column: 1 / -1; grid-row: 1; }
+#toolbar, #split-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; background: #1c1f24; border-bottom: 1px solid #2a2e35; }
 #browser { grid-column: 1; grid-row: 2; width: 220px; border-right: 1px solid #2a2e35; }
 #viewport { grid-column: 2; grid-row: 2; }
 #properties { grid-column: 3; grid-row: 2; width: 300px; border-left: 1px solid #2a2e35; }
 #assistant { grid-column: 4; grid-row: 2; }
-#browser, #properties { padding: 16px; background: #1c1f24; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
-#toolbar:empty, #browser:empty, #properties:empty { display: none; }
+#browser, #properties, #split-browser, #split-properties { padding: 16px; background: #1c1f24; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+#toolbar:empty, #browser:empty, #properties:empty, #split-toolbar:empty, #split-browser:empty, #split-properties:empty { display: none; }
 #workspace aside h2 { font-size: 13px; margin: 8px 0 0; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
 label { display: flex; align-items: center; gap: 8px; }
 label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background: #14161a; border: 1px solid #2a2e35; color: inherit; border-radius: 4px; font-family: ui-monospace, monospace; }
@@ -51,9 +52,9 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #status.ok { color: #3ddc97; }
 #status.bad { color: #ff6b6b; }
 #error { color: #ff6b6b; min-height: 1em; margin: 0; white-space: pre-wrap; }
-#viewport { min-width: 0; position: relative; }
-#view-controls { position: absolute; left: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
-#workspace #view-controls button { padding: 5px 8px; background: rgba(38, 42, 49, 0.9); font-size: 13px; }
+#viewport, #split-viewport { min-width: 0; position: relative; }
+.view-controls { position: absolute; left: 8px; bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+#workspace .view-controls button, #workspace #split-bar button { padding: 5px 8px; background: rgba(38, 42, 49, 0.9); font-size: 13px; }
 .view-cube { position: absolute; top: 8px; right: 8px; width: 96px; height: 96px; touch-action: none; }
 .overlay-legend { position: absolute; top: 112px; right: 8px; margin: 0; padding: 6px 10px; list-style: none; background: rgba(20, 22, 26, 0.85); color: #f5b14c; border-radius: 6px; font-size: 13px; }
 #workspace button { padding: 7px 10px; background: #262a31; border: 1px solid #353a43; color: inherit; border-radius: 4px; font: inherit; cursor: pointer; }
@@ -61,7 +62,7 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 .tool-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .tool-group + .tool-group { border-left: 1px solid #2a2e35; padding-left: 10px; margin-left: 4px; }
 .tool-group-name { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; margin-right: 4px; }
-#toolbar button[aria-pressed="true"] { background: #23384f; border-color: #4aa8ff; }
+#toolbar button[aria-pressed="true"], #split-toolbar button[aria-pressed="true"], #workspace #split-toggle[aria-pressed="true"] { background: #23384f; border-color: #4aa8ff; }
 .tree { list-style: none; margin: 0; padding: 0; }
 .tree .tree { padding-left: 14px; }
 .tree summary { cursor: pointer; padding: 4px 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
@@ -73,6 +74,37 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #workspace .selection-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 #workspace .selection-list code { color: #8a919c; font-size: 12px; overflow-wrap: anywhere; }
 #action-note.bad { color: #ff6b6b; }
+
+/* Split view (X3): a second workspace beside the first, each with its own
+   toolbar, panels and camera on the one scene. Viewports meet in the
+   middle; each pane's browser sits above its properties in one 240 px
+   column on its outer side. The second pane's parts join the workspace
+   grid (display: contents), so both toolbars share the top row. Wide
+   screens only (SPLIT_MIN_WIDTH_PX in split.ts): the shell closes it below. */
+#split { display: contents; }
+#split[hidden] { display: none; }
+#split-toggle { position: absolute; right: 8px; bottom: 8px; }
+#split-bar { position: absolute; left: 8px; top: 8px; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: rgba(28, 31, 36, 0.9); border-radius: 4px; font-size: 13px; }
+#split-bar label { gap: 6px; }
+#split-bar select { padding: 4px 6px; font-family: inherit; }
+#workspace #split-toggle { padding: 5px 8px; background: rgba(38, 42, 49, 0.9); font-size: 13px; }
+#workspace[data-split="on"] { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto auto; grid-template-rows: auto auto minmax(0, 1fr); }
+#workspace[data-split="on"] #toolbar { grid-column: 1 / 3; }
+#workspace[data-split="on"] #split-toolbar { grid-column: 3 / 5; grid-row: 1; border-left: 2px solid #2a2e35; }
+#workspace[data-split="on"] #viewport { grid-column: 2; grid-row: 2 / 4; }
+#workspace[data-split="on"] #split-viewport { grid-column: 3; grid-row: 2 / 4; border-left: 2px solid #2a2e35; }
+#workspace[data-split="on"] #browser, #workspace[data-split="on"] #properties, #split-browser, #split-properties { width: 240px; }
+#workspace[data-split="on"] #browser { grid-column: 1; grid-row: 2; max-height: 40vh; }
+#workspace[data-split="on"] #properties { grid-column: 1; grid-row: 3; border-left: none; border-right: 1px solid #2a2e35; }
+#split-browser { grid-column: 4; grid-row: 2; max-height: 40vh; border-left: 1px solid #2a2e35; }
+#split-properties { grid-column: 4; grid-row: 3; border-left: 1px solid #2a2e35; }
+/* A pane with nothing in its browser gives its properties the whole column. */
+#workspace[data-split="on"]:has(#browser:empty) #properties { grid-row: 2 / 4; }
+#workspace[data-split="on"]:has(#split-browser:empty) #split-properties { grid-row: 2 / 4; }
+#workspace[data-split="on"] #assistant { grid-column: 5; grid-row: 2 / 4; }
+@media (max-width: 899px) {
+  #split-toggle, #split { display: none; }
+}
 
 /* Placeholder pages. */
 .placeholder h2 { font-size: 18px; margin: 0; text-transform: none; letter-spacing: 0; color: #e6e8eb; }
