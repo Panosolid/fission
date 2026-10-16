@@ -19,6 +19,8 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/display.rs`: mesh shaped for the viewer (per-face normals, edge lines).
   - `src/stl.rs`: binary STL export (reports the largest rounding to single precision and warns past MIN_FEATURE) and reading it back.
   - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate, which take and return `Placed`; a rotation pivot must lie in model space). Each returns `Result<Body, KernelError>` via `ops::finish`.
+  - `src/intersect.rs`: where curves and surfaces meet (lines and circles against planes, cylinders, spheres and each other; the closed curves where two surfaces cross). Proposes candidate points only, never decides that two things touch; known shared points are divided out so tangent joins aren't mistaken for contacts.
+  - `src/self_intersect.rs`: the self-intersection check `validate` runs (edge–edge, edge–face, face–face; each candidate from `intersect.rs` measured against LINEAR), with point-in-face classification and sweep-and-prune pairing.
   - `src/fixtures.rs`: hand-built test bodies (cube, cylinder, sphere, half cylinder, tube, sphere cap/slice/octant) that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
   - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_cylinder`, `make_sphere`, `make_extrude` → `BodyView`, with exact volume and area; `export_stl(spec, name)` → `StlFile`, where a `BodySpec` names the same shapes). Keep it thin.
   - `src/debug_dump.rs`: failure dumps: ASCII STL per body plus `index.html`, a viewer that loads nothing (plain 2D canvas, works offline, draws relative to the scene's middle in doubles). In red: faces and edges a validation error names, vertices off their edges, every face of an inside-out shell, the mesh's open or flipped edges; dashed red: a named edge's own curve. `checked` writes one (`dump_invalid`, at most 20 per process) into `kernel/target/failure-dumps/` before panicking and names it in the panic; the harness writes its own there too, and `endless.sh` copies them into each nightly failure folder. `examples/dump_demo.rs` writes the two dumps the browser check opens.
@@ -41,10 +43,11 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 
 - Tier 1 (after every change): `cd kernel && cargo clippy --all-targets && cargo test <module>`
 - Before pushing kernel changes, also build for the browser: `cd kernel && cargo build --target wasm32-unknown-unknown` (code gated with `#[cfg(not(target_arch = "wasm32"))]`, like `debug_dump`, must not be called from code that is built there). CI uses the latest stable Rust, whose clippy may have lints the local toolchain lacks: `rustup update stable` first.
-- All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored)
+- All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored). Run them in a debug build: in `--release`, `validate::tests::checked_panics_in_test_builds` and `checked_writes_a_failure_dump_before_panicking` fail on purpose, because invalid results only panic when `debug_assertions` is on.
 - After every push that changes `kernel/`, start a "Random testing" run on the pushed branch (GitHub Actions, `nightly.yml`, workflow_dispatch with `ref` = the branch). Scheduled runs only test `main`, so work not yet merged is tested only this way. Check its results on the `test-results` branch at the start of the next session.
 - Precision measurement: `cd kernel && cargo run --release --example precision_budget` (how far intersection points land from both pieces, by part size and distance from the origin; evidence for the modelling range).
-- Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
+- Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs` (install once per container: `cargo install cargo-mutants --locked`; not while `rustup update` runs). Each surviving mutant gets a test, or is listed as equivalent, with the reason, in a "Mutation testing (...) leaves these survivors" paragraph at the end of the file's top `//!` comment (see `mass.rs`, `ops/profile.rs`).
+- Random-testing results: `log.csv` on the `test-results` branch has `commit` and `branch` columns (and each `failures/<seed>/` a `commit.txt`) naming the code each round tested; a failure from an older commit may already be fixed or out of range.
 - Install (repo root, npm workspaces): `npm install`
 - Build the app: `cd apps/fission && npm run build`
 - Dev server: `cd apps/fission && npm run dev`
@@ -115,9 +118,8 @@ Fission is a suite of workspaces (Design, Render, Simulate, Manufacture, Laser, 
 
 ## Git workflow
 
-- Commit after every completed step and after every bug fix together with its regression test. Never leave more than one step uncommitted. Push after each commit.
-
-- Develop on the branch named by the session; commit each roadmap item separately and push it.
+- Develop on the branch named by the session. Commit after every completed step (each roadmap item separately) and after every bug fix together with its regression test; never leave more than one step uncommitted.
+- Push after each commit, without asking first (owner's decision): pushes only touch the session's branch, never `main`, and random testing only runs on pushed work.
 - Commit messages: a first line naming the step and feature (e.g. "Step 7: box primitive in the viewer"), then what changed and how it was verified.
 - Commit as the owner's GitHub account (each new container: `git config user.name benpy28` and `git config user.email 333175357+benpy28@users.noreply.github.com`), and keep the Co-Authored-By: Claude line in every commit message.
 - Never commit generated files (`apps/fission/src/kernel/`, `kernel/target/`, `apps/fission/dist/`).
