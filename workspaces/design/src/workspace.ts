@@ -14,6 +14,7 @@ import { toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
+import { DESIGN_SHORTCUTS, designShortcut } from "./shortcuts.ts";
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -289,27 +290,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
     else if (c.change === "clear") ctx.selection.clear();
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") ctx.selection.clear();
-  };
-  // Copy (Ctrl+C, or the browser's Edit menu) with one profile selected runs
-  // Copy as SVG; in a text field, or with anything else selected, the
-  // browser copies as usual.
-  const onCopy = (e: ClipboardEvent) => {
-    const target = e.target as Element | null;
-    if (target?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
-    const items = ctx.selection.items;
-    if (items.length !== 1 || items[0].kind !== "outline") return;
-    e.preventDefault();
-    void runAction(COPY_SVG, items);
-  };
-  const keys = viewport.element.ownerDocument;
   let stopWatching = () => {};
-  /** Listens to picks, keys, copy and the selection: from mount, and again on each wake. */
+  /** Listens to picks and the selection: from mount, and again on each wake. Keys come from the shell (X7b), only while shown. */
   function listen() {
     viewport.onPick = onPick;
-    keys.addEventListener("keydown", onKey);
-    keys.addEventListener("copy", onCopy);
     stopWatching = ctx.selection.onChange(() => {
       // The user's next change of selection retires the note about dropped items.
       if (!settling && note) panel.showSelectionNote((note = ""));
@@ -322,8 +306,6 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.onPick = null;
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
-    keys.removeEventListener("keydown", onKey);
-    keys.removeEventListener("copy", onCopy);
   }
 
   inputs.forEach((i) => i.addEventListener("input", () => update()));
@@ -331,6 +313,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   update();
   return {
     sleep,
+    // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
+    shortcut(id) {
+      if (!shown) return false; // the shell only asks while shown; never act asleep
+      const items = ctx.selection.items;
+      const what = designShortcut(id, items);
+      if (what === "clear") ctx.selection.clear();
+      else if (what === "copy") void runAction(COPY_SVG, items);
+      return what !== null;
+    },
     wake() {
       if (shown) return;
       shown = true;
@@ -358,5 +349,6 @@ export const designWorkspace: WorkspacePlugin = {
   registerActions: (registry) => registerDesignActions(registry),
   readData: readDesignDocument,
   commands: DESIGN_COMMANDS,
+  shortcuts: DESIGN_SHORTCUTS,
   mount,
 };

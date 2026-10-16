@@ -19,6 +19,7 @@ import type { ChangeNotes } from "./change-notes.ts";
 import type { CommandSpec } from "./commands.ts";
 import type { DownstreamRegistry } from "./downstream.ts";
 import type { DependencyGraph } from "./graph.ts";
+import type { ShortcutSpec } from "./shortcuts.ts";
 import type { RepresentationKind, RepresentationRegistry } from "./representation.ts";
 import type { History, Selection } from "./session.ts";
 import type { Project, WorkspaceId } from "./project.ts";
@@ -90,6 +91,13 @@ export interface MountedWorkspace {
   sleep?(): void;
   /** Back on screen: listen again and redraw what may have changed meanwhile (the selection, the graph, the viewport). */
   wake?(): void;
+  /**
+   * Runs the plugin's shortcut `id` (X7b): the shell calls it only while
+   * this workspace is on screen, with the key press or clipboard event.
+   * Return false to decline (nothing to copy): the browser then does what
+   * it would have done. A workspace never listens to the keyboard itself.
+   */
+  shortcut?(id: string, event: Event): boolean | void;
   /** Gone for good (a project opened, its pane closed): stops listening if awake, and empties every slot it filled. */
   unmount(): void;
 }
@@ -123,6 +131,12 @@ export interface WorkspacePlugin {
   readData?(data: unknown): unknown;
   /** The actions a user can take here, as data: the panel, scripts and the AI assistant all go through these. */
   commands: readonly CommandSpec[];
+  /**
+   * Its keys (X7b), in the one shortcut table (shortcuts.ts): the keys its
+   * own users already know, which may differ from another workspace's. The
+   * shell runs them through the mounted workspace's `shortcut`.
+   */
+  shortcuts?: readonly ShortcutSpec[];
   toolbar?(): ToolbarItem[];
   overlays?(): ViewportOverlay[];
 }
