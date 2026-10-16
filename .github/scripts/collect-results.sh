@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Adds one "Random testing" run to the test-results branch: every round's line
 # to log.csv, failure folders to failures/<seed>/, the nightly mutation run to
-# mutants/, then rewrites summary.txt and opens an issue when something new was
-# found. Called by the collect job in .github/workflows/nightly.yml, from a
-# checkout of the repository with full history.
+# mutants/, then rewrites summary.txt, files one issue per kind of problem
+# (file_issues.py, which must sit next to this script) and opens one for new
+# mutation survivors. Called by the collect job in .github/workflows/nightly.yml,
+# from a checkout of the repository with full history.
 #
 # Runs on different branches can finish at the same moment, so the push may be
 # refused: then it starts again from the branch as it now is and re-applies
@@ -15,7 +16,8 @@
 #                   and exit-code.txt)
 #   MUTANT_SHARDS   how many mutation shards the run started (0 or unset: none)
 #   RUN_URL, COMMIT, BRANCH   what this run tested, written next to every row
-#   GH_TOKEN        for `gh issue create` (no issue is opened without it)
+#   GH_TOKEN        for `gh` (without it no issue is filed; file_issues.py prints
+#                   what it would have done)
 set -uo pipefail
 : "${IN:?}" "${RUN_URL:?}" "${COMMIT:?}" "${BRANCH:?}"
 MUTANT_SHARDS="${MUTANT_SHARDS:-0}"
@@ -27,7 +29,7 @@ today=$(date -u '+%Y-%m-%d %H:%M')
 strip() { sed -E 's/^([^:]+):[0-9]+:[0-9]+:/\1:/' | sort -u; }
 
 add_run() {
-  found=0 list="" new_missed=0 new_list=""
+  found=0 new_missed=0 new_list=""
   [ -f log.csv ] || echo "finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run,commit,branch" >log.csv
   # Logs from before the commit column was added: widen the header (their old
   # rows just leave the last two columns empty).
@@ -40,7 +42,6 @@ add_run() {
       mkdir -p failures && cp -r "$f" failures/
       echo "tested commit $COMMIT on branch $BRANCH ($RUN_URL)" >"failures/$(basename "$f")/commit.txt"
       found=$((found + 1))
-      list="$list- failures/$(basename "$f"): $(grep -h -m1 'step\|line ' "$f/report.txt" "$f/oracle-disagreements.txt" 2>/dev/null | head -c 400)"$'\n'
     done
   done
 
@@ -130,11 +131,15 @@ done
 [ -n "${GITHUB_STEP_SUMMARY:-}" ] && cat summary.txt >>"$GITHUB_STEP_SUMMARY"
 [ $pushed = 1 ] || { echo "Could not push to test-results after 5 attempts."; exit 1; }
 
-if [ "$found" -gt 0 ] || [ "$new_missed" -gt 0 ]; then
+# One issue per kind of problem, found again and updated rather than piling
+# up (file_issues.py, next to this script).
+if [ "$found" -gt 0 ]; then
+  RUN_URL="$RUN_URL" COMMIT="$short" BRANCH="$BRANCH" python3 "$(dirname "$0")/file_issues.py" "$IN" ||
+    echo "Filing issues failed; the results are on test-results all the same."
+fi
+if [ "$new_missed" -gt 0 ]; then
   body="Run: $RUN_URL (commit $short on $BRANCH)"$'\n\n'
-  [ "$found" -gt 0 ] && body="$body$found random round(s) found a problem:"$'\n'"$list"$'\n'"Details are on the test-results branch, in the failures folder."$'\n\n'
-  [ "$new_missed" -gt 0 ] && body="$body$new_missed mutant(s) survived that the previous complete mutation run caught or did not have (new code, or a test that got weaker):"$'\n'"$(printf '%s\n' "$new_list" | head -50 | sed 's/^/- /')"$'\n\n'"Every survivor is in mutants/missed.txt on the test-results branch."$'\n'
-  title="Random testing found $found problem(s)"
-  [ "$new_missed" -gt 0 ] && title="$title and $new_missed new mutation survivor(s)"
+  body="$body$new_missed mutant(s) survived that the previous complete mutation run caught or did not have (new code, or a test that got weaker):"$'\n'"$(printf '%s\n' "$new_list" | head -50 | sed 's/^/- /')"$'\n\n'"Every survivor is in mutants/missed.txt on the test-results branch."$'\n'
+  title="Mutation testing: $new_missed new survivor(s)"
   if [ -n "${GH_TOKEN:-}" ]; then gh issue create --title "$title" --body "$body"; else printf '%s\n\n%s' "$title" "$body"; fi
 fi
