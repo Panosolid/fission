@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, SHELL_SHORTCUTS, ShortcutTable, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, createHistory, RepresentationRegistry, createSelection, NO_HIGHLIGHT, SHELL_SHORTCUTS, ShortcutTable, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -154,7 +154,8 @@ function testContext(): WorkspaceContext {
     // Every kernel call fails, as when the kernel is not loaded: the workspace must show it, not crash.
     kernel: { call: (() => Promise.reject(new Error("no kernel in this test"))) as KernelCalls["call"] },
     selection: createSelection(),
-    history: historyNotBuilt,
+    // A real history no test here undoes: Design asks it whether a mount is an undo's (step 20c).
+    history: createHistory({ capture: () => "", restore: () => assert.fail("nothing here undoes") }),
     graph: new DependencyGraph(),
     toolbar: el(),
     browser: el(),

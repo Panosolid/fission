@@ -41,8 +41,28 @@ export interface History {
    * there was nothing to take in, or during a restore. A present step left
    * the same as the state before it has nothing to undo, so it is removed.
    * The next record starts a step of its own (no merging across this).
+   * Inside a step (below) it does nothing: the step takes everything in.
    */
   amend(): boolean;
+  /**
+   * Runs `run` as ONE undo step named `label`, however many changes it
+   * makes: an ownership hand-over, or an accepted AI command (commands
+   * only, one undo step). Records made inside are folded into it and
+   * return false; a step inside a step joins the outer one. Changes no one
+   * recorded before it starts are taken into the present first (as amend).
+   * The step never merges with a neighbour. If nothing changed, nothing is
+   * recorded and the redo is kept. If `run` throws, the project is put back
+   * as it was when the step started, nothing is recorded, and the error
+   * passes on. Undo, redo and reset inside a step are refused, as is a step
+   * started while a snapshot is being put back. Returns what `run` returns.
+   */
+  step<T>(label: string, run: () => T): T;
+  /**
+   * True while undo or redo is putting a snapshot back: a workspace mounted
+   * now is showing the same project a moment later, not an opened file, so
+   * it keeps its camera and follows its selection.
+   */
+  restoring(): boolean;
   /** Called once after every change to what can be undone or redone; returns an unsubscribe. */
   onChange(listener: () => void): () => void;
 }
@@ -86,6 +106,11 @@ export function createHistory(options: HistoryOptions): History {
   // Merging is allowed only straight after a record.
   let lastWasRecord = false;
   let restoring = false;
+  /** Steps running (step() inside step() joins the outer one). */
+  let grouping = 0;
+  const refuseInStep = (what: string) => {
+    if (grouping > 0) throw new Error(`can't ${what} while an undo step is running`);
+  };
   const listeners = new Set<() => void>();
   const changed = () => {
     for (const l of [...listeners]) l();
@@ -110,13 +135,13 @@ export function createHistory(options: HistoryOptions): History {
     changed();
   };
 
-  return {
+  const api: History = {
     canUndo: () => index > 0,
     canRedo: () => index < entries.length - 1,
     undoLabel: () => (index > 0 ? entries[index].label : null),
     redoLabel: () => (index < entries.length - 1 ? entries[index + 1].label : null),
     record(label, mergeKey) {
-      if (restoring) return false;
+      if (restoring || grouping > 0) return false;
       const snapshot = options.capture();
       if (snapshot === entries[index].snapshot) return false;
       const t = now();
@@ -144,22 +169,25 @@ export function createHistory(options: HistoryOptions): History {
       return true;
     },
     undo() {
+      refuseInStep("undo");
       if (index === 0) return null;
       const label = entries[index].label;
       go(index - 1);
       return label;
     },
     redo() {
+      refuseInStep("redo");
       if (index === entries.length - 1) return null;
       go(index + 1);
       return entries[index].label;
     },
     reset() {
+      refuseInStep("start the history afresh");
       start();
       changed();
     },
     amend() {
-      if (restoring) return false;
+      if (restoring || grouping > 0) return false;
       const snapshot = options.capture();
       if (snapshot === entries[index].snapshot) return false;
       entries[index] = { ...entries[index], snapshot };
@@ -171,9 +199,53 @@ export function createHistory(options: HistoryOptions): History {
       changed();
       return true;
     },
+    step(label, run) {
+      if (restoring) throw new Error("can't start an undo step while undo or redo is putting a snapshot back");
+      if (grouping > 0) return run();
+      api.amend();
+      const before = entries[index].snapshot;
+      let result: ReturnType<typeof run>;
+      let snapshot: string;
+      grouping++;
+      try {
+        result = run();
+        snapshot = options.capture(); // a project the step left unsaveable fails the step too
+      } catch (e) {
+        let unchanged = false;
+        try {
+          unchanged = options.capture() === before;
+        } catch {
+          // can't even be captured: put it back
+        }
+        if (!unchanged) {
+          restoring = true;
+          try {
+            options.restore(before);
+          } finally {
+            restoring = false;
+          }
+        }
+        throw e;
+      } finally {
+        grouping--;
+      }
+      if (snapshot === before) return result;
+      entries.length = index + 1;
+      entries.push({ snapshot, label, mergeKey: undefined, at: now() });
+      index++;
+      if (entries.length > limit + 1) {
+        entries.shift();
+        index--;
+      }
+      lastWasRecord = false;
+      changed();
+      return result;
+    },
+    restoring: () => restoring,
     onChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
   };
+  return api;
 }

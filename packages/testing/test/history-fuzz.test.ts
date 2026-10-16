@@ -37,7 +37,8 @@ function session(seed: bigint, steps: number) {
     restore: (text) => {
       if (failRestore) throw new Error("restore failed");
       project = projectFromJson(text, [designWorkspace]);
-      // The remounted workspace reports a change: never a step.
+      // The remounted workspace reports a change: never a step. It can tell it is a restore.
+      assert.equal(h.restoring(), true);
       assert.equal(h.record("remount", "width"), false);
     },
     limit: LIMIT,
@@ -50,13 +51,48 @@ function session(seed: bigint, steps: number) {
   let undos: Undo[] = [];
   let redos: { after: number; label: string }[] = [];
   let lastWasRecord = false;
-  const counts = { edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0 };
+  const counts = { edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0, steps: 0, stepsFailed: 0, stepsEmpty: 0 };
 
   for (let i = 0; i < steps; i++) {
     const at = `seed ${seed} step ${i}`;
     t += Math.floor(r.next() * 2 * MERGE);
     const n = r.next();
-    if (n < 0.46) {
+    if (n < 0.06) {
+      // One labelled step with several changes inside (an ownership
+      // hand-over, an accepted AI command, step 20c): 1–3 recorded edits,
+      // sometimes back to where it started, sometimes failing part way.
+      const label = pick(r, ["Hand Width to Laser", "AI: resize"]);
+      const inner = 1 + Math.floor(r.next() * 3);
+      const widths = Array.from({ length: inner }, () => 1 + Math.floor(r.next() * 20));
+      if (r.next() < 0.2) widths.push(present); // ends where it began
+      const fails = r.next() < 0.2;
+      const run = () => {
+        for (const [j, w] of widths.entries()) {
+          project = projectWith(w);
+          assert.equal(h.record(`inner ${j}`, pick(r, KEYS)), false, `${at}: folded into the step`);
+          if (fails && j === widths.length - 1) throw new Error("command refused");
+        }
+      };
+      if (fails) {
+        assert.throws(() => h.step(label, run), /command refused/, at);
+        counts.stepsFailed++; // put back, nothing recorded, the model is unchanged
+      } else {
+        h.step(label, run);
+        const w = widths[widths.length - 1];
+        if (w === present) counts.stepsEmpty++; // nothing recorded, the redo kept
+        else {
+          redos = [];
+          undos.push({ before: present, label, key: undefined, at: t });
+          if (undos.length > LIMIT) {
+            undos.shift();
+            counts.dropped++;
+          }
+          present = w;
+          lastWasRecord = false; // a step never merges with what follows
+          counts.steps++;
+        }
+      }
+    } else if (n < 0.46) {
       // An edit: mostly a new width, sometimes the same, sometimes back to the one before.
       const key = pick(r, KEYS);
       const label = key ? `Change ${key}` : "Change shape";

@@ -1,9 +1,12 @@
-/* Undo and Redo in the top bar (step 20b): two arrow buttons before Save,
-   on the bar on wide screens and the first row of Menu at phone width (where
-   the bar keeps its room for the workspace tabs), dimmed when there is
+/* Undo and Redo (step 20b): two arrow buttons on the top bar before Save on
+   wide screens; at phone width the shell docks them in the main viewport's
+   bottom-right corner (20c), one above the other so the View buttons along
+   the bottom never run into them, 44 px tap targets; dimmed when there is
    nothing to undo or redo. The bar's buttons take their font
    from here (font: inherit); naming the buttons by id outweighs the bar's
    own "#topbar button" padding, so the pair stays narrow. */
 .undo-redo { display: flex; flex-shrink: 0; font-size: 18px; line-height: 1; }
 .undo-redo button#undo, .undo-redo button#redo { padding-left: 6px; padding-right: 6px; }
 .undo-redo button:disabled { opacity: 0.35; cursor: default; }
+.undo-redo.docked { position: absolute; right: 8px; bottom: 8px; z-index: 1; flex-direction: column; gap: 4px; }
+.undo-redo.docked button#undo, .undo-redo.docked button#redo { width: 44px; height: 44px; padding: 0; background: rgba(38, 42, 49, 0.9); }
