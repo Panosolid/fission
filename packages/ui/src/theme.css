@@ -3,19 +3,27 @@ html, body { margin: 0; height: 100%; background: #14161a; color: #e6e8eb; font:
 body { display: flex; flex-direction: column; }
 
 /* Top bar: name, workspace tabs, community. */
-#topbar { display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 44px; background: #1c1f24; border-bottom: 1px solid #2a2e35; flex-shrink: 0; }
+#topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; padding: 0 12px; min-height: 44px; background: #1c1f24; border-bottom: 1px solid #2a2e35; flex-shrink: 0; }
 #topbar h1 { font-size: 16px; margin: 0; white-space: nowrap; }
 #version { font-size: 12px; color: #8a919c; font-weight: normal; }
-#workspaces { display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; }
+/* Basis 0, so the tabs take the room that is left and never push the rest onto a second row. */
+#workspaces { display: flex; gap: 2px; flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* Save, Open, AI and Community sit in the top bar on wide screens and behind Menu on phones. */
+#topbar-actions { display: contents; }
+#menu-toggle { display: none; }
 #topbar button { background: none; border: none; border-bottom: 2px solid transparent; color: #b5bbc4; padding: 12px 10px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
 #topbar button:hover { color: #e6e8eb; }
 #topbar button[aria-selected="true"], #topbar button[aria-pressed="true"] { color: #e6e8eb; border-bottom-color: #4aa8ff; }
 #topbar button.soon { color: #6f7680; }
-#file-status { color: #f5b14c; font-size: 12px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#file-status:empty { display: none; }
-#save-status { color: #b5bbc4; font-size: 12px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A problem gets a row of its own under the top bar, in full: a refused file,
+   a last project that wouldn't open, a failed autosave (storage full). */
+#file-notice { order: 99; flex-basis: 100%; display: flex; align-items: baseline; gap: 8px; padding: 0 0 8px; color: #f5b14c; font-size: 12px; }
+#file-notice:has(#file-status:empty) { display: none; }
+#file-status { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#topbar #file-dismiss { padding: 2px 8px; font-size: 12px; border: 1px solid #2a2e35; border-radius: 4px; }
+#save-status { color: #b5bbc4; font-size: 12px; white-space: nowrap; }
 #save-status:empty { display: none; }
-#save-status[data-state="error"] { color: #f5b14c; }
+#save-status[data-state="error"] { order: 98; flex-basis: 100%; color: #f5b14c; white-space: normal; overflow-wrap: anywhere; padding-bottom: 8px; }
 #topbar button.soon[aria-selected="true"] { color: #b5bbc4; }
 
 /* Workspace: toolbar above, browser left, properties right of the shared
@@ -94,15 +102,22 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #workspace #assistant { width: auto; order: 5; flex-shrink: 0; border-left: none; border-top: 1px solid #2a2e35; }
   #topbar { gap: 8px; padding: 0 8px; }
   #topbar h1 #version { display: none; }
-  /* The save status as one small mark beside the name, taking no room from
-     the tabs (the words stay for screen readers and the tooltip); 19d
-     revisits the phone top bar. */
+  /* Save, Open, AI and Community fold behind Menu, so the workspace tabs keep
+     the row (they scroll sideways inside it). The open menu drops down at
+     the right; Escape, a choice or a tap elsewhere closes it. */
+  #menu-toggle { display: block; }
   #topbar { position: relative; }
-  #save-status { position: absolute; left: 62px; top: 8px; font-size: 0; max-width: none; overflow: visible; }
-  #save-status::before { font-size: 11px; }
+  #topbar-actions { display: none; position: absolute; top: 44px; right: 0; z-index: 20; min-width: 180px; flex-direction: column; background: #1c1f24; border: 1px solid #2a2e35; border-top: none; }
+  #topbar[data-menu="open"] #topbar-actions { display: flex; }
+  #topbar #topbar-actions button { text-align: left; padding: 12px 16px; border-bottom: none; border-left: 2px solid transparent; }
+  #topbar #topbar-actions button[aria-pressed="true"] { border-left-color: #4aa8ff; }
+  /* The save status as one small mark beside the name, taking no room from
+     the tabs (the words stay for screen readers and the tooltip); a failed
+     save shows its words in full on a row of its own. */
+  #save-status:not([data-state="error"]) { position: absolute; left: 62px; top: 8px; font-size: 0; }
+  #save-status:not([data-state="error"])::before { font-size: 11px; }
   #save-status[data-state="saved"]::before { content: "✓"; }
   #save-status[data-state="saving"]::before { content: "…"; }
-  #save-status[data-state="error"]::before { content: "!"; }
 }
 [hidden] { display: none !important; }
 .link-badge { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: #23272e; }

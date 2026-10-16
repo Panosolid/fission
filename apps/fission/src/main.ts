@@ -112,6 +112,29 @@ function show(page: Page) {
 
 $("community").addEventListener("click", () => show("community"));
 
+// At phone width Save, Open, AI and Community fold behind Menu (theme.css),
+// leaving the top bar's row to the workspace tabs. Choosing one, Escape or
+// a tap anywhere else closes it; Escape puts focus back on Menu.
+{
+  const toggle = $("menu-toggle");
+  const setMenu = (open: boolean) => {
+    toggle.setAttribute("aria-expanded", String(open));
+    $("topbar").dataset.menu = open ? "open" : "closed";
+  };
+  setMenu(false);
+  toggle.addEventListener("click", () => setMenu(toggle.getAttribute("aria-expanded") !== "true"));
+  $("topbar-actions").addEventListener("click", () => setMenu(false)); // after the chosen button's own handler
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || toggle.getAttribute("aria-expanded") !== "true") return;
+    setMenu(false);
+    toggle.focus();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!(e.target instanceof Node) || toggle.contains(e.target) || $("topbar-actions").contains(e.target)) return;
+    setMenu(false);
+  });
+}
+
 // Autosave (19c): the project is kept in this browser and saved a moment
 // after each change; the top bar says "Saving…", "Saved" or what went wrong.
 // Each project has its own stored id: an opened file becomes a new stored
@@ -122,11 +145,14 @@ const saveStatus = (s: AutosaveStatus) => {
   const el = $("save-status");
   el.dataset.state = s.state; // read by the e2e test
   el.textContent = s.state === "saving" ? "Saving…" : s.state === "saved" ? "Saved" : `Not saved: ${s.message}`;
-  el.title = el.textContent; // the top bar cuts a long one short
+  el.title = el.textContent; // the words behind the mark at phone width
 };
 const newId = () => globalThis.crypto?.randomUUID?.() ?? `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+/** False once the browser has shown it can't keep projects: then nothing autosaves, and Save/Open use files. */
+let canKeep = true;
 function keep(id: string) {
   autosave?.stop();
+  if (!canKeep) return;
   autosave = startAutosave(store, id, () => ctx.project, saveStatus);
   document.body.dataset.projectId = id; // read by the e2e test
 }
@@ -135,10 +161,8 @@ function keep(id: string) {
 // .fission.json file (docs/project-format.md). Opening replaces the project
 // only once all of it has read cleanly; a refused file leaves the open
 // project as it was and says why.
-const fileStatus = (message: string) => {
-  $("file-status").textContent = message;
-  $("file-status").title = message; // the top bar cuts a long one short
-};
+const fileStatus = (message: string) => ($("file-status").textContent = message);
+$("file-dismiss").addEventListener("click", () => fileStatus(""));
 $("save").addEventListener("click", () => {
   try {
     const url = URL.createObjectURL(new Blob([projectToJson(ctx.project)], { type: "application/json" }));
@@ -162,7 +186,7 @@ $("open-file").addEventListener("change", async () => {
     ctx.project = project;
     ctx.graph = new DependencyGraph();
     keep(newId());
-    autosave!.changed(); // store the opened file as it is
+    autosave?.changed(); // store the opened file as it is
     show(current); // re-mounts the workspace on the opened project
     fileStatus("");
   } catch (e) {
@@ -196,18 +220,28 @@ const fromHash = (): Page => {
 // Links (and back/forward) can name a workspace: #design, #slice, …
 window.addEventListener("hashchange", () => show(fromHash()));
 // Start on the project saved most recently in this browser, or a new one.
-// One that can't be read is left stored as it is, and a new project starts.
+// One that can't be read is left stored as it is, and a new project starts
+// with a message saying so; a browser that can't keep projects at all still
+// gets a working app (Save and Open use files). Never a blank app.
 async function start() {
+  const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  let newest: string | undefined;
   try {
-    const newest = (await store.list())[0];
+    newest = (await store.list())[0]?.id;
+  } catch (e) {
+    canKeep = false;
+    fileStatus(`Projects can't be kept in this browser (${why(e)}). Use Save to keep your work as a file.`);
+    return show(fromHash());
+  }
+  try {
     if (newest) {
-      ctx.project = await store.open(newest.id);
-      keep(newest.id);
+      ctx.project = await store.open(newest);
+      keep(newest);
       saveStatus({ state: "saved" });
     } else keep(newId());
   } catch (e) {
     keep(newId());
-    fileStatus(`Couldn't open the last project (${e instanceof Error ? e.message : String(e)}), so a new one was started.`);
+    fileStatus(`Couldn't open the last project (${why(e)}), so a new one was started. The old one is still kept in this browser.`);
   }
   show(fromHash());
 }

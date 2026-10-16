@@ -1136,6 +1136,189 @@ try {
     }
   });
 
+  // Reads IndexedDB keys in a page, straight from the database (not through the app).
+  const storedKeys = (p) =>
+    p.evaluate(async () => {
+      const db = await new Promise((ok, no) => Object.assign(indexedDB.open("fission"), { onsuccess: (e) => ok(e.target.result), onerror: no }));
+      const store = db.transaction("kv").objectStore("kv");
+      const keys = await new Promise((ok) => (store.getAllKeys().onsuccess = (e) => ok(e.target.result)));
+      db.close();
+      return keys.map(String);
+    });
+
+  await check("phone width: the workspace tabs keep the top bar; Save, Open, AI and Community are behind Menu", async () => {
+    const phone = await browser.newPage({ viewport: { width: 375, height: 740 } });
+    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await phone.addInitScript(() => indexedDB.deleteDatabase("fission"));
+      await phone.goto(url + "#design");
+      await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      const rect = (sel) => phone.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
+      const visible = (sel) => phone.$eval(sel, (el) => el.getBoundingClientRect().width > 0);
+      // 19a left Save/Open squeezing the tabs to 6 px; now at least three whole tabs show.
+      const nav = await rect("#workspaces");
+      const tabs = await phone.$$eval("#workspaces [role=tab]", (els) => els.map((e) => e.getBoundingClientRect().toJSON()));
+      const whole = tabs.filter((t) => t.left >= nav.left - 0.5 && t.right <= nav.right + 0.5);
+      assert.ok(whole.length >= 3, `${whole.length} whole tabs in ${nav.width} px`);
+      for (const id of ["save", "open", "assistant-toggle", "community"]) assert.equal(await visible(`#${id}`), false, `${id} folded away`);
+      assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
+      // Menu shows all four, inside the screen.
+      await phone.click("#menu-toggle");
+      assert.equal(await phone.getAttribute("#menu-toggle", "aria-expanded"), "true");
+      for (const id of ["save", "open", "assistant-toggle", "community"]) {
+        const b = await rect(`#${id}`);
+        assert.ok(b.width > 0 && b.left >= 0 && b.right <= 375 && b.height >= 32, `${id} ${JSON.stringify(b)}`);
+      }
+      assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll with the menu open");
+      await phone.screenshot({ path: "e2e/design-375-menu.png" });
+      // Escape closes it and puts focus back on Menu.
+      await phone.keyboard.press("Escape");
+      assert.equal(await visible("#save"), false);
+      assert.equal(await phone.evaluate(() => document.activeElement?.id), "menu-toggle");
+      // From the keyboard: Enter opens it and Tab moves into it, Save first.
+      await phone.keyboard.press("Enter");
+      await phone.keyboard.press("Tab");
+      assert.equal(await phone.evaluate(() => document.activeElement?.id), "save");
+      // Choosing an item does it and closes the menu.
+      const [download] = await Promise.all([phone.waitForEvent("download"), phone.keyboard.press("Enter")]);
+      assert.equal(download.suggestedFilename(), "Untitled.fission.json");
+      assert.equal(await phone.getAttribute("#menu-toggle", "aria-expanded"), "false");
+      // A tap elsewhere closes it too.
+      await phone.click("#menu-toggle");
+      await phone.mouse.click(180, 400);
+      assert.equal(await visible("#save"), false);
+      // A workspace far along the tabs is scrolled into view when chosen.
+      await phone.goto(url + "#layout");
+      await phone.waitForFunction(() => document.body.dataset.activeWorkspace === "layout");
+      const layout = await rect("#workspaces [data-workspace=layout]");
+      const nav2 = await rect("#workspaces");
+      assert.ok(layout.left >= nav2.left - 0.5 && layout.right <= nav2.right + 0.5, `Layout tab ${JSON.stringify(layout)} in ${JSON.stringify(nav2)}`);
+      await phone.screenshot({ path: "e2e/layout-375.png" });
+    } finally {
+      await phone.close();
+    }
+  });
+
+  await check("wide screen: every tab, Save, Open, AI and Community in one row, no Menu", async () => {
+    const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
+      await wide.goto(url + "#design");
+      await wide.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
+      const rect = (sel) => wide.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
+      assert.equal((await rect("#menu-toggle")).width, 0, "no Menu");
+      const bar = await rect("#topbar");
+      assert.equal(bar.height, 44, "one row");
+      const nav = await rect("#workspaces");
+      for (const t of await wide.$$eval("#workspaces [role=tab]", (els) => els.map((e) => e.getBoundingClientRect().toJSON()))) {
+        assert.ok(t.right <= nav.right + 0.5, "every tab shows");
+      }
+      for (const id of ["save", "open", "save-status", "assistant-toggle", "community"]) {
+        const b = await rect(`#${id}`);
+        assert.ok(b.width > 0 && b.right <= 1280 && b.top >= bar.top && b.bottom <= bar.bottom, id);
+      }
+      await wide.screenshot({ path: "e2e/design-1280.png" });
+    } finally {
+      await wide.close();
+    }
+  });
+
+  await check("a stored project that no longer opens starts a new project with a message, readable at phone width", async () => {
+    const phone = await browser.newPage({ viewport: { width: 375, height: 740 } }); // its own storage, kept across reloads
+    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await phone.goto(url + "#design");
+      await phone.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
+      const id = await phone.evaluate(() => document.body.dataset.projectId);
+      // Cut the stored project short, as a crash in the middle of a write might.
+      await phone.evaluate(async (id) => {
+        const db = await new Promise((ok, no) => Object.assign(indexedDB.open("fission"), { onsuccess: (e) => ok(e.target.result), onerror: no }));
+        const tx = db.transaction("kv", "readwrite");
+        tx.objectStore("kv").put('{"formatVersion": 2, "name": "Untit', `project/${id}`);
+        await new Promise((ok) => (tx.oncomplete = ok));
+        db.close();
+      }, id);
+      await phone.reload();
+      // Not a blank app: the default part, and the message in full.
+      await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      const message = await phone.textContent("#file-status");
+      assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a Fission project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
+      const notice = await phone.$eval("#file-notice", (el) => ({ ...el.getBoundingClientRect().toJSON(), cut: el.scrollWidth > el.clientWidth }));
+      assert.ok(notice.width > 0 && notice.left >= 0 && notice.right <= 375 && !notice.cut, JSON.stringify(notice));
+      assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
+      await phone.screenshot({ path: "e2e/design-375-notice.png" });
+      // A new stored project; the unreadable one is left as it was.
+      await phone.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+      const fresh = await phone.evaluate(() => document.body.dataset.projectId);
+      assert.notEqual(fresh, id);
+      assert.deepEqual((await storedKeys(phone)).filter((k) => k.startsWith("project/")).sort(), [`project/${id}`, `project/${fresh}`].sort());
+      // Dismiss hides the message; the next start opens the new project without one.
+      await phone.click("#file-dismiss");
+      assert.equal((await phone.$eval("#file-notice", (el) => el.getBoundingClientRect().height)), 0);
+      await phone.reload();
+      await phone.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
+      assert.equal(await phone.evaluate(() => document.body.dataset.projectId), fresh);
+      assert.equal(await phone.textContent("#file-status"), "");
+    } finally {
+      await phone.close();
+    }
+  });
+
+  await check("storage full is reported in words at phone width, and the next change saves again", async () => {
+    const phone = await browser.newPage({ viewport: { width: 375, height: 740 } });
+    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      // Every write fails the way a full disk does, until the test lets it through.
+      await phone.addInitScript(() => {
+        indexedDB.deleteDatabase("fission");
+        window.__full = true;
+        const put = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function (...args) {
+          if (!window.__full) return put.apply(this, args);
+          const request = { error: new DOMException("The quota has been exceeded.", "QuotaExceededError"), onerror: null, onsuccess: null };
+          setTimeout(() => request.onerror?.());
+          return request;
+        };
+      });
+      await phone.goto(url + "#design");
+      await phone.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "error");
+      const words = await phone.textContent("#save-status");
+      assert.match(words, /^Not saved: browser storage is full: can't save "project\/.+" \(use Save to keep your work as a file\)$/);
+      const shown = await phone.$eval("#save-status", (el) => ({ ...el.getBoundingClientRect().toJSON(), size: getComputedStyle(el).fontSize, cut: el.scrollWidth > el.clientWidth }));
+      assert.ok(shown.width > 0 && shown.left >= 0 && shown.right <= 375 && shown.size === "12px" && !shown.cut, JSON.stringify(shown));
+      assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
+      await phone.screenshot({ path: "e2e/design-375-storage-full.png" });
+      // Space is freed; the next change saves.
+      await phone.evaluate(() => (window.__full = false));
+      await phone.fill("#width", "50");
+      await phone.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+      assert.ok((await storedKeys(phone)).some((k) => k.startsWith("project/")));
+    } finally {
+      await phone.close();
+    }
+  });
+
+  await check("a browser that can't keep projects still opens the app and can Save a file", async () => {
+    const bare = await browser.newPage({ viewport: { width: 1000, height: 640 } });
+    bare.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await bare.addInitScript(() => delete window.indexedDB);
+      await bare.goto(url + "#design");
+      await bare.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      assert.equal(await bare.evaluate(() => typeof indexedDB), "undefined", "the test really took storage away");
+      assert.match(await bare.textContent("#file-status"), /^Projects can't be kept in this browser \(IndexedDB is not available\)\. Use Save to keep your work as a file\.$/);
+      // Nothing pretends to autosave.
+      await bare.fill("#width", "50");
+      await bare.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
+      assert.equal(await bare.textContent("#save-status"), "");
+      const [download] = await Promise.all([bare.waitForEvent("download"), bare.click("#save")]);
+      assert.equal(download.suggestedFilename(), "Untitled.fission.json");
+    } finally {
+      await bare.close();
+    }
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });

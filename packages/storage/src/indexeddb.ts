@@ -8,7 +8,7 @@ const STORE = "kv";
 
 /** Turns an IndexedDB failure into an Error with a message a person can read. */
 function failure(e: DOMException | null, doing: string): Error {
-  if (e?.name === "QuotaExceededError") return new Error(`browser storage is full: can't ${doing}`);
+  if (e?.name === "QuotaExceededError") return new Error(`browser storage is full: can't ${doing} (use Save to keep your work as a file)`);
   return new Error(`browser storage failed: can't ${doing}${e ? ` (${e.name}: ${e.message})` : ""}`);
 }
 
@@ -19,11 +19,16 @@ function request<T>(r: IDBRequest<T>, doing: string): Promise<T> {
   });
 }
 
-/** The KeyValue kept in this browser's IndexedDB database `name`. */
-export function indexedDbKeyValue(name = "fission", factory: IDBFactory = indexedDB): KeyValue {
+/**
+ * The KeyValue kept in this browser's IndexedDB database `name`. A browser
+ * without IndexedDB (some private modes) still gets a KeyValue, whose every
+ * call is refused with a message, so the app around it keeps working.
+ */
+export function indexedDbKeyValue(name = "fission", factory: IDBFactory | undefined = globalThis.indexedDB): KeyValue {
   let db: Promise<IDBDatabase> | undefined;
   const open = () =>
     (db ??= new Promise((resolve, reject) => {
+      if (!factory) return reject(new Error("IndexedDB is not available"));
       const r = factory.open(name, 1);
       r.onupgradeneeded = () => r.result.createObjectStore(STORE);
       r.onsuccess = () => resolve(r.result);
