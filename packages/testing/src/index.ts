@@ -9,6 +9,8 @@
 //
 // DRAFT interfaces: will change when the first workspace needs them.
 
+export { JOURNEYS, ROUND_TRIPS, type Journey } from "./journeys.ts";
+
 /** A random source that gives the same sequence for the same seed. */
 export interface SeededRandom {
   readonly seed: bigint;

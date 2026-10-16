@@ -22,6 +22,7 @@
     "apps/*/src"
   ],
   "exclude": [
-    "packages/core/src/kernel/wasm"
+    "packages/core/src/kernel/wasm",
+    "packages/testing/src/node-kernel.ts"
   ]
 }
