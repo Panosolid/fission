@@ -58,6 +58,8 @@ try {
     assert.equal(await text("area"), "5,200 mm²");
     assert.equal(await text("topology"), "8 V · 12 E · 6 F");
     assert.equal(await text("status"), "valid");
+    assert.equal(await text("intent"), "Box: 40 × 30 × 20 mm");
+    assert.equal(await text("provenance"), "Feature 1 (box) was made in Design.");
   });
 
   await check("the box is actually drawn", async () => {
@@ -149,6 +151,9 @@ try {
     assert.equal(await text("topology"), "12 V · 18 E · 8 F");
     assert.equal(await text("status"), "valid");
     assert.equal(await text("height-label"), "Extrude by");
+    // The part is feature #1 of the timeline, and knows what it is and where it came from.
+    assert.equal(await text("intent"), "Extrude: L-bracket profile 40 × 30 mm, by 20 mm");
+    assert.equal(await text("provenance"), "Feature 1 (extrude) comes from L-bracket profile in Design.");
     // A new shape is framed: r = √(40² + 30² + 20²)/2 ≈ 26.93.
     const r = Number(await page.$eval("#viewport", (el) => el.dataset.framedRadius));
     assert.ok(Math.abs(r - Math.sqrt(2900) / 2) < 1e-4, `framed radius ${r}`);

@@ -2,11 +2,12 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { describeProvenance, latestOnly, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { formatQuantity as fmt } from "@fission/ui";
 import { needsRefit } from "@fission/viewport";
-import { outline, type ShapeKind } from "./profiles.ts";
-import { specFor } from "./spec.ts";
+import { lastFeature, partDocument, specOf, type DesignDocument } from "./document.ts";
+import type { ShapeKind } from "./profiles.ts";
+import { buildSpec } from "./spec.ts";
 
 const PANEL = `
   <label>Shape
@@ -23,6 +24,10 @@ const PANEL = `
   <label><span id="width-label">Width</span> <input id="width" type="number" value="40" step="any" /> mm</label>
   <label id="depth-row">Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
   <label id="height-row"><span id="height-label">Height</span> <input id="height" type="number" value="20" step="any" /> mm</label>
+  <dl id="properties">
+    <dt>Feature</dt><dd id="intent">…</dd>
+    <dt>Made from</dt><dd id="provenance">…</dd>
+  </dl>
   <dl id="stats">
     <dt>Volume</dt><dd id="volume">…</dd>
     <dt>Area</dt><dd id="area">…</dd>
@@ -60,14 +65,8 @@ function mount(ctx: WorkspaceContext): () => void {
   const { kernel, viewport } = ctx;
   let shown = true;
 
-  // Boxes, cylinders and spheres come from the primitives (a cylinder's or
-  // sphere's width is its diameter); the other shapes are outlines extruded by the height.
-  const build = latestOnly((kind: ShapeKind, w: number, d: number, h: number) => {
-    if (kind === "box") return kernel.call("make_box", w, d, h);
-    if (kind === "cylinder") return kernel.call("make_cylinder", w / 2, h);
-    if (kind === "sphere") return kernel.call("make_sphere", w / 2);
-    return kernel.call("make_extrude", outline(kind, w, d), h);
-  });
+  // The body is built from the part's feature intent (document.ts).
+  const build = latestOnly((doc: DesignDocument) => buildSpec(kernel, specOf(doc, lastFeature(doc))));
 
   async function update() {
     const [w, d, h] = inputs.map((i) => Number(i.value));
@@ -79,8 +78,14 @@ function mount(ctx: WorkspaceContext): () => void {
     $("width-label").textContent = round ? "Diameter" : "Width";
     $("depth-row").hidden = round;
     $("height-row").hidden = kind === "sphere";
+    // The panel edits feature #1 of the one-step timeline; the project holds it.
+    const doc = partDocument(kind, w, d, h);
+    ctx.project.workspaces.design = doc;
+    const feature = lastFeature(doc);
+    $("intent").textContent = feature.intent.summary;
+    $("provenance").textContent = describeProvenance(feature.provenance);
     try {
-      const { current, value: view } = await build(kind, w, d, h);
+      const { current, value: view } = await build(doc);
       if (!current || !shown) return;
       viewport.showBody(view.mesh);
       // A different shape is a new part: frame it.
@@ -107,7 +112,8 @@ function mount(ctx: WorkspaceContext): () => void {
     const kind = shape.value as ShapeKind;
     const note = $("stl-note");
     try {
-      const file = await kernel.call("export_stl", specFor(kind, w, d, h), kind);
+      const doc = partDocument(kind, w, d, h);
+      const file = await kernel.call("export_stl", specOf(doc, lastFeature(doc)), kind);
       download(file.bytes, `fission-${kind}.stl`);
       note.textContent = file.warning ?? "";
       note.className = file.warning ? "bad" : "";

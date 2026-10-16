@@ -18,7 +18,12 @@ export type KernelRequest = {
 
 export type KernelResponse = { id: number; ok: true; value: unknown } | { id: number; ok: false; error: string };
 
-export class KernelClient {
+/** Anything that answers kernel calls: the worker client in the app, the WASM module directly in tests. */
+export interface KernelCalls {
+  call<K extends keyof KernelOps>(op: K, ...args: KernelOps[K]["args"]): Promise<KernelOps[K]["result"]>;
+}
+
+export class KernelClient implements KernelCalls {
   private worker = new Worker(new URL("./kernel.worker.ts", import.meta.url), { type: "module" });
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
