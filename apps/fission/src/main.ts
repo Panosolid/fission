@@ -6,6 +6,7 @@ import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt,
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
+import { showAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
@@ -48,6 +49,7 @@ const ctx = {
 
 type Page = WorkspaceId | "community";
 let hide: () => void = () => {};
+let current: Page = "design";
 const markTab = workspaceSwitcher(
   $("workspaces"),
   workspaces.map((w) => ({ id: w.id, title: w.title, summary: w.summary, placeholder: w.status === "placeholder" })),
@@ -63,10 +65,19 @@ function show(page: Page) {
   markTab(page);
   $("community").setAttribute("aria-pressed", String(page === "community"));
   document.body.dataset.activeWorkspace = page; // read by the e2e test
+  current = page;
+  if (!$("assistant").hidden) showAssistant($("assistant"), page, workspace?.title ?? "Community");
   if (location.hash !== `#${page}`) history.replaceState(null, "", `#${page}`);
 }
 
 $("community").addEventListener("click", () => show("community"));
+// One assistant panel for every workspace, beside the viewport.
+$("assistant-toggle").addEventListener("click", () => {
+  const panel = $("assistant");
+  panel.hidden = !panel.hidden;
+  $("assistant-toggle").setAttribute("aria-pressed", String(!panel.hidden));
+  if (!panel.hidden) showAssistant(panel, current, workspaces.find((w) => w.id === current)?.title ?? "Community");
+});
 const pages: string[] = [...workspaces.map((w) => w.id), "community"];
 const fromHash = (): Page => {
   const id = location.hash.slice(1);

@@ -15,6 +15,7 @@
     "@fission/ui": "*",
     "@fission/viewport": "*",
     "@fission/community": "*",
+    "@fission/ai": "*",
     "@fission/design": "*",
     "@fission/render": "*",
     "@fission/simulate": "*",

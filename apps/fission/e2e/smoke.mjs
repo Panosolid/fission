@@ -402,6 +402,30 @@ try {
     assert.equal(await page.getAttribute("[data-workspace=laser]", "aria-selected"), "true");
   });
 
+  await check("the assistant is optional, off, and follows the active workspace", async () => {
+    await page.goto(url + "#design");
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    // Off by default: nothing is sent anywhere.
+    assert.equal(await page.textContent("#assistant-toggle"), "AI off");
+    assert.equal(await page.isVisible("#assistant"), false);
+    await page.click("#assistant-toggle");
+    assert.match(await page.textContent("#assistant"), /Coming soon/);
+    assert.match(await page.textContent("#ai-status-detail"), /Nothing is sent anywhere/);
+    assert.match(await page.textContent("#assistant"), /In Design.*Plain-English commands/s);
+    // The settings list the four providers and say which keep data local.
+    assert.equal(await page.locator("#assistant [data-provider]").count(), 4);
+    assert.match(await page.textContent('[data-provider="ollama"]'), /stays on your machine.*OLLAMA_ORIGINS/s);
+    assert.match(await page.textContent('[data-provider="api-key"]'), /sends your request to the provider.*Consumer chat subscriptions can't be used/s);
+    await page.screenshot({ path: "e2e/assistant.png" });
+    // Switching workspace keeps the panel and changes what it lists.
+    await page.click('[data-workspace="laser"]');
+    assert.match(await page.textContent("#assistant"), /In Laser.*finger-joint boxes/s);
+    assert.doesNotMatch(await page.textContent("#assistant"), /In Design/);
+    await page.click("#assistant-toggle");
+    assert.equal(await page.isVisible("#assistant"), false);
+    await page.click('[data-workspace="design"]');
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });

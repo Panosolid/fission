@@ -52,3 +52,8 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 [hidden] { display: none !important; }
 .link-badge { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: #23272e; }
 .link-badge.unresolved { color: #f5b14c; }
+#assistant { width: 320px; padding: 16px; background: #1c1f24; border-left: 1px solid #2a2e35; overflow-y: auto; }
+#assistant[hidden] { display: none; }
+#assistant h4 { margin: 12px 0 4px; }
+#assistant .where { font-weight: normal; font-size: 12px; color: #8a919c; }
+#ai-status { font-size: 12px; color: #8a919c; }
