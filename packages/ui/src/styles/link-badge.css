@@ -1,0 +1,3 @@
+/* The link badge (link-badge.ts): live, frozen copy or broken. */
+.link-badge { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: #23272e; }
+.link-badge.unresolved { color: #f5b14c; }
