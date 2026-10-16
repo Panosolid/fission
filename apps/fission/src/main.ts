@@ -5,7 +5,11 @@
 // camera and what is on screen. Split view (X3) shows a second workspace
 // beside the first, in slots of its own, with its own camera on the same
 // scene and the same project and selection.
+/// <reference types="vite/client" />
 import "@fission/ui/theme.css";
+// Every feature's own styles (src/styles/<feature>.css in packages/ui and the
+// workspaces), loaded without a list, so two features never edit one file.
+import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
 import { ActionRegistry, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
