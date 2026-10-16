@@ -93,3 +93,85 @@ test("Design's saved data reads back, and anything else is refused clearly", asy
   assert.throws(() => readDesignDocument({ ...doc, version: 2 }), /version 2 is not one this Fission reads/);
   assert.throws(() => readDesignDocument({ ...doc, timeline: { features: [] } }), /no timeline/);
 });
+
+// ---- Opening a saved project (19a) ----
+import { projectFromJson, projectToJson, emptyProject } from "@fission/core";
+import { partOf, readDesignDocument, type DesignDocument } from "../src/document.ts";
+
+const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
+
+/** A version-2 file written by hand, as docs/project-format.md describes it: a 50 × 30 × 20 box. */
+const HAND_WRITTEN = `{
+  "formatVersion": 2,
+  "name": "Block",
+  "units": { "length": "mm" },
+  "materials": [],
+  "links": [],
+  "workspaces": {
+    "design": {
+      "version": 1,
+      "profiles": [],
+      "timeline": { "features": [{
+        "id": "feature-1",
+        "intent": { "type": "box", "parameters": { "width": 50, "depth": 30, "height": 20 }, "summary": "Box: 50 × 30 × 20 mm" },
+        "provenance": { "self": { "workspace": "design", "id": "feature-1", "label": "Feature 1 (box)" }, "from": [] },
+        "dependsOn": [],
+        "suppressed": false
+      }] }
+    }
+  }
+}`;
+
+test("a hand-written version-2 file opens to its 50 × 30 × 20 box", () => {
+  const p = projectFromJson(HAND_WRITTEN, DESIGN);
+  const doc = p.workspaces.design as DesignDocument;
+  assert.deepEqual(partOf(doc), { shape: "box", sizes: { width: 50, depth: 30, height: 20 } });
+  const spec = specOf(doc, lastFeature(doc));
+  assert.deepEqual(spec, { box: { width: 50, depth: 30, height: 20 } });
+  // V = 50 · 30 · 20 = 30000 mm³ (the real kernel measures it in the open-a-file journey).
+  assert.equal(spec.box!.width * spec.box!.depth * spec.box!.height, 30000);
+  assert.equal(p.name, "Block");
+});
+
+test("a version-1 file with a Design part opens (outer migration, Design untouched)", () => {
+  const v1 = JSON.parse(HAND_WRITTEN);
+  v1.formatVersion = 1;
+  delete v1.links;
+  const p = projectFromJson(JSON.stringify(v1), DESIGN);
+  assert.deepEqual(p.links, []);
+  assert.deepEqual(p.workspaces.design, JSON.parse(HAND_WRITTEN).workspaces.design);
+});
+
+test("partOf undoes partDocument for every shape (self-consistency)", () => {
+  for (const kind of ["box", "cylinder", "sphere", "l-bracket", "plate", "slot", "star"] as const) {
+    const { shape, sizes } = partOf(partDocument(kind, 41, 31, 21));
+    assert.equal(shape, kind);
+    const full = { width: 41, depth: kind === "cylinder" || kind === "sphere" ? undefined : 31, height: kind === "sphere" ? undefined : 21 };
+    assert.deepEqual(sizes, Object.fromEntries(Object.entries(full).filter(([, v]) => v !== undefined)));
+    // And the document it describes is the one it came from.
+    const doc = partDocument(kind, 41, 31, 21);
+    assert.deepEqual(partDocument(shape, sizes.width!, sizes.depth ?? 31, sizes.height ?? 21), doc);
+  }
+});
+
+test("Design data the panel can't show is refused when the file is opened, each with its message", () => {
+  const broken = (edit: (d: any) => void) => {
+    const f = JSON.parse(HAND_WRITTEN);
+    edit(f.workspaces.design);
+    return () => projectFromJson(JSON.stringify(f), DESIGN);
+  };
+  assert.throws(broken((d) => (d.timeline.features[0].intent.type = "loft")), /can't open the design workspace's data: unknown feature type loft/);
+  assert.throws(broken((d) => (d.timeline.features[0].intent.parameters.width = "50")), /Box: 50 × 30 × 20 mm: width must be a number/);
+  assert.throws(broken((d) => delete d.timeline.features[0].intent), /Design feature 1 has no id or intent/);
+  assert.throws(broken((d) => (d.timeline.features = [])), /Design data has no timeline/);
+  assert.throws(broken((d) => (d.version = 2)), /Design data version 2 is not one this Fission reads \(1\)/);
+  const extrude = (edit: (d: DesignDocument) => void) => {
+    const doc = partDocument("slot", 40, 30, 20);
+    edit(doc);
+    return () => projectFromJson(projectToJson({ ...emptyProject(), workspaces: { design: doc } }), DESIGN);
+  };
+  assert.doesNotThrow(extrude(() => {}));
+  assert.throws(extrude((d) => (d.profiles = [])), /its profile profile-1 is missing/);
+  assert.throws(extrude((d) => ((d.profiles[0] as { kind: string }).kind = "hexagon")), /profile profile-1 has an unknown kind hexagon/);
+  assert.throws(extrude((d) => ((d.profiles[0] as { width: unknown }).width = null)), /profile profile-1: width and depth must be numbers/);
+});

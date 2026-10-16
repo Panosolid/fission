@@ -4,7 +4,7 @@
 
 import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
-import { lastFeature, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
+import { lastFeature, partOf, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
 import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
@@ -27,8 +27,12 @@ function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-/** What the user last entered, kept while other workspaces are shown. */
-let saved: { shape: ShapeKind; sizes: string[] } | null = null;
+/**
+ * What the user last entered (as typed), kept while other workspaces are
+ * shown, with the document it made: when the project holds a different
+ * document (a file was opened), the panel shows that one instead.
+ */
+let saved: { doc: DesignDocument; shape: ShapeKind; sizes: string[] } | null = null;
 let framed: Framing | null = null;
 let framedKind: ShapeKind | null = null;
 
@@ -129,8 +133,20 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
 function mount(ctx: WorkspaceContext): () => void {
   const panel = propertiesPanel(ctx.properties);
   const { inputs } = panel;
-  let shape: ShapeKind = saved?.shape ?? "box";
-  if (saved) inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
+  let shape: ShapeKind = "box";
+  const held = ctx.project.workspaces.design as DesignDocument | undefined;
+  /** A document the project holds that this panel did not make (an opened file): shown as it is, and framed. */
+  let loaded: DesignDocument | undefined;
+  if (saved && held === saved.doc) {
+    shape = saved.shape;
+    inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
+  } else if (held) {
+    const part = partOf(held); // readDesignDocument checked it when the file was opened
+    shape = part.shape;
+    for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+    loaded = held;
+    framedKind = null;
+  }
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
   const { kernel, viewport } = ctx;
   let shown = true;
@@ -190,14 +206,20 @@ function mount(ctx: WorkspaceContext): () => void {
 
   async function update() {
     const kind = shape;
-    saved = { shape, sizes: inputs.map((i) => i.value) };
     for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
-    // The panel edits feature #1 of the one-step timeline; the project holds it.
-    const doc = documentFor(partCommand());
-    syncGraph(ctx.graph, doc, (ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
+    // The panel edits feature #1 of the one-step timeline; the project holds
+    // it. An opened file's document is kept as it is until the first edit.
+    const doc = loaded ?? documentFor(partCommand());
+    // An opened document is all new to the graph: out of date until it builds.
+    const before = loaded ? null : ((ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
+    loaded = undefined;
+    saved = { doc, shape, sizes: inputs.map((i) => i.value) };
+    syncGraph(ctx.graph, doc, before);
+    const changed = ctx.project.workspaces.design !== doc;
     ctx.project.workspaces.design = doc;
+    if (changed) ctx.projectChanged(); // the shell autosaves (19c)
     browser(ctx.browser, doc, selectRow);
     showSelection();
     markStale();
@@ -273,7 +295,7 @@ function mount(ctx: WorkspaceContext): () => void {
     showSelection();
   });
 
-  inputs.forEach((i) => i.addEventListener("input", update));
+  inputs.forEach((i) => i.addEventListener("input", () => update()));
   update();
   return () => {
     shown = false;

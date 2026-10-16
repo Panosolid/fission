@@ -1,32 +1,19 @@
-// @fission/storage: local-first project storage. PLACEHOLDER.
+// @fission/storage: local-first project storage.
 //
-// Will keep projects on the user's own machine (the browser's file system
-// access API where available, IndexedDB otherwise), autosave as you work,
-// and import/export project files and meshes. Nothing here works yet.
-//
-// DRAFT interfaces: will change when storage is built (roadmap step 19).
+// Projects kept in this browser (store.ts, over the KeyValue in
+// key-value.ts; IndexedDB in the browser through indexeddb.ts), and
+// autosave on top of them (autosave.ts).
 
-import type { Project } from "@fission/core";
+import type { DataReader } from "@fission/core";
+import { indexedDbKeyValue } from "./indexeddb.ts";
+import { projectStore, type ProjectStore } from "./store.ts";
 
-export interface ProjectSummary {
-  id: string;
-  name: string;
-  modified: Date;
-}
+export { indexedDbKeyValue } from "./indexeddb.ts";
+export { memoryKeyValue, type KeyValue } from "./key-value.ts";
+export { startAutosave, QUIET_MS, type Autosave, type AutosaveOptions, type AutosaveStatus, type Timers } from "./autosave.ts";
+export { projectStore, type ProjectStore, type ProjectSummary } from "./store.ts";
 
-export interface ProjectStore {
-  list(): Promise<ProjectSummary[]>;
-  open(id: string): Promise<Project>;
-  save(id: string, project: Project): Promise<void>;
-  remove(id: string): Promise<void>;
-}
-
-/** The store for this browser. Not implemented yet. */
-export function localStore(): ProjectStore {
-  throw new Error("not implemented");
-}
-
-/** Saves the project a moment after each change. Not implemented yet. */
-export function startAutosave(_store: ProjectStore, _id: string, _project: () => Project): () => void {
-  throw new Error("not implemented");
+/** The store for this browser, kept in IndexedDB. `readers` are the workspace plugins. */
+export function localStore(readers: readonly DataReader[]): ProjectStore {
+  return projectStore(indexedDbKeyValue(), readers);
 }

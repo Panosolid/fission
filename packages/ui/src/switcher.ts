@@ -30,6 +30,8 @@ export function workspaceSwitcher(bar: HTMLElement, entries: SwitcherEntry[], ch
     for (const tab of bar.querySelectorAll<HTMLButtonElement>("[role=tab]")) {
       const active = tab.dataset.workspace === id;
       tab.setAttribute("aria-selected", String(active));
+      // The tabs scroll sideways on a narrow screen: keep the chosen one in view.
+      if (active) tab.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     }
   };
 }

@@ -98,9 +98,40 @@ export function specOf(document: DesignDocument, feature: Feature): BodySpec {
   }
 }
 
+/** The sizes the panel edits, keyed like its inputs; a shape fills only the ones it uses. */
+export type PartSizes = Partial<Record<"width" | "depth" | "height", number>>;
+
 /**
- * Design's part of a loaded project, checked. Version 1 is the first, so
- * there is nothing to migrate yet; a later version adds its step here.
+ * The shape and sizes a document's final feature was made from: the
+ * inverse of partDocument, for the panel showing a loaded part. Throws a
+ * clear message for a feature the panel can't show.
+ */
+export function partOf(document: DesignDocument): { shape: ShapeKind; sizes: PartSizes } {
+  const f = lastFeature(document);
+  switch (f.intent.type) {
+    case "box":
+      return { shape: "box", sizes: { width: num(f, "width"), depth: num(f, "depth"), height: num(f, "height") } };
+    case "cylinder":
+      return { shape: "cylinder", sizes: { width: num(f, "diameter"), height: num(f, "height") } };
+    case "sphere":
+      return { shape: "sphere", sizes: { width: num(f, "diameter") } };
+    case "extrude": {
+      const profile = document.profiles.find((x) => x.id === f.intent.parameters.profile);
+      if (!profile) throw new Error(`${f.intent.summary}: its profile ${String(f.intent.parameters.profile)} is missing`);
+      if (!Object.hasOwn(profileNames, profile.kind)) throw new Error(`profile ${profile.id} has an unknown kind ${String(profile.kind)}`);
+      if (typeof profile.width !== "number" || typeof profile.depth !== "number") throw new Error(`profile ${profile.id}: width and depth must be numbers`);
+      return { shape: profile.kind, sizes: { width: profile.width, depth: profile.depth, height: num(f, "distance") } };
+    }
+    default:
+      throw new Error(`unknown feature type ${String(f.intent.type)}`);
+  }
+}
+
+/**
+ * Design's part of a loaded project, checked all the way down to the
+ * numbers the panel shows, so a bad file is refused when it is opened
+ * rather than failing later. Version 1 is the first, so there is nothing
+ * to migrate yet; a later version adds its step here.
  */
 export function readDesignDocument(data: unknown): DesignDocument {
   const d = data as Partial<DesignDocument> | null;
@@ -108,6 +139,12 @@ export function readDesignDocument(data: unknown): DesignDocument {
   if (d.version !== 1) throw new Error(`Design data version ${String(d.version)} is not one this Fission reads (1)`);
   if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features) || d.timeline.features.length === 0)
     throw new Error("Design data has no timeline");
+  for (const [i, f] of d.timeline.features.entries()) {
+    const intent = (f as Partial<Feature> | null)?.intent;
+    if (typeof f?.id !== "string" || typeof intent?.type !== "string" || typeof intent.summary !== "string" || typeof intent.parameters !== "object" || intent.parameters === null)
+      throw new Error(`Design feature ${i + 1} has no id or intent`);
+  }
+  partOf(d as DesignDocument);
   return d as DesignDocument;
 }
 
