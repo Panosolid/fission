@@ -28,6 +28,40 @@
 //!   steps 46–47); points on it are not reported.
 //! - A shell wholly inside another (a body inside a body, not touching)
 //!   meets nothing, so it passes; voids come with booleans.
+//!
+//! Mutation testing (`cargo mutants`, lib tests) leaves these survivors,
+//! all equivalent or ties at exactly a threshold:
+//! - `check`, the sphere face box, `- pad` → `/ pad`: by precedence that is
+//!   centre − r/LINEAR, a far bigger box, so it only stops pruning; so does
+//!   `&&` → `||` in `overlapping`'s box test.
+//! - `edges_meet`, `along_each_other`'s `&&` → `||`: one edge within LINEAR
+//!   of the other's whole line or circle but not the reverse happens only
+//!   at slants inside tolerance, and there the four ends (always candidates)
+//!   find what the samples would. Checked: 1200 pairs of star prisms (with
+//!   and without arcs), cubes and half cylinders turned by 1e-6, 1e-3 and
+//!   1 rad and moved by as much gave identical reports.
+//! - `> LINEAR` → `>= LINEAR` from a known vertex (`edges_meet`,
+//!   `edge_meets_face`): a candidate exactly LINEAR from a shared vertex.
+//! - `edge_meets_face`, the `==` in the `known` dedup → `!=`: drops the
+//!   second shared vertex when both ends are f's vertices. That vertex is on
+//!   f's boundary, so `classify` never calls it inside; only dividing out
+//!   its root could matter, at an edge tangent there. Checked: 1200 edges
+//!   tangent to balls of radius 100 mm to 1 km, 10 mm to 10 m long, in 100
+//!   turns, arriving at the vertex with it left out of `known` altogether,
+//!   report nothing (rounding splits the root only where the edge starts,
+//!   `a_tangent_edge_at_a_shared_vertex_is_not_a_meeting`).
+//! - `faces_meet`, `size(i) <= size(j)` → `>`: only the order of two
+//!   `classify` calls that must both say inside.
+//! - `classify`, `d < best` → `<=`: a tie between equally near edges; the
+//!   path from either nearest point crosses no edge, so either decides the
+//!   same. `* ±1` → `/ ±1` (normal, edge direction): exact. `> 0.0` →
+//!   `>= 0.0`: the path is perpendicular to the edge at an inner nearest
+//!   point, so the product is 0 only for a path of length 0, already the
+//!   boundary.
+//! - `corner_contains`, `a > 0.0` → `>=`, `a < angle(..)` → `<=`: a path
+//!   leaving exactly along one of the corner's edges.
+//! - `along_surface`, `+ PI` → `- PI` in the cylinder's turn: d − π and
+//!   d + π differ by 2π, the same after `rem_euclid(TAU)`.
 
 use crate::geom::{Curve, Surface};
 use crate::intersect::{closed_meetings, curve_curve, curve_surface};
@@ -654,6 +688,28 @@ mod tests {
     }
 
     #[test]
+    fn classify_at_a_sharp_corner_by_hand() {
+        // The triangle (0,0) (4,0) (0,1), extruded 1; its top is face 1.
+        // At (4, 0) the edges meet at atan(¼) ≈ 14°. q = (4.1, 0.3) is
+        // nearest that corner: past the end of the edge along y = 0
+        // (x > 4), and before the start of the edge to (0, 1), since
+        // (q − (4,0))·(−4, 1) = −0.4 + 0.3 < 0. It is outside (x + 4y =
+        // 5.3 > 4), although it lies on the face's side of the edge
+        // arriving at the corner (y > 0): only the corner between both
+        // edges decides. Mirrored below y = 0, (4.1, −0.3) is outside too,
+        // and (3.9, 0.02) is inside (x + 4y = 3.98 < 4).
+        let tri = [(0.0, 0.0), (4.0, 0.0), (0.0, 1.0)];
+        let b = extrude(&Profile::polygon(tri.iter().map(|&(x, y)| DVec2::new(x, y)).collect(), vec![]), 1.0).unwrap();
+        let top = (0..b.faces.len())
+            .find(|&f| matches!(b.faces[f].surface, Surface::Plane { normal, .. } if normal.z * if b.faces[f].sense { 1.0 } else { -1.0 } > 0.5))
+            .unwrap();
+        let at = |x: f64, y: f64| classify(&b, top, DVec3::new(x, y, 1.0));
+        assert_eq!(at(4.1, 0.3), Where::Outside);
+        assert_eq!(at(4.1, -0.3), Where::Outside);
+        assert_eq!(at(3.9, 0.02), Where::Inside);
+    }
+
+    #[test]
     fn classify_on_a_cylinder_by_hand() {
         // The half cylinder's curved face (face 3): radius 1, angles 0 to π
         // (y ≥ 0), heights 0 to 2. At angle π/2, height 1: inside. At angle
@@ -730,6 +786,66 @@ mod tests {
             let b = b.transformed(&turn);
             assert_eq!(edge_meets_face(&b, 1, 0, &[0]), None, "turn {k}");
         }
+    }
+
+    #[test]
+    fn a_doubled_edge_meets_its_twin_between_their_vertices() {
+        // A second edge from cube vertex 0 (0, 0, 0) to vertex 1 (1, 0, 0)
+        // lies along the cube's edge 0–1: they share both vertices and
+        // every point between, so they meet away from the shared vertices.
+        // The first sample more than LINEAR from both is a quarter of the
+        // way along: (¼, 0, 0).
+        let mut b = hand_cube();
+        let twin = (0..b.edges.len()).find(|&e| [b.edges[e].start, b.edges[e].end] == [0, 1] || [b.edges[e].start, b.edges[e].end] == [1, 0]).unwrap();
+        let e = b.add_line(0, 1);
+        let p = edges_meet(&b, twin, e).expect("they overlap");
+        assert!(p.distance(DVec3::new(0.25, 0.0, 0.0)) <= LINEAR, "{p}");
+    }
+
+    #[test]
+    fn a_diagonal_across_a_face_meets_it_between_its_vertices() {
+        // An edge from cube vertex 0 (0, 0, 0) to vertex 3 (1, 1, 0) runs
+        // across the bottom (face 0, vertices 0, 1, 2, 3), in its plane. Its
+        // ends are the face's own vertices; a quarter of the way along,
+        // (¼, ¼, 0), is ¼ from the bottom's edges, inside it: the first
+        // meeting found.
+        let mut b = hand_cube();
+        let e = b.add_line(0, 3);
+        let p = edge_meets_face(&b, e, 0, &[0, 1, 2, 3]).expect("it crosses the face");
+        assert!(p.distance(DVec3::new(0.25, 0.25, 0.0)) <= LINEAR, "{p}");
+    }
+
+    #[test]
+    fn along_surface_by_hand() {
+        // Plane through (5, −3, 2) with normal n = (0, 0.6, 0.8); q is p
+        // moved 2 along x (in the plane) and 0.5 along n (off it): the part
+        // in the plane is (2, 0, 0).
+        let n = DVec3::new(0.0, 0.6, 0.8);
+        let plane = Surface::Plane { origin: DVec3::new(5.0, -3.0, 2.0), normal: n, x_dir: DVec3::X };
+        let p = DVec3::new(5.0, -3.0, 2.0);
+        let got = along_surface(&plane, p, p + DVec3::new(2.0, 0.0, 0.0) + n * 0.5);
+        assert!(got.distance(DVec3::new(2.0, 0.0, 0.0)) <= LINEAR, "{got}");
+        // Ball of radius 2 round c = (4, −2, 7): p = c + 2x, q = c + 2y. The
+        // tangent plane at p is x = 6, so the chord q − p = (−2, 2, 0) loses
+        // its x part: the great circle leaves p along (0, 2, 0).
+        let c = DVec3::new(4.0, -2.0, 7.0);
+        let ball = Surface::Sphere { center: c, axis: DVec3::Z, x_dir: DVec3::X, radius: 2.0 };
+        let got = along_surface(&ball, c + DVec3::X * 2.0, c + DVec3::Y * 2.0);
+        assert!(got.distance(DVec3::new(0.0, 2.0, 0.0)) <= LINEAR, "{got}");
+        // Rod of radius 2.5 along z through o = (1, 2, 3). p at angle π/3,
+        // height 1; q at angle π/3 + 0.4, height 1.7. Unrolled, the path
+        // runs 2.5 · 0.4 = 1 round, along the circle's direction at p,
+        // (−sin π/3, cos π/3, 0) = (−√3/2, ½, 0), and 0.7 up: (−√3/2, ½, 0.7).
+        let o = DVec3::new(1.0, 2.0, 3.0);
+        let rod = Surface::Cylinder { origin: o, axis: DVec3::Z, x_dir: DVec3::X, radius: 2.5 };
+        let at = |a: f64, h: f64| o + DVec3::new(2.5 * a.cos(), 2.5 * a.sin(), h);
+        let a = PI / 3.0;
+        let got = along_surface(&rod, at(a, 1.0), at(a + 0.4, 1.7));
+        assert!(got.distance(DVec3::new(-(3f64.sqrt()) / 2.0, 0.5, 0.7)) <= LINEAR, "{got}");
+        // Across angle 0: from angle 0.2 to 2π − 0.2 the short way is −0.4,
+        // 1 back round: −(−sin 0.2, cos 0.2, 0), at the same height.
+        let got = along_surface(&rod, at(0.2, 1.0), at(TAU - 0.2, 1.0));
+        assert!(got.distance(DVec3::new(0.2f64.sin(), -(0.2f64.cos()), 0.0)) <= LINEAR, "{got}");
     }
 
     /// A rigid motion off the origin and turned about a skew axis: the
