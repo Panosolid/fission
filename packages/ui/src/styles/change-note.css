@@ -1,4 +1,4 @@
-/* Change notes (X5): the note (change-note.ts) and the strip the shell shows over each pane's viewport. Kept out of theme.css so work on other workspaces doesn't collide here. */
+/* The change note (change-note.ts): an automatic update, its cause, "Why?" and dismiss. */
 .change-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; padding: 6px 8px; margin-bottom: 6px; border-radius: 6px; border-left: 3px solid #4aa8ff; background: #23272e; }
 .change-note.needs-rerun { border-left-color: #f5b14c; }
 .change-note .note-body { flex: 1; }
@@ -7,7 +7,3 @@
 .change-note ol { margin: 4px 0 0; padding-left: 18px; }
 .change-note .note-dismiss { font: inherit; font-size: 14px; line-height: 1; background: none; border: none; color: inherit; cursor: pointer; padding: 0 2px; opacity: 0.7; }
 .change-note .note-dismiss:hover, .change-note .note-dismiss:focus-visible { opacity: 1; }
-.notes-strip { position: absolute; top: 8px; left: 8px; right: 112px; max-width: 440px; z-index: 1; }
-.notes-strip:empty { display: none; }
-#split-viewport .notes-strip { top: 48px; }
-.notes-strip .change-note { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }

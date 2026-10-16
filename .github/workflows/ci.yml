@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  # Started by auto-merge.yml after it brings a branch up to date.
+  workflow_dispatch:
 
 jobs:
   kernel:
@@ -20,6 +22,7 @@ jobs:
       - run: cargo test
         working-directory: kernel
       - run: python3 prototypes/vectors.py
+      - run: python3 -m unittest discover -s .github/scripts
 
   app:
     runs-on: ubuntu-latest

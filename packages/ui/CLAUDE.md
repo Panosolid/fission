@@ -2,4 +2,4 @@
 
 Contents of `packages/ui`; the rules are in packages/CLAUDE.md and the root CLAUDE.md. Keep this list current when you add or change a file here.
 
-- shared UI kit: number formatting, theme (`theme.css`, including the split layout), workspace switcher, split choices (`split.ts`), the link badge, the downstream chip (`downstream-chip.ts`) and the change note (`change-note.ts`, styled with the shell's notes strip in `change-notes.css`, kept out of theme.css so other work doesn't collide there), placeholder page.
+- shared UI kit: number formatting, theme (`theme.css`: the base layout, including split view; each feature's own styles are `src/styles/<feature>.css`, every selector starting with `.<feature>`, loaded by the app without a list), workspace switcher, split choices (`split.ts`), the link badge, the downstream chip (`downstream-chip.ts`) and the change note (`change-note.ts`; the strip of notes the shell shows over each pane is styled in `styles/notes-strip.css`), placeholder page.

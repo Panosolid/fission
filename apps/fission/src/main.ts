@@ -6,8 +6,11 @@
 // beside the first, in slots of its own, with its own camera on the same
 // scene and the same project and selection. Change notes (X5) show over
 // each pane's viewport, for the workspace in that pane.
+/// <reference types="vite/client" />
 import "@fission/ui/theme.css";
-import "@fission/ui/change-notes.css";
+// Every feature's own styles (src/styles/<feature>.css in packages/ui and the
+// workspaces), loaded without a list, so two features never edit one file.
+import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
 import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
@@ -120,6 +123,7 @@ function notesStrip(host: HTMLElement): HTMLElement {
   return strip;
 }
 const notesStrips = { main: notesStrip($("viewport")), split: notesStrip($("split-viewport")) };
+notesStrips.split.classList.add("in-split"); // below the split bar
 const drawn = new WeakMap<HTMLElement, string>();
 /** Draws `notes` in `strip`, keeping open any "Why?" the user opened; nothing changes when nothing would. */
 function drawNotes(strip: HTMLElement, notes: ChangeNote[]) {

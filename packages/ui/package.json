@@ -5,8 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./theme.css": "./src/theme.css",
-    "./change-notes.css": "./src/change-notes.css"
+    "./theme.css": "./src/theme.css"
   },
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
