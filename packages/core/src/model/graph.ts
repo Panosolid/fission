@@ -82,6 +82,34 @@ export class DependencyGraph {
     return seen;
   }
 
+  /**
+   * The shortest chain by which `to` reads `from`: [from, …, to], each id
+   * read by the next. Ties go to inputs in the order they were given, so
+   * the answer is the same every time. Undefined when `to` doesn't read
+   * `from`. Still works when `from` was removed, because what read it keeps
+   * the dangling input.
+   */
+  path(from: string, to: string): string[] | undefined {
+    if (from === to) return undefined;
+    // Breadth-first from `to` back through inputs; next[x] is the id x feeds on the way to `to`.
+    const next = new Map<string, string>();
+    const queue = [to];
+    for (let i = 0; i < queue.length; i++) {
+      const x = queue[i];
+      for (const d of this.inputs.get(x) ?? []) {
+        if (d === to || next.has(d)) continue;
+        next.set(d, x);
+        if (d === from) {
+          const chain = [from];
+          for (let y = from; y !== to; ) chain.push((y = next.get(y)!));
+          return chain;
+        }
+        queue.push(d);
+      }
+    }
+    return undefined;
+  }
+
   /** `id` changed: marks everything downstream out of date and says what to rebuild now. */
   changed(id: string): Staleness {
     const result: Staleness = { updateNow: [], awaitingRerun: [] };
