@@ -90,11 +90,16 @@ impl Trig2 {
 /// leaves are then refined, by bisection where f changes sign and by
 /// golden-section search for the smallest |f| where it doesn't.
 pub fn trig_zeros(f: &Trig2) -> Vec<f64> {
+    trig_zeros_counted(f).0
+}
+
+/// `trig_zeros`, and how many evaluations it spent ruling intervals out.
+fn trig_zeros_counted(f: &Trig2) -> (Vec<f64>, usize) {
     let slope = f.slope_bound();
     if slope == 0.0 {
         // Constant: zero everywhere or nowhere; callers handle "everywhere"
         // (a curve lying in a surface) before asking.
-        return vec![];
+        return (vec![], 0);
     }
     let mut leaves: Vec<(f64, f64)> = Vec::new();
     let mut evals = 0usize;
@@ -148,7 +153,7 @@ pub fn trig_zeros(f: &Trig2) -> Vec<f64> {
             out.push(golden_min_abs(f, a, b));
         }
     }
-    out.iter().map(|t| t.rem_euclid(TAU)).collect()
+    (out.iter().map(|t| t.rem_euclid(TAU)).collect(), evals)
 }
 
 /// A zero of f between a and b, where f(a) and f(b) differ in sign.
@@ -735,5 +740,307 @@ mod tests {
         assert_eq!(closed_meetings(&big, &centred), Vec::<DVec3>::new());
         let side = Surface::Plane { origin: DVec3::ZERO, normal: DVec3::X, x_dir: DVec3::Y };
         assert_eq!(closed_meetings(&side, &big), Vec::<DVec3>::new());
+    }
+
+    /// An awkward similarity: turned about a skew axis, scaled by 3.7 and
+    /// moved off the origin. Hand cases sit at the origin with unit sizes,
+    /// where `c − o` and `c + o`, `x·r` and `x/r` agree; carried through
+    /// this, they don't.
+    fn awkward() -> Transform {
+        Transform::rotation(DVec3::new(0.3, -1.0, 0.6), 1.1)
+            .then(Transform::uniform_scale(3.7))
+            .then(Transform::translation(DVec3::new(12.5, -7.0, 3.25)))
+    }
+
+    use crate::geom::Transform;
+
+    /// Each wanted point has a proposed point within 1e-12 of the scene's
+    /// size, and there are no more proposed points than wanted ones.
+    fn proposes(got: &[DVec3], want: &[DVec3], label: &str) {
+        for w in want {
+            assert!(got.iter().any(|g| g.distance(*w) <= 1e-12 * w.length().max(1.0)), "{label}: {w} not in {got:?}");
+        }
+        assert!(got.len() <= want.len(), "{label}: extra points {got:?}, want {want:?}");
+    }
+
+    /// The hand cases of the curve–surface tests, each as (curve, surface,
+    /// known parameter or none, the meeting points).
+    /// (label, curve, surface, a known parameter, the meeting points).
+    type SurfaceCase = (&'static str, Curve, Surface, Option<f64>, Vec<DVec3>);
+    /// (label, curve, curve, known points, the meeting points).
+    type CurveCase = (&'static str, Curve, Curve, Vec<DVec3>, Vec<DVec3>);
+
+    fn curve_surface_cases() -> Vec<SurfaceCase> {
+        let h = 0.75f64.sqrt();
+        let s7 = 7f64.sqrt() / 4.0;
+        let unit = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let ball = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let rod = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let x_line = Curve::Line { origin: DVec3::new(-2.0, 0.0, 0.0), dir: DVec3::X };
+        vec![
+            // Through the unit ball: in at (−1, 0, 0), out at (1, 0, 0).
+            ("line–ball", x_line.clone(), ball.clone(), None, vec![-DVec3::X, DVec3::X]),
+            ("line–ball, one known", x_line.clone(), ball.clone(), Some(1.0), vec![DVec3::X]),
+            // y = ½, z = 7 through the unit rod: x = ±√¾.
+            (
+                "line–rod",
+                Curve::Line { origin: DVec3::new(-2.0, 0.5, 7.0), dir: DVec3::X },
+                rod.clone(),
+                None,
+                vec![DVec3::new(-h, 0.5, 7.0), DVec3::new(h, 0.5, 7.0)],
+            ),
+            ("line–plane", x_line.clone(), Surface::Plane { origin: DVec3::new(3.0, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y }, None, vec![DVec3::new(3.0, 0.0, 0.0)]),
+            // Its one meeting known: nothing else.
+            ("line–plane, known", x_line, Surface::Plane { origin: DVec3::new(3.0, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y }, Some(5.0), vec![]),
+            // Unit circle and the plane x = ½: (½, ±√3/2, 0); knowing the
+            // first (θ = π/3) leaves the second.
+            ("circle–plane", unit.clone(), Surface::Plane { origin: DVec3::new(0.5, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y }, None, vec![DVec3::new(0.5, h, 0.0), DVec3::new(0.5, -h, 0.0)]),
+            ("circle–plane, known", unit.clone(), Surface::Plane { origin: DVec3::new(0.5, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y }, Some(FRAC_PI_3), vec![DVec3::new(0.5, -h, 0.0)]),
+            // Unit circle and the unit ball, or rod, about (1.5, 0): cos θ = ¾,
+            // sin θ = ±√7/4.
+            ("circle–ball", unit.clone(), Surface::Sphere { center: DVec3::new(1.5, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, None, vec![DVec3::new(0.75, s7, 0.0), DVec3::new(0.75, -s7, 0.0)]),
+            ("circle–ball, known", unit.clone(), Surface::Sphere { center: DVec3::new(1.5, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, Some(0.75f64.acos()), vec![DVec3::new(0.75, -s7, 0.0)]),
+            ("circle–rod across", unit.clone(), Surface::Cylinder { origin: DVec3::new(1.5, 0.0, -4.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, None, vec![DVec3::new(0.75, s7, 0.0), DVec3::new(0.75, -s7, 0.0)]),
+            ("circle–rod across, known", unit, Surface::Cylinder { origin: DVec3::new(1.5, 0.0, -4.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, Some(0.75f64.acos()), vec![DVec3::new(0.75, -s7, 0.0)]),
+            // The unit circle in x = 0 and a rod of radius 0.6 along z:
+            // (0, ±0.6, ±0.8).
+            (
+                "circle–rod tilted",
+                Curve::Circle { center: DVec3::ZERO, axis: DVec3::X, x_dir: DVec3::Y, radius: 1.0 },
+                Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 0.6 },
+                None,
+                vec![DVec3::new(0.0, 0.6, 0.8), DVec3::new(0.0, -0.6, 0.8), DVec3::new(0.0, 0.6, -0.8), DVec3::new(0.0, -0.6, -0.8)],
+            ),
+        ]
+    }
+
+    #[test]
+    fn curve_surface_cases_anywhere() {
+        for tf in [Transform::IDENTITY, awkward()] {
+            for (label, c, s, known, want) in curve_surface_cases() {
+                let (c2, s2) = (c.transformed(&tf), s.transformed(&tf));
+                let known: Vec<f64> = known.into_iter().map(|t| c.transform_param(t, &tf)).collect();
+                let got: Vec<DVec3> = curve_surface(&c2, &s2, &known).into_iter().map(|t| c2.eval(t)).collect();
+                let want: Vec<DVec3> = want.iter().map(|p| tf.point(*p)).collect();
+                proposes(&got, &want, label);
+            }
+        }
+    }
+
+    #[test]
+    fn curve_surface_near_misses_propose_the_closest_point() {
+        // No meeting: the closest approach is proposed, so the caller can
+        // measure how near it comes. The line y = 2 misses the unit ball;
+        // nearest at (0, 2, 0). The circle round (0, 0, 0) of radius 1 in the
+        // plane x = 0 against the plane x = 3: parallel, nothing. The unit
+        // circle and the plane x = 2 (never reached): its nearest point
+        // (1, 0, 0); the plane x = −2: (−1, 0, 0).
+        let ball = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let unit = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        for tf in [Transform::IDENTITY, awkward()] {
+            let line = Curve::Line { origin: DVec3::new(-5.0, 2.0, 0.0), dir: DVec3::X }.transformed(&tf);
+            let got: Vec<DVec3> = curve_surface(&line, &ball.transformed(&tf), &[]).into_iter().map(|t| line.eval(t)).collect();
+            proposes(&got, &[tf.point(DVec3::new(0.0, 2.0, 0.0))], "line misses ball");
+            let c = unit.transformed(&tf);
+            for (x, want) in [(2.0, DVec3::X), (-2.0, -DVec3::X)] {
+                let wall = Surface::Plane { origin: DVec3::new(x, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y }.transformed(&tf);
+                let got: Vec<DVec3> = curve_surface(&c, &wall, &[]).into_iter().map(|t| c.eval(t)).collect();
+                proposes(&got, &[tf.point(want)], "circle misses plane");
+            }
+            // Parallel and apart: nothing proposed is on the wall (exactly
+            // parallel proposes nothing; rounding in the turned frame may
+            // make it "nearly parallel", and a nearest point then).
+            let upright = Curve::Circle { center: DVec3::ZERO, axis: DVec3::X, x_dir: DVec3::Y, radius: 1.0 }.transformed(&tf);
+            let wall = Surface::Plane { origin: DVec3::new(3.0, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y }.transformed(&tf);
+            assert!(curve_surface(&upright, &wall, &[]).into_iter().all(|t| wall.distance(upright.eval(t)) > 1.0));
+        }
+    }
+
+    #[test]
+    fn curve_curve_cases_anywhere() {
+        let h = 3f64.sqrt() / 2.0;
+        let r = 0.75f64.sqrt();
+        let c1 = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let c2 = Curve::Circle { center: DVec3::X, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let c3 = Curve::Circle { center: DVec3::new(0.5, 0.0, 0.0), axis: DVec3::X, x_dir: DVec3::Y, radius: 1.0 };
+        let chord = Curve::Line { origin: DVec3::new(-3.0, 0.5, 0.0), dir: DVec3::X };
+        // Through (0.6, 0.8, 0) on c1, crossing its plane there.
+        let pin = Curve::Line { origin: DVec3::new(0.6, 0.8, -1.0), dir: DVec3::Z };
+        let cases: Vec<CurveCase> = vec![
+            ("skew lines", Curve::Line { origin: DVec3::new(-5.0, 0.0, 0.0), dir: DVec3::X }, Curve::Line { origin: DVec3::new(2.0, 1.0, 3.0), dir: DVec3::Z }, vec![], vec![DVec3::new(2.0, 0.0, 0.0)]),
+            ("crossing lines, known", Curve::Line { origin: DVec3::new(-5.0, 0.0, 0.0), dir: DVec3::X }, Curve::Line { origin: DVec3::new(2.0, 0.0, 3.0), dir: DVec3::Z }, vec![DVec3::new(2.0, 0.0, 0.0)], vec![]),
+            ("circles", c1.clone(), c2.clone(), vec![], vec![DVec3::new(0.5, h, 0.0), DVec3::new(0.5, -h, 0.0)]),
+            ("circles, known", c1.clone(), c2.clone(), vec![DVec3::new(0.5, h, 0.0)], vec![DVec3::new(0.5, -h, 0.0)]),
+            ("chord", chord.clone(), c1.clone(), vec![], vec![DVec3::new(r, 0.5, 0.0), DVec3::new(-r, 0.5, 0.0)]),
+            ("chord, known", c1.clone(), chord, vec![DVec3::new(r, 0.5, 0.0)], vec![DVec3::new(-r, 0.5, 0.0)]),
+            ("pin", pin.clone(), c1.clone(), vec![], vec![DVec3::new(0.6, 0.8, 0.0)]),
+            ("pin, known", c1.clone(), pin, vec![DVec3::new(0.6, 0.8, 0.0)], vec![]),
+            (
+                "circles across",
+                c1.clone(),
+                c3.clone(),
+                vec![],
+                vec![DVec3::new(0.5, r, 0.0), DVec3::new(0.5, -r, 0.0), DVec3::new(0.5, 1.0, 0.0), DVec3::new(0.5, -1.0, 0.0)],
+            ),
+            // Sharing (½, √¾, 0) (on c1, and on c4 below): the others on the
+            // line x = ½, z = 0 are c1's (½, −√¾, 0) and c4's (½, −√¾, 0) too
+            // (c4 = the circle in x = ½ about (½, 0, 0) of radius 1... no:
+            // radius √¾, so it passes through both).
+            (
+                "circles across, known",
+                c1.clone(),
+                Curve::Circle { center: DVec3::new(0.5, 0.0, 0.0), axis: DVec3::X, x_dir: DVec3::Y, radius: r },
+                vec![DVec3::new(0.5, r, 0.0)],
+                vec![DVec3::new(0.5, -r, 0.0)],
+            ),
+        ];
+        for tf in [Transform::IDENTITY, awkward()] {
+            for (label, a, b, known, want) in &cases {
+                let known: Vec<DVec3> = known.iter().map(|p| tf.point(*p)).collect();
+                let got = curve_curve(&a.transformed(&tf), &b.transformed(&tf), &known);
+                let want: Vec<DVec3> = want.iter().map(|p| tf.point(*p)).collect();
+                // "circles across, known" proposes c1's and c4's other point,
+                // which are the same point: both count.
+                let mut got = got;
+                got.dedup_by(|x, y| x.distance(*y) <= 1e-12 * x.length().max(1.0));
+                proposes(&got, &want, label);
+            }
+            // Off each other's planes: a line parallel to c1's plane 1 above,
+            // and a circle in the parallel plane z = 1: nothing.
+            let above = Curve::Line { origin: DVec3::new(-3.0, 0.0, 1.0), dir: DVec3::X }.transformed(&tf);
+            assert_eq!(curve_curve(&c1.transformed(&tf), &above, &[]), Vec::<DVec3>::new());
+            let lid = Curve::Circle { center: DVec3::Z, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }.transformed(&tf);
+            assert_eq!(curve_curve(&c1.transformed(&tf), &lid, &[]), Vec::<DVec3>::new());
+        }
+    }
+
+    #[test]
+    fn closed_meetings_anywhere() {
+        // Every proposed point is on both surfaces (when they cross), and
+        // each loop gets points, in any position.
+        let ball = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let cases: Vec<(&str, Surface, Surface, usize)> = vec![
+            ("plane–ball", Surface::Plane { origin: DVec3::new(0.0, 0.0, 0.6), normal: DVec3::Z, x_dir: DVec3::X }, ball.clone(), RING_SAMPLES),
+            ("balls", ball.clone(), Surface::Sphere { center: DVec3::new(0.0, 0.0, 1.2), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, RING_SAMPLES),
+            (
+                "plane–rod",
+                Surface::Plane { origin: DVec3::new(0.0, 0.0, 0.3), normal: DVec3::new(0.0, 0.6, 0.8), x_dir: DVec3::X },
+                Surface::Cylinder { origin: DVec3::new(0.2, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.5 },
+                RING_SAMPLES,
+            ),
+            ("centred rod–ball", Surface::Cylinder { origin: DVec3::new(0.0, 0.0, -3.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.3 }, ball.clone(), 2 * RING_SAMPLES),
+            ("rod–ball", Surface::Cylinder { origin: DVec3::new(0.2, 0.0, -3.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.3 }, ball.clone(), 4),
+            ("rods", Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, Surface::Cylinder { origin: DVec3::new(0.0, 0.1, 0.2), axis: DVec3::X, x_dir: DVec3::Y, radius: 0.5 }, 4),
+        ];
+        for tf in [Transform::IDENTITY, awkward()] {
+            for (label, a, b, least) in &cases {
+                let (a, b) = (a.transformed(&tf), b.transformed(&tf));
+                let pts = closed_meetings(&a, &b);
+                let on: Vec<&DVec3> = pts.iter().filter(|p| a.distance(**p) <= 1e-12 * 20.0 && b.distance(**p) <= 1e-12 * 20.0).collect();
+                assert!(on.len() >= *least, "{label}: {} of {} on both", on.len(), pts.len());
+                // Swapped, as good (two cylinders are then walked round the
+                // other one, so the points differ).
+                let swapped = closed_meetings(&b, &a);
+                let on = swapped.iter().filter(|p| a.distance(**p) <= 1e-12 * 20.0 && b.distance(**p) <= 1e-12 * 20.0).count();
+                assert!(on >= *least, "{label} swapped: {on} of {}", swapped.len());
+            }
+        }
+    }
+
+    #[test]
+    fn closed_meetings_find_both_loops() {
+        // A rod of radius ½ along x through a rod of radius 1 along z
+        // crosses it in two loops, at x ≈ +1 and x ≈ −1; a rod of radius
+        // 0.3 along z through (0.2, 0) crosses the unit ball in two loops,
+        // z ≈ ±0.95. Points of each loop are proposed.
+        let big = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let small = Surface::Cylinder { origin: DVec3::new(0.0, 0.1, 0.2), axis: DVec3::X, x_dir: DVec3::Y, radius: 0.5 };
+        let ball = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let rod = Surface::Cylinder { origin: DVec3::new(0.2, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.3 };
+        for (a, b, side) in [(&small, &big, DVec3::X), (&big, &small, DVec3::X), (&rod, &ball, DVec3::Z)] {
+            let on: Vec<DVec3> = closed_meetings(a, b).into_iter().filter(|p| a.distance(*p) <= 1e-12 && b.distance(*p) <= 1e-12).collect();
+            assert!(on.iter().any(|p| p.dot(side) > 0.9) && on.iter().any(|p| p.dot(side) < -0.9), "{on:?}");
+        }
+        // Rods crossing at a slant (not square): still two loops.
+        let slant = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::new(0.6, 0.0, 0.8), x_dir: DVec3::Y, radius: 0.4 };
+        let on: Vec<DVec3> = closed_meetings(&slant, &big).into_iter().filter(|p| slant.distance(*p) <= 1e-12 && big.distance(*p) <= 1e-12).collect();
+        assert!(on.iter().any(|p| p.x > 0.5) && on.iter().any(|p| p.x < -0.5), "{on:?}");
+    }
+
+    #[test]
+    fn trig_parts_by_hand() {
+        // Derivative of 1 − 2 cos θ + 3 sin θ + ½ cos 2θ − 4 sin 2θ:
+        // 2 sin θ + 3 cos θ − sin 2θ − 8 cos 2θ.
+        assert_eq!(Trig2([1.0, -2.0, 3.0, 0.5, -4.0]).derivative().0, [0.0, 3.0, 2.0, -8.0, -1.0]);
+        // Most slope: |−2| + |3| + 2(|½| + |−4|) = 14.
+        assert_eq!(Trig2([1.0, -2.0, 3.0, 0.5, -4.0]).slope_bound(), 14.0);
+        // a + m cos(θ − φ) with no zero: least |f| where cos is 1 if a < −m
+        // (θ = φ), −1 if a > m (θ = φ + π). Here φ = atan2(4, 3), m = 5.
+        let phi = 4f64.atan2(3.0);
+        assert_eq!(trig1_zeros(-7.0, 3.0, 4.0, None), vec![phi]);
+        assert_eq!(trig1_zeros(7.0, 3.0, 4.0, None), vec![phi + PI]);
+        // With zeros: −2.5 + 5 cos(θ − φ): θ = φ ± π/3.
+        let z = trig1_zeros(-2.5, 3.0, 4.0, None);
+        assert!(close(z[0], phi + FRAC_PI_3, 1e-15) && close(z[1], phi - FRAC_PI_3, 1e-15), "{z:?}");
+    }
+
+    #[test]
+    fn zeros_of_lopsided_polynomials() {
+        // 0.3 + cos(θ − 0.4) = 0 at θ = 0.4 ± acos(−0.3): written out,
+        // 0.3 + cos 0.4 cos θ + sin 0.4 sin θ.
+        let f = Trig2([0.3, 0.4f64.cos(), 0.4f64.sin(), 0.0, 0.0]);
+        let want = sorted(vec![0.4 + (-0.3f64).acos(), 0.4 - (-0.3f64).acos()]);
+        let z = sorted(trig_zeros(&f));
+        assert_eq!(z.len(), 2, "{z:?}");
+        assert!(close(z[0], want[0], 1e-12) && close(z[1], want[1], 1e-12), "{z:?} vs {want:?}");
+        // A big sin θ term: −1 + 2 sin θ + 0.7 cos 2θ. As a quadratic in
+        // s = sin θ (cos 2θ = 1 − 2s²): −0.3 + 2s − 1.4s² = 0, s = (2 −
+        // √(4 − 1.68))/2.8 = 0.1703 (the other root is > 1), so θ = asin s
+        // and π − asin s.
+        let f = Trig2([-1.0, 0.0, 2.0, 0.7, 0.0]);
+        let s = (2.0 - 2.32f64.sqrt()) / 2.8;
+        let want = sorted(vec![s.asin(), PI - s.asin()]);
+        let z = sorted(trig_zeros(&f));
+        assert_eq!(z.len(), 2, "{z:?}");
+        assert!(close(z[0], want[0], 1e-12) && close(z[1], want[1], 1e-12), "{z:?} vs {want:?}");
+    }
+
+    #[test]
+    fn zeros_close_together_and_touching() {
+        // cos(θ − 2) − (1 − 1e-12): two zeros 2 ± √(2e-12) ≈ 2 ± 1.414e-6,
+        // closer than LEAF_WIDTH · 3. Both found, and nothing else.
+        let (c, s) = (2f64.cos(), 2f64.sin());
+        let f = Trig2([-(1.0 - 1e-12), c, s, 0.0, 0.0]);
+        let z = sorted(trig_zeros(&f));
+        let d = (2e-12f64).sqrt();
+        assert_eq!(z.len(), 2, "{z:?}");
+        assert!(close(z[0], 2.0 - d, 1e-9) && close(z[1], 2.0 + d, 1e-9), "{z:?}");
+        // cos(θ − 2) − (1 + 1e-12) never reaches 0; it comes closest at θ = 2:
+        // one candidate there.
+        let f = Trig2([-(1.0 + 1e-12), c, s, 0.0, 0.0]);
+        let z = trig_zeros(&f);
+        assert_eq!(z.len(), 1, "{z:?}");
+        assert!(close(z[0], 2.0, 1e-6), "{z:?}");
+    }
+
+    #[test]
+    fn zero_finding_cost_is_bounded() {
+        // An ordinary polynomial is settled in a few thousand evaluations
+        // (64 starting intervals, then ~20 halvings near each zero); one
+        // that is nearly 0 everywhere stops at the budget.
+        // cos θ − ½: 64, then 4 per halving (two intervals by each zero)
+        // for the 17 halvings from 2π/64 down to LEAF_WIDTH: 132.
+        let (_, n) = trig_zeros_counted(&Trig2([-0.5, 1.0, 0.0, 0.0, 0.0]));
+        assert_eq!(n, 64 + 4 * 17);
+        // (1 − cos θ)² = 3/2 − 2 cos θ + ½ cos 2θ ≈ θ⁴/4 near 0, under
+        // slope_bound · LEAF_WIDTH/2 = 3e-6/2 for |θ| up to (6e-6)^¼ ≈ 0.05:
+        // ~10^5 leaves. It stops at the budget, plus one look at each
+        // interval still waiting: at most the 64 starting ones and one kept
+        // half per halving (17). It still proposes a point near 0.
+        let (z, n) = trig_zeros_counted(&Trig2([1.5, -2.0, 0.0, 0.5, 0.0]));
+        assert!((MAX_ZERO_EVALS..=MAX_ZERO_EVALS + 64 + 17).contains(&n), "{n}");
+        assert!(z.iter().any(|&t| !(0.06..=TAU - 0.06).contains(&t)), "{z:?}");
+        // Far from zero everywhere: only the 64 starting intervals.
+        assert_eq!(trig_zeros_counted(&Trig2([3.0, 1.0, 0.0, 0.0, 0.0])).1, 64);
     }
 }
