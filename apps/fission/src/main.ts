@@ -677,4 +677,7 @@ async function start() {
   ctx.history.reset(); // the project as it opened is the start
 }
 void start();
-ctx.kernel.call("kernel_version").then((v) => ($("version").textContent = `kernel v${v}`));
+ctx.kernel.call("kernel_version").then((v) => {
+  $("version").textContent = `kernel v${v}`;
+  $("version").parentElement!.title = `Fission, kernel v${v}`; // where the version shows when the bar has no room for it
+});
