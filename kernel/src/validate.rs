@@ -34,11 +34,20 @@ pub enum ValidationError {
     /// A planar face's outer loop runs clockwise seen from outside, i.e.
     /// the face normal disagrees with its boundary.
     FaceOrientation { face: FaceId },
+    /// A loop runs the wrong way round its face: walking along it, the
+    /// face isn't on the left (seen from outside). Holes run clockwise.
+    LoopOrientation { face: FaceId, loop_index: usize },
     Tessellation { face: FaceId, message: String },
     /// The display mesh has holes or flipped triangles.
     MeshNotClosed { problems: usize },
     /// A shell encloses negative volume: its normals point inward.
     InsideOut { shell: usize, volume: f64 },
+    /// Two edges meet (or come within LINEAR) away from a shared vertex.
+    EdgesMeet { a: EdgeId, b: EdgeId, point: DVec3 },
+    /// An edge meets a face it doesn't bound, away from a shared vertex.
+    EdgeMeetsFace { edge: EdgeId, face: FaceId, point: DVec3 },
+    /// Two faces cross (or touch) inside both.
+    FacesMeet { a: FaceId, b: FaceId, point: DVec3 },
 }
 
 impl fmt::Display for ValidationError {
@@ -65,9 +74,15 @@ impl fmt::Display for ValidationError {
             ZeroLengthEdge { edge } => write!(f, "edge {edge} has zero length"),
             ZeroAreaFace { face } => write!(f, "face {face} has zero area"),
             FaceOrientation { face } => write!(f, "face {face}: normal disagrees with its boundary loop"),
+            LoopOrientation { face, loop_index } => {
+                write!(f, "face {face}: loop {loop_index} runs the wrong way round (the face isn't on its left)")
+            }
             Tessellation { face, message } => write!(f, "face {face} could not be tessellated: {message}"),
             MeshNotClosed { problems } => write!(f, "mesh has {problems} open or flipped edges"),
             InsideOut { shell, volume } => write!(f, "shell {shell} encloses {volume:e} mm³ (normals point inward)"),
+            EdgesMeet { a, b, point } => write!(f, "edges {a} and {b} meet at {point} away from a shared vertex"),
+            EdgeMeetsFace { edge, face, point } => write!(f, "edge {edge} meets face {face} at {point}"),
+            FacesMeet { a, b, point } => write!(f, "faces {a} and {b} cross at {point}"),
         }
     }
 }
@@ -81,8 +96,27 @@ impl ValidationError {
             | EdgeSameDirection { edge }
             | VertexOffEdge { edge, .. }
             | EdgeOffFace { edge, .. }
-            | ZeroLengthEdge { edge } => vec![edge],
+            | ZeroLengthEdge { edge }
+            | EdgeMeetsFace { edge, .. } => vec![edge],
+            EdgesMeet { a, b, .. } => vec![a, b],
             _ => vec![],
+        }
+    }
+
+    /// Vertices this error is about, for highlighting.
+    pub fn vertices(&self) -> Vec<usize> {
+        match *self {
+            ValidationError::VertexOffEdge { vertex, .. } => vec![vertex],
+            _ => vec![],
+        }
+    }
+
+    /// The point where parts meet, for the self-intersection errors.
+    pub fn point(&self) -> Option<DVec3> {
+        use ValidationError::*;
+        match *self {
+            EdgesMeet { point, .. } | EdgeMeetsFace { point, .. } | FacesMeet { point, .. } => Some(point),
+            _ => None,
         }
     }
 
@@ -97,7 +131,10 @@ impl ValidationError {
             | EdgeOffFace { face, .. }
             | ZeroAreaFace { face }
             | FaceOrientation { face }
-            | Tessellation { face, .. } => vec![face],
+            | LoopOrientation { face, .. }
+            | Tessellation { face, .. }
+            | EdgeMeetsFace { face, .. } => vec![face],
+            FacesMeet { a, b, .. } => vec![a, b],
             _ => vec![],
         }
     }
@@ -119,6 +156,11 @@ pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
         // The mesh checks assume sound topology, so they run last.
         check_mesh(body, &mut errs);
     }
+    if errs.is_empty() {
+        // Assumes sound geometry too (edges on their faces, loops the
+        // right way round), and is the costliest.
+        crate::self_intersect::check(body, &mut errs);
+    }
     if errs.is_empty() { Ok(()) } else { Err(errs) }
 }
 
@@ -130,7 +172,13 @@ pub fn checked(body: Body) -> Result<Body, Vec<ValidationError>> {
         Err(errs) => {
             if cfg!(debug_assertions) {
                 let list: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-                panic!("kernel produced an invalid body:\n  {}", list.join("\n  "));
+                // WebAssembly has no files, and no debug_dump module.
+                #[cfg(not(target_arch = "wasm32"))]
+                let dump = crate::debug_dump::dump_invalid(&body, &list.join("\n"))
+                    .map_or_else(|| "none written".to_string(), |p| p.display().to_string());
+                #[cfg(target_arch = "wasm32")]
+                let dump = "none written (WebAssembly has no files)";
+                panic!("kernel produced an invalid body:\n  {}\nfailure dump: {dump}", list.join("\n  "));
             }
             Err(errs)
         }
@@ -264,6 +312,34 @@ fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) {
     };
     if let Err(problems) = mesh.check_closed() {
         errs.push(ValidationError::MeshNotClosed { problems: problems.len() });
+    }
+    // Triangles run counter-clockwise seen from outside, so a face's
+    // triangles have its interior on the left of each of their edges.
+    // Walking a loop in its own direction, the face must be on the left:
+    // each mesh step a→b along the loop is an edge a→b of one of the face's
+    // triangles. (Which triangles are inside is decided by crossings, not by
+    // loop direction, so a loop run backwards still meshes; this catches it.)
+    let mut directed: std::collections::HashSet<(usize, u32, u32)> = std::collections::HashSet::new();
+    for (t, tri) in mesh.triangles.iter().enumerate() {
+        for k in 0..3 {
+            directed.insert((mesh.triangle_face[t], tri[k], tri[(k + 1) % 3]));
+        }
+    }
+    for (fi, f) in body.faces.iter().enumerate() {
+        for (li, l) in f.loops.iter().enumerate() {
+            let right_way = l.coedges.iter().all(|c| {
+                let poly = &mesh.edge_polylines[c.edge];
+                let steps: Vec<(u32, u32)> = if c.reversed {
+                    poly.windows(2).map(|w| (w[1], w[0])).collect()
+                } else {
+                    poly.windows(2).map(|w| (w[0], w[1])).collect()
+                };
+                steps.iter().all(|&(a, b)| directed.contains(&(fi, a, b)))
+            });
+            if !right_way {
+                errs.push(ValidationError::LoopOrientation { face: fi, loop_index: li });
+            }
+        }
     }
     for (si, s) in body.shells.iter().enumerate() {
         let volume = mesh.signed_volume_of(|t| s.faces.contains(&mesh.triangle_face[t]));
@@ -431,6 +507,25 @@ mod tests {
     }
 
     #[test]
+    fn hole_running_the_wrong_way_is_caught() {
+        // Found by a planted bug in step 10 (circle holes built running
+        // counter-clockwise): every other check passed, because the mesh
+        // comes out the same. Reverse the whole hole as that bug did: its
+        // loop on each cap (faces 0 and 1, loop 1) and both loops of the
+        // bore (face 3), so every edge is still used once each way.
+        let mut b = crate::fixtures::hand_tube(1.0, 2.0, 1.0, 0.0);
+        assert_eq!(validate(&b), Ok(()));
+        for (f, l) in [(0, 1), (1, 1), (3, 0), (3, 1)] {
+            b.faces[f].loops[l].coedges[0].reversed ^= true;
+        }
+        let errs = validate(&b).unwrap_err();
+        let expected: Vec<_> = [(0, 1), (1, 1), (3, 0), (3, 1)]
+            .map(|(face, loop_index)| ValidationError::LoopOrientation { face, loop_index })
+            .to_vec();
+        assert_eq!(errs, expected);
+    }
+
+    #[test]
     fn inward_normal_is_caught() {
         let mut b = hand_cube();
         b.faces[4].sense = false;
@@ -571,9 +666,13 @@ mod tests {
             (ZeroLengthEdge { edge: 11 }, vec!["edge 11", "zero length"]),
             (ZeroAreaFace { face: 9 }, vec!["face 9", "zero area"]),
             (FaceOrientation { face: 5 }, vec!["face 5", "normal"]),
+            (LoopOrientation { face: 2, loop_index: 1 }, vec!["face 2", "loop 1", "wrong way"]),
             (Tessellation { face: 2, message: "boom".into() }, vec!["face 2", "boom"]),
             (MeshNotClosed { problems: 4 }, vec!["4 open"]),
             (InsideOut { shell: 0, volume: -1.0 }, vec!["shell 0", "-1e0", "inward"]),
+            (EdgesMeet { a: 2, b: 13, point: DVec3::new(1.0, 0.5, 2.0) }, vec!["edges 2 and 13", "[1, 0.5, 2]"]),
+            (EdgeMeetsFace { edge: 6, face: 10, point: DVec3::new(0.5, 1.0, 1.0) }, vec!["edge 6", "face 10", "[0.5, 1, 1]"]),
+            (FacesMeet { a: 1, b: 7, point: DVec3::new(0.5, 0.25, 1.0) }, vec!["faces 1 and 7", "[0.5, 0.25, 1]", "cross"]),
         ];
         for (err, words) in cases {
             let msg = err.to_string();
@@ -581,6 +680,19 @@ mod tests {
                 assert!(msg.contains(w), "{msg:?} should mention {w:?}");
             }
         }
+    }
+
+    #[test]
+    fn checked_writes_a_failure_dump_before_panicking() {
+        // Vertex 7 lifted off its edges: the panic names the dump, and the
+        // dump's page lists the same errors.
+        let mut b = hand_cube();
+        b.vertices[7].point.z += 0.25;
+        let message = std::panic::catch_unwind(|| checked(b)).unwrap_err();
+        let message = message.downcast_ref::<String>().unwrap();
+        let path = message.split("failure dump: ").nth(1).expect("the panic names its dump");
+        let html = std::fs::read_to_string(std::path::Path::new(path).join("index.html")).unwrap();
+        assert!(html.contains("vertex 7 is 2.5e-1 mm off edge 5"), "{message}");
     }
 
     #[test]

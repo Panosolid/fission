@@ -1,10 +1,12 @@
 //! Analytic curves and surfaces, plus the similarity transforms that move them.
 
 pub mod curve;
+pub mod placement;
 pub mod surface;
 pub mod transform;
 
 pub use curve::Curve;
+pub use placement::Placement;
 pub use surface::Surface;
 pub use transform::Transform;
 

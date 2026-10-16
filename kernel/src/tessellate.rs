@@ -45,11 +45,20 @@ pub struct TessError {
 pub fn tessellate(body: &Body, opts: &TessOptions) -> Result<Mesh, TessError> {
     let mut mesh =
         Mesh { positions: body.vertices.iter().map(|v| v.point).collect(), options: *opts, ..Mesh::default() };
-    for e in &body.edges {
-        let n = segments(&e.curve, e.t1 - e.t0, opts);
+    // Where along each edge (as fractions 0..=1) its mesh points go.
+    let mut params: Vec<Vec<f64>> = body
+        .edges
+        .iter()
+        .map(|e| {
+            let n = segments(&e.curve, e.t1 - e.t0, opts);
+            (0..=n).map(|k| k as f64 / n as f64).collect()
+        })
+        .collect();
+    conform_planar_faces(body, &mut params)?;
+    for (e, ps) in body.edges.iter().zip(&params) {
         let mut poly = vec![e.start as u32];
-        for k in 1..n {
-            mesh.positions.push(e.point_at(k as f64 / n as f64));
+        for &f in &ps[1..ps.len() - 1] {
+            mesh.positions.push(e.point_at(f));
             poly.push((mesh.positions.len() - 1) as u32);
         }
         poly.push(e.end as u32);
@@ -59,6 +68,140 @@ pub fn tessellate(body: &Body, opts: &TessOptions) -> Result<Mesh, TessError> {
         tessellate_face(body, fi, &mut mesh).map_err(|message| TessError { face: fi, message })?;
     }
     Ok(mesh)
+}
+
+/// Most mesh points a tessellation may use before giving up: keeps cost
+/// bounded when chords have to be split very finely.
+pub const MAX_MESH_POINTS: usize = 4_000_000;
+
+/// A mesh point on a face boundary: a B-rep vertex, or point k of an edge.
+#[derive(Clone, Copy, PartialEq)]
+enum BoundaryPoint {
+    Vertex(usize),
+    OnEdge(usize, usize),
+}
+
+/// One chord of a planar face's boundary, in the face's uv coordinates.
+struct Chord {
+    a: DVec2,
+    b: DVec2,
+    ends: [BoundaryPoint; 2],
+    edge: usize,
+    /// Interval k of the edge: between params[edge][k] and [k + 1].
+    k: usize,
+}
+
+/// Splits chords of curved edges until no two chords of any planar face's
+/// boundary touch except where they share an end point. A chord sags inside
+/// its arc by up to the chord tolerance, so where a wall is thinner than
+/// that the chords of one side would cut through the other. Each split
+/// quarters the sag, so this stops once chords sag less than the gap.
+/// Chords of straight edges can't be split: if two of them touch, the face
+/// itself crosses itself and that is an error.
+fn conform_planar_faces(body: &Body, params: &mut [Vec<f64>]) -> Result<(), TessError> {
+    let snap = |p: DVec2| {
+        let s = |x: f64| if x.abs() < tolerance::SNAP_TO_ZERO { 0.0 } else { x };
+        DVec2::new(s(p.x), s(p.y))
+    };
+    loop {
+        let mut split: Vec<(usize, usize)> = Vec::new();
+        for (fi, face) in body.faces.iter().enumerate() {
+            if !matches!(face.surface, Surface::Plane { .. }) {
+                continue;
+            }
+            let mut chords = Vec::new();
+            for l in &face.loops {
+                for c in &l.coedges {
+                    let e = &body.edges[c.edge];
+                    let ps = &params[c.edge];
+                    let id = |k: usize| match k {
+                        0 => BoundaryPoint::Vertex(e.start),
+                        k if k == ps.len() - 1 => BoundaryPoint::Vertex(e.end),
+                        k => BoundaryPoint::OnEdge(c.edge, k),
+                    };
+                    let uv = |k: usize| {
+                        let p = match k {
+                            0 => body.vertices[e.start].point,
+                            k if k == ps.len() - 1 => body.vertices[e.end].point,
+                            k => e.point_at(ps[k]),
+                        };
+                        snap(face.surface.project(p))
+                    };
+                    for k in 0..ps.len() - 1 {
+                        chords.push(Chord { a: uv(k), b: uv(k + 1), ends: [id(k), id(k + 1)], edge: c.edge, k });
+                    }
+                }
+            }
+            for (s, t) in touching_pairs(&chords) {
+                let curved = |c: &Chord| matches!(body.edges[c.edge].curve, Curve::Circle { .. });
+                if !curved(s) && !curved(t) {
+                    return Err(TessError { face: fi, message: "face boundary crosses itself".into() });
+                }
+                for c in [s, t].into_iter().filter(|c| curved(c)) {
+                    split.push((c.edge, c.k));
+                }
+            }
+        }
+        if split.is_empty() {
+            return Ok(());
+        }
+        split.sort_unstable_by(|x, y| y.cmp(x)); // high k first, so earlier indices stay valid
+        split.dedup();
+        for (e, k) in split {
+            let (lo, hi) = (params[e][k], params[e][k + 1]);
+            let mid = 0.5 * (lo + hi);
+            if !(lo < mid && mid < hi) {
+                return Err(TessError { face: 0, message: "boundary curves touch: chords can't be split further".into() });
+            }
+            params[e].insert(k + 1, mid);
+        }
+        if params.iter().map(Vec::len).sum::<usize>() > MAX_MESH_POINTS {
+            return Err(TessError { face: 0, message: format!("more than {MAX_MESH_POINTS} mesh points needed") });
+        }
+    }
+}
+
+/// Pairs of chords that touch other than at a shared end point (exact
+/// predicates). Chords sharing an end point only count if they overlap
+/// along a line. Sweeps along u so only chords whose u ranges overlap are
+/// compared.
+fn touching_pairs(chords: &[Chord]) -> Vec<(&Chord, &Chord)> {
+    let mut order: Vec<usize> = (0..chords.len()).collect();
+    order.sort_by(|&i, &j| chords[i].a.x.min(chords[i].b.x).total_cmp(&chords[j].a.x.min(chords[j].b.x)));
+    let mut active: Vec<usize> = Vec::new();
+    let mut out = Vec::new();
+    for &i in &order {
+        let s = &chords[i];
+        let (lo, hi) = (s.a.min(s.b), s.a.max(s.b));
+        active.retain(|&j| chords[j].a.x.max(chords[j].b.x) >= lo.x);
+        for &j in &active {
+            let t = &chords[j];
+            let (tlo, thi) = (t.a.min(t.b), t.a.max(t.b));
+            if thi.y < lo.y || tlo.y > hi.y {
+                continue;
+            }
+            let shared: Vec<usize> = (0..2).filter(|&m| s.ends.contains(&t.ends[m])).collect();
+            let touches = match shared.len() {
+                0 => tolerance::segments_touch((s.a, s.b), (t.a, t.b)),
+                // Meeting at one end: they overlap only if collinear and the
+                // other end of one lies on the other.
+                1 => {
+                    let (t_far, s_far) = if shared[0] == 0 { (t.b, if s.ends[0] == t.ends[0] { s.b } else { s.a }) } else { (t.a, if s.ends[0] == t.ends[1] { s.b } else { s.a }) };
+                    let on = |p: DVec2, q: DVec2, r: DVec2| {
+                        tolerance::side(p, q, r) == 0 && r.cmpge(p.min(q)).all() && r.cmple(p.max(q)).all()
+                    };
+                    on(s.a, s.b, t_far) || on(t.a, t.b, s_far)
+                }
+                // Same two end points: the chords coincide.
+                _ => true,
+            };
+            if touches {
+                out.push((s, t));
+            }
+        }
+        active.push(i);
+    }
+    out
 }
 
 /// Largest angle one chord may span (a third of a circle).
@@ -245,7 +388,9 @@ fn sphere_cap(body: &Body, fi: FaceId, mesh: &mut Mesh, center: DVec3, radius: f
     let [l] = face.loops.as_slice() else { return Err("general sphere faces are not supported yet".into()) };
     let [c] = l.coedges.as_slice() else { return Err("general sphere faces are not supported yet".into()) };
     let e = &body.edges[c.edge];
-    let Curve::Circle { axis, .. } = e.curve else { return Err("sphere cap must be bounded by a circle".into()) };
+    let Curve::Circle { center: rim_center, axis, radius: rim_radius, .. } = e.curve else {
+        return Err("sphere cap must be bounded by a circle".into());
+    };
     if !e.is_closed() {
         return Err("sphere cap boundary must be a closed circle".into());
     }
@@ -259,7 +404,11 @@ fn sphere_cap(body: &Body, fi: FaceId, mesh: &mut Mesh, center: DVec3, radius: f
     let pole = center + pole_dir * radius;
 
     let dirs: Vec<DVec3> = boundary.iter().map(|&i| (mesh.positions[i as usize] - center).normalize()).collect();
-    let theta = dirs[0].dot(pole_dir).clamp(-1.0, 1.0).acos();
+    // Angle from the rim to the pole, from the exact curve rather than mesh
+    // points: those carry the rounding of world coordinates (~1e-8 mm at
+    // 100 km), enough to tip the ring count past a whole number, so a part
+    // that merely moved would be meshed differently.
+    let theta = rim_radius.atan2((rim_center - center).dot(pole_dir));
     let rings = segments(&Curve::Circle { center, axis, x_dir: dirs[0], radius }, theta, mesh_opts(mesh)).max(1);
 
     let mut prev: Vec<u32> = boundary.clone();
@@ -398,7 +547,7 @@ pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Ve
 mod tests {
     use super::*;
     use crate::tolerance::eq;
-    use crate::fixtures::{hand_cube, hand_cylinder, hand_half_cylinder, hand_sphere, hand_twisted_cylinder};
+    use crate::fixtures::{hand_cube, hand_cylinder, hand_half_cylinder, hand_sphere, hand_tube, hand_twisted_cylinder};
     use crate::tolerance::{points_eq, rel_eq, FP_REL, LINEAR};
     use crate::validate::validate;
 
@@ -668,6 +817,70 @@ mod tests {
         let big = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 50.0 };
         assert_eq!(segments(&big, TAU, &opts(50.0 * c_star * 0.9)), 5);
         assert_eq!(segments(&big, TAU, &opts(50.0 * c_star * 1.1)), 4);
+    }
+
+    #[test]
+    fn chords_are_split_where_a_wall_is_thinner_than_their_sag() {
+        // A tube of radius 100 with a 1 µm wall (MIN_FEATURE, the thinnest
+        // the supported range allows), hole points half a chord out of step.
+        // By hand: r ≈ 100 at a 0.01 chord allows 2·acos(1 − 1e-4) ≈ 0.02828
+        // rad per chord, so both circles start with ceil(2π/0.02828) = 223
+        // chords, sagging 100·(1 − cos(π/223)) ≈ 9.9e-3 inside their circle:
+        // ten times the wall, so the outer chords cut through the hole.
+        // Halving twice gives 892 chords sagging ≈ 6.2e-4 < 1e-3, after
+        // which they can't cross (the hole's chords sag away, inwards). Both
+        // chords of a crossing pair are split, so each circle ends with
+        // more than 223 and at most 892 chords.
+        let (r, wall) = (100.0, crate::tolerance::MIN_FEATURE);
+        let body = hand_tube(r, r + wall, 5.0, PI / 223.0);
+        assert_eq!(validate(&body), Ok(()));
+        let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        let chords = |e: usize| m.edge_polylines[e].len() - 1;
+        for e in 0..4 {
+            assert!((224..=892).contains(&chords(e)), "edge {e}: {} chords", chords(e));
+        }
+        // Top and bottom caps are refined alike (same shape, same rule).
+        assert_eq!((chords(0), chords(2)), (chords(1), chords(3)));
+        // No outer chord crosses a hole chord, checked by brute force with
+        // plain arithmetic (independently of the exact sweep the kernel
+        // uses): segments pq and uv cross when each straddles the other.
+        let cross = |a: DVec3, b: DVec3, c: DVec3| (b - a).truncate().perp_dot((c - a).truncate());
+        for (outer, hole) in [(0, 2), (1, 3)] {
+            for w in m.edge_polylines[outer].windows(2) {
+                let (p, q) = (m.positions[w[0] as usize], m.positions[w[1] as usize]);
+                for z in m.edge_polylines[hole].windows(2) {
+                    let (u, v) = (m.positions[z[0] as usize], m.positions[z[1] as usize]);
+                    let straddles = cross(p, q, u) * cross(p, q, v) < 0.0 && cross(u, v, p) * cross(u, v, q) < 0.0;
+                    assert!(!straddles, "outer chord {p}–{q} crosses hole chord {u}–{v}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sphere_ring_count_does_not_depend_on_position() {
+        // Regression (found by the overnight run on GitHub, seed
+        // 0x5d7c66cfebde): rotating a sphere 50 km about a far pivot changed
+        // its mesh volume by 2e-6, because the cap's pole angle was measured
+        // from mesh points that carry the rounding of world coordinates.
+        //
+        // By hand: r = 137.5…; the 0.01 chord allows 2·acos(1 − 0.01/r) ≈
+        // 0.0241 rad per chord, below the 2π/256 ≈ 0.0245 floor, so the step
+        // is exactly 2π/256. Each hemisphere spans π/2 from equator to pole,
+        // exactly 64 steps: 64 rings, i.e. 63 bands of 2·256 triangles plus a
+        // fan of 256, 256·(2·64 − 1) = 32512 triangles; 65024 for the ball.
+        let r = 137.52459832834157;
+        let ball = crate::ops::primitives::make_sphere(r).unwrap();
+        // Turned and moved geometry, baked into world coordinates (as two
+        // bodies meeting in a boolean will be).
+        let turned = crate::ops::transform::rotate(&crate::placed::Placed::new(ball), DVec3::ZERO, DVec3::new(1.0, 1.0, 1.0), -4.71238898038469).unwrap();
+        let far = crate::ops::transform::rotate(&turned, DVec3::new(5e7, 0.0, 0.0), DVec3::new(-9e-10, 0.0, 1.0), 3.8846540033404207).unwrap();
+        let (ball, far) = (turned.baked(), far.baked());
+        for (name, b) in [("at the origin", &ball), ("100 km out", &far)] {
+            let m = tessellate(b, &TessOptions::DISPLAY).unwrap();
+            assert_eq!(m.triangles.len(), 65024, "{name}");
+        }
     }
 
     #[test]

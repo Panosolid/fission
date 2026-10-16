@@ -46,7 +46,7 @@ pub fn rounding_slack(scale: f64) -> f64 {
 /// a ≈ b to FP_REL, plus an absolute allowance for rounding that does not
 /// shrink with the values themselves (e.g. a tiny part far from the origin).
 pub fn measure_eq(a: f64, b: f64, abs_slack: f64) -> bool {
-    (a - b).abs() <= FP_REL * a.abs().max(b.abs()) + abs_slack
+    a.is_finite() && b.is_finite() && (a - b).abs() <= FP_REL * a.abs().max(b.abs()) + abs_slack
 }
 
 /// Allowed relative error when comparing results that went through f32
@@ -108,11 +108,15 @@ pub fn angle_eq(a: f64, b: f64) -> bool {
     (a - b).abs() <= ANGULAR
 }
 
-/// Relative comparison: |a - b| <= rel * max(|a|, |b|), falling back to
-/// `LINEAR` near zero.
+/// Relative comparison: |a - b| <= rel * max(|a|, |b|). Never true unless
+/// both are finite (otherwise ∞ ≤ rel·∞ would let an infinite result
+/// pass). There is no absolute floor: one (LINEAR² = 1e-12) used to make
+/// every comparison of values below ~1 looser than asked, e.g. 1e-3
+/// relative for a 1 µm cube's volume, and any two values under 1e-12
+/// "equal". Compare against zero with an explicit bound instead.
 pub fn rel_eq(a: f64, b: f64, rel: f64) -> bool {
     let scale = a.abs().max(b.abs());
-    (a - b).abs() <= (rel * scale).max(LINEAR * LINEAR)
+    a.is_finite() && b.is_finite() && (a - b).abs() <= rel * scale
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +125,23 @@ pub fn rel_eq(a: f64, b: f64, rel: f64) -> bool {
 /// Positive if c is left of a→b, negative if right, exactly 0 if collinear.
 pub fn orient2d(a: DVec2, b: DVec2, c: DVec2) -> f64 {
     robust::orient2d(c2(a), c2(b), c2(c))
+}
+
+/// Sign of orient2d: 1, −1 or 0, exact.
+pub fn side(a: DVec2, b: DVec2, c: DVec2) -> i8 {
+    let o = orient2d(a, b, c);
+    (o > 0.0) as i8 - (o < 0.0) as i8
+}
+
+/// Whether closed segments ab and cd share any point (exact).
+pub fn segments_touch((a, b): (DVec2, DVec2), (c, d): (DVec2, DVec2)) -> bool {
+    let (o1, o2, o3, o4) = (side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b));
+    if o1 * o2 < 0 && o3 * o4 < 0 {
+        return true;
+    }
+    // Collinear point on the other segment: exact box test.
+    let on = |p: DVec2, q: DVec2, r: DVec2| r.cmpge(p.min(q)).all() && r.cmple(p.max(q)).all();
+    (o1 == 0 && on(a, b, c)) || (o2 == 0 && on(a, b, d)) || (o3 == 0 && on(c, d, a)) || (o4 == 0 && on(c, d, b))
 }
 
 /// Positive if d is below the plane through a, b, c (counter-clockwise seen
@@ -140,6 +161,23 @@ fn c3(p: DVec3) -> robust::Coord3D<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn infinite_or_nan_values_never_compare_equal() {
+        // Regression (found by mutation testing in mass.rs): |∞ − x| = ∞ is
+        // ≤ rel·max(∞, x) = ∞, so rel_eq(∞, x) was true and a test whose
+        // result blew up to infinity passed. A measurement that isn't
+        // finite is never "equal" to anything, itself included.
+        for (a, b) in [(f64::INFINITY, 1.0), (1.0, f64::NEG_INFINITY), (f64::INFINITY, f64::INFINITY), (f64::NAN, 1.0), (f64::NAN, f64::NAN)] {
+            assert!(!rel_eq(a, b, FP_REL) && !rel_eq(a, b, 1.0), "rel_eq({a}, {b})");
+            assert!(!measure_eq(a, b, 0.0) && !measure_eq(a, b, f64::INFINITY), "measure_eq({a}, {b})");
+        }
+        // Finite values still compare as before: 1 vs 1 + 1e-13 at FP_REL.
+        assert!(rel_eq(1.0, 1.0 + 1e-13, FP_REL) && !rel_eq(1.0, 1.0 + 1e-11, FP_REL));
+        // Tiny values are compared relatively too: 1e-15 vs 2e-15 differ.
+        assert!(!rel_eq(1e-15, 2e-15, FP_REL) && rel_eq(1e-15, 1e-15 * (1.0 + 1e-13), FP_REL));
+        assert!(measure_eq(1.0, 1.5, 0.5) && !measure_eq(1.0, 1.6, 0.5));
+    }
 
     #[test]
     fn exact_orientation_of_nearly_collinear_points() {

@@ -1,25 +1,34 @@
-name: Nightly
+name: Random testing
 
-# Tier 3: the stateful harness at scale, split across parallel jobs, each
-# followed by the OpenCascade oracle. Scheduled runs only fire from the
+# Tier 3, around the clock on GitHub's computers (free for public repos):
+# every 6 hours, 4 parallel jobs each run kernel/scripts/endless.sh (the
+# stateful harness plus the OpenCascade oracle, a fresh random seed per
+# round) for about 5 hours. A final job adds every round to the
+# `test-results` branch (log.csv, summary.txt, failures/<seed>/) and opens an
+# issue when something new was found. Scheduled runs only fire from the
 # default branch; "Run workflow" on the Actions tab starts one by hand.
 on:
   schedule:
-    - cron: "17 2 * * *" # 02:17 UTC every night
+    - cron: "23 */6 * * *"
   workflow_dispatch:
     inputs:
-      cases:
-        description: "Cases per job"
-        default: "12500"
+      minutes:
+        description: "Minutes of testing per job"
+        default: "290"
+
+# Runs queue rather than overlap, so two collect jobs never race on the branch.
+concurrency:
+  group: random-testing
+  cancel-in-progress: false
 
 jobs:
-  stateful:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 350
     strategy:
       fail-fast: false
       matrix:
-        job: [0, 1, 2, 3, 4, 5, 6, 7]
+        job: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -30,18 +39,80 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install cadquery-ocp
-      - name: Harness + oracle
+      - name: Random rounds until the time is up
         working-directory: kernel
-        # Distinct base seed per job and per night: YYYYMMDD * 100 + job.
-        run: scripts/overnight.sh "${{ inputs.cases || '12500' }}" 1 python "$(( $(date +%Y%m%d) * 100 + ${{ matrix.job }} ))"
-      - name: Upload report, new regressions and failure dumps
+        env:
+          FISSION_ENDLESS_MINUTES: ${{ inputs.minutes || '290' }}
+        run: scripts/endless.sh 2000 0 python
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: nightly-job-${{ matrix.job }}
+          name: endless-${{ matrix.job }}
+          path: kernel/endless-results/
           if-no-files-found: ignore
-          path: |
-            kernel/target/stateful-report.txt
-            kernel/target/oracle-disagreements-*.txt
-            kernel/target/failure-dumps/
-            kernel/tests/regressions/stateful/
+
+  collect:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: endless-*
+          path: ${{ runner.temp }}/incoming
+      - name: Add this run to the test-results branch
+        env:
+          IN: ${{ runner.temp }}/incoming
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code origin test-results >/dev/null; then
+            git switch test-results
+          else
+            git switch --orphan test-results
+          fi
+          [ -f log.csv ] || echo "finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run" >log.csv
+          found=0 list=""
+          for d in "$IN"/*/; do
+            [ -f "$d/log.csv" ] && tail -n +2 "$d/log.csv" | sed "s|\$|,$RUN_URL|" >>log.csv
+            for f in "$d"seed-*; do
+              [ -d "$f" ] || continue
+              mkdir -p failures && cp -r "$f" failures/
+              found=$((found + 1))
+              list="$list- failures/$(basename "$f"): $(grep -h -m1 'step\|line ' "$f/report.txt" "$f/oracle-disagreements.txt" 2>/dev/null | head -c 400)"$'\n'
+            done
+          done
+          awk -F, -v now="$(date -u '+%Y-%m-%d %H:%M UTC')" 'NR > 1 {
+              rounds++; cases += $3; fails += ($4 == "FAIL"); bodies += $5; dis += $6; secs += $7
+              if ($4 == "FAIL" || $6 > 0) last = $1 " (seed " $2 ")"
+            } END {
+              print "Fission random testing, all runs so far (updated " now ")"
+              print ""
+              printf "hours of testing:                 %.1f\n", secs / 3600
+              print  "rounds:                           " rounds
+              print  "random operation chains:          " cases
+              print  "rounds where the harness failed:  " fails
+              print  "bodies compared with OpenCascade: " bodies
+              print  "OpenCascade disagreements:        " dis
+              print  "last problem found:               " (last ? last : "none yet")
+              print ""
+              print "Every round is a line in log.csv. Each round that found a problem has a"
+              print "folder in failures/ named after its seed: report.txt says what went wrong,"
+              print "the .json file is the shortest chain of operations that shows it, and"
+              print "failure-dumps/*/index.html is a 3D view with the problem in red."
+            }' log.csv >summary.txt
+          cat summary.txt >>"$GITHUB_STEP_SUMMARY"
+          git add -A log.csv summary.txt failures 2>/dev/null || git add -A log.csv summary.txt
+          git commit -qm "Random testing run ${{ github.run_id }}: $found round(s) found something" || exit 0
+          for i in 1 2 3 4; do git push -q origin test-results && break; sleep $((2 ** i)); done
+          if [ "$found" -gt 0 ]; then
+            gh issue create --title "Random testing found $found problem(s)" --body "$(printf 'Run: %s\n\n%s\nDetails are on the test-results branch, in the failures folder.\n' "$RUN_URL" "$list")"
+          fi

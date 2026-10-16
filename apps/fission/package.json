@@ -1,0 +1,32 @@
+{
+  "name": "@fission/app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "kernel": "wasm-pack build ../../kernel --target web --out-dir ../packages/core/src/kernel/wasm --out-name fission_kernel",
+    "dev": "npm run kernel && vite",
+    "build": "npm run kernel && tsc && vite build",
+    "preview": "vite preview",
+    "e2e": "node e2e/smoke.mjs && node e2e/dump-viewer.mjs"
+  },
+  "dependencies": {
+    "@fission/core": "*",
+    "@fission/ui": "*",
+    "@fission/viewport": "*",
+    "@fission/community": "*",
+    "@fission/design": "*",
+    "@fission/render": "*",
+    "@fission/simulate": "*",
+    "@fission/manufacture": "*",
+    "@fission/laser": "*",
+    "@fission/slice": "*",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "playwright": "^1.49.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

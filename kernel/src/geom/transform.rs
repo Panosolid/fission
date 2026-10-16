@@ -29,6 +29,11 @@ impl Transform {
         Self { affine: DAffine3::from_quat(DQuat::from_axis_angle(axis, angle)), scale: 1.0 }
     }
 
+    /// Rotation by the unit quaternion `q`, then translation by `t`.
+    pub fn rigid(q: DQuat, t: DVec3) -> Self {
+        Self { affine: DAffine3::from_rotation_translation(q, t), scale: 1.0 }
+    }
+
     /// Rotation from XYZ Euler angles in degrees (applied X, then Y, then Z).
     pub fn rotation_euler_deg(deg: DVec3) -> Self {
         let q = DQuat::from_euler(

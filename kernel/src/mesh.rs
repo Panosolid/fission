@@ -37,18 +37,15 @@ impl Mesh {
 
     /// Volume enclosed by the triangles `keep` selects (e.g. one shell's).
     ///
-    /// Each triangle contributes (a−o)·((b−a)×(c−a))/6, which equals the
-    /// tetrahedron volume (a−o)·((b−o)×(c−o))/6 exactly (the extra terms
-    /// are triple products with a repeated vector). Two choices keep the
-    /// rounding small:
-    /// - `o` is the centre of the bounding box of the selected triangles,
-    ///   so |a−o| is at most half the selection's own diagonal, however far
-    ///   it is from the world origin or from other shells in the mesh;
-    /// - the cross product is taken at the corner opposite the longest
-    ///   edge, so it multiplies the two shorter edges. On a 2000 × 0.01
-    ///   sliver, the two long edges would give products ~10^6 cancelling
-    ///   to ~20 (error ~1e-10, times |a−o| in the sum); the short pair
-    ///   gives products ~10 with error ~1e-15.
+    /// Each triangle contributes det(a − o, b − o, c − o)/6, the signed
+    /// volume of the tetrahedron o, a, b, c. `o` is the centre of the
+    /// bounding box of the selected triangles, so |a − o| is at most half
+    /// the selection's own diagonal, however far it is from the world
+    /// origin or from other shells in the mesh. The determinants and their
+    /// sum are taken in double-double (`accurate`): a wall strip 1e7 long
+    /// and 1e-3 high, 5e6 from o, has products ~1e13 cancelling to ~1e4,
+    /// and in plain doubles its rounding (~2e-3) times that lever swamps a
+    /// thin body's volume.
     pub fn signed_volume_of(&self, keep: impl Fn(usize) -> bool) -> f64 {
         let selected: Vec<usize> = (0..self.triangles.len()).filter(|&t| keep(t)).collect();
         let (lo, hi) = selected
@@ -63,10 +60,11 @@ impl Mesh {
         selected
             .into_iter()
             .map(|t| {
-                let [a, b, c] = short_edge_corner(self.triangle(t));
-                (a - o).dot((b - a).cross(c - a))
+                let [a, b, c] = self.triangle(t);
+                crate::accurate::det3(o, a, b, c)
             })
-            .sum::<f64>()
+            .fold(crate::accurate::Dd::ZERO, |sum, d| sum + d)
+            .to_f64()
             / 6.0
     }
 
@@ -220,6 +218,27 @@ mod tests {
         assert_eq!(short_edge_corner([p, q, r]), [p, q, r]); // longest is b–c
         assert_eq!(short_edge_corner([q, r, p]), [p, q, r]); // longest is a–b
         assert_eq!(short_edge_corner([r, p, q]), [p, q, r]); // longest is c–a
+    }
+
+    #[test]
+    fn a_huge_thin_frame_turned_keeps_its_mesh_volume() {
+        // Regression (random tester, seed 0x389ee678a942 and others): the
+        // 10 km frame with 1 µm walls (`mass` tests), turned a quarter
+        // turn. Its mesh is exactly its 18 corners, so its volume is the
+        // frame's, 39999.99999596 (see the mass test), to area ×
+        // rounding_slack (~11). Each wall strip is a triangle 1e7 long and
+        // 1e-3 high: its cross product cancelled terms ~1e13 (rounding
+        // ~2e-3) which, times its 5e6 mm lever from the middle, gave
+        // 41337.5. Exact arithmetic on the same rounded corners: 39999.98.
+        let body = crate::mass::tests::huge_thin_frame();
+        let turn = crate::geom::Transform::rotation(DVec3::new(0.0, 0.36568663456908856, -0.6439675223061451), std::f64::consts::FRAC_PI_2);
+        for b in [body.clone(), body.transformed(&turn)] {
+            let m = crate::tessellate::tessellate(&b, &Default::default()).unwrap();
+            let (lo, hi) = b.bounds();
+            let slack = m.area() * crate::tolerance::rounding_slack(lo.abs().max(hi.abs()).max_element());
+            let v = m.signed_volume();
+            assert!(crate::tolerance::measure_eq(v, 39999.99999596, slack), "volume {v} ± {slack}");
+        }
     }
 
     #[test]

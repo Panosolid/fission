@@ -1,6 +1,6 @@
 # Fission
 
-A free, open-source parametric CAD app that rivals Fusion 360. Inspired by what ArtCraft is doing to Adobe: professional tools without the subscription.
+A free, open-source suite for making things: parametric CAD at its heart, with rendering, simulation, CNC, laser cutting and 3D printing as workspaces of the same app, sharing one project. Professional tools without the subscription.
 
 The owner is a student learning the maths behind every algorithm. Correctness beats speed: geometry bugs are silent, so nothing is done until it is checked automatically.
 
@@ -8,44 +8,59 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 
 - `kernel/`: Rust geometry kernel, compiled to WebAssembly with wasm-pack.
   - `src/tolerance.rs`: every tolerance and the exact predicates. The only place epsilons live.
-  - `src/geom/`: analytic curves (`curve.rs`: Line, Circle), surfaces (`surface.rs`: Plane, Cylinder, Sphere), similarity transforms (`transform.rs`).
+  - `src/geom/`: analytic curves (`curve.rs`: Line, Circle), surfaces (`surface.rs`: Plane, Cylinder, Sphere), similarity transforms (`transform.rs`), placements (`placement.rs`: a rigid motion kept apart from geometry, rotation as a unit quaternion plus a shift).
   - `src/topology.rs`: B-rep arenas (Vertex, Edge, Coedge, Loop, Face, Shell, Body) and Euler counts.
   - `src/validate.rs`: `validate()` and `checked()`. Every operation's result goes through `checked()`.
   - `src/tessellate.rs`: B-rep → watertight triangle mesh (constrained Delaunay in uv space via `spade`).
-  - `src/mesh.rs`: triangle mesh, volume, area, closed-mesh check.
+  - `src/placed.rs`: `Placed` = a body's local geometry plus its placement. Moves and turns change only the placement; volume, area and the mesh's shape come from the untouched geometry; `baked()` gives world geometry where it is needed.
+  - `src/accurate.rs`: double-double arithmetic (exact two-sum/two-product, 3×3 determinants) for sums where large terms cancel.
+  - `src/mesh.rs`: triangle mesh, volume (double-double determinants), area, closed-mesh check.
+  - `src/mass.rs`: exact volume and area of a B-rep from its edges (vector area by Stokes, divergence theorem, cylinder flux, Gauss–Bonnet on spheres), written to keep digits for far-away and huge-radius geometry. The app shows these, not mesh values.
   - `src/display.rs`: mesh shaped for the viewer (per-face normals, edge lines).
-  - `src/ops/`: modelling operations (`primitives.rs`: box). Each returns `Result<Body, KernelError>` via `ops::finish`.
-  - `src/fixtures.rs`: hand-built test bodies that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
-  - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box` → `BodyView`). Keep it thin.
-  - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
+  - `src/stl.rs`: binary STL export (reports the largest rounding to single precision and warns past MIN_FEATURE) and reading it back.
+  - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate, which take and return `Placed`; a rotation pivot must lie in model space). Each returns `Result<Body, KernelError>` via `ops::finish`.
+  - `src/fixtures.rs`: hand-built test bodies (cube, cylinder, sphere, half cylinder, tube, sphere cap/slice/octant) that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
+  - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_cylinder`, `make_sphere`, `make_extrude` → `BodyView`, with exact volume and area; `export_stl(spec, name)` → `StlFile`, where a `BodySpec` names the same shapes). Keep it thin.
+  - `src/debug_dump.rs`: failure dumps: ASCII STL per body plus `index.html`, a viewer that loads nothing (plain 2D canvas, works offline, draws relative to the scene's middle in doubles). In red: faces and edges a validation error names, vertices off their edges, every face of an inside-out shell, the mesh's open or flipped edges; dashed red: a named edge's own curve. `checked` writes one (`dump_invalid`, at most 20 per process) into `kernel/target/failure-dumps/` before panicking and names it in the panic; the harness writes its own there too, and `endless.sh` copies them into each nightly failure folder. `examples/dump_demo.rs` writes the two dumps the browser check opens.
   - `tests/stateful.rs`: stateful random-testing harness (see its header). When a kernel operation lands, add it to `Op`, `Scene::transitions`, `apply_op` and `replay_op` the same day.
   - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
-  - `scripts/overnight.sh`: Tier 3 run.
-- `prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies written by the harness.
-- `app/`: Vite + TypeScript + Three.js web app. `src/main.ts` UI; `src/viewer.ts` Three.js viewport; `src/kernel.worker.ts` runs the WASM kernel in a Web Worker; `src/kernel-client.ts` is the only way the app talks to it (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table); `src/kernel-types.ts` shapes of kernel results; `test/` unit tests (Node test runner); `e2e/smoke.mjs` browser test. `npm run kernel` builds the WASM package into `app/src/kernel/` (generated, gitignored).
+  - `scripts/overnight.sh`: Tier 3 run. `scripts/endless.sh`: the same, round after round with random seeds, logging to `endless-results/`.
+- `prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies written by the harness (box, cylinder, sphere, extrusion).
+- TypeScript (one npm workspace at the repo root, one lockfile; packages are TypeScript source with `exports` pointing at `src/index.ts`, no build step between them; imports inside a package name their `.ts` files so Node's test runner can load them; every package has `test/*.test.ts` run by `npm test` at the root):
+  - `packages/core`: the shared document model and the kernel bridge. `src/kernel/`: `kernel-client.ts` is the only way the app talks to the kernel (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table), `kernel.worker.ts` runs the WASM kernel in a Web Worker, `kernel-types.ts` shapes of kernel results and inputs (`Outline`, the kernel's `ProfileIn`); `npm run kernel` (in `apps/fission`) builds the WASM package into `src/kernel/wasm/` (generated, gitignored). `src/model/` (DRAFT): `Project`, `Material`, `BodyReference`/`FaceReference`/`EdgeReference`, `Selection`/`History`, `SharedViewport`, `WorkspacePlugin`.
+  - `packages/viewport`: the one Three.js viewport every workspace draws into (`Viewer`, implements `SharedViewport`) and the camera re-framing rule.
+  - `packages/ui`: shared UI kit: number formatting, theme (`theme.css`), workspace switcher, placeholder page.
+  - `packages/storage`, `packages/ai`, `packages/testing`, `packages/community`: placeholders (interfaces only; every function throws "not implemented").
+  - `workspaces/design`: the CAD workspace (`workspace.ts`; `profiles.ts` ready-made outlines until the sketcher). `workspaces/render`, `simulate`, `manufacture`, `laser`, `slice`: placeholders.
+  - `apps/fission`: the app shell (`src/main.ts`: top bar, workspace switcher, side panel, shared viewport; `#design`, `#slice`… links open a workspace), `e2e/smoke.mjs` browser test, `e2e/dump-viewer.mjs` browser check of the kernel's failure-dump page (both run by `npm run e2e`).
+- `docs/community.md`: open questions for the community library's server.
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust.
-- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages).
+- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing": every 6 hours, 4 jobs × ~5 h of `endless.sh`; results accumulate on the `test-results` branch: `summary.txt`, `log.csv`, `failures/<seed>/`; an issue is opened when something is found).
 
 ## Commands
 
 - Tier 1 (after every change): `cd kernel && cargo clippy --all-targets && cargo test <module>`
+- Before pushing kernel changes, also build for the browser: `cd kernel && cargo build --target wasm32-unknown-unknown` (code gated with `#[cfg(not(target_arch = "wasm32"))]`, like `debug_dump`, must not be called from code that is built there). CI uses the latest stable Rust, whose clippy may have lints the local toolchain lacks: `rustup update stable` first.
 - All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored)
 - Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
-- Build the app: `cd app && npm install && npm run build`
-- Dev server: `cd app && npm run dev`
-- App unit tests: `cd app && npm test`
-- Browser smoke test: `cd app && npm run build && npm run e2e`
+- Install (repo root, npm workspaces): `npm install`
+- Build the app: `cd apps/fission && npm run build`
+- Dev server: `cd apps/fission && npm run dev`
+- Unit tests of every package and workspace: `npm test` (repo root)
+- Type-check every package, including ones the app does not import yet: `npm run typecheck` (repo root, after a build so the WASM types exist)
+- Browser smoke test: `cd apps/fission && npm run build && npm run e2e`
 - Stateful random testing, quick mode (~200 cases, ~50 s, also part of `cargo test`; ~95% of operations in range, ~5% with one extreme input, counted in the report's "~extreme input" row): `cd kernel && cargo test --test stateful -- --nocapture`
+- Endless mode (owner's own computer, no Claude involved; random seed per round until Ctrl+C, results in `kernel/endless-results/`, gitignored): `cd kernel && scripts/endless.sh [cases-per-round] [rounds, 0 = endless] [python]`
 - Overnight mode (100,000 cases × 4 seeds in release, then the OpenCascade oracle): `cd kernel && scripts/overnight.sh [cases] [seeds] [python]` (needs `pip install cadquery-ocp`)
 
 Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't download binaryen. Harmless; re-enable when size matters.
 
 ## Supported modelling range
 
-Every serious kernel works inside a fixed range (Parasolid: a 1 km box). Fission's:
+Every serious kernel works inside a fixed range (commercial kernels commonly use a 1 km box). Fission's:
 - Feature sizes (any length parameter: width, radius, distance) from 1 µm to 10 km: `tolerance::MIN_FEATURE` = 1e-3 mm to `tolerance::MAX_SIZE` = 1e7 mm.
 - Every point of every body within ±100 km of the origin: `tolerance::MAX_COORD` = 1e8 mm.
-- Linear tolerance stays 1 nm (`LINEAR` = 1e-6 mm), 1000× below the smallest feature. At 100 km a double resolves ~15 nm, so this is tighter than Parasolid's box; the stateful harness tests the edges of the range.
+- Linear tolerance stays 1 nm (`LINEAR` = 1e-6 mm), 1000× below the smallest feature. At 100 km a double resolves ~15 nm, so this is tighter than a 1 km box; the stateful harness tests the edges of the range.
 - Operations outside the range return `KernelError::InvalidInput`; they never panic and never produce geometry.
 - Volumes, areas and projections are computed relative to a local origin (the body's or mesh's bounding-box centre, or a point on the face), never the world origin.
 - The fuzzer spends ~95% of its inputs inside the range and ~5% on extreme inputs, which only have to produce clean errors.
@@ -69,6 +84,20 @@ Every serious kernel works inside a fixed range (Parasolid: a 1 km box). Fission
 4. If the feature is visible, it has been checked in a real browser (the e2e smoke test, or a Playwright screenshot).
 5. The roadmap item is ticked here, then committed and pushed with a message saying what was done and how it was verified.
 
+## Ecosystem: one project, many workspaces
+
+Fission is a suite of workspaces (Design, Render, Simulate, Manufacture, Laser, Slice) sharing one project and one document model. Making them work together without any hassle is the priority, ahead of any single workspace's features.
+
+- Design is the source of truth for all geometry. A change there flows to every other workspace automatically: no exporting files between workspaces.
+- One project file holds everything: the design timeline, render scenes, simulation studies, CAM setups, laser jobs, print plates.
+- Other workspaces refer to design bodies, faces and edges by stable IDs from topological naming (scheme at step 32, full at step 50). They never copy geometry. When the design changes, every reference re-resolves: a load stays on its face, a toolpath on its pocket, a plate updates its model.
+- A reference that cannot be resolved after a design edit shows a clear warning on the item that holds it (like a failed timeline step). Never break it silently.
+- Shared everywhere: one viewport, one selection, one undo/redo history, one materials library (a Design appearance = a Render material = Simulate's properties = Slice/Laser presets), one units system. Switching workspaces is instant and keeps the camera and selection.
+- Placeholders stay placeholders: a page saying what the workspace will do, when work starts and "Coming soon", plus DRAFT typed interfaces whose functions throw "not implemented". No stub code that pretends to work, no fake results. Each placeholder has a test that it says so.
+- The DRAFT interfaces in `packages/core/src/model` change as real workspaces are built; keep them small.
+- Never use other companies' product names, logos or UI styles anywhere in the UI, code or docs. Use our own names and visual style. (Tools we depend on, like OpenCascade for the oracle, are named where needed.)
+- Community sharing is free only: anyone may share what they make and anyone may download it, with no paid content and no payments anywhere.
+
 ## App conventions
 
 - The main thread never loads the WASM module; every kernel call goes through `KernelClient` to the worker (the e2e test checks this).
@@ -81,7 +110,7 @@ Every serious kernel works inside a fixed range (Parasolid: a 1 km box). Fission
 
 - Develop on the branch named by the session; commit each roadmap item separately and push it.
 - Commit messages: a first line naming the step and feature (e.g. "Step 7: box primitive in the viewer"), then what changed and how it was verified.
-- Never commit generated files (`app/src/kernel/`, `kernel/target/`, `app/dist/`).
+- Never commit generated files (`apps/fission/src/kernel/`, `kernel/target/`, `apps/fission/dist/`).
 
 ## Roadmap (mark items [x] when done)
 
@@ -94,16 +123,16 @@ Kernel foundations
 - [x] 6. Tessellation of cylinder and sphere faces
 - [x] 7. Box primitive; viewer shows a kernel B-rep box with edges
 - [x] 8. Kernel runs in a Web Worker from here on; every app→kernel call is an async message
-- [ ] 9. Extrude polygon profiles with holes; property test volume = area × distance
-- [ ] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
-- [ ] 11. Sphere primitive; accurate volume and area
-- [ ] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 44)
-- [ ] 13. STL export + download button + round-trip test
-- [ ] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
+- [x] 9. Extrude polygon profiles with holes; property test volume = area × distance
+- [x] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
+- [x] 11. Sphere primitive; accurate volume and area
+- [x] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 44). Acceptance case: today a 26.5 × 0.0124 × 27 box placed 37.8 km out and moved back loses 8.7e-8 of its volume to rounding there (OpenCascade oracle, seed 0x5eed, 3000 cases); after this step it must not
+- [x] 13. STL export + download button + round-trip test
+- [x] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
 - [ ] 15. Self-intersection check in validate(). Easy for planes/cylinders/spheres; must be extended for general surfaces when NURBS arrive (63–64)
 
 App shell
-- [ ] 16. Fusion-style layout: toolbar, browser panel, properties panel, viewport
+- [ ] 16. Design workspace layout: toolbar, browser panel, properties panel, viewport (the app shell and workspace switcher already exist)
 - [ ] 17. Selection of bodies/faces/edges with highlighting
 - [ ] 18. View controls: home, top/front/right, fit, view cube
 - [ ] 19. Save/load JSON documents + autosave
@@ -139,10 +168,10 @@ Booleans
 - [ ] 41. Plane–plane and line–plane intersection
 - [ ] 42. Splitting planar faces along intersection lines
 - [ ] 43. Inside/outside classification with exact predicates
-- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set
+- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 10 km frame with 1 µm walls, turned and baked, gives 37231 instead of 40000 today; see the step 12 regressions)
 - [ ] 45. Coplanar faces, touching edges, shared vertices
 - [ ] 46. Plane–cylinder intersection (drill a hole through a box)
-- [ ] 47. Cylinder–cylinder, plane–sphere
+- [ ] 47. Cylinder–cylinder, plane–sphere. Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces
 - [ ] 48. Extrude modes (join/cut/intersect/new body), symmetric, to-face, taper
 - [ ] 49. Hole feature, Combine tool
 
@@ -192,6 +221,49 @@ Extras
 - [ ] 82. CAM: 2.5D toolpaths, G-code
 - [ ] 83. Sheet metal
 - [ ] 84. Cloud saving, versions, sharing
+
+Integration (the priority whenever a workspace is built; each item lands before the workspace that first needs it)
+- [ ] I1. Project file holds every workspace's data; save/load round-trips it (with step 19)
+- [ ] I2. References by stable ID with re-resolution after every rebuild, and unresolved-reference warnings shown on the holding item (with steps 32–33, completed at 50)
+- [ ] I3. One materials library used by Design appearances (62) and every later workspace
+- [ ] I4. One selection and one undo/redo history across workspaces (with steps 17 and 20)
+- [ ] I5. Switching workspaces keeps camera and selection; a workspace's view of the design updates live after an edit
+- [ ] I6. Cross-workspace tests: edit the design, check every workspace's references still resolve (or warn) in the harness and e2e
+
+Render workspace (starts after CAD step 33)
+- [ ] R1. Scenes in the project: bodies by reference, materials from the shared library, environment, cameras
+- [ ] R2. Path-traced preview in the shared viewport; final render to an image
+- [ ] R3. Scene updates live when the design changes
+
+Laser workspace (starts after CAD step 31, when the sketcher is solid)
+- [ ] L1. Jobs from design faces and sketches by reference; cut, engrave and score layers with power and speed
+- [ ] L2. DXF and SVG import and export
+- [ ] L3. Job preview and time estimate
+- [ ] L4. Machine control for common controllers; sheet-metal flat patterns after step 83
+
+Simulate workspace (starts after CAD step 50, booleans and full topological naming)
+- [ ] S1. Studies in the project; loads and constraints on design faces by reference
+- [ ] S2. Tetrahedral meshing from the exact geometry (shares step 81)
+- [ ] S3. Static stress: stress, displacement, safety factor in the viewport
+- [ ] S4. Thermal and modal studies
+
+Manufacture workspace (starts after CAD step 50, booleans and full topological naming)
+- [ ] M1. Setups, stock, work coordinates; a tool library shared across projects
+- [ ] M2. 2D/2.5D strategies on referenced faces and edges (shares step 82)
+- [ ] M3. Toolpath simulation in the viewport
+- [ ] M4. G-code through post-processors for different machines; 3D strategies
+
+Slice workspace (starts after CAD step 73, STL and 3MF export)
+- [ ] P1. Printer profiles for any printer; plates with design bodies by reference that update when the design changes
+- [ ] P2. Slicing: walls, infill, supports; layer preview
+- [ ] P3. G-code export; several plates per project
+
+Community (free sharing only; starts after CAD step 33, needs a server first, see docs/community.md)
+- [ ] C1. Decide the server questions in docs/community.md with the owner
+- [ ] C2. Accounts and uploads: share a whole project (editable timeline and every workspace's data) or a mesh, with a free licence
+- [ ] C3. Search and browse; download into a new local project; open it in any workspace
+- [ ] C4. Remix: a downloaded copy links back to the original and credits its author
+- [ ] C5. Moderation and reporting
 
 ## Testing rules
 
