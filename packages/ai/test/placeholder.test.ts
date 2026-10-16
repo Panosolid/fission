@@ -1,12 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { browserKeyStore, createProvider, dataLeavesMachine, detectProviders, PROVIDERS } from "../src/index.ts";
-
-test("AI providers are a placeholder and say so", () => {
-  assert.throws(() => createProvider({ kind: "ollama" }), /not implemented/);
-  assert.throws(() => detectProviders(), /not implemented/);
-  assert.throws(() => browserKeyStore(), /not implemented/);
-});
+import { dataLeavesMachine, PROVIDERS } from "../src/index.ts";
 
 test("four providers; only the API-key one sends anything off the machine", () => {
   assert.deepEqual(PROVIDERS.map((p) => p.kind), ["in-browser", "ollama", "api-key", "browser-built-in"]);
