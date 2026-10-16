@@ -60,6 +60,6 @@ export const layoutWorkspace: WorkspacePlugin = {
       ],
       startsAfter: "after CAD step 33, once Vector (V1–V2) and Image (G1) work",
     });
-    return () => ctx.properties.replaceChildren();
+    return { unmount: () => ctx.properties.replaceChildren() };
   },
 };

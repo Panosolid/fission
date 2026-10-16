@@ -9,6 +9,6 @@ export { buildSpec, specFor } from "./spec.ts";
 export { lastFeature, partDocument, partOf, profileLabel, readDesignDocument, specOf, type DesignDocument, type PartSizes, type ReadyProfile } from "./document.ts";
 export { PART_VIEW, syncGraph } from "./graph.ts";
 export { designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
-export { designReference, PLACEHOLDER_ID_NOTE } from "./references.ts";
+export { designReference, PLACEHOLDER_ID_NOTE, profileReference, readProfileReference } from "./references.ts";
 export { pickChange, type SelectionChange } from "./picking.ts";
-export { designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type SaveFile } from "./actions.ts";
+export { COPY_SVG, designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";

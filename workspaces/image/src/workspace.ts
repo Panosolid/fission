@@ -2,11 +2,12 @@
 // the browser with its hide toggle, the size and Brightness in the
 // properties, and the image itself drawn at its real size in the shared
 // viewport, seen from above. The open image is kept
-// while other workspaces are shown, but not saved with the project yet (G3).
+// while other workspaces are shown, but not saved with the project yet (G6).
 
-import type { WorkspaceContext } from "@fission/core";
+import type { MountedWorkspace, WorkspaceContext } from "@fission/core";
 import { setBrightness, setDpi, setLayerVisible, setMmPerPixel, toImageRep, type ImageDocument, type Pixels } from "./document.ts";
 import { openImage } from "./open.ts";
+import { imageObjects } from "./representations.ts";
 import { brightnessView, layerRows, NOT_SAVED_NOTE, parseBrightnessInput, parseSizeInput, sizeView } from "./panels.ts";
 import type { PhysicalSize } from "./physical-size.ts";
 
@@ -48,6 +49,9 @@ export async function openImageFile(name: string, bytes: Uint8Array, decode = br
   }
 }
 
+/** The open image's layers as live handles other workspaces can take (representations.ts). */
+export const currentImageObjects = () => imageObjects(() => current);
+
 /** For the tests: forget the open image. */
 export function resetImageWorkspace() {
   current = null;
@@ -77,9 +81,13 @@ const PROPERTIES = `
 /** The one layer's id (G1 has one layer; choosing among several comes with the stack, G4). */
 const layerId = (doc: ImageDocument) => doc.layers[0].id;
 
-export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () => void {
+export function mountImage(ctx: WorkspaceContext, decode = browserDecode): MountedWorkspace {
   const page = ctx.toolbar.ownerDocument;
+  /** Mounted (false after unmount), and on screen (false while asleep, X7). */
   let live = true;
+  let awake = true;
+  /** A file finished opening while asleep: wake redraws the panels too. */
+  let missed = false;
   const $ = <T extends HTMLElement>(id: string) => ctx.properties.querySelector(`#${id}`) as T;
 
   // Toolbar: Open, through a hidden file input.
@@ -108,6 +116,12 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
 
   /** Puts the document (and the last message) on screen; `frame` re-frames the camera on the image, and live edits leave it where it is. */
   function show(frame: boolean) {
+    draw(frame);
+    panels();
+  }
+
+  /** The image in the viewport; false if it could not be drawn (the document is dropped and the message says why). */
+  function draw(frame: boolean): boolean {
     if (current) {
       try {
         ctx.viewport.showImage(toImageRep(current));
@@ -116,11 +130,16 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
         current = null;
         message = (e as Error).message;
         ctx.viewport.clearImage();
+        return false;
       }
     } else {
       ctx.viewport.clearImage();
     }
+    return true;
+  }
 
+  /** The layer list, the size and Brightness, and the message, from the document. */
+  function panels() {
     // Browser: the layer list.
     const heading = page.createElement("h2");
     heading.textContent = "Layers";
@@ -190,7 +209,8 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
       if (!live) return;
       message = (e as Error).message;
     }
-    show(true);
+    if (awake) show(true);
+    else missed = true; // wake shows it
   });
 
   /** A size typed into DPI or mm per pixel; a bad one is refused with its message and the inputs go back to the document's size. */
@@ -224,11 +244,27 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
 
   ctx.viewport.onPick = null;
   show(true);
-  return () => {
-    live = false;
-    ctx.viewport.clearImage();
-    ctx.toolbar.replaceChildren();
-    ctx.browser.replaceChildren();
-    ctx.properties.replaceChildren();
+  const sleep = () => {
+    if (!awake) return;
+    awake = false;
+    ctx.viewport.clearImage(); // the body and the 3D camera come back
+  };
+  return {
+    sleep,
+    wake() {
+      if (awake) return;
+      awake = true;
+      ctx.viewport.onPick = null;
+      // The panels are as they were left, unless a file opened meanwhile.
+      if (!draw(true) || missed) panels();
+      missed = false;
+    },
+    unmount() {
+      sleep();
+      live = false;
+      ctx.toolbar.replaceChildren();
+      ctx.browser.replaceChildren();
+      ctx.properties.replaceChildren();
+    },
   };
 }

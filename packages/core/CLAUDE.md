@@ -17,9 +17,11 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
   - `downstream.ts`: downstream summaries: what another workspace makes from the design, its state from the graph; the chips in Design's properties panel.
   - `change-notes.ts`: change notes: one dismissible note per result another workspace's change updated, naming the cause, with the dependency chain from `graph.path`; `onChange` tells the shell to redraw. On `WorkspaceContext` as `changeNotes`: whoever calls `graph.changed`/`remove` for a user's edit records it there with the cause's words.
   - `files.ts`: files dropped or pasted (X6a): `identifyFile` by contents and name, `FILE_FORMATS` (each format's representation and who will take it), `routeFiles` through the registered importers; a workspace opens a format by `registry.registerImporter` in its `registerRepresentations`.
+  - `svg.ts`: `outlineToSvg`: an Outline as an SVG file in mm (one path, holes by evenodd, y flipped, arcs as quarter turns at most so rounding never moves a centre, the viewBox the exact box); Design's Copy as SVG writes it.
   - `links.ts`.
   - `ownership.ts`: one owner per linked value: `proposeEdit`, `acceptProposal`/`rejectProposal`, `setOwnedValue`, `transferOwnership`.
   - `overlay.ts`.
-  - `workspace.ts`: the public Workspace API.
-  - `session.ts`: `createSelection`, the one selection; its undo/redo half is DRAFT until step 20.
+  - `workspace.ts`: the public Workspace API; `mount` returns a `MountedWorkspace` (`sleep`, `wake`, `unmount`: workspaces stay warm, X7).
+  - `session.ts`: `createSelection`, the one selection; `historyNotBuilt` until the shell wires the history (20b).
+  - `history.ts`: `createHistory`, the one undo/redo history of whole-project snapshots (labels, merge keys, limit, `reset` on open; step 20a).
 - `src/model/`, DRAFT: `material.ts`, `machines.ts`, `search.ts`, `feedback.ts`, `parameters.ts`, `references.ts`, `viewport.ts`.
