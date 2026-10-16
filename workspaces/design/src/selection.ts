@@ -48,3 +48,41 @@ export function selectionRows(items: readonly GeometryReference[], featureId: st
     return { name: `${kind} ${r.index}`, type: type ?? (view ? NOT_ON_BODY : "…"), id: item.id };
   });
 }
+
+/**
+ * What survives a rebuild (17e). Until topological naming (step 32) a face
+ * or edge is only its kernel index, so it is kept when the rebuilt body
+ * still has that index with the same surface or curve type, on a body with
+ * the same numbers of vertices, edges and faces as `before` (a resize keeps
+ * them; a change of shape renumbers everything). `before` is null when no
+ * earlier body is known (first build, or back from another workspace):
+ * then the index and nothing else is checked. Body references to `featureId`
+ * stay; references this function cannot read, or to another feature, are
+ * left alone (not Design's to judge here).
+ */
+export function survivors(items: readonly GeometryReference[], featureId: string, before: BodyView | null, after: BodyView): { kept: GeometryReference[]; dropped: GeometryReference[] } {
+  const sameTopology = before === null || (before.vertices === after.vertices && before.edges === after.edges && before.faces === after.faces);
+  const kept: GeometryReference[] = [];
+  const dropped: GeometryReference[] = [];
+  for (const item of items) {
+    const r = readDesignReference(item);
+    let keep = true;
+    if (r && r.featureId === featureId && r.kind !== "body") {
+      const types = (v: BodyView) => (r.kind === "face" ? v.face_types : v.edge_types);
+      const now = types(after)[r.index!];
+      keep = now !== undefined && sameTopology && (before === null || types(before)[r.index!] === now);
+    }
+    (keep ? kept : dropped).push(item);
+  }
+  return { kept, dropped };
+}
+
+/** The visible note for references a rebuild dropped ("" when none were). */
+export function droppedNote(dropped: readonly GeometryReference[]): string {
+  if (dropped.length === 0) return "";
+  const names = dropped.map((d) => {
+    const r = readDesignReference(d);
+    return r ? `${d.kind[0].toUpperCase()}${d.kind.slice(1)} ${r.index}` : d.id;
+  });
+  return `Taken out of the selection: ${names.join(", ")}. The edit renumbered the body's faces and edges, so these could not be followed.`;
+}

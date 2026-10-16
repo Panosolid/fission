@@ -15,7 +15,7 @@ import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { designReference } from "./references.ts";
-import { highlightOf, selectionRows } from "./selection.ts";
+import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 
 /** Hands `bytes` to the browser as a file download. */
 function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
@@ -136,6 +136,9 @@ function mount(ctx: WorkspaceContext): () => void {
   let shown = true;
   /** The last body that built, for the selection's surface and curve types. */
   let lastView: BodyView | null = null;
+  /** The note about items the last rebuild dropped, and whether that drop is being applied now. */
+  let note = "";
+  let settling = false;
 
   /** The browser's Body 1 row: a click selects the body, Shift adds or takes it out. */
   function selectRow(ref: GeometryReference, shift: boolean) {
@@ -215,7 +218,16 @@ function mount(ctx: WorkspaceContext): () => void {
         viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
       }
       panel.showBody(view);
+      // Faces and edges the edit renumbered leave the selection, with a note (17e).
+      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView, view);
       lastView = view;
+      note = droppedNote(dropped);
+      if (dropped.length > 0) {
+        settling = true;
+        ctx.selection.set(kept);
+        settling = false;
+      }
+      panel.showSelectionNote(note);
       showSelection();
       viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
     } catch (e) {
@@ -255,7 +267,11 @@ function mount(ctx: WorkspaceContext): () => void {
   };
   const keys = viewport.element.ownerDocument;
   keys.addEventListener("keydown", onKey);
-  const stopWatching = ctx.selection.onChange(showSelection);
+  const stopWatching = ctx.selection.onChange(() => {
+    // The user's next change of selection retires the note about dropped items.
+    if (!settling && note) panel.showSelectionNote((note = ""));
+    showSelection();
+  });
 
   inputs.forEach((i) => i.addEventListener("input", update));
   update();

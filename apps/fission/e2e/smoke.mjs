@@ -234,6 +234,61 @@ try {
     await page.keyboard.press("Escape");
   });
 
+  // 17e: until topological naming (step 32) a face or edge is its kernel
+  // index, kept only while the rebuilt body is numbered the same way.
+  const selected = () => page.evaluate(() => document.body.dataset.selection ?? "");
+  const pickTopAndEdge = async () => {
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const top = screenPoint(box, [20, 15, 20]); // face 1, as in the picking check
+    const topFront = screenPoint(box, [20, 0, 20]); // edge 4
+    await page.mouse.click(top.x, top.y);
+    await page.keyboard.down("Shift");
+    await page.mouse.click(topFront.x, topFront.y);
+    await page.keyboard.up("Shift");
+    await page.mouse.move(box.x + 2, box.y + 2);
+    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4");
+  };
+
+  await check("the selection survives a resize, and a change of shape drops its faces and edges with a note", async () => {
+    await pickTopAndEdge();
+    await setSize("width", 44);
+    // V = 44·30·20 = 26400: the box rebuilt, still 8 V · 12 E · 6 F.
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "26,400 mm³");
+    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4", "a resize keeps face 1 and edge 4");
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges 4");
+    assert.equal(await page.isVisible("#selection-note"), false);
+    await page.keyboard.down("Shift");
+    await page.click("#browser [data-node=body-1]");
+    await page.keyboard.up("Shift");
+    // A cylinder is 2 V · 2 E · 3 F: the box's face 1 and edge 4 cannot be followed; the body can.
+    await page.click("#toolbar [data-shape=cylinder]");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
+    assert.equal(await selected(), "body:feature-1");
+    assert.equal(await page.isVisible("#selection-note"), true);
+    assert.match(await page.textContent("#selection-note"), /^Taken out of the selection: Face 1, Edge 4\./);
+    await page.screenshot({ path: "e2e/selection-dropped.png" });
+    await page.keyboard.press("Escape");
+    assert.equal(await page.isVisible("#selection-note"), false, "the next change of selection retires the note");
+    // Back to the 40 mm box, framed afresh by the change of shape, for the hand-worked positions.
+    await setSize("width", 40);
+    await page.click("#toolbar [data-shape=box]");
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+  });
+
+  await check("the selection survives switching workspaces", async () => {
+    await pickTopAndEdge();
+    await page.click("[data-workspace=laser]");
+    assert.equal(await page.isVisible(".placeholder h2"), true);
+    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4", "kept while Laser is shown");
+    await page.click("[data-workspace=design]");
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4");
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges 4");
+    assert.deepEqual(await page.$$eval("#selection-list li", (els) => els.map((e) => e.textContent)), ["Face 1 · plane face:feature-1/1", "Edge 4 · line edge:feature-1/4"]);
+    assert.equal(await page.isVisible("#selection-note"), false);
+    await page.keyboard.press("Escape");
+  });
+
   await check("editing a size rebuilds the body", async () => {
     await setSize("width", 100);
     // V = 100·30·20 = 60000.
@@ -679,6 +734,25 @@ try {
     await page.screenshot({ path: "e2e/laser-375.png" });
     await page.click("[data-workspace=design]");
     await page.setViewportSize({ width: 1000, height: 640 });
+  });
+
+  await check("phone width: a tap selects a face", async () => {
+    const phone = await browser.newPage({ viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true });
+    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await phone.goto(url + "#design");
+      await phone.waitForFunction(() => document.querySelector("#viewport")?.dataset.shape === "box");
+      const box = await phone.locator("#viewport canvas").boundingBox();
+      const top = screenPoint(box, [20, 15, 20]); // face 1 (fit() frames the same way at any aspect)
+      await phone.touchscreen.tap(top.x, top.y);
+      assert.equal(await phone.evaluate(() => document.body.dataset.selection ?? ""), "face:feature-1/1");
+      await phone.screenshot({ path: "e2e/design-375-tap.png" });
+      // A tap on empty space clears, as a click does.
+      await phone.touchscreen.tap(box.x + 4, box.y + 4);
+      assert.equal(await phone.evaluate(() => document.body.dataset.selection ?? ""), "");
+    } finally {
+      await phone.close();
+    }
   });
 
   await check("no errors in the browser console", async () => {

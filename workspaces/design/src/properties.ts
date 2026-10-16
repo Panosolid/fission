@@ -39,6 +39,7 @@ const HTML = `
   <h2>Selection</h2>
   <p id="selection-empty">Nothing selected: click a face or an edge, or Body 1 in the browser.</p>
   <ul id="selection-list" class="selection-list"></ul>
+  <p id="selection-note" class="bad" hidden></p>
   <h2>Parameters</h2>
   ${SIZE_KEYS.map((k) => `<label id="${k}-row"><span id="${k}-label"></span> <input id="${k}" type="number" value="${DEFAULT_SIZES[k]}" step="any" /> mm</label>`).join("\n  ")}
   <h2>Feature</h2>
@@ -65,6 +66,8 @@ export interface PropertiesPanel {
   showFeature(feature: Feature): void;
   /** What is selected: one row per item, or the empty note. */
   showSelection(rows: readonly SelectionRow[]): void;
+  /** Says what the last rebuild took out of the selection ("" hides the note). */
+  showSelectionNote(text: string): void;
   /** The built body's numbers and validation; clears the error line. */
   showBody(view: BodyView): void;
   showError(message: string): void;
@@ -104,6 +107,11 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
           return li;
         }),
       );
+    },
+    showSelectionNote(text) {
+      const note = $("selection-note");
+      note.textContent = text;
+      note.hidden = text === "";
     },
     showBody(view) {
       $("volume").textContent = `${fmt(view.volume)} mm³`;
