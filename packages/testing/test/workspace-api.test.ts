@@ -96,7 +96,7 @@ test("placeholders register no actions; a working workspace's verbs are its own"
   }
   const design = new ActionRegistry();
   plugins.find((p) => p.id === "design")!.registerActions!(design);
-  assert.deepEqual(design.byWorkspace("design").map((a) => a.id), ["design.download-stl"]);
+  assert.deepEqual(design.byWorkspace("design").map((a) => a.id), ["design.download-stl", "design.copy-svg"]);
 });
 
 // Downstream chips (X4b): no workspace makes anything from the design yet,
