@@ -2,7 +2,7 @@
 // the browser with its hide toggle, the size and Brightness in the
 // properties, and the image itself drawn at its real size in the shared
 // viewport, seen from above. The open image is kept
-// while other workspaces are shown, but not saved with the project yet (G3).
+// while other workspaces are shown, but not saved with the project yet (G6).
 
 import type { WorkspaceContext } from "@fission/core";
 import { setBrightness, setDpi, setLayerVisible, setMmPerPixel, toImageRep, type ImageDocument, type Pixels } from "./document.ts";
