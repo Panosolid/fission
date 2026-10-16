@@ -60,7 +60,7 @@ try {
       // app's keys; no placeholder binds a key and Image binds none yet.
       assert.deepEqual(await listed(page), [
         { title: "Design on screen", rows: ["Esc: Clear the selection", "Ctrl+C: Copy the selected profile as SVG"] },
-        { title: "Everywhere", rows: ["?: Show the keyboard shortcuts", "Ctrl+V: Paste files into the project (a project file, an image…)"] },
+        { title: "Everywhere", rows: ["?: Show the keyboard shortcuts", "Ctrl+V: Paste files into the project (a project file, an image…)", "Ctrl+Z: Undo", "Ctrl+Shift+Z: Redo", "Ctrl+Y: Redo"] },
       ]);
       await page.screenshot({ path: "e2e/shortcuts.png" });
       await page.keyboard.press("Escape");

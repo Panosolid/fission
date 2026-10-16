@@ -75,6 +75,10 @@ export const SHELL_SHORTCUTS: readonly ShortcutSpec[] = [
   { id: "shortcuts", keys: "?", label: "Show the keyboard shortcuts" },
   // Paste (the keys or the browser's Edit menu) with files on the clipboard; text pastes as usual.
   { id: "paste-files", keys: "Mod+V", label: "Paste files into the project (a project file, an image…)" },
+  // Undo and redo the project (step 20b); in a text field the browser's own undo of the typing runs instead.
+  { id: "undo", keys: "Mod+Z", label: "Undo" },
+  { id: "redo", keys: "Mod+Shift+Z", label: "Redo" },
+  { id: "redo-y", keys: "Mod+Y", label: "Redo" },
 ];
 
 /** Writes `keys` in the one canonical form; throws a clear error for anything that isn't a key a user can press. */

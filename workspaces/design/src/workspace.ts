@@ -10,7 +10,7 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
-import { toolbarGroups, type ToolButton } from "./toolbar.ts";
+import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
@@ -220,10 +220,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
     shape = command.shape as ShapeKind;
     for (const [i, key] of SIZE_KEYS.entries()) if (typeof command[key] === "number") inputs[i].value = String(command[key]);
-    return update();
+    return update(`Change shape to ${SHAPE_LABELS[shape] ?? shape}`);
   }
 
-  async function update() {
+  /** Builds the part from the panel; `label` and `mergeKey` name the undo step when this is a user's edit (none while mounting). */
+  async function update(label?: string, mergeKey?: string) {
     const kind = shape;
     for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
@@ -238,7 +239,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     syncGraph(ctx.graph, doc, before, ctx.changeNotes);
     const changed = ctx.project.workspaces.design !== doc;
     ctx.project.workspaces.design = doc;
-    if (changed) ctx.projectChanged(); // the shell autosaves (19c)
+    if (changed) ctx.projectChanged(label, mergeKey); // the shell autosaves (19c) and records the undo step (20b)
     browser(ctx.browser, doc, selectRow);
     showSelection();
     markStale();
@@ -308,7 +309,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     stopWatching();
   }
 
-  inputs.forEach((i) => i.addEventListener("input", () => update()));
+  // Typing in one box is one undo step (the merge key), named for the box.
+  inputs.forEach((input, i) => input.addEventListener("input", () => update(`Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])));
   listen();
   update();
   return {

@@ -20,7 +20,7 @@ export interface ToolGroup {
   buttons: ToolButton[];
 }
 
-const SHAPE_LABELS: Record<ShapeKind, string> = {
+export const SHAPE_LABELS: Record<ShapeKind, string> = {
   box: "Box",
   cylinder: "Cylinder",
   sphere: "Sphere",

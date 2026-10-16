@@ -1,0 +1,9 @@
+/* Undo and Redo in the top bar (step 20b): two arrow buttons before Save,
+   on the bar on wide screens and the first row of Menu at phone width (where
+   the bar keeps its room for the workspace tabs), dimmed when there is
+   nothing to undo or redo. The bar's buttons take their font
+   from here (font: inherit); naming the buttons by id outweighs the bar's
+   own "#topbar button" padding, so the pair stays narrow. */
+.undo-redo { display: flex; flex-shrink: 0; font-size: 18px; line-height: 1; }
+.undo-redo button#undo, .undo-redo button#redo { padding-left: 6px; padding-right: 6px; }
+.undo-redo button:disabled { opacity: 0.35; cursor: default; }

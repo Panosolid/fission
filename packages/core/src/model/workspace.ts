@@ -42,8 +42,14 @@ export const WORKSPACE_API_VERSION = 1;
 /** What the shell hands a workspace when it is shown. */
 export interface WorkspaceContext {
   project: Project;
-  /** Call after changing `project`, so the shell can autosave it. */
-  projectChanged(): void;
+  /**
+   * Call after changing `project`: the shell autosaves it and records one
+   * undo step named `label` ("Change width"; "Edit" if none is given).
+   * Steps with the same `mergeKey` in quick succession are one step (typing
+   * in one box). A change made while the workspace is being mounted (a
+   * default filled in) is taken into the present instead: not a step.
+   */
+  projectChanged(label?: string, mergeKey?: string): void;
   kernel: KernelCalls;
   selection: Selection;
   history: History;

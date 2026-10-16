@@ -212,6 +212,73 @@ test("reset forgets every step and starts from the project as it is", () => {
   assert.equal(edit(70), false); // 70 is the new start
 });
 
+test("hand-worked: amend takes a change nobody made into the present, not a new step", () => {
+  // 40 → Width 50, then a workspace fills in a default (the box becomes 55
+  // with no edit). Undo takes back Width 50 to 40, redo brings 55, the
+  // amended present, not the 50 recorded before it.
+  const { h, doc, edit, restores, changes } = rig();
+  edit(50);
+  doc.w = 55;
+  assert.equal(h.amend(), true);
+  assert.equal(changes(), 2); // the record and the amend
+  assert.equal(h.undoLabel(), "Width 50");
+  assert.equal(h.undo(), "Width 50");
+  assert.equal(h.redo(), "Width 50");
+  assert.deepEqual(restores, [40, 55]);
+  // Nothing new to take in: false, and no change call.
+  assert.equal(h.amend(), false);
+  assert.equal(changes(), 4);
+});
+
+test("amend keeps the redo, and a present step amended back to the state before it is removed", () => {
+  const { h, doc, edit, restores } = rig();
+  edit(50);
+  edit(60);
+  h.undo(); // at Width 50, Width 60 to redo
+  doc.w = 51;
+  h.amend();
+  assert.equal(h.redoLabel(), "Width 60");
+  // 51 → 40 is the start's state: Width 50 has nothing left to undo.
+  doc.w = 40;
+  assert.equal(h.amend(), true);
+  assert.equal(h.canUndo(), false);
+  assert.equal(h.redoLabel(), "Width 60");
+  assert.equal(h.redo(), "Width 60");
+  assert.deepEqual(restores, [50, 60]);
+});
+
+test("amend ends a merge: the next edit with the same key is a step of its own", () => {
+  // Typing 41 then 42 in one box within the merge time is one step; a
+  // default filled in between them splits it, so undo goes 42 → 41 → 40.
+  const { h, doc, edit, restores, tick } = rig();
+  edit(41, "Change width", "width");
+  (doc as { w: number; d?: number }).d = 30;
+  h.amend();
+  tick(MERGE_MS * 0.1);
+  edit(42, "Change width", "width");
+  h.undo();
+  h.undo();
+  assert.deepEqual(restores, [41, 40]);
+});
+
+test("amend during a restore does nothing", () => {
+  let h!: ReturnType<typeof createHistory>;
+  const doc = { w: 40 };
+  const results: boolean[] = [];
+  h = createHistory({
+    capture: () => JSON.stringify(doc),
+    restore: (s) => {
+      doc.w = JSON.parse(s).w + 1; // the remount changed it again
+      results.push(h.amend());
+    },
+  });
+  doc.w = 50;
+  h.record("Width 50");
+  h.undo();
+  assert.deepEqual(results, [false]);
+  assert.equal(h.redoLabel(), "Width 50");
+});
+
 test("onChange is called once per change and can be unsubscribed", () => {
   const { h, edit, changes } = rig();
   edit(50);
