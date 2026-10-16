@@ -1,0 +1,13 @@
+/* The keyboard shortcuts list (shortcut-list.ts, X7b): a dialog over the app, the workspaces on screen first. */
+.shortcut-list { width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow-y: auto; padding: 16px; background: #1c1f24; color: #e6e8eb; border: 1px solid #2a2e35; border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.shortcut-list::backdrop { background: rgba(0, 0, 0, 0.5); }
+.shortcut-list header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.shortcut-list h2 { font-size: 16px; margin: 0; }
+.shortcut-list h3 { font-size: 13px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
+.shortcut-list .here { text-transform: none; letter-spacing: 0; color: #4aa8ff; font-weight: normal; }
+.shortcut-list dl { margin: 0; }
+.shortcut-list dl > div { display: flex; gap: 12px; padding: 4px 0; border-bottom: 1px solid #2a2e35; }
+.shortcut-list dt { flex: 0 0 96px; }
+.shortcut-list dd { margin: 0; }
+.shortcut-list kbd { font: 12px ui-monospace, monospace; padding: 1px 6px; border: 1px solid #3a3f47; border-radius: 4px; background: #14161a; }
+.shortcut-list .close { font: inherit; background: none; border: 1px solid #3a3f47; border-radius: 4px; color: inherit; padding: 4px 10px; cursor: pointer; }

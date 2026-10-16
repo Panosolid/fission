@@ -11,7 +11,7 @@ export interface PaneCamera {
   fit(): Framing | null;
   setView(name: ViewName): Framing | null;
   fitSelection(): Framing | null;
-  showImage(image: ImageRep): void;
+  showImage(image: ImageRep | null): void;
   clearImage(): void;
 }
 
@@ -38,7 +38,7 @@ export function paneViewports(scene: SharedViewport): (view: PaneCamera) => Shar
       fit: () => view.fit(),
       setView: (name: ViewName) => view.setView(name),
       fitSelection: () => view.fitSelection(),
-      showImage: (image: ImageRep) => view.showImage(image),
+      showImage: (image: ImageRep | null) => view.showImage(image),
       clearImage: () => view.clearImage(),
       setOverlay: (overlay: AnalysisOverlay) => scene.setOverlay(overlay),
       clearOverlay: (id: string) => scene.clearOverlay(id),

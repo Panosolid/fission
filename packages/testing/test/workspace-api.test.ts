@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, createHistory, RepresentationRegistry, createSelection, NO_HIGHLIGHT, SHELL_SHORTCUTS, ShortcutTable, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -154,7 +154,8 @@ function testContext(): WorkspaceContext {
     // Every kernel call fails, as when the kernel is not loaded: the workspace must show it, not crash.
     kernel: { call: (() => Promise.reject(new Error("no kernel in this test"))) as KernelCalls["call"] },
     selection: createSelection(),
-    history: historyNotBuilt,
+    // A real history no test here undoes: Design asks it whether a mount is an undo's (step 20c).
+    history: createHistory({ capture: () => "", restore: () => assert.fail("nothing here undoes") }),
     graph: new DependencyGraph(),
     toolbar: el(),
     browser: el(),
@@ -338,12 +339,55 @@ test("Design turns viewport picks and Escape into the shared selection", async (
   ctx.viewport.onPick!({ face: 4, shift: true });
   assert.deepEqual(ids(), ["face:feature-1/1", "face:feature-1/4"]);
   const doc = ctx.viewport.element.ownerDocument;
-  doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
+  const escape = () => new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event;
+  // Escape comes from the shell's one shortcut table (X7b), never a listener of Design's own.
+  doc.dispatchEvent(escape());
+  assert.deepEqual(ids(), ["face:feature-1/1", "face:feature-1/4"], "Design does not listen to the keyboard itself");
+  assert.equal(view.shortcut!("clear-selection", escape()), true);
   assert.deepEqual(ids(), []);
   ctx.viewport.onPick!({ face: 2, shift: false });
+  view.sleep!();
+  assert.equal(view.shortcut!("clear-selection", escape()), false, "asleep: declines");
+  assert.deepEqual(ids(), ["face:feature-1/2"], "Escape while asleep no longer clears");
+  view.wake!();
+  assert.equal(view.shortcut!("no-such-shortcut", escape()), false, "an id it doesn't have: declines");
   view.unmount();
-  doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
-  assert.deepEqual(ids(), ["face:feature-1/2"], "Escape after hide no longer clears");
+  assert.equal(view.shortcut!("clear-selection", escape()), false, "after unmount: declines");
+  assert.deepEqual(ids(), ["face:feature-1/2"]);
+});
+
+// One shortcut table (X7b): the shell's keys and every workspace's, with no
+// clash, and no workspace hearing keys on its own (so none hears them asleep).
+test("the real shortcut table has no clashes, and every declared shortcut has a handler", () => {
+  const table = new ShortcutTable(SHELL_SHORTCUTS, plugins);
+  assert.deepEqual(table.clashes().map((c) => c.message), []);
+  for (const p of plugins) {
+    if (!p.shortcuts?.length) continue;
+    const view = p.mount(testContext());
+    assert.equal(typeof view.shortcut, "function", `${p.id} declares keys, so its mounted view must run them`);
+    view.unmount();
+  }
+  // Placeholders bind no keys: a key that does nothing would pretend to work.
+  for (const p of plugins.filter((p) => p.status === "placeholder")) assert.deepEqual(p.shortcuts ?? [], [], `${p.id} is a placeholder`);
+});
+
+const keyListener = /\b(?:document|ownerDocument|window|defaultView|keys)\s*\.\s*addEventListener\(\s*["'](?:keydown|keyup|keypress|copy|cut|paste)["']/;
+test("no workspace listens to keys or the clipboard on the page itself: they come from the shortcut table", () => {
+  const found = workspaceDirs.flatMap((dir) => {
+    const src = join(root, "workspaces", dir, "src");
+    return readdirSync(src)
+      .filter((f) => f.endsWith(".ts"))
+      .filter((f) => keyListener.test(readFileSync(join(src, f), "utf8")))
+      .map((f) => `${dir}/src/${f}`);
+  });
+  assert.deepEqual(found, []);
+});
+
+test("the key-listener check can fail: it catches a page-level keydown and copy, not an element's input", () => {
+  assert.ok(keyListener.test(`keys.addEventListener("keydown", onKey);`));
+  assert.ok(keyListener.test(`document.addEventListener('copy', f)`));
+  assert.ok(!keyListener.test(`input.addEventListener("keydown", f)`));
+  assert.ok(!keyListener.test(`document.addEventListener("pointerdown", f)`));
 });
 
 // Highlighting (17d): the selection drawn in the viewport, lit in the

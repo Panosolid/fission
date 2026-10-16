@@ -45,5 +45,7 @@ export { outlineToSvg, svgNumber } from "./model/svg.ts";
 export { EXACTNESS, isExact, RepresentationRegistry, XY_PLANE } from "./model/representation.ts";
 export type { Action, ActionOutcome, ActionTarget, Selected, SelectionKind } from "./model/actions.ts";
 export { ActionRegistry } from "./model/actions.ts";
+export type { Chord, KeyPress, ShortcutClash, ShortcutEntry, ShortcutScope, ShortcutSource, ShortcutSpec } from "./model/shortcuts.ts";
+export { BROWSER_RESERVED, CLIPBOARD_CHORDS, chordLabel, chordOf, parseChord, SHELL_SHORTCUTS, ShortcutTable } from "./model/shortcuts.ts";
 export type { ToolbarItem, ViewportOverlay, MountedWorkspace, WorkspaceContext, WorkspacePlugin } from "./model/workspace.ts";
 export { WORKSPACE_API_VERSION } from "./model/workspace.ts";

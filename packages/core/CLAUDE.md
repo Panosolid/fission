@@ -19,9 +19,10 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
   - `files.ts`: files dropped or pasted (X6a): `identifyFile` by contents and name, `FILE_FORMATS` (each format's representation and who will take it), `routeFiles` through the registered importers; a workspace opens a format by `registry.registerImporter` in its `registerRepresentations`.
   - `svg.ts`: `outlineToSvg`: an Outline as an SVG file in mm (one path, holes by evenodd, y flipped, arcs as quarter turns at most so rounding never moves a centre, the viewBox the exact box); Design's Copy as SVG writes it.
   - `links.ts`.
-  - `ownership.ts`: one owner per linked value: `proposeEdit`, `acceptProposal`/`rejectProposal`, `setOwnedValue`, `transferOwnership`.
+  - `ownership.ts`: one owner per linked value: `proposeEdit`, `acceptProposal`/`rejectProposal`, `setOwnedValue`, `transferOwnership` (its `label` names the undo step the hand-over is stored in).
   - `overlay.ts`.
   - `workspace.ts`: the public Workspace API; `mount` returns a `MountedWorkspace` (`sleep`, `wake`, `unmount`: workspaces stay warm, X7).
-  - `session.ts`: `createSelection`, the one selection; `historyNotBuilt` until the shell wires the history (20b).
-  - `history.ts`: `createHistory`, the one undo/redo history of whole-project snapshots (labels, merge keys, limit, `reset` on open; step 20a).
+  - `shortcuts.ts`: the one shortcut table (X7b): `ShortcutTable` (the shell's `SHELL_SHORTCUTS` and each plugin's `shortcuts`), `parseChord`/`chordOf`/`chordLabel`, `lookup` (pane in use, other pane, shell), `clashes` (same key or id in one scope, a workspace key the shell uses, `BROWSER_RESERVED`), `help` (the list's order). Workspaces run theirs in `MountedWorkspace.shortcut`.
+  - `session.ts`: `createSelection`, the one selection; `historyNotBuilt`, a history that throws, for tests of workspaces that never undo.
+  - `history.ts`: `createHistory`, the one undo/redo history of whole-project snapshots (labels, merge keys, limit, `reset` on open; step 20a; `amend` takes a default filled in while mounting into the present, 20b; `step(label, run)` makes many changes one labelled step, all or nothing, and `restoring()` tells a mount it is an undo's, 20c). `WorkspaceContext.projectChanged(label, mergeKey)` records a step.
 - `src/model/`, DRAFT: `material.ts`, `machines.ts`, `search.ts`, `feedback.ts`, `parameters.ts`, `references.ts`, `viewport.ts`.

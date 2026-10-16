@@ -1,7 +1,7 @@
 // Shared by every workspace: one selection and one undo/redo history, so
 // switching workspaces keeps both. The selection is built (step 17a); the
-// history is built in history.ts (step 20a) and handed to workspaces once the
-// shell wires it (20b); until then the shell passes historyNotBuilt.
+// history is built in history.ts (step 20a) and the shell creates it (20b).
+// historyNotBuilt stands in for it in tests of workspaces that never undo.
 
 import type { History } from "./history.ts";
 import type { GeometryReference } from "./references.ts";
@@ -54,7 +54,7 @@ export function createSelection(): Selection {
   };
 }
 
-/** Undo/redo until the shell wires createHistory (step 20b): every call says it is not built yet. */
+/** A history for tests that must not touch one: every call says it is not built. */
 const notBuilt = (): never => {
   throw new Error("not implemented");
 };
@@ -67,5 +67,8 @@ export const historyNotBuilt: History = {
   undo: notBuilt,
   redo: notBuilt,
   reset: notBuilt,
+  amend: notBuilt,
+  step: notBuilt,
+  restoring: notBuilt,
   onChange: notBuilt,
 };

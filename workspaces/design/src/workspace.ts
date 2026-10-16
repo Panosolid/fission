@@ -10,10 +10,11 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
-import { toolbarGroups, type ToolButton } from "./toolbar.ts";
+import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
+import { DESIGN_SHORTCUTS, designShortcut } from "./shortcuts.ts";
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -26,6 +27,16 @@ import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, t
 let saved: { doc: DesignDocument; shape: ShapeKind; sizes: string[] } | null = null;
 let framed: Framing | null = null;
 let framedKind: ShapeKind | null = null;
+/**
+ * The last body Design built, kept across mounts: Undo and Redo re-mount
+ * Design on the restored project (step 20c), and the selection follows
+ * only if the restored body is compared with the one that was on screen.
+ */
+let lastBuilt: BodyView | null = null;
+/** Design was put away by an Undo or Redo made in another workspace: the next mount is that restore's, not an opened file's. */
+let putAwayByRestore = false;
+/** How many times Design has framed the part, read by the e2e test (an undo must not add one). */
+let fits = 0;
 
 /** Fills the toolbar slot with the command groups; returns each button with its element. */
 function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void): [ToolButton, HTMLButtonElement][] {
@@ -137,8 +148,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shape = part.shape;
     for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
     loaded = held;
-    framedKind = null;
+    framedKind = null; // an opened file is a new part: frame it (not after Undo or Redo: keepCamera)
   }
+  /** Mounted by Undo or Redo (step 20c): the first build keeps the camera unless the body no longer fits, even for another shape. */
+  let keepCamera = ctx.history.restoring() || putAwayByRestore;
+  putAwayByRestore = false;
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
   const { kernel, viewport } = ctx;
   /** On screen (awake); false while asleep (X7) and after unmount. */
@@ -219,10 +233,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
     shape = command.shape as ShapeKind;
     for (const [i, key] of SIZE_KEYS.entries()) if (typeof command[key] === "number") inputs[i].value = String(command[key]);
-    return update();
+    return update(`Change shape to ${SHAPE_LABELS[shape] ?? shape}`);
   }
 
-  async function update() {
+  /** Builds the part from the panel; `label` and `mergeKey` name the undo step when this is a user's edit (none while mounting). */
+  async function update(label?: string, mergeKey?: string) {
     const kind = shape;
     for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
@@ -237,7 +252,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     syncGraph(ctx.graph, doc, before, ctx.changeNotes);
     const changed = ctx.project.workspaces.design !== doc;
     ctx.project.workspaces.design = doc;
-    if (changed) ctx.projectChanged(); // the shell autosaves (19c)
+    if (changed) ctx.projectChanged(label, mergeKey); // the shell autosaves (19c) and records the undo step (20b)
     browser(ctx.browser, doc, selectRow);
     showSelection();
     markStale();
@@ -253,16 +268,22 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       ctx.graph.markFresh(PART_VIEW);
       markStale();
       viewport.showBody(view.mesh);
-      // A different shape is a new part: frame it.
-      if (kind !== framedKind || needsRefit(framed, viewport.bodyFraming())) {
+      // A different shape is a new part: frame it (not when Undo or Redo put
+      // it back: the camera stays unless the body no longer fits).
+      const newPart = kind !== framedKind && !keepCamera;
+      keepCamera = false;
+      if (newPart || needsRefit(framed, viewport.bodyFraming())) {
         framed = viewport.fit();
-        framedKind = kind;
         viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
+        viewport.element.dataset.fits = String(++fits);
       }
+      framedKind = kind;
       panel.showBody(view);
       // Faces and edges the edit renumbered leave the selection, with a note (17e).
-      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView, view, doc.profiles.map((p) => p.id));
-      lastView = view;
+      // A fresh mount compares with the body Design last built (Undo and
+      // Redo: the selection follows when the faces are still the same ones).
+      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView ?? lastBuilt, view, doc.profiles.map((p) => p.id));
+      lastView = lastBuilt = view;
       note = droppedNote(dropped);
       if (dropped.length > 0) {
         settling = true;
@@ -289,27 +310,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
     else if (c.change === "clear") ctx.selection.clear();
   };
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") ctx.selection.clear();
-  };
-  // Copy (Ctrl+C, or the browser's Edit menu) with one profile selected runs
-  // Copy as SVG; in a text field, or with anything else selected, the
-  // browser copies as usual.
-  const onCopy = (e: ClipboardEvent) => {
-    const target = e.target as Element | null;
-    if (target?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
-    const items = ctx.selection.items;
-    if (items.length !== 1 || items[0].kind !== "outline") return;
-    e.preventDefault();
-    void runAction(COPY_SVG, items);
-  };
-  const keys = viewport.element.ownerDocument;
   let stopWatching = () => {};
-  /** Listens to picks, keys, copy and the selection: from mount, and again on each wake. */
+  /** Listens to picks and the selection: from mount, and again on each wake. Keys come from the shell (X7b), only while shown. */
   function listen() {
     viewport.onPick = onPick;
-    keys.addEventListener("keydown", onKey);
-    keys.addEventListener("copy", onCopy);
     stopWatching = ctx.selection.onChange(() => {
       // The user's next change of selection retires the note about dropped items.
       if (!settling && note) panel.showSelectionNote((note = ""));
@@ -322,15 +326,23 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.onPick = null;
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
-    keys.removeEventListener("keydown", onKey);
-    keys.removeEventListener("copy", onCopy);
   }
 
-  inputs.forEach((i) => i.addEventListener("input", () => update()));
+  // Typing in one box is one undo step (the merge key), named for the box.
+  inputs.forEach((input, i) => input.addEventListener("input", () => update(`Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])));
   listen();
   update();
   return {
     sleep,
+    // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
+    shortcut(id) {
+      if (!shown) return false; // the shell only asks while shown; never act asleep
+      const items = ctx.selection.items;
+      const what = designShortcut(id, items);
+      if (what === "clear") ctx.selection.clear();
+      else if (what === "copy") void runAction(COPY_SVG, items);
+      return what !== null;
+    },
     wake() {
       if (shown) return;
       shown = true;
@@ -342,6 +354,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       markStale();
     },
     unmount() {
+      putAwayByRestore = ctx.history.restoring();
       sleep();
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
     },
@@ -358,5 +371,6 @@ export const designWorkspace: WorkspacePlugin = {
   registerActions: (registry) => registerDesignActions(registry),
   readData: readDesignDocument,
   commands: DESIGN_COMMANDS,
+  shortcuts: DESIGN_SHORTCUTS,
   mount,
 };
