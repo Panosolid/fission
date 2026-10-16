@@ -1,7 +1,9 @@
-// Browser check of the Image workspace (G1b, G1c): opening a PNG shows it at
+// Browser check of the Image workspace (G1b, G1c, G1d): opening a PNG shows it at
 // its real size in the shared viewport, seen from above, with pan and zoom
 // and no orbit; switching back to Design gives back the body and its camera;
-// Brightness changes the colours on screen at once and Hide shows nothing.
+// Brightness changes the colours on screen at once and Hide shows nothing;
+// at 1280 and 375 px it fits, focus goes in reading order, and a too-large
+// or damaged file shows its message.
 // The test image is made here: 200 × 100 pixels at 254 DPI (10 px per mm),
 // in four coloured quarters, so where each colour lands on screen shows the
 // image is the right way up and the right shape.
@@ -53,6 +55,17 @@ const broken = (() => {
   cut.writeUInt32BE(crc, idat + 8 + len);
   return cut;
 })();
+
+  // Only the header is read before refusing, so a PNG that is just an IHDR
+  // saying 20000 × 10 is enough: 20000 > 16384 pixels along a side.
+  const headerOnly = (w, h) => {
+    const full = makePng(1, 1, () => [0, 0, 0, 255], null);
+    const ihdr = Buffer.from(full.subarray(8, 8 + 25));
+    ihdr.writeUInt32BE(w, 8);
+    ihdr.writeUInt32BE(h, 12);
+    ihdr.writeUInt32BE(crc32(ihdr.subarray(4, 21)), 21);
+    return Buffer.concat([full.subarray(0, 8), ihdr, full.subarray(full.length - 12)]);
+  };
 
 const server = await preview({ preview: { port: 4175, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4175/";
@@ -306,6 +319,140 @@ try {
     await page.waitForTimeout(100);
     assert.equal(await page.textContent("#layer-list .layer-visibility"), "Hide");
     near(await pixel(0.5, 0.5), [179, 179, 179], "shown again");
+  });
+
+  await check("a file too large to open, and one with a damaged header, each show their message", async () => {
+    await page.setInputFiles("#image-file", { name: "wide.png", mimeType: "image/png", buffer: headerOnly(20000, 10) });
+    await page.waitForFunction(() => document.querySelector("#image-error")?.textContent !== "");
+    assert.equal(await page.textContent("#image-error"), "20000 × 10 pixels is too large: at most 16384 pixels along a side.");
+    // 9000 × 9000 = 81 megapixels, over 8192² = 67.1 megapixels, though each side is under 16384.
+    await page.setInputFiles("#image-file", { name: "big.png", mimeType: "image/png", buffer: headerOnly(9000, 9000) });
+    await page.waitForFunction(() => document.querySelector("#image-error")?.textContent.startsWith("9000"));
+    assert.equal(await page.textContent("#image-error"), "9000 × 9000 pixels (81.0 megapixels) is too large: at most 67.1 megapixels.");
+    // One byte of the IHDR changed after its CRC was written: the CRC check refuses it.
+    const flipped = makePng(200, 100, quarters, 10000);
+    flipped[20] ^= 1;
+    await page.setInputFiles("#image-file", { name: "flipped.png", mimeType: "image/png", buffer: flipped });
+    await page.waitForFunction(() => /damaged|CRC/i.test(document.querySelector("#image-error")?.textContent ?? ""));
+    // The grey image that was open stays open.
+    assert.equal(await page.textContent("#image-mm"), "20 × 10 mm");
+  });
+
+  /** A fresh page at a given size with the four-quarter plate open in Image. */
+  const withPlate = async (options) => {
+    const p = await browser.newPage(options);
+    p.on("pageerror", (e) => errors.push(e.message));
+    await p.goto(url + "#image");
+    await p.waitForSelector("#image-open");
+    await p.setInputFiles("#image-file", { name: "plate.png", mimeType: "image/png", buffer: plate });
+    await p.waitForFunction(() => document.querySelector("#image-mm")?.textContent === "20 × 10 mm");
+    await p.waitForTimeout(400);
+    return p;
+  };
+  /** Tabs from the top bar; gives the regions in the order focus visits them, and each stop's control. */
+  const focusOrder = async (p, last) => {
+    // Start from the top bar's first control, wherever focus was before (a tap leaves it in the browser).
+    await p.focus("#topbar button");
+    const regions = ["topbar"];
+    const stops = [];
+    for (let i = 0; i < 120 && !(regions.at(-1) === "properties" && stops.at(-1) === last); i++) {
+      await p.keyboard.press("Tab");
+      const stop = await p.evaluate(() => {
+        const el = document.activeElement;
+        return { region: el?.closest("#topbar, #toolbar, #panel-toggles, #browser, #view-controls, #properties")?.id ?? "other", id: el?.id || el?.className || el?.tagName };
+      });
+      stops.push(stop.id);
+      if (stop.region !== regions.at(-1)) regions.push(stop.region);
+    }
+    return { regions, stops };
+  };
+  /** Elements wider than their box: anything here means a sideways scroll. */
+  const overflow = (p) =>
+    p.evaluate(() =>
+      ["html", "body", "#topbar", "#workspace", "#panel-toggles", "#browser", "#properties", "#image-size", "#image-size-inputs", "#image-adjust"]
+        .map((s) => document.querySelector(s))
+        .filter((el) => el && el.scrollWidth > el.clientWidth)
+        .map((el) => `${el.id || el.tagName}: ${el.scrollWidth} > ${el.clientWidth}`),
+    );
+
+  await check("1280 px: focus moves top bar, toolbar (Open), browser (Hide), View buttons, properties (DPI, mm per pixel, Brightness)", async () => {
+    const p = await withPlate({ viewport: { width: 1280, height: 800 } });
+    try {
+      assert.deepEqual(await overflow(p), []);
+      const { regions, stops } = await focusOrder(p, "image-brightness");
+      assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "properties"]);
+      assert.ok(stops.includes("image-open"), `Open is reachable: ${stops}`);
+      assert.ok(stops.includes("layer-visibility"), `Hide is reachable: ${stops}`);
+      const props = stops.slice(stops.indexOf("image-dpi"));
+      assert.deepEqual(props, ["image-dpi", "image-mmpp", "image-brightness"]);
+      await p.screenshot({ path: "e2e/image-1280.png" });
+    } finally {
+      await p.close();
+    }
+  });
+
+  await check("375 px: no sideways scroll; the sheet, size, DPI and Brightness fit; the layer folds behind Browser; focus goes down the column", async () => {
+    const p = await withPlate({ viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true });
+    try {
+      assert.deepEqual(await overflow(p), []);
+      const rect = (sel) => p.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
+      // Every properties control lies inside the 375 px screen.
+      for (const sel of ["#image-dpi", "#image-mmpp", "#image-brightness", "#image-brightness-value", "#image-not-saved"]) {
+        const r = await rect(sel);
+        assert.ok(r.left >= 0 && r.right <= 375, `${sel} spans ${r.left}..${r.right}`);
+      }
+      // The slider keeps a usable width: at least half the screen.
+      assert.ok((await rect("#image-brightness")).width >= 375 / 2, "Brightness slider too narrow");
+      // The sheet is framed in the narrow viewport: 2:1, width-limited, 1 / 1.1 of it.
+      const vp = await rect("#viewport");
+      assert.equal(vp.width, 375);
+      // The four quarters land the right way up in the phone's viewport too.
+      const at = (fx, fy) =>
+        p.evaluate(
+          ([fx, fy]) => {
+            const src = document.querySelector("#viewport canvas");
+            const c = document.createElement("canvas");
+            c.width = src.width;
+            c.height = src.height;
+            const ctx = c.getContext("2d");
+            ctx.drawImage(src, 0, 0);
+            return Array.from(ctx.getImageData(Math.floor(src.width * fx), Math.floor(src.height * fy), 1, 1).data.slice(0, 3));
+          },
+          [fx, fy],
+        );
+      near(await at(0.4, 0.48), RED, "top-left");
+      near(await at(0.6, 0.48), GREEN, "top-right");
+      near(await at(0.4, 0.52), BLUE, "bottom-left");
+      near(await at(0.6, 0.52), WHITE, "bottom-right");
+      await p.screenshot({ path: "e2e/image-375.png" });
+      await p.$eval("#workspace", (el) => el.scrollTo(0, el.scrollHeight));
+      await p.screenshot({ path: "e2e/image-375-scrolled.png" });
+      // The layer row is behind the Browser toggle, closed at first.
+      assert.equal(await p.isVisible("#layer-list"), false);
+      await p.click("#browser-toggle");
+      assert.equal(await p.isVisible("#layer-list .layer-visibility"), true);
+      assert.deepEqual(await overflow(p), []);
+      await p.$eval("#workspace", (el) => el.scrollTo(0, 0));
+      await p.screenshot({ path: "e2e/image-375-browser.png" });
+      // A long refusal wraps inside the screen.
+      await p.setInputFiles("#image-file", { name: "wide.png", mimeType: "image/png", buffer: headerOnly(20000, 10) });
+      await p.waitForFunction(() => document.querySelector("#image-error")?.textContent !== "");
+      assert.deepEqual(await overflow(p), []);
+      const err = await rect("#image-error");
+      assert.ok(err.left >= 0 && err.right <= 375, `the message spans ${err.left}..${err.right}`);
+      await p.$eval("#image-error", (el) => el.scrollIntoView());
+      await p.screenshot({ path: "e2e/image-375-error.png" });
+      // Tap Hide works at phone width.
+      await p.tap("#layer-list .layer-visibility");
+      assert.equal(await p.textContent("#layer-list .layer-visibility"), "Show");
+      await p.tap("#layer-list .layer-visibility");
+      // Focus from the top follows the column as drawn.
+      await p.$eval("#workspace", (el) => el.scrollTo(0, 0));
+      const { regions } = await focusOrder(p, "image-brightness");
+      assert.deepEqual(regions, ["topbar", "toolbar", "panel-toggles", "browser", "view-controls", "properties"]);
+    } finally {
+      await p.close();
+    }
   });
 
   await check("no page errors", async () => assert.deepEqual(errors, []));
