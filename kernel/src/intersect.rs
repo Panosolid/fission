@@ -15,6 +15,27 @@
 //! are proposed. A tangent join, like a slot's straight side meeting its
 //! round end, is then a known root rather than a cluster of near-roots that
 //! stay within tolerance for millimetres when the radius is kilometres.
+//!
+//! Known limit: one near-double root (a near-tangency) costs `trig_zeros`
+//! ~13,000 of its MAX_ZERO_EVALS = 20,000 evaluations, so a polynomial with
+//! two of them runs out of budget, and a close pair of zeros can then be
+//! proposed as one point. The cost stays bounded; the caller's measuring
+//! still sees the proposed point.
+//!
+//! Mutation testing (`cargo mutants -f src/intersect.rs`) leaves these
+//! survivors, all equivalent: `>` vs `>=` (or `<` vs `<=`) at exact ties
+//! in `trig_zeros` ruling an interval out, `trig1_zeros` (s = 1 is taken by
+//! the branch before), `quadratic` (at d = 0 both forms give the double
+//! root −b) and `curve_curve`'s off-the-plane tests; `b − a` vs `b + a` or
+//! `b / a` in the grid size of a run (never a coarser grid, and a finer one
+//! only finds the same sign changes); `||` vs `&&` in `bisect`'s stop test
+//! (the 80-step cap ends it anyway); `+` vs `−` before the sine term of
+//! the plane–cylinder ellipse, `around_cylinder`'s walk and
+//! `circle_points`, and before `circle_points`' offset from its centre (the
+//! curve walked the other way round, or mirrored through its centre, gives
+//! the same points at the fixed angles, which are symmetric); and `−` vs
+//! `+` in the centred rod–ball test where the result is only that
+//! the general path is taken, which gives the same points.
 
 use crate::geom::{Curve, Surface};
 use crate::tolerance::{ANGULAR, LINEAR};
@@ -789,6 +810,12 @@ mod tests {
         let pts = closed_meetings(&plane, &ball);
         assert_eq!(pts.len(), RING_SAMPLES);
         assert!(pts.iter().all(|p| close(p.z, 0.6, 1e-15) && close(p.truncate().length(), 0.8, 1e-15)));
+        // Spread evenly round it, not bunched on one arc: 8 unit vectors at
+        // multiples of π/4 sum to zero, so the points' mean is the circle's
+        // centre (0, 0, 0.6). Points bunched within 1 rad would put it ~0.7
+        // of the radius out.
+        let mean = pts.iter().sum::<DVec3>() / pts.len() as f64;
+        assert!(mean.distance(DVec3::new(0.0, 0.0, 0.6)) <= 1e-15, "{mean}");
         // Either order gives the same.
         assert_eq!(closed_meetings(&ball, &plane), pts);
         // Two unit balls 1.2 apart meet on the same circle.
@@ -1314,6 +1341,86 @@ mod tests {
             assert!(pts.iter().all(|p| slant.distance(*p) <= 1e-9 && rod.distance(*p) <= 1e-9), "{pts:?}");
             assert!(distinct_on_both(&slant, &rod, &pts, 1e-9).len() >= 2 * RING_SAMPLES);
         }
+    }
+
+    #[test]
+    fn a_tilted_circle_off_the_rods_axis_by_hand() {
+        // The unit circle about (0.2, 0, 0) with axis (0.6, 0, 0.8) and
+        // x_dir y: its frame's second direction is axis × y = (−0.8, 0, 0.6),
+        // so P(θ) = (0.2 − 0.8 sin θ, cos θ, 0.6 sin θ). Against a rod
+        // along z of radius √0.79, with s = sin θ:
+        // (0.2 − 0.8s)² + 1 − s² = 0.79, i.e. 0.36s² + 0.32s − 0.23 = 0,
+        // s = (−0.32 ± √(0.1024 + 0.3312))/0.72 = (−0.32 ± 0.68)/0.72: ½ (the
+        // other root is below −1). So θ = π/6 and 5π/6, at (−0.2, ±√3/2, 0.3).
+        // Not symmetric under θ → −θ (both parts of the frame cross the
+        // rod's axis), so a sign slip between them moves the crossings.
+        let tilted = Curve::Circle { center: DVec3::new(0.2, 0.0, 0.0), axis: DVec3::new(0.6, 0.0, 0.8), x_dir: DVec3::Y, radius: 1.0 };
+        let rod = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 0.79f64.sqrt() };
+        let h = 3f64.sqrt() / 2.0;
+        for tf in [Transform::IDENTITY, awkward()] {
+            let c = tilted.transformed(&tf);
+            let got: Vec<DVec3> = curve_surface(&c, &rod.transformed(&tf), &[]).into_iter().map(|t| c.eval(t)).collect();
+            proposes(&got, &[tf.point(DVec3::new(-0.2, h, 0.3)), tf.point(DVec3::new(-0.2, -h, 0.3))], "tilted circle off the rod's axis");
+        }
+    }
+
+    #[test]
+    fn a_lopsided_small_loop_by_hand() {
+        // A rod of radius 0.05 along v = (0.8, 0, 0.6) through q = (0, ½, 0),
+        // walked round from the unit rod along z. It pierces the unit rod's
+        // wall in two small loops, near θ = π/6 and 5π/6 (where sin θ = ½).
+        // Neither loop is symmetric about its own angle (the thin rod meets
+        // the wall at a slant), so only the right discriminant turns inside
+        // it; a loop ±0.06 rad wide lies between the fixed angles walked
+        // (multiples of π/4). At θ = π/6, P − q = (cos θ, 0, h), whose
+        // distance² from the thin axis is cos²θ + h² − (0.8 cos θ + 0.6h)²
+        // = (0.6 cos θ − 0.8h)² = 0.05², so h = 0.75 cos θ ± 0.0625. The
+        // discriminant is greatest there: with s = sin θ it is
+        // (0.05² − (s − ½)²)/0.64, the cos²θ parts cancelling.
+        let big = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let thin = Surface::Cylinder { origin: DVec3::new(0.0, 0.5, 0.0), axis: DVec3::new(0.8, 0.0, 0.6), x_dir: DVec3::Y, radius: 0.05 };
+        let (c, s) = ((PI / 6.0).cos(), 0.5);
+        let want = [DVec3::new(c, s, 0.75 * c + 0.0625), DVec3::new(c, s, 0.75 * c - 0.0625)];
+        for tf in [Transform::IDENTITY, awkward()] {
+            let pts = closed_meetings(&big.transformed(&tf), &thin.transformed(&tf));
+            proposes_among(&pts, &want.map(|p| tf.point(p)), "lopsided small loop");
+        }
+    }
+
+    #[test]
+    fn a_rod_and_ball_mirrored_through_the_origin_by_hand() {
+        // The rod's origin c = (0.2, 0, 0) and the ball's centre s = −c, so
+        // s + c = 0 while s − c = (−0.4, 0, 0): mixing them up would take
+        // the ball for one centred on the rod. The rod (radius 0.3 along z)
+        // lies inside the unit ball's shadow (0.4 + 0.3 < 1), so it crosses
+        // in two loops all round the rod, and every point proposed is on
+        // both. At angle 0 the rod's wall is at x = 0.5, 0.7 from the
+        // centre: z = ±√(1 − 0.49) = ±√0.51.
+        let rod = Surface::Cylinder { origin: DVec3::new(0.2, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.3 };
+        let ball = Surface::Sphere { center: DVec3::new(-0.2, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let pts = closed_meetings(&rod, &ball);
+        assert!(pts.iter().all(|p| rod.distance(*p) <= 1e-12 && ball.distance(*p) <= 1e-12), "{pts:?}");
+        let z = 0.51f64.sqrt();
+        proposes_among(&pts, &[DVec3::new(0.5, 0.0, z), DVec3::new(0.5, 0.0, -z)], "mirrored rod–ball");
+    }
+
+    #[test]
+    fn a_flat_discriminant_is_walked_at_the_fixed_angles() {
+        // When the discriminant is the same at every angle (a loop all
+        // round the cylinder at a constant height, as for a ball centred on
+        // the axis), it has no turning points and only the fixed angles
+        // are sure to give points: kπ/4 for k = 0..8, each at both heights
+        // (fitting a constant leaves rounding-sized harmonics, so others may
+        // be proposed too). Here
+        // h² − 1 = 0 (B = 0, C = −1) round the unit rod along z: the points
+        // (cos kπ/4, sin kπ/4, ±1).
+        let pts = around_cylinder(DVec3::ZERO, DVec3::Z, DVec3::X, DVec3::Y, 1.0, |_| (0.0, -1.0), DVec3::ZERO);
+        let mut want = Vec::new();
+        for k in 0..RING_SAMPLES {
+            let t = PI * k as f64 / 4.0;
+            want.extend([DVec3::new(t.cos(), t.sin(), 1.0), DVec3::new(t.cos(), t.sin(), -1.0)]);
+        }
+        proposes_among(&pts, &want, "flat discriminant");
     }
 
     /// Each wanted point is among those proposed (others may be too).
