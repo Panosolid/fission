@@ -236,7 +236,7 @@ Vector workspace (logo / 2D design; starts after CAD step 31: reuses the sketche
 - [ ] V2. Boolean path operations, text to outlines, SVG import and export
 - [ ] V3. A graphic becomes, live-linked: an emboss or deboss in Design, an engraving or cut in Laser, a decal in Render, silkscreen in Circuit
 
-Image workspace (photo / texture editing). The base (G1, done) started early on the owner's request (2026-10-16) and runs alongside the CAD steps without touching the kernel; G2 onwards starts after CAD step 33 and Render R1–R2.
+Image workspace (photo / texture editing). The base (G1, done) started early on the owner's request (2026-10-16) and runs alongside the CAD steps without touching the kernel; G2 started on the owner's request (2026-10-16): G2a (each layer handed over as an Image) is done, the rest of G2 waits on the workspaces that receive images and on the owner (docs/progress/image.md), and G3 onwards starts after CAD step 33 and Render R1–R2.
 
 How Image stays integrated (rules in docs/integration.md):
 - It declares what it produces and accepts: Image (pixels with mm per pixel) out, Image in (renders from Render, pages from Layout). Every image carries its physical size from the moment it opens, so Laser, Slice and Render never ask "how big is this?".
