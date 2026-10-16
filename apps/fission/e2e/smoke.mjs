@@ -298,17 +298,44 @@ try {
   });
 
   await check("a part too big for single precision is exported with a warning", async () => {
-    // A 999,999.3 mm box (just inside the 1 km limit): the far corners round
+    // A 999,999.3 mm cube (just inside the 1 km limit): the far corners round
     // to 999,999.3125 in single precision (spacing 1/16 there), 0.0125 mm
-    // off, over the 1 µm smallest feature.
+    // off, over the 1 µm smallest feature. A cube, so its faces are big
+    // enough on screen to see the overlay.
     await page.selectOption("#shape", "box");
-    await page.fill("#width", "999999.3");
+    for (const id of ["width", "depth", "height"]) await page.fill(`#${id}`, "999999.3");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
     const f = await downloadStl();
     assert.equal(f.tris.length, 12);
     assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 1\.250e-2 mm/);
-    await page.fill("#width", "40");
+    // The analysis overlay marks the part itself, with a legend.
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.overlays), "design.stl-precision");
+    assert.equal(await page.textContent(".overlay-legend"), "Too big for an accurate STL");
+    // Count amber pixels: red well above blue (the plain part is blue-grey,
+    // the background dark).
+    await page.waitForTimeout(300);
+    const amber = () =>
+      page.evaluate(() => {
+        const src = document.querySelector("#viewport canvas");
+        const c = document.createElement("canvas");
+        [c.width, c.height] = [src.width, src.height];
+        const ctx = c.getContext("2d");
+        ctx.drawImage(src, 0, 0);
+        const d = ctx.getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] > d[i + 2] + 40) n++;
+        return n;
+      });
+    assert.ok((await amber()) > 10000, `the part should be painted amber (${await amber()} px)`);
+    await page.screenshot({ path: "e2e/stl-overlay.png" });
+    for (const [id, v] of [["width", 40], ["depth", 30], ["height", 20]]) await page.fill(`#${id}`, String(v));
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    // Editing the part clears the overlay: it described the part before the edit.
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.overlays), "");
+    assert.equal(await page.isVisible(".overlay-legend"), false);
+    await page.waitForTimeout(300);
+    // Only the red X axis line is left (a few dozen pixels).
+    assert.ok((await amber()) < 1000, `nothing amber once the overlay is cleared (${await amber()} px)`);
     await downloadStl();
     assert.equal(await text("stl-note"), ""); // the warning goes once the part fits again
   });

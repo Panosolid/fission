@@ -12,6 +12,8 @@ export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
 export { historyNotBuilt, selectionNotBuilt } from "./model/session.ts";
 export type { Framing, SharedViewport } from "./model/viewport.ts";
+export type { AnalysisOverlay, OverlayMark, OverlaySeverity, OverlayTarget } from "./model/overlay.ts";
+export { SEVERITY_COLOURS, triangleColours } from "./model/overlay.ts";
 export type { Converter, DataRep, Delivery, ImageRep, MeshRep, OutlineRep, Plane, Producer, Producible, Representation, RepresentationKind, RepresentationOf, SolidRep } from "./model/representation.ts";
 export type { Cost, GraphNode, Staleness } from "./model/graph.ts";
 export { DependencyGraph } from "./model/graph.ts";

@@ -4,6 +4,7 @@
 // implements it). Switching workspaces keeps it, so the camera stays put.
 
 import type { DisplayMesh } from "../kernel/kernel-types.ts";
+import type { AnalysisOverlay } from "./overlay.ts";
 
 /** A sphere around a body: what the camera frames. */
 export interface Framing {
@@ -19,4 +20,7 @@ export interface SharedViewport {
   bodyFraming(): Framing;
   /** Frames the current body; returns what it framed (null if none). */
   fit(): Framing | null;
+  /** Paints an analysis overlay on the current body (replaces one with the same id). */
+  setOverlay(overlay: AnalysisOverlay): void;
+  clearOverlay(id: string): void;
 }

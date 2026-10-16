@@ -78,10 +78,14 @@ function mount(ctx: WorkspaceContext): () => void {
     $("stale-note").hidden = !(stale && failed);
   }
 
+  /** The STL-precision overlay: the whole part, while its last export warned. */
+  const STL_OVERLAY = "design.stl-precision";
+
   async function update() {
     const [w, d, h] = inputs.map((i) => Number(i.value));
     const kind = shape.value as ShapeKind;
     saved = { shape: shape.value, sizes: inputs.map((i) => i.value) };
+    viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     const primitive = kind === "box" || kind === "cylinder" || kind === "sphere";
     $("height-label").textContent = primitive ? "Height" : "Extrude by";
     const round = kind === "cylinder" || kind === "sphere";
@@ -135,6 +139,10 @@ function mount(ctx: WorkspaceContext): () => void {
       download(file.bytes, `fission-${kind}.stl`);
       note.textContent = file.warning ?? "";
       note.className = file.warning ? "bad" : "";
+      // Mark the part on screen too: every face moves in single precision.
+      if (file.warning)
+        viewport.setOverlay({ id: STL_OVERLAY, label: "Too big for an accurate STL", detail: file.warning, marks: [{ target: { body: true }, severity: "warning" }] });
+      else viewport.clearOverlay(STL_OVERLAY);
     } catch (e) {
       note.textContent = e instanceof Error ? e.message : String(e);
       note.className = "bad";
