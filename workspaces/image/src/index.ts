@@ -9,9 +9,11 @@
 //
 // Built: reading a file's pixel and physical size, the limits, the
 // one-layer document and Brightness (G1a); opening a PNG or JPEG and
-// showing it at its real size in the shared viewport (G1b).
+// showing it at its real size in the shared viewport (G1b); each layer
+// handed to other workspaces as an Image (G2a).
 
 import type { WorkspacePlugin } from "@fission/core";
+import { registerImage } from "./representations.ts";
 import { mountImage, openImageFile } from "./workspace.ts";
 
 export * from "./errors.ts";
@@ -21,7 +23,8 @@ export * from "./adjust.ts";
 export * from "./document.ts";
 export * from "./open.ts";
 export * from "./panels.ts";
-export { mountImage, openImageFile, resetImageWorkspace } from "./workspace.ts";
+export * from "./representations.ts";
+export { currentImageObjects, mountImage, openImageFile, resetImageWorkspace } from "./workspace.ts";
 
 const summary = "Photo and texture editing with real-world sizes, for textures, engravings, lithophanes and tracing.";
 
@@ -30,10 +33,9 @@ export const imageWorkspace: WorkspacePlugin = {
   title: "Image",
   summary,
   status: "working",
-  // Handing images to other workspaces comes with the links (G2).
-  representations: { produces: [], accepts: [] },
-  // A PNG or JPEG dropped or pasted anywhere opens here (X6).
-  registerRepresentations: (registry) => registry.registerImporter({ formats: ["png", "jpeg"], workspace: "image", open: (name, bytes) => openImageFile(name, bytes) }),
+  // Each layer as an Image with its physical size (G2a); taking images in comes with Render and Layout.
+  representations: { produces: ["image"], accepts: [] },
+  registerRepresentations: (registry) => registerImage(registry, (name, bytes) => openImageFile(name, bytes)),
   commands: [],
   mount: (ctx) => mountImage(ctx),
 };
