@@ -545,10 +545,90 @@ fn ring(p: impl Fn(f64) -> DVec3) -> Vec<DVec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tolerance::MAX_SIZE;
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_3};
 
     fn close(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() <= tol
+    }
+
+    #[test]
+    fn the_modelling_range_leaves_room_for_rounding() {
+        // The range (MAX_SIZE) and tolerance (LINEAR) were chosen from
+        // examples/precision_budget.rs; this keeps them honest if either
+        // changes. Random lines and circles crossing planes, cylinders and
+        // spheres, all about MAX_SIZE across, near their own origin (a
+        // body's local frame). A found meeting must lie within LINEAR/10 of
+        // the surface, leaving room for the several intersections a boolean
+        // chains. Along the curve a point is only known to d / sin(angle):
+        // crossings steeper than 0.6° (sin > 0.01) must stay within
+        // LINEAR/10 too, and 0.06° to 0.6° within LINEAR. Measured here
+        // (4842 meetings): 7.5e-9, 3.5e-8 and 3.9e-6, so shallow crossings
+        // have only ~2.5× headroom and booleans must treat them with care.
+        // This fails for 10 nm at 10 km (shallow 3.1e-5), 1 nm at 1 km
+        // (shallow 3.9e-6) and 1 nm at 10 km (steep 6.3e-7). Shallower
+        // crossings need tangent handling, whatever the tolerance (step 45).
+        let mut seed = 0x5eedu64;
+        let mut f = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut unit = || loop {
+            let v = DVec3::new(f() * 2.0 - 1.0, f() * 2.0 - 1.0, f() * 2.0 - 1.0);
+            if v.length() > 0.1 && v.length() < 1.0 {
+                return v.normalize();
+            }
+        };
+        let size = MAX_SIZE;
+        let (mut worst, mut steep, mut shallow, mut meetings) = (0.0f64, 0.0f64, 0.0f64, 0);
+        for i in 0..3000 {
+            let (a, b) = (unit(), unit());
+            let (pa, pb) = (a.cross(unit()).normalize(), b.cross(unit()).normalize());
+            let (p, c, k) = (unit() * size * 0.3, unit() * size * 0.3, 0.2 + (i % 7) as f64 / 7.0);
+            let curve = if i % 2 == 0 {
+                Curve::Line { origin: p, dir: a }
+            } else {
+                Curve::Circle { center: p, axis: a, x_dir: pa, radius: size * k }
+            };
+            let surface = match i % 3 {
+                0 => Surface::Plane { origin: c, normal: b, x_dir: pb },
+                1 => Surface::Cylinder { origin: c, axis: b, x_dir: pb, radius: size * k },
+                _ => Surface::Sphere { center: c, axis: b, x_dir: pb, radius: size * k },
+            };
+            for t in curve_surface(&curve, &surface, &[]) {
+                let x = curve.eval(t);
+                let d = surface.distance(x);
+                if d >= size * 1e-9 {
+                    continue; // a near miss's closest approach, not a meeting
+                }
+                meetings += 1;
+                worst = worst.max(d);
+                let speed = match curve {
+                    Curve::Line { .. } => 1.0,
+                    Curve::Circle { radius, .. } => radius,
+                };
+                let h = 1e-6 * size / speed;
+                let tangent = (curve.eval(t + h) - curve.eval(t - h)).normalize();
+                let normal = match &surface {
+                    Surface::Plane { normal, .. } => *normal,
+                    Surface::Cylinder { origin, axis, .. } => {
+                        let q = x - *origin;
+                        (q - *axis * q.dot(*axis)).normalize()
+                    }
+                    Surface::Sphere { center, .. } => (x - *center).normalize(),
+                };
+                let sin = tangent.dot(normal).abs();
+                if sin > 1e-2 {
+                    steep = steep.max(d / sin);
+                } else if sin > 1e-3 {
+                    shallow = shallow.max(d / sin);
+                }
+            }
+        }
+        assert!(meetings > 3000, "only {meetings} meetings: the sample tests too little");
+        assert!(worst <= LINEAR / 10.0, "a meeting {worst:e} off the surface");
+        assert!(steep <= LINEAR / 10.0, "a steep crossing slides {steep:e}");
+        assert!(shallow <= LINEAR, "a shallow crossing slides {shallow:e}");
     }
 
     /// Sorted angles in [0, 2π), for comparing sets.

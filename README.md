@@ -18,9 +18,11 @@ Fission is early. The geometry kernel's foundations are built and heavily tested
 A failure stops a test build and writes a failure dump: STL files plus an offline HTML viewer with the faulty faces, edges and vertices in red.
 
 **A fixed modelling range, enforced.** Every tolerance lives in one file, and there are no stray epsilons anywhere else. The range is:
-- sizes from 1 µm to 10 km;
+- sizes from 1 µm to 1 km;
 - every point within 100 km of the origin;
-- a 1 nm linear tolerance.
+- a 10 nm linear tolerance.
+
+These limits were chosen from measurements of how many digits intersections lose, and a test fails if they are ever moved past what double-precision arithmetic supports.
 
 Inputs outside the range get a clear error, never quietly wrong geometry. A body's shape is stored apart from its position, so moving a part far away and back loses nothing.
 

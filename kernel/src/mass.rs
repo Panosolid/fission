@@ -356,12 +356,18 @@ pub(crate) mod tests {
     #[test]
     fn long_thin_box_turned_keeps_its_volume() {
         // Regression (stateful seed 0x5eed): 1 × 4228783.9 × 0.5, turned
-        // 90° about (0, 0.252, 0.109). V = 2114391.95..., A = 2(wd + dh +
-        // wh). Turning rounds each coordinate by up to rounding_slack(reach)
-        // so V may move by area × that (≈ 8.5e6 × 4e6 × 1.4e-14 ≈ 0.5) at
-        // most. Measuring each flat face's height from a far corner along a
-        // computed (not exact) normal lost 142 here.
-        let (w, d, h) = (1.0, 4228783.901680244, 0.5);
+        // 90° about (0, 0.252, 0.109). Measuring each flat face's height
+        // from a far corner along a computed (not exact) normal lost 142
+        // there. That box is now over MAX_SIZE (refused, checked below), so
+        // the same box is tested at 983438.1, near the new limit. The old
+        // mistake, rebuilt on purpose (height from the farthest corner along
+        // the normalised vector area), measured 249 off at 4228783.9 and
+        // 3.98 off here, 115× this test's slack.
+        // V = w·d·h, A = 2(wd + dh + wh). Turning rounds each coordinate by
+        // up to rounding_slack(reach), so V may move by area × that
+        // (≈ 2e6 × 1e6 × 1.4e-14 ≈ 0.03) at most.
+        assert!(crate::ops::primitives::make_box(1.0, 4228783.901680244, 0.5).is_err());
+        let (w, d, h) = (1.0, 983438.1166698242, 0.5);
         let turn = Transform::rotation(DVec3::new(0.0, 0.25212664109292654, 0.1092220701325219), FRAC_PI_2);
         let body = crate::ops::primitives::make_box(w, d, h).unwrap().transformed(&turn);
         let (lo, hi) = body.bounds();
@@ -374,17 +380,21 @@ pub(crate) mod tests {
 
     #[test]
     fn a_very_shallow_arc_keeps_its_digits() {
-        // 10 × 10 square whose top edge bows in with bulge −1e-6: sweep
-        // φ = 4·atan(1e-6) ≈ 4e-6, r = 10(1 + 1e-12)/4e-6 ≈ 2.5e6. The
-        // segment cut off is (r²/2)(φ − sin φ) ≈ (2/3)·chord·sagitta =
-        // (2/3)·10·5e-6 ≈ 3.3e-5, worked out here with the series
-        // φ − sin φ = φ³/6 − φ⁵/120 + … (no cancellation). Extruded 3:
-        // V = 3(100 − cut). Every corner is exact, so only the kernel's own
-        // arithmetic can be off: allow FP_REL. Using the cylinder's centre,
-        // 2.5e6 away, the side wall's r·A and centre terms (each ~7.5e7)
-        // cancel to ~1e-4 and leave ~1e-8 of rounding.
+        // 10 × 10 square whose top edge bows in with bulge −3e-6 (the
+        // flattest arc whose radius is inside MAX_SIZE; at the old −1e-6
+        // the radius, 2.5e6, is now refused): sweep φ = 4·atan(3e-6) ≈
+        // 1.2e-5, r = 10(1 + 9e-12)/1.2e-5 ≈ 8.3e5. The segment cut off is
+        // (r²/2)(φ − sin φ) ≈ (2/3)·chord·sagitta = (2/3)·10·1.5e-5 ≈
+        // 1e-4, worked out here with the series φ − sin φ = φ³/6 − φ⁵/120
+        // + … (no cancellation). Extruded 3: V = 3(100 − cut). Every corner
+        // is exact, so only the kernel's own arithmetic can be off: allow
+        // FP_REL. Using the cylinder's centre, 8.3e5 away, the side wall's
+        // r·A and centre terms (each ~2.5e7) cancel to ~3e-4 and leave
+        // ~3e-9 of rounding.
         let square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
-        let beta: f64 = 1e-6;
+        let too_flat = Profile { outer: path(&square, &[0.0, 0.0, -1e-6, 0.0]), holes: vec![] };
+        assert!(extrude(&too_flat, 3.0).is_err(), "an arc of radius 2.5e6 is over MAX_SIZE");
+        let beta: f64 = 3e-6;
         let bowed = extrude(&Profile { outer: path(&square, &[0.0, 0.0, -beta, 0.0]), holes: vec![] }, 3.0).unwrap();
         let (r, phi) = (10.0 * (1.0 + beta * beta) / (4.0 * beta), 4.0 * beta.atan());
         let phi_minus_sin = phi.powi(3) / 6.0 - phi.powi(5) / 120.0 + phi.powi(7) / 5040.0;
@@ -399,12 +409,20 @@ pub(crate) mod tests {
         // Regression (random tester, seed 0x5eed, saved): circles of r =
         // 1679740.80 and r − 2 whose centres are 1.5 apart (a wall 0.5 to
         // 3.5 thick), extruded 0.5, lifted 963.28 and turned a quarter
-        // turn. V = π(R² − r²)·0.5 = π·2·(R + r)·0.5. The walls' terms are
-        // each ±2πR²h ≈ ±8.86e12 and cancel; measuring each wall's height
-        // from one of its own corners, 1.7e6 from the middle and rounded by
-        // ~4e-10 when turned, left an error of ~2πR²·4e-10 ≈ 7e3 (688 here).
-        // Turning may only move the true volume by area × rounding_slack.
-        let (big, small) = (1679740.7957549074, 1679738.7957549074);
+        // turn. Measuring each wall's height from one of its own corners,
+        // 1.7e6 from the middle and rounded by ~4e-10 when turned, left an
+        // error of ~2πR²·4e-10 ≈ 7e3 (688 there). That washer is now over
+        // MAX_SIZE (refused, checked below), so the same washer is tested
+        // at the new limit, R = 499870.80 (1 km across).
+        // V = π(R² − r²)·0.5 = π·2·(R + r)·0.5. The walls' terms are each
+        // ±2πR²h ≈ ±7.8e11 and cancel. Turning may only move the true
+        // volume by area × rounding_slack.
+        let old = Profile {
+            outer: Boundary::Circle { center: DVec2::new(0.0, 3.5), radius: 1679740.7957549074 },
+            holes: vec![Boundary::Circle { center: DVec2::new(1.5, 3.5), radius: 1679738.7957549074 }],
+        };
+        assert!(extrude(&old, 0.5).is_err());
+        let (big, small) = (499870.7957549074, 499868.7957549074);
         let profile = Profile {
             outer: Boundary::Circle { center: DVec2::new(0.0, 3.5), radius: big },
             holes: vec![Boundary::Circle { center: DVec2::new(1.5, 3.5), radius: small }],
@@ -421,16 +439,30 @@ pub(crate) mod tests {
         }
     }
 
-    /// The 10 km square frame with 1 µm walls the random tester found
-    /// (seed 0x389ee678a942 and 25 others, saved): outer corners 0 and
-    /// L = 9999999.99999 (plus a corner halfway along the bottom), hole
-    /// corners 0.001 and L − 0.001, extruded 1.
+    /// The square frame with 1 µm walls the random tester found (seed
+    /// 0x389ee678a942 and 25 others, saved), at 10 km then (L =
+    /// 9999999.99999, now over MAX_SIZE and refused) and here at 1 km, the
+    /// new limit: outer corners 0 and L = 999999.99999 (plus a corner
+    /// halfway along the bottom), hole corners 0.001 and L − 0.001,
+    /// extruded 1. V = (L² − (L − 2w)²)·h = 4Lw − 4w² with w = 0.001:
+    /// 3999.99999996 − 0.000004 = 3999.99999596.
     pub(crate) fn huge_thin_frame() -> Body {
+        let v = DVec2::new;
+        let l = 999999.99999;
+        let outer = vec![v(0.0, 0.0), v(499999.999995, 0.0), v(l, 0.0), v(l, l), v(0.0, l)];
+        let hole = vec![v(0.001, 0.001), v(0.001, 999999.99899), v(999999.99899, 999999.99899), v(999999.99899, 0.001)];
+        extrude(&Profile::polygon(outer, vec![hole]), 1.0).unwrap()
+    }
+
+    pub(crate) const HUGE_THIN_FRAME_VOLUME: f64 = 3999.99999596;
+
+    #[test]
+    fn the_10_km_frame_is_now_refused() {
         let v = DVec2::new;
         let l = 9999999.99999;
         let outer = vec![v(0.0, 0.0), v(4999999.999995, 0.0), v(l, 0.0), v(l, l), v(0.0, l)];
         let hole = vec![v(0.001, 0.001), v(0.001, 9999999.99899), v(9999999.99899, 9999999.99899), v(9999999.99899, 0.001)];
-        extrude(&Profile::polygon(outer, vec![hole]), 1.0).unwrap()
+        assert!(extrude(&Profile::polygon(outer, vec![hole]), 1.0).is_err());
     }
 
     #[test]

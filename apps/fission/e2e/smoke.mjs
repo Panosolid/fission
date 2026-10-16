@@ -288,14 +288,15 @@ try {
   });
 
   await check("a part too big for single precision is exported with a warning", async () => {
-    // A 9,999,999.3 mm box: the far corners round to 9,999,999 in single
-    // precision (spacing 1 there), 0.3 mm off, over the 1 µm smallest feature.
+    // A 999,999.3 mm box (just inside the 1 km limit): the far corners round
+    // to 999,999.3125 in single precision (spacing 1/16 there), 0.0125 mm
+    // off, over the 1 µm smallest feature.
     await page.selectOption("#shape", "box");
-    await page.fill("#width", "9999999.3");
+    await page.fill("#width", "999999.3");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
     const f = await downloadStl();
     assert.equal(f.tris.length, 12);
-    assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 3\.000e-1 mm/);
+    assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 1\.250e-2 mm/);
     await page.fill("#width", "40");
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
     await downloadStl();

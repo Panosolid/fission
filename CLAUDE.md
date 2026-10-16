@@ -60,9 +60,11 @@ Note: `wasm-opt` is disabled in `kernel/Cargo.toml` because the sandbox can't do
 ## Supported modelling range
 
 Every serious kernel works inside a fixed range (commercial kernels commonly use a 1 km box). Fission's:
-- Feature sizes (any length parameter: width, radius, distance) from 1 µm to 10 km: `tolerance::MIN_FEATURE` = 1e-3 mm to `tolerance::MAX_SIZE` = 1e7 mm.
-- Every point of every body within ±100 km of the origin: `tolerance::MAX_COORD` = 1e8 mm.
-- Linear tolerance stays 1 nm (`LINEAR` = 1e-6 mm), 1000× below the smallest feature. At 100 km a double resolves ~15 nm, so this is tighter than a 1 km box; the stateful harness tests the edges of the range.
+- Feature sizes (any length parameter: width, radius, distance, and a profile's overall span) from 1 µm to 1 km: `tolerance::MIN_FEATURE` = 1e-3 mm to `tolerance::MAX_SIZE` = 1e6 mm.
+- Every point of every body within ±100 km of the origin: `tolerance::MAX_COORD` = 1e8 mm. That far out a double resolves ~15 nm, fine for placing a body but too coarse to intersect there.
+- Linear tolerance 10 nm (`LINEAR` = 1e-5 mm), 100× below the smallest feature. Chosen with the owner after step 15, from measurements: `examples/precision_budget.rs`, and `intersect::tests::the_modelling_range_leaves_room_for_rounding`, which fails if LINEAR or MAX_SIZE move past what doubles support (it fails for 1 nm at 1 km, 10 nm at 10 km and 1 nm at 10 km). At 1 km, crossings steeper than 0.6° land ~300× inside LINEAR, but 0.06° to 0.6° crossings can slide 0.4 LINEAR along the curve: booleans must handle shallow crossings with care (step 45).
+- Geometry is intersected near its own origin. Before booleans (step 44), when two bodies meet, bake them into a frame centred on them, not the world frame: at 100 km out, the position alone costs ~0.07 LINEAR per intersection at shallow crossings.
+- There is no rule on the ratio of smallest feature to part size yet (the cap makes it at most 1e9). Measure again at step 44, when the volume formula for turned, baked thin parts is rewritten.
 - Operations outside the range return `KernelError::InvalidInput`; they never panic and never produce geometry.
 - Volumes, areas and projections are computed relative to a local origin (the body's or mesh's bounding-box centre, or a point on the face), never the world origin.
 - The fuzzer spends ~95% of its inputs inside the range and ~5% on extreme inputs, which only have to produce clean errors.
@@ -112,6 +114,7 @@ Fission is a suite of workspaces (Design, Render, Simulate, Manufacture, Laser, 
 
 - Develop on the branch named by the session; commit each roadmap item separately and push it.
 - Commit messages: a first line naming the step and feature (e.g. "Step 7: box primitive in the viewer"), then what changed and how it was verified.
+- Commit as the owner's GitHub account (each new container: `git config user.name benpy28` and `git config user.email 333175357+benpy28@users.noreply.github.com`), and keep the Co-Authored-By: Claude line in every commit message.
 - Never commit generated files (`apps/fission/src/kernel/`, `kernel/target/`, `apps/fission/dist/`).
 
 ## Roadmap (mark items [x] when done)
@@ -170,7 +173,7 @@ Booleans
 - [ ] 41. Plane–plane and line–plane intersection
 - [ ] 42. Splitting planar faces along intersection lines
 - [ ] 43. Inside/outside classification with exact predicates
-- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 10 km frame with 1 µm walls, turned and baked, gives 37231 instead of 40000 today; see the step 12 regressions)
+- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 1 km frame with 1 µm walls, turned and baked, gives 4010.3 instead of 4000.0 today; 37231 instead of 40000 at the old 10 km limit; see the step 12 regressions)
 - [ ] 45. Coplanar faces, touching edges, shared vertices
 - [ ] 46. Plane–cylinder intersection (drill a hole through a box)
 - [ ] 47. Cylinder–cylinder, plane–sphere. Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces

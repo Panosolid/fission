@@ -141,6 +141,25 @@ impl Ring {
         }
     }
 
+    /// True if this ring is certainly bigger than the kernel allows: its
+    /// corners alone (points on the outline, so a lower bound on its
+    /// extent) span more than MAX_SIZE, or a circle's radius is over it.
+    /// Saved regressions store the generator's verdict from the day they
+    /// were found; this keeps them right after the range changes.
+    fn certainly_too_big(&self) -> bool {
+        let over = |x: f64| x > MAX_SIZE * (1.0 + 1e-9);
+        match self {
+            Ring::Circle { r, .. } => over(r.0) || over(2.0 * r.0),
+            Ring::Path { pts, .. } => {
+                let (mut lo, mut hi) = (DVec2::INFINITY, DVec2::NEG_INFINITY);
+                for p in pts.iter().map(p2) {
+                    (lo, hi) = (lo.min(p), hi.max(p));
+                }
+                over((hi - lo).max_element())
+            }
+        }
+    }
+
     /// The pieces as the harness's own arcs (see `Piece`).
     fn pieces(&self) -> Vec<Piece> {
         match self {
@@ -345,7 +364,7 @@ fn from_pool(pool: &[f64], fallback: BoxedStrategy<f64>) -> BoxedStrategy<f64> {
 }
 
 /// An in-range size: ~70% coincident (0.5 grid, reused, near-miss), the
-/// rest random across the whole range (log-uniform 1 µm to 10 km) or at
+/// rest random across the whole range (log-uniform MIN_FEATURE to MAX_SIZE, 1 µm to 1 km) or at
 /// its edges.
 fn length(scene: &Scene) -> BoxedStrategy<f64> {
     let grid = (1..=200i32).prop_map(|k| k as f64 * 0.5).boxed();
@@ -1255,7 +1274,10 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 Shape::Sphere { r } => size_ok(r.0),
                 Shape::Extrude { outer, holes, dist, expect } => {
                     let polygons: Option<Vec<Vec<DVec2>>> = std::iter::once(outer).chain(holes).map(Ring::polygon).collect();
-                    let verdict = if !size_ok(dist.0) || shape.clone().numbers().iter().any(|v| !v.0.is_finite() || v.0.abs() > MAX_COORD) {
+                    let verdict = if !size_ok(dist.0)
+                        || shape.clone().numbers().iter().any(|v| !v.0.is_finite() || v.0.abs() > MAX_COORD)
+                        || outer.certainly_too_big()
+                    {
                         Expect::Invalid
                     } else if let Some(e) = expect {
                         if *e { Expect::Valid } else { Expect::Invalid }

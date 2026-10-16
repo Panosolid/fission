@@ -6,8 +6,14 @@
 
 use glam::{DVec2, DVec3};
 
-/// Two points closer than this are the same point (1 nm).
-pub const LINEAR: f64 = 1e-6;
+/// Two points closer than this are the same point (10 nm). Chosen with the
+/// owner from measurements (`examples/precision_budget.rs`, and the test
+/// `intersect::tests::the_modelling_range_leaves_room_for_rounding`, which
+/// fails if LINEAR or MAX_SIZE move past what doubles can support): at
+/// MAX_SIZE a meeting point lands within 7.5e-9 of both pieces, but a
+/// shallow crossing (0.06° to 0.6°) can slide 3.9e-6 along the curve. At
+/// 1 nm with a 10 km limit, a part was 18× over in one intersection.
+pub const LINEAR: f64 = 1e-5;
 
 /// Two directions whose angle is below this (radians) are parallel.
 pub const ANGULAR: f64 = 1e-9;
@@ -23,14 +29,17 @@ pub const MASS_PROPS_REL: f64 = 1e-6;
 /// and only differ by floating-point rounding (e.g. the volume of a box).
 pub const FP_REL: f64 = 1e-12;
 
-/// Smallest feature size accepted (1 µm), 1000× LINEAR.
+/// Smallest feature size accepted (1 µm), 100× LINEAR.
 pub const MIN_FEATURE: f64 = 1e-3;
 
-/// Largest feature size accepted (10 km).
-pub const MAX_SIZE: f64 = 1e7;
+/// Largest feature size accepted (1 km). Positions may go further out
+/// (MAX_COORD) because a body's shape is kept apart from its placement.
+pub const MAX_SIZE: f64 = 1e6;
 
 /// Every point must stay within ±MAX_COORD (100 km) of the origin. There a
-/// double resolves ~15 nm, still well inside LINEAR.
+/// double resolves ~15 nm, about LINEAR: fine for placing a body, too
+/// coarse to intersect there, so geometry is intersected in a body's own
+/// frame, near its local origin.
 pub const MAX_COORD: f64 = 1e8;
 
 /// How many units in the last place a short chain of arithmetic may drift.

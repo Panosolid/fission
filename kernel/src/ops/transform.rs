@@ -229,24 +229,25 @@ mod tests {
     #[test]
     fn a_huge_thin_frame_turned_keeps_its_volume() {
         // Regression (random tester, seed 0x389ee678a942 and 23 others):
-        // the 10 km square frame with 1 µm walls (`mass` tests), turned a
-        // quarter turn about (0, 0.366, −0.644). V = (L² − (L − 2w)²)·h =
-        // 4Lw − 4w² with L = 9999999.99999, w = 0.001, h = 1:
-        // 39999.99999596. Baking the turn into the corners rounded each by
-        // ~1e-9, and the exact volume then came out 37231 (each 1e7 mm² side
-        // face's area moved ~0.01, times its 5e6 mm lever). Now the turn is
-        // a placement and the geometry is untouched.
+        // the square frame with 1 µm walls (`mass` tests; 10 km then, 1 km
+        // now), turned a quarter turn about (0, 0.366, −0.644). V = (L² −
+        // (L − 2w)²)·h = 4Lw − 4w² with L = 999999.99999, w = 0.001, h = 1:
+        // 3999.99999596. At 10 km, baking the turn into the corners rounded
+        // each by ~1e-9, and the exact volume came out 37231 instead of
+        // 39999.99 (each 1e7 mm² side face's area moved ~0.01, times its
+        // 5e6 mm lever). Now the turn is a placement and the geometry is
+        // untouched.
         let frame = Placed::new(crate::mass::tests::huge_thin_frame());
         let turned = rotate(&frame, DVec3::ZERO, DVec3::new(0.0, 0.36568663456908856, -0.6439675223061451), FRAC_PI_2).unwrap();
         for p in [&frame, &turned] {
             let m = p.mass_properties();
             let (lo, hi) = frame.bounds();
             let slack = m.area * crate::tolerance::rounding_slack(lo.abs().max(hi.abs()).max_element());
-            assert!(crate::tolerance::measure_eq(m.volume, 39999.99999596, slack), "volume {} ± {slack}", m.volume);
+            assert!(crate::tolerance::measure_eq(m.volume, crate::mass::tests::HUGE_THIN_FRAME_VOLUME, slack), "volume {} ± {slack}", m.volume);
             // The mesh, carried into the world, keeps it too (double-double
             // volume; see mesh tests).
             let v = p.tessellate(&crate::tessellate::TessOptions::DISPLAY).unwrap().signed_volume();
-            assert!(crate::tolerance::measure_eq(v, 39999.99999596, slack), "mesh volume {v} ± {slack}");
+            assert!(crate::tolerance::measure_eq(v, crate::mass::tests::HUGE_THIN_FRAME_VOLUME, slack), "mesh volume {v} ± {slack}");
         }
     }
 
