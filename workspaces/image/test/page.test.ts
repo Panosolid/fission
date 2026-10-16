@@ -74,20 +74,20 @@ const plate = png(ihdr(200, 100), phys(10000, 10000, 1), idat(), iend());
 test("with nothing open: an Open button, no layers, an invitation, and no image in the viewport", () => {
   resetImageWorkspace();
   const f = fake();
-  const hide = mountImage(f.ctx, decodeAs(1, 1));
+  const view = mountImage(f.ctx, decodeAs(1, 1));
   assert.equal(f.ctx.toolbar.querySelector("#image-open")!.textContent, "Open…");
   assert.equal(f.ctx.browser.querySelector("#layers-empty")!.textContent, "No image open");
   assert.equal(hidden(f.ctx, "image-empty"), false);
   assert.equal(hidden(f.ctx, "image-size"), true);
   assert.equal(f.ctx.viewport.onPick, null, "nothing to pick in an image yet");
   assert.deepEqual(f.log, ["clear"]);
-  hide();
+  view.unmount();
 });
 
 test("opening a 200 × 100 PNG at 254 DPI shows it at 20 × 10 mm, lists its layer and says it is not saved", async () => {
   resetImageWorkspace();
   const f = fake();
-  const hide = mountImage(f.ctx, decodeAs(200, 100));
+  const view = mountImage(f.ctx, decodeAs(200, 100));
   await pick(f.ctx, plate);
   assert.equal(f.shown.length, 1);
   assert.deepEqual([f.shown[0].width, f.shown[0].height], [200, 100]);
@@ -101,13 +101,13 @@ test("opening a 200 × 100 PNG at 254 DPI shows it at 20 × 10 mm, lists its lay
   assert.equal(hidden(f.ctx, "image-not-saved"), false);
   assert.match(text(f.ctx, "image-not-saved")!, /^Not saved with the project yet/);
   assert.equal(text(f.ctx, "image-error"), "");
-  hide();
+  view.unmount();
 });
 
 test("typing a DPI resizes the sheet; a bad one is refused with its message and the size stays", async () => {
   resetImageWorkspace();
   const f = fake();
-  const hide = mountImage(f.ctx, decodeAs(200, 100));
+  const view = mountImage(f.ctx, decodeAs(200, 100));
   await pick(f.ctx, plate);
   const dpi = f.ctx.properties.querySelector("#image-dpi") as HTMLInputElement;
   const change = (el: HTMLInputElement, v: string) => {
@@ -127,43 +127,43 @@ test("typing a DPI resizes the sheet; a bad one is refused with its message and 
   change(f.ctx.properties.querySelector("#image-mmpp") as HTMLInputElement, "0.5");
   assert.equal(text(f.ctx, "image-mm"), "100 × 50 mm");
   assert.equal(text(f.ctx, "image-error"), "");
-  hide();
+  view.unmount();
 });
 
 test("a damaged file shows its message and no image", async () => {
   resetImageWorkspace();
   const f = fake();
-  const hide = mountImage(f.ctx, decodeAs(100, 200)); // decodes to a different size than its header
+  const view = mountImage(f.ctx, decodeAs(100, 200)); // decodes to a different size than its header
   await pick(f.ctx, plate);
   assert.equal(text(f.ctx, "image-error"), "The file's header says 200 × 100 pixels but it decoded to 100 × 200.");
   assert.equal(f.shown.length, 0);
   assert.equal(hidden(f.ctx, "image-size"), true);
-  hide();
+  view.unmount();
 });
 
 test("an image the screen's graphics can't hold shows the viewport's message instead", async () => {
   resetImageWorkspace();
   const f = fake();
   f.failShow = "This image is 200 × 100 pixels, but this screen's graphics can show at most 64 pixels along a side.";
-  const hide = mountImage(f.ctx, decodeAs(200, 100));
+  const view = mountImage(f.ctx, decodeAs(200, 100));
   await pick(f.ctx, plate);
   assert.equal(text(f.ctx, "image-error"), f.failShow);
   assert.equal(f.ctx.browser.querySelector("#layers-empty")!.textContent, "No image open");
-  hide();
+  view.unmount();
 });
 
 test("the image is kept across a switch away and back; hiding gives the viewport back and empties every slot", async () => {
   resetImageWorkspace();
   const f = fake();
-  let hide = mountImage(f.ctx, decodeAs(200, 100));
+  let view = mountImage(f.ctx, decodeAs(200, 100));
   await pick(f.ctx, plate);
-  hide();
+  view.unmount();
   assert.equal(f.log.at(-1), "clear");
   assert.equal(f.ctx.toolbar.childNodes.length + f.ctx.browser.childNodes.length + f.ctx.properties.childNodes.length, 0);
-  hide = mountImage(f.ctx, decodeAs(200, 100));
+  view = mountImage(f.ctx, decodeAs(200, 100));
   assert.equal(f.shown.length, 2, "shown again on return");
   assert.equal(text(f.ctx, "image-mm"), "20 × 10 mm");
-  hide();
+  view.unmount();
 });
 
 test("a file that finishes decoding after the page is hidden writes nothing", async () => {
@@ -171,10 +171,10 @@ test("a file that finishes decoding after the page is hidden writes nothing", as
   const f = fake();
   let release!: () => void;
   const slow: Decoder = (bytes, format) => new Promise((r) => (release = () => r(decodeAs(200, 100)(bytes, format))));
-  const hide = mountImage(f.ctx, slow);
+  const view = mountImage(f.ctx, slow);
   const picked = pick(f.ctx, plate);
   await settle();
-  hide();
+  view.unmount();
   release();
   await picked;
   assert.equal(f.shown.length, 0);
@@ -182,7 +182,44 @@ test("a file that finishes decoding after the page is hidden writes nothing", as
   // And it was not kept for next time either.
   const again = mountImage(f.ctx, decodeAs(1, 1));
   assert.equal(f.shown.length, 0);
-  again();
+  again.unmount();
+});
+
+// Warm (X7): switching away puts the page to sleep instead of unmounting it.
+test("asleep, the viewport gets the body back; woken, the image is drawn and framed again with the panels untouched", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  const view = mountImage(f.ctx, decodeAs(200, 100));
+  await pick(f.ctx, plate);
+  (f.ctx.properties.querySelector("#image-dpi") as HTMLInputElement).value = "300";
+  const nodes = [...f.ctx.browser.childNodes, ...f.ctx.properties.childNodes];
+  f.log.length = 0;
+  view.sleep!();
+  assert.deepEqual(f.log, ["clear"]);
+  view.wake!();
+  assert.deepEqual(f.log, ["clear", "show", "fit"]);
+  assert.equal(f.shown.at(-1)!.width * f.shown.at(-1)!.mmPerPixel, 20); // 200 px at 0.1 mm per pixel
+  assert.ok([...f.ctx.browser.childNodes, ...f.ctx.properties.childNodes].every((n, i) => n === nodes[i]), "the same panels, not rebuilt");
+  assert.equal((f.ctx.properties.querySelector("#image-dpi") as HTMLInputElement).value, "300", "what was typed is still there");
+  view.unmount();
+});
+
+test("a file that finishes decoding while asleep is not drawn until wake, then drawn with its panels", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  let release!: () => void;
+  const slow: Decoder = (bytes, format) => new Promise((r) => (release = () => r(decodeAs(200, 100)(bytes, format))));
+  const view = mountImage(f.ctx, slow);
+  const picked = pick(f.ctx, plate);
+  await settle();
+  view.sleep!();
+  release();
+  await picked;
+  assert.equal(f.shown.length, 0, "nothing drawn while asleep");
+  view.wake!();
+  assert.equal(f.shown.length, 1);
+  assert.equal(text(f.ctx, "image-mm"), "20 × 10 mm");
+  view.unmount();
 });
 
 // A 2 × 1 PNG decoded as 50 % grey (128) on the left and white on the right, fully opaque.
@@ -192,7 +229,7 @@ const decodeGrey: Decoder = async () => ({ width: 2, height: 1, rgba: new Uint8C
 test("Brightness at +20 % shows 50 % grey as 179 at once, without moving the camera; back to 0 % gives the original", async () => {
   resetImageWorkspace();
   const f = fake();
-  const hide = mountImage(f.ctx, decodeGrey);
+  const view = mountImage(f.ctx, decodeGrey);
   assert.equal(hidden(f.ctx, "image-adjust"), true, "no slider with nothing open");
   await pick(f.ctx, greyPlate);
   assert.equal(hidden(f.ctx, "image-adjust"), false);
@@ -210,13 +247,13 @@ test("Brightness at +20 % shows 50 % grey as 179 at once, without moving the cam
   slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
   assert.deepEqual([...f.shown.at(-1)!.rgba], [128, 128, 128, 255, 255, 255, 255, 255], "non-destructive");
   assert.equal(text(f.ctx, "image-brightness-value"), "0 %");
-  hide();
+  view.unmount();
 });
 
 test("a slider value outside -100…+100 is refused with its message and the image stays as it was", async () => {
   resetImageWorkspace();
   const f = fake();
-  const hide = mountImage(f.ctx, decodeGrey);
+  const view = mountImage(f.ctx, decodeGrey);
   await pick(f.ctx, greyPlate);
   const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
   // A range input clamps what is typed into it, so the bad value is forced past it, as a script could.
@@ -224,13 +261,13 @@ test("a slider value outside -100…+100 is refused with its message and the ima
   slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
   assert.equal(text(f.ctx, "image-error"), 'Brightness must be a whole percent from -100 to +100, not "150".');
   assert.deepEqual([...f.shown.at(-1)!.rgba], [128, 128, 128, 255, 255, 255, 255, 255]);
-  hide();
+  view.unmount();
 });
 
 test("Hide on the layer shows nothing (fully transparent) and Show brings it back with its brightness; the camera stays", async () => {
   resetImageWorkspace();
   const f = fake();
-  const hide = mountImage(f.ctx, decodeGrey);
+  const view = mountImage(f.ctx, decodeGrey);
   await pick(f.ctx, greyPlate);
   const win = f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis;
   const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
@@ -247,25 +284,25 @@ test("Hide on the layer shows nothing (fully transparent) and Show brings it bac
   eye().click();
   assert.deepEqual([...f.shown.at(-1)!.rgba], [179, 179, 179, 255, 255, 255, 255, 255]);
   assert.equal(f.log.filter((l) => l === "fit").length, fits, "neither toggle moves the camera");
-  hide();
+  view.unmount();
 });
 
 test("brightness and visibility are kept across a switch away and back", async () => {
   resetImageWorkspace();
   const f = fake();
-  let hide = mountImage(f.ctx, decodeGrey);
+  let view = mountImage(f.ctx, decodeGrey);
   await pick(f.ctx, greyPlate);
   const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
   slider.value = "-30";
   slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
   (f.ctx.browser.querySelector("#layer-list .layer-visibility") as HTMLButtonElement).click();
-  hide();
-  hide = mountImage(f.ctx, decodeGrey);
+  view.unmount();
+  view = mountImage(f.ctx, decodeGrey);
   assert.equal((f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement).value, "-30");
   assert.equal(text(f.ctx, "image-brightness-value"), "\u221230 %");
   assert.equal((f.ctx.browser.querySelector("#layer-list .layer-visibility") as HTMLButtonElement).textContent, "Show");
   assert.deepEqual([...f.shown.at(-1)!.rgba], [0, 0, 0, 0, 0, 0, 0, 0]);
-  hide();
+  view.unmount();
 });
 
 // X6: a PNG or JPEG dropped or pasted anywhere comes here through the importer the workspace registers.
@@ -278,15 +315,15 @@ test("a dropped file opens through the importer: the page shows it once mounted;
   resetImageWorkspace();
   await openImageFile("plate.png", plate, decodeAs(200, 100));
   const f = fake();
-  const hide = mountImage(f.ctx, decodeAs(1, 1));
+  const view = mountImage(f.ctx, decodeAs(1, 1));
   assert.equal(f.shown.length, 1);
   assert.equal(text(f.ctx, "image-mm"), "20 × 10 mm"); // 200 × 100 px at 0.1 mm per pixel
-  hide();
+  view.unmount();
   // The same file decoding to the wrong size is refused and the page says why; the image already open stays, as with Open.
   await openImageFile("plate.png", plate, decodeAs(100, 200));
   const g = fake();
-  const hide2 = mountImage(g.ctx, decodeAs(1, 1));
+  const view2 = mountImage(g.ctx, decodeAs(1, 1));
   assert.equal(text(g.ctx, "image-error"), "The file's header says 200 × 100 pixels but it decoded to 100 × 200.");
   assert.equal(g.shown.length, 1);
-  hide2();
+  view2.unmount();
 });

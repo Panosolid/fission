@@ -33,6 +33,6 @@ export const sliceWorkspace: WorkspacePlugin = {
       plans: ["Printer profiles for any printer, not tied to one brand", "Supports, infill and walls", "Several plates per project; a plate updates when the design changes", "Layer preview and G-code export"],
       startsAfter: "after CAD step 73 (STL and 3MF export)",
     });
-    return () => ctx.properties.replaceChildren();
+    return { unmount: () => ctx.properties.replaceChildren() };
   },
 };

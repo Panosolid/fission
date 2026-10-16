@@ -49,6 +49,6 @@ export const vectorWorkspace: WorkspacePlugin = {
       ],
       startsAfter: "after CAD step 31 (when the sketcher is solid: it reuses its curves and constraints)",
     });
-    return () => ctx.properties.replaceChildren();
+    return { unmount: () => ctx.properties.replaceChildren() };
   },
 };
