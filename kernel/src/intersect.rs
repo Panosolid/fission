@@ -1123,4 +1123,203 @@ mod tests {
         // Far from zero everywhere: only the 64 starting intervals.
         assert_eq!(trig_zeros_counted(&Trig2([3.0, 1.0, 0.0, 0.0, 0.0])).1, 64);
     }
+
+    #[test]
+    fn generic_angles_and_radii_by_hand() {
+        // The cases above mostly use unit radii and right angles, where
+        // ρ·k and ρ/k, x/a and x·a agree. These don't: each has a radius
+        // other than 1 and an angle other than 0° or 90°, worked by hand.
+        let close_all = |got: Vec<DVec3>, want: Vec<DVec3>, label: &str| proposes(&got, &want, label);
+        for tf in [Transform::IDENTITY, awkward()] {
+            let at = |p: DVec3| tf.point(p);
+            let params = |c: &Curve, s: &Surface| -> Vec<DVec3> {
+                let (c, s) = (c.transformed(&tf), s.transformed(&tf));
+                curve_surface(&c, &s, &[]).into_iter().map(|t| c.eval(t)).collect()
+            };
+            // Circle of radius 2 round the origin in z = 0, and the plane
+            // 0.6x + 0.8y = 0.6 (unit normal n, 0.6 from the origin): the
+            // chord's middle is 0.6n = (0.36, 0.48), half-length
+            // √(2² − 0.6²) = √3.64, along (−0.8, 0.6).
+            let big = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 2.0 };
+            let slanted = Surface::Plane { origin: DVec3::new(1.0, 0.0, 0.0), normal: DVec3::new(0.6, 0.8, 0.0), x_dir: DVec3::Z };
+            let k = 3.64f64.sqrt();
+            let chord = |sg: f64| at(DVec3::new(0.36 - 0.8 * k * sg, 0.48 + 0.6 * k * sg, 0.0));
+            close_all(params(&big, &slanted), vec![chord(1.0), chord(-1.0)], "circle of radius 2–slanted plane");
+            // The same circle and a ball of radius 1.5 about s = (2, 1, 0),
+            // or a rod of radius 1.5 along z through it: in z = 0, circles
+            // of radii 2 and 1.5 with centres √5 apart. Along u = s/√5 the
+            // common chord is at a = (5 + 4 − 2.25)/(2√5) = 6.75/(2√5),
+            // half-length √(4 − a²), along v = (−1, 2, 0)/√5.
+            let r5 = 5f64.sqrt();
+            let (u, v) = (DVec3::new(2.0, 1.0, 0.0) / r5, DVec3::new(-1.0, 2.0, 0.0) / r5);
+            let a = 6.75 / (2.0 * r5);
+            let hh = (4.0 - a * a).sqrt();
+            let want = vec![at(u * a + v * hh), at(u * a - v * hh)];
+            let ball = Surface::Sphere { center: DVec3::new(2.0, 1.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.5 };
+            close_all(params(&big, &ball), want.clone(), "circle of radius 2–ball of radius 1.5");
+            let rod = Surface::Cylinder { origin: DVec3::new(2.0, 1.0, -3.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.5 };
+            close_all(params(&big, &rod), want, "circle of radius 2–rod across");
+            // A unit circle in x = 0 about (0, 0.3, 0.2) and a rod of radius
+            // 0.6 along z: x² + y² = (0.3 + cos θ)² = 0.36, so cos θ = 0.3
+            // (y = 0.6, z = 0.2 ± √0.91) or cos θ = −0.9 (y = −0.6,
+            // z = 0.2 ± √0.19).
+            let upright = Curve::Circle { center: DVec3::new(0.0, 0.3, 0.2), axis: DVec3::X, x_dir: DVec3::Y, radius: 1.0 };
+            let thin = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 0.6 };
+            let (p, q) = (0.91f64.sqrt(), 0.19f64.sqrt());
+            close_all(
+                params(&upright, &thin),
+                vec![at(DVec3::new(0.0, 0.6, 0.2 + p)), at(DVec3::new(0.0, 0.6, 0.2 - p)), at(DVec3::new(0.0, -0.6, 0.2 + q)), at(DVec3::new(0.0, -0.6, 0.2 - q))],
+                "off-centre circle–rod tilted",
+            );
+            // A line from (−2, 0.5, 0) along (0.6, 0, 0.8) through the unit
+            // rod along z: x² = 1 − 0.25 at x = ±√¾, so t = (x + 2)/0.6 and
+            // z = 0.8t.
+            let line = Curve::Line { origin: DVec3::new(-2.0, 0.5, 0.0), dir: DVec3::new(0.6, 0.0, 0.8) };
+            let unit_rod = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+            let x = 0.75f64.sqrt();
+            let on = |x: f64| at(DVec3::new(x, 0.5, 0.8 * (x + 2.0) / 0.6));
+            close_all(params(&line, &unit_rod), vec![on(x), on(-x)], "slanted line–rod");
+            // A line along the rod's axis tilted by φ = 1e-5 rad leaves the
+            // unit rod where |t| sin φ = 1: t = ±1/sin φ, 100 m away. Not
+            // "parallel" (that is only within ANGULAR).
+            let phi = 1e-5f64;
+            let steep = Curve::Line { origin: DVec3::ZERO, dir: DVec3::new(phi.sin(), 0.0, phi.cos()) };
+            let t = 1.0 / phi.sin();
+            // The meeting is ill-conditioned (|d across the axis| = 1e-5, so
+            // a rounding of 1e-16 in the turned direction moves t by 1e-11 of
+            // itself); along the line that barely leaves the rod, so 1e-9 of
+            // the distance is plenty for the caller's measuring.
+            let got = params(&steep, &unit_rod);
+            for w in [at(DVec3::new(1.0, 0.0, t * phi.cos())), at(DVec3::new(-1.0, 0.0, -t * phi.cos()))] {
+                assert!(got.iter().any(|g| g.distance(w) <= 1e-9 * w.length()), "nearly upright line–rod: {w} not in {got:?}");
+            }
+            assert_eq!(got.len(), 2);
+
+            let meet = |a: &Curve, b: &Curve| curve_curve(&a.transformed(&tf), &b.transformed(&tf), &[]);
+            // The x axis and the line through (2, 1, 3) along (0.6, 0, 0.8)
+            // (not square to it): closest where (2 + 0.6u − s) = 0 and
+            // 0.6(2 + 0.6u − s) + 0.8(3 + 0.8u) = 0, so u = −3.75 and
+            // s = 2 − 2.25 = −0.25: the point (−0.25, 0, 0).
+            let x_axis = Curve::Line { origin: DVec3::new(-5.0, 0.0, 0.0), dir: DVec3::X };
+            let leaning = Curve::Line { origin: DVec3::new(2.0, 1.0, 3.0), dir: DVec3::new(0.6, 0.0, 0.8) };
+            close_all(meet(&x_axis, &leaning), vec![at(DVec3::new(-0.25, 0.0, 0.0))], "skew lines at a slant");
+            // The unit circle in z = 0, and a unit circle in the plane through
+            // the line y = ½, z = 0 tilted 60° (normal (0, −√3/2, ½)),
+            // centred 0.4 up that plane from the line, at (0, 0.7, 0.4·√3/2).
+            // On the line (x, ½, 0): the first has x² = ¾, the second
+            // x² + 0.2² + 0.12 = 1, x² = 0.84.
+            let flat = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+            let s3 = 3f64.sqrt() / 2.0;
+            let tilted = Curve::Circle { center: DVec3::new(0.0, 0.7, 0.4 * s3), axis: DVec3::new(0.0, -s3, 0.5), x_dir: DVec3::X, radius: 1.0 };
+            let (p, q) = (0.75f64.sqrt(), 0.84f64.sqrt());
+            close_all(
+                meet(&flat, &tilted),
+                [p, -p, q, -q].iter().map(|&x| at(DVec3::new(x, 0.5, 0.0))).collect(),
+                "circles in planes at 60°",
+            );
+            // The unit circle and one of radius 0.8 about (1.2, 0, 0) in the
+            // same plane: the chord at x = (1.44 + 1 − 0.64)/2.4 = 0.75,
+            // y = ±√(1 − 0.5625) (and (0.75 − 1.2)² + 0.4375 = 0.64).
+            let small = Curve::Circle { center: DVec3::new(1.2, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.8 };
+            let y = 0.4375f64.sqrt();
+            close_all(meet(&flat, &small), vec![at(DVec3::new(0.75, y, 0.0)), at(DVec3::new(0.75, -y, 0.0))], "unequal coplanar circles");
+        }
+    }
+
+    #[test]
+    fn zeros_in_a_long_run_stay_apart() {
+        // cos(θ − c) − (1 − 2e-12): zeros c ± √(4e-12) = c ± 2e-6, wherever
+        // c is. Near c, |f| ≈ (θ − c)²/2 stays under slope_bound ·
+        // LEAF_WIDTH/2 for about ±1e-3, so ~2700 neighbouring leaves form
+        // one run round c, and its middle grid point falls between them.
+        for c in [1.0, 2.0, 3.0, TAU - 1.0] {
+            let f = Trig2([-(1.0 - 2e-12), f64::cos(c), f64::sin(c), 0.0, 0.0]);
+            let z = sorted(trig_zeros(&f));
+            assert_eq!(z.len(), 2, "c = {c}: {z:?}");
+            assert!(close(z[0], c - 2e-6, 1e-9) && close(z[1], c + 2e-6, 1e-9), "c = {c}: {z:?}");
+        }
+        // (1 + 1e-12) − cos(2(θ − ½)) never reaches 0 and comes closest
+        // twice, at ½ and ½ + π: two runs, one candidate each. Written out,
+        // cos(2θ − 1) = cos 1 cos 2θ + sin 1 sin 2θ.
+        let z = sorted(trig_zeros(&Trig2([1.0 + 1e-12, 0.0, 0.0, -f64::cos(1.0), -f64::sin(1.0)])));
+        assert_eq!(z.len(), 2, "{z:?}");
+        assert!(close(z[0], 0.5, 1e-6) && close(z[1], 0.5 + PI, 1e-6), "{z:?}");
+        // A near-touch away from θ = 2 (where (a + b)/2 and ab/2 agree):
+        // cos(θ − 1.3) − (1 + 1e-12) comes closest at θ = 1.3.
+        let z = trig_zeros(&Trig2([-(1.0 + 1e-12), 1.3f64.cos(), 1.3f64.sin(), 0.0, 0.0]));
+        assert_eq!(z.len(), 1, "{z:?}");
+        assert!(close(z[0], 1.3, 1e-6), "{z:?}");
+    }
+
+    #[test]
+    fn closed_meetings_by_hand_off_the_axes() {
+        // Points proposed on each closed crossing curve, distinct ones, all
+        // on both surfaces where the curve goes all round.
+        let distinct_on_both = |a: &Surface, b: &Surface, pts: &[DVec3], tol: f64| {
+            let mut on: Vec<DVec3> = pts.iter().copied().filter(|p| a.distance(*p) <= tol && b.distance(*p) <= tol).collect();
+            on.sort_by(|p, q| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)).then(p.z.total_cmp(&q.z)));
+            on.dedup_by(|p, q| p.distance(*q) <= 1e-6);
+            on
+        };
+        let ball = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let big = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        for tf in [Transform::IDENTITY, awkward()] {
+            let tol = 1e-12 * 20.0;
+            let at = |p: DVec3| tf.point(p);
+            // Balls of radii 1 and 0.7, centres 1.2 apart: the circle at
+            // x = (1.44 + 1 − 0.49)/2.4 = 0.8125 along the line of centres,
+            // radius √(1 − 0.8125²). Every point proposed is on it.
+            let (a, b) = (ball.transformed(&tf), Surface::Sphere { center: DVec3::new(0.0, 0.0, 1.2), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.7 }.transformed(&tf));
+            let pts = closed_meetings(&a, &b);
+            let (mid, rho) = (at(DVec3::new(0.0, 0.0, 0.8125)), (1.0 - 0.8125f64 * 0.8125).sqrt() * tf.scale());
+            for p in &pts {
+                assert!((p.distance(mid) - rho).abs() <= tol && a.distance(*p) <= tol && b.distance(*p) <= tol, "{p}");
+            }
+            assert_eq!(distinct_on_both(&a, &b, &pts, tol).len(), RING_SAMPLES);
+            // A rod of radius 0.3 along z through (0.2, 0) and the unit
+            // ball: the rod is inside the ball's shadow (0.2 + 0.3 < 1), so
+            // the crossing is two loops all round the rod, and at every
+            // angle walked both heights are on both surfaces.
+            let (rod, b) = (Surface::Cylinder { origin: DVec3::new(0.2, 0.0, -3.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 0.3 }.transformed(&tf), ball.transformed(&tf));
+            let pts = closed_meetings(&rod, &b);
+            assert!(pts.iter().all(|p| rod.distance(*p) <= tol && b.distance(*p) <= tol), "{pts:?}");
+            assert!(distinct_on_both(&rod, &b, &pts, tol).len() >= 2 * RING_SAMPLES);
+            // A ball of radius 0.05 sitting on the unit rod's wall at angle
+            // π/8, between the angles walked anyway (multiples of π/4): its
+            // loop spans ±0.05 rad, and only the discriminant's turning
+            // point finds it. There, at the ball's centre, the heights are
+            // ±0.05: (cos π/8, sin π/8, ±0.05).
+            let u = DVec3::new((PI / 8.0).cos(), (PI / 8.0).sin(), 0.0);
+            let (rod, b) = (big.transformed(&tf), Surface::Sphere { center: u, axis: DVec3::Z, x_dir: DVec3::X, radius: 0.05 }.transformed(&tf));
+            proposes_among(&closed_meetings(&rod, &b), &[at(u + DVec3::Z * 0.05), at(u - DVec3::Z * 0.05)], "small ball on a rod");
+            // A rod of radius 0.05 along u through the origin crosses the
+            // unit rod's wall in small loops at angles π/8 and 9π/8; at π/8
+            // the point u + hz is 0.05 from the thin rod's axis when
+            // h = ±0.05.
+            let thin = Surface::Cylinder { origin: u * -3.0, axis: u, x_dir: DVec3::Z, radius: 0.05 }.transformed(&tf);
+            proposes_among(&closed_meetings(&rod, &thin), &[at(u + DVec3::Z * 0.05), at(u - DVec3::Z * 0.05), at(-u + DVec3::Z * 0.05), at(-u - DVec3::Z * 0.05)], "thin rod through a rod");
+            // Rods whose axes are only 1e-5 rad apart (not parallel: that is
+            // within ANGULAR): radius 0.5 through (0.6, 0, 0) leaning along
+            // x, against the unit rod along z. They cross (the thin one's
+            // wall reaches x = 1.1 near z = 0); some point is on both.
+            let leaning = Surface::Cylinder { origin: DVec3::new(0.6, 0.0, 0.0), axis: DVec3::new(1e-5f64.sin(), 0.0, 1e-5f64.cos()), x_dir: DVec3::Y, radius: 0.5 }.transformed(&tf);
+            let pts = closed_meetings(&rod, &leaning);
+            assert!(!distinct_on_both(&rod, &leaning, &pts, 1e-9).is_empty(), "nearly parallel rods: {pts:?}");
+            // Rods at a slant (axes 36.9° apart, so |a1 across a2|² = 0.36,
+            // not 1): radius 0.4 along (0.6, 0, 0.8) inside the unit rod
+            // along z, crossing its wall in two loops all round the thin
+            // one: walking round the thin rod, every height is on both.
+            let slant = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::new(0.6, 0.0, 0.8), x_dir: DVec3::Y, radius: 0.4 }.transformed(&tf);
+            let pts = closed_meetings(&slant, &rod);
+            assert!(pts.iter().all(|p| slant.distance(*p) <= 1e-9 && rod.distance(*p) <= 1e-9), "{pts:?}");
+            assert!(distinct_on_both(&slant, &rod, &pts, 1e-9).len() >= 2 * RING_SAMPLES);
+        }
+    }
+
+    /// Each wanted point is among those proposed (others may be too).
+    fn proposes_among(got: &[DVec3], want: &[DVec3], label: &str) {
+        for w in want {
+            assert!(got.iter().any(|g| g.distance(*w) <= 1e-12 * w.length().max(1.0) * 20.0), "{label}: {w} not in {got:?}");
+        }
+    }
 }

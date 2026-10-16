@@ -702,5 +702,18 @@ mod tests {
         b.faces.pop();
         let _ = checked(b);
     }
-}
 
+    #[test]
+    fn self_intersection_errors_name_their_parts() {
+        // The failure dump highlights what an error names: both edges of
+        // EdgesMeet, the edge and face of EdgeMeetsFace, both faces of
+        // FacesMeet.
+        let p = DVec3::new(0.5, 0.25, 1.0);
+        let e = ValidationError::EdgesMeet { a: 2, b: 5, point: p };
+        assert_eq!((e.edges(), e.faces(), e.point()), (vec![2, 5], vec![], Some(p)));
+        let e = ValidationError::EdgeMeetsFace { edge: 6, face: 10, point: p };
+        assert_eq!((e.edges(), e.faces(), e.point()), (vec![6], vec![10], Some(p)));
+        let e = ValidationError::FacesMeet { a: 1, b: 7, point: p };
+        assert_eq!((e.edges(), e.faces(), e.point()), (vec![], vec![1, 7], Some(p)));
+    }
+}

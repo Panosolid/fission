@@ -731,4 +731,140 @@ mod tests {
             assert_eq!(edge_meets_face(&b, 1, 0, &[0]), None, "turn {k}");
         }
     }
+
+    /// A rigid motion off the origin and turned about a skew axis: the
+    /// classify cases above sit at the origin, where p − c and p + c agree,
+    /// on unit or axis-aligned shapes. Rigid, so LINEAR offsets survive.
+    fn rigid() -> Transform {
+        Transform::rotation(DVec3::new(0.3, -1.0, 0.6), 1.1).then(Transform::translation(DVec3::new(12.5, -7.0, 3.25)))
+    }
+
+    #[test]
+    fn classify_by_hand_anywhere() {
+        let tf = rigid();
+        // The half cylinder of radius 2.5 and height 3 (curved face 3:
+        // angles 0 to π). At angle θ, height h the point is
+        // (2.5 cos θ, 2.5 sin θ, h). Round from the line at angle 0 by
+        // 0.9·LINEAR (θ = 0.9·LINEAR/2.5): boundary; 1.1·LINEAR in: inside;
+        // 1.1·LINEAR out: outside. 0.1 rad past either line: outside;
+        // 0.1 rad in: inside. Below the bottom and round past the line
+        // (θ = −0.1, h = −0.1, nearest the corner at (2.5, 0, 0)): outside.
+        let r = 2.5;
+        let b = hand_half_cylinder(r, 3.0).transformed(&tf);
+        let at = |angle: f64, h: f64| classify(&b, 3, tf.point(DVec3::new(r * angle.cos(), r * angle.sin(), h)));
+        assert_eq!(at(FRAC_PI_2, 1.5), Where::Inside);
+        assert_eq!(at(-FRAC_PI_2, 1.5), Where::Outside);
+        assert_eq!(at(FRAC_PI_2, 3.5), Where::Outside);
+        assert_eq!(at(FRAC_PI_2, -0.5), Where::Outside);
+        assert_eq!(at(0.9 * LINEAR / r, 1.5), Where::Boundary);
+        assert_eq!(at(1.1 * LINEAR / r, 1.5), Where::Inside);
+        assert_eq!(at(-1.1 * LINEAR / r, 1.5), Where::Outside);
+        assert_eq!(at(PI - 1.1 * LINEAR / r, 1.5), Where::Inside);
+        assert_eq!(at(PI + 1.1 * LINEAR / r, 1.5), Where::Outside);
+        for (angle, want) in [(0.1, Where::Inside), (-0.1, Where::Outside), (PI - 0.1, Where::Inside), (PI + 0.1, Where::Outside)] {
+            for h in [0.3, 1.5, 2.7] {
+                assert_eq!(at(angle, h), want, "angle {angle}, height {h}");
+            }
+        }
+        assert_eq!(at(-0.1, -0.1), Where::Outside);
+        assert_eq!(at(0.1, 0.05), Where::Inside);
+        assert_eq!(at(FRAC_PI_2, 3.0 - 0.9 * LINEAR), Where::Boundary);
+        assert_eq!(at(FRAC_PI_2, 3.0 - 1.1 * LINEAR), Where::Inside);
+        // A ball of radius 2.5: the upper half (face 0) holds the north
+        // pole, not the south; 1.1·LINEAR above the equator (along the
+        // sphere) is inside face 0 and outside face 1, 0.9·LINEAR is the
+        // boundary.
+        let ball = hand_sphere(r).transformed(&tf);
+        let above = |h: f64| tf.point(DVec3::new((r * r - h * h).sqrt(), 0.0, h));
+        assert_eq!(classify(&ball, 0, tf.point(DVec3::Z * r)), Where::Inside);
+        assert_eq!(classify(&ball, 0, tf.point(-DVec3::Z * r)), Where::Outside);
+        assert_eq!(classify(&ball, 1, tf.point(-DVec3::Z * r)), Where::Inside);
+        assert_eq!(classify(&ball, 0, above(1.1 * LINEAR)), Where::Inside);
+        assert_eq!(classify(&ball, 0, above(0.9 * LINEAR)), Where::Boundary);
+        assert_eq!(classify(&ball, 1, above(1.1 * LINEAR)), Where::Outside);
+        // The sphere octant of radius 3, moved: its middle is inside, its
+        // mirror across the arc x = 0 outside, and from the corner (3, 0, 0)
+        // 1e-3 rad up and round into the octant inside, round to y < 0
+        // outside.
+        let oct = hand_sphere_octant(3.0).transformed(&tf);
+        let face = (0..oct.faces.len()).find(|&f| matches!(oct.faces[f].surface, Surface::Sphere { .. })).unwrap();
+        let m = 3.0 / 3f64.sqrt();
+        assert_eq!(classify(&oct, face, tf.point(DVec3::new(m, m, m))), Where::Inside);
+        assert_eq!(classify(&oct, face, tf.point(DVec3::new(-m, m, m))), Where::Outside);
+        let near = |lon: f64, lat: f64| tf.point(DVec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()) * 3.0);
+        assert_eq!(classify(&oct, face, near(1e-3, 1e-3)), Where::Inside);
+        assert_eq!(classify(&oct, face, near(-1e-3, 1e-3)), Where::Outside);
+        // The unit cube's top (face 1), moved: the plane is off the origin.
+        let cube = hand_cube().transformed(&tf);
+        let top = |x: f64, y: f64| classify(&cube, 1, tf.point(DVec3::new(x, y, 1.0)));
+        assert_eq!(top(0.5, 0.5), Where::Inside);
+        assert_eq!(top(2.0, 0.5), Where::Outside);
+        assert_eq!(top(2.0, 2.0), Where::Outside);
+        assert_eq!(top(1.0 - 0.9 * LINEAR, 0.5), Where::Boundary);
+        assert_eq!(top(1.0 - 1.1 * LINEAR, 0.5), Where::Inside);
+        assert_eq!(top(1.0 + 1.1 * LINEAR, 0.5), Where::Outside);
+    }
+
+    #[test]
+    fn unmeasurable_cylinder_edges_give_unknown() {
+        // On a cylinder, classify can only measure along lines along it and
+        // circles round it. Swap one edge of the half cylinder's curved face
+        // for each other kind (the body is no longer valid; classify is
+        // asked directly): a slanted line, a circle tilted off the axis, one
+        // off the axis, and one of another radius. Each gives Unknown, where
+        // the point would otherwise be inside.
+        let b = hand_half_cylinder(1.0, 2.0);
+        let q = DVec3::new(0.0, 1.0, 1.0);
+        assert_eq!(classify(&b, 3, q), Where::Inside);
+        let bottom = b.faces[3].loops[0].coedges[0].edge; // the bottom arc
+        let side = b.faces[3].loops[0].coedges[1].edge; // the line at −x
+        let swapped = |edge: EdgeId, curve: Curve| {
+            let mut b2 = b.clone();
+            b2.edges[edge].curve = curve;
+            classify(&b2, 3, q)
+        };
+        let slanted = Curve::Line { origin: DVec3::new(-1.0, 0.0, 0.0), dir: DVec3::new(0.0, 0.6, 0.8) };
+        assert_eq!(swapped(side, slanted), Where::Unknown);
+        let arc = |center: DVec3, axis: DVec3, radius: f64| Curve::Circle { center, axis, x_dir: DVec3::X, radius };
+        assert_eq!(swapped(bottom, arc(DVec3::ZERO, DVec3::new(0.0, 0.6, 0.8), 1.0)), Where::Unknown);
+        assert_eq!(swapped(bottom, arc(DVec3::new(0.1, 0.0, 0.0), DVec3::Z, 1.0)), Where::Unknown);
+        assert_eq!(swapped(bottom, arc(DVec3::ZERO, DVec3::Z, 1.1)), Where::Unknown);
+        // Within tolerance of round the axis is still measurable.
+        assert_eq!(swapped(bottom, arc(DVec3::new(0.5 * LINEAR, 0.0, 0.0), DVec3::Z, 1.0 + 0.5 * LINEAR)), Where::Inside);
+    }
+
+    #[test]
+    fn edges_just_past_a_ball_s_poles_are_seen() {
+        // A ball's face boxes reach past its edges' boxes to the poles (an
+        // upper hemisphere bulges above its equator). A cube's bottom edge
+        // passing 0.5·LINEAR over the north pole of a radius-1 ball centred
+        // at (3, 3, 3), or its top edge 0.5·LINEAR under the south pole,
+        // touches the ball there: reported. Each edge's box comes within
+        // LINEAR of the pole only through its own padding, so the face box
+        // must be padded by LINEAR too.
+        let ball = moved(hand_sphere(1.0), DVec3::splat(3.0));
+        let g = 0.5 * LINEAR;
+        for (lift, label) in [(4.0 + g, "over the north pole"), (2.0 - g - 1.0, "under the south pole")] {
+            let cube = moved(hand_cube(), DVec3::new(2.5, 3.0, lift));
+            let errs = errors(&two_shells(&ball, &cube));
+            assert!(!errs.is_empty(), "{label}");
+            let pole = DVec3::new(3.0, 3.0, if lift > 3.0 { 4.0 } else { 2.0 });
+            assert!(points_of(&errs).iter().all(|p| p.distance(pole) <= 2.0 * LINEAR), "{label}: {errs:?}");
+        }
+    }
+
+    #[test]
+    fn the_cap_counts_only_this_check_s_reports() {
+        // `check` adds at most MAX_REPORTED errors of its own, however many
+        // validate already found.
+        let ngon = |turn: f64| -> Vec<DVec2> { (0..40).map(|i| DVec2::from_angle(TAU * i as f64 / 40.0 + turn) * 10.0).collect() };
+        let a = extrude(&Profile::polygon(ngon(0.0), vec![]), 2.0).unwrap();
+        let b = moved(extrude(&Profile::polygon(ngon(TAU / 80.0), vec![]), 2.0).unwrap(), DVec3::Z);
+        let body = two_shells(&a, &b);
+        for already in [1, 3, MAX_REPORTED + 2] {
+            let mut errs = vec![ValidationError::EdgesMeet { a: 0, b: 1, point: DVec3::ZERO }; already];
+            check(&body, &mut errs);
+            assert_eq!(errs.len(), already + MAX_REPORTED, "{already} found before");
+        }
+    }
 }
