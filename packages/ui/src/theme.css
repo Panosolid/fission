@@ -40,6 +40,10 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 .overlay-legend { position: absolute; top: 8px; right: 8px; margin: 0; padding: 6px 10px; list-style: none; background: rgba(20, 22, 26, 0.85); color: #f5b14c; border-radius: 6px; font-size: 13px; }
 #workspace button { padding: 7px 10px; background: #262a31; border: 1px solid #353a43; color: inherit; border-radius: 4px; font: inherit; cursor: pointer; }
 #workspace button:hover { background: #2e333b; }
+.tool-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.tool-group + .tool-group { border-left: 1px solid #2a2e35; padding-left: 10px; margin-left: 4px; }
+.tool-group-name { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; margin-right: 4px; }
+#toolbar button[aria-pressed="true"] { background: #23384f; border-color: #4aa8ff; }
 #stl-note { margin: 0; font-size: 13px; min-height: 1em; }
 #stl-note.bad { color: #ff6b6b; }
 

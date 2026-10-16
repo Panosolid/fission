@@ -2,28 +2,18 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { describeProvenance, latestOnly, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { describeProvenance, latestOnly, type Command, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { formatQuantity as fmt } from "@fission/ui";
 import { needsRefit } from "@fission/viewport";
-import { lastFeature, partDocument, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
+import { lastFeature, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
 import { registerDesign } from "./representations.ts";
-import { DESIGN_COMMANDS } from "./commands.ts";
+import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
+import { toolbarGroups, type ToolButton } from "./toolbar.ts";
 
 const PANEL = `
-  <label>Shape
-    <select id="shape">
-      <option value="box">Box</option>
-      <option value="cylinder">Cylinder</option>
-      <option value="sphere">Sphere</option>
-      <option value="l-bracket">L-bracket (extruded)</option>
-      <option value="plate">Plate with two round holes (extruded)</option>
-      <option value="slot">Slot with round ends (extruded)</option>
-      <option value="star">Star (extruded)</option>
-    </select>
-  </label>
   <label><span id="width-label">Width</span> <input id="width" type="number" value="40" step="any" /> mm</label>
   <label id="depth-row">Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
   <label id="height-row"><span id="height-label">Height</span> <input id="height" type="number" value="20" step="any" /> mm</label>
@@ -39,7 +29,6 @@ const PANEL = `
   </dl>
   <p id="stale-note" hidden>Out of date: these numbers are for the last part that built.</p>
   <p id="error"></p>
-  <button id="download-stl" type="button">Download STL</button>
   <p id="stl-note"></p>`;
 
 /** Hands `bytes` to the browser as a file download. */
@@ -53,20 +42,47 @@ function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
 }
 
 /** What the user last entered, kept while other workspaces are shown. */
-let saved: { shape: string; sizes: string[] } | null = null;
+let saved: { shape: ShapeKind; sizes: string[] } | null = null;
 let framed: Framing | null = null;
 let framedKind: ShapeKind | null = null;
 
+/** Fills the toolbar slot with the command groups; returns each button with its element. */
+function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void): [ToolButton, HTMLButtonElement][] {
+  const made: [ToolButton, HTMLButtonElement][] = [];
+  const document = slot.ownerDocument; // the slot's own page, not a global one
+  for (const group of toolbarGroups()) {
+    const div = document.createElement("div");
+    div.className = "tool-group";
+    div.setAttribute("role", "group");
+    div.setAttribute("aria-label", group.name);
+    const name = document.createElement("span");
+    name.className = "tool-group-name";
+    name.textContent = group.name;
+    div.append(name);
+    for (const b of group.buttons) {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.textContent = b.label;
+      el.title = b.title;
+      el.dataset.op = b.command.op; // read by the e2e test
+      if (typeof b.command.shape === "string") el.dataset.shape = b.command.shape;
+      el.addEventListener("click", () => onClick(b));
+      div.append(el);
+      made.push([b, el]);
+    }
+    slot.append(div);
+  }
+  return made;
+}
+
 function mount(ctx: WorkspaceContext): () => void {
-  // Until 16b–16d split it up, the whole old side panel sits in the properties slot.
+  // Until 16c–16d split it up, the rest of the old side panel sits in the properties slot.
   ctx.properties.innerHTML = PANEL;
   const $ = <T extends HTMLElement>(id: string) => ctx.properties.querySelector<T>(`#${id}`)!;
   const inputs = ["width", "depth", "height"].map((id) => $<HTMLInputElement>(id));
-  const shape = $<HTMLSelectElement>("shape");
-  if (saved) {
-    shape.value = saved.shape;
-    inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
-  }
+  let shape: ShapeKind = saved?.shape ?? "box";
+  if (saved) inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
+  const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
   const { kernel, viewport } = ctx;
   let shown = true;
 
@@ -84,10 +100,30 @@ function mount(ctx: WorkspaceContext): () => void {
   /** The STL-precision overlay: the whole part, while its last export warned. */
   const STL_OVERLAY = "design.stl-precision";
 
+  /** The command the toolbar and the inputs stand for: set_part with this shape and these sizes. */
+  function partCommand(): Command {
+    const [width, depth, height] = inputs.map((i) => Number(i.value));
+    return { op: "set_part", shape, width, depth, height };
+  }
+
+  /**
+   * Does what a Design command says: the toolbar's buttons come here, and
+   * the AI's accepted commands will too. A set_part from the toolbar names
+   * only the shape and keeps the sizes; the kernel judges the sizes (a bad
+   * one shows its message, as when typed).
+   */
+  function run(command: Command) {
+    if (command.op === "export_stl") return exportStl();
+    if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
+    shape = command.shape as ShapeKind;
+    for (const [i, key] of ["width", "depth", "height"].entries()) if (typeof command[key] === "number") inputs[i].value = String(command[key]);
+    return update();
+  }
+
   async function update() {
-    const [w, d, h] = inputs.map((i) => Number(i.value));
-    const kind = shape.value as ShapeKind;
-    saved = { shape: shape.value, sizes: inputs.map((i) => i.value) };
+    const kind = shape;
+    saved = { shape, sizes: inputs.map((i) => i.value) };
+    for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     const primitive = kind === "box" || kind === "cylinder" || kind === "sphere";
     $("height-label").textContent = primitive ? "Height" : "Extrude by";
@@ -96,7 +132,7 @@ function mount(ctx: WorkspaceContext): () => void {
     $("depth-row").hidden = round;
     $("height-row").hidden = kind === "sphere";
     // The panel edits feature #1 of the one-step timeline; the project holds it.
-    const doc = partDocument(kind, w, d, h);
+    const doc = documentFor(partCommand());
     syncGraph(ctx.graph, doc, (ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
     ctx.project.workspaces.design = doc;
     markStale();
@@ -133,11 +169,10 @@ function mount(ctx: WorkspaceContext): () => void {
   }
 
   async function exportStl() {
-    const [w, d, h] = inputs.map((i) => Number(i.value));
-    const kind = shape.value as ShapeKind;
+    const kind = shape;
     const note = $("stl-note");
     try {
-      const doc = partDocument(kind, w, d, h);
+      const doc = documentFor(partCommand());
       const file = await kernel.call("export_stl", specOf(doc, lastFeature(doc)), kind);
       download(file.bytes, `fission-${kind}.stl`);
       note.textContent = file.warning ?? "";
@@ -152,9 +187,7 @@ function mount(ctx: WorkspaceContext): () => void {
     }
   }
 
-  $("download-stl").addEventListener("click", exportStl);
   inputs.forEach((i) => i.addEventListener("input", update));
-  shape.addEventListener("change", update);
   update();
   return () => {
     shown = false;

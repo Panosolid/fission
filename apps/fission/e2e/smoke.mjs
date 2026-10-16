@@ -139,11 +139,13 @@ try {
   const shown = async (id) => Number((await text(id)).split(" ")[0].replaceAll(",", ""));
   const near = (a, b, what) => assert.ok(Math.abs(a - b) <= 1e-9 * Math.abs(b), `${what}: shown ${a}, expected ${b}`);
   const pick = async (kind, volumeNot) => {
-    await page.selectOption("#shape", kind);
+    await page.click(`#toolbar [data-shape=${kind}]`);
     await page.waitForFunction(
       ([k, v]) => document.querySelector("#viewport").dataset.shape === k && document.querySelector("#volume").textContent !== v,
       [kind, volumeNot],
     );
+    // The toolbar shows the shape on screen pressed, and only that one.
+    assert.deepEqual(await page.$$eval("#toolbar [aria-pressed=true]", (els) => els.map((e) => e.dataset.shape)), [kind]);
   };
 
   await check("L-bracket extrusion shows hand-worked numbers", async () => {
@@ -239,18 +241,18 @@ try {
     // Plate 0.008 × 0.008: holes of radius 0.15·0.008 = 0.0012 (a legal
     // radius) centred 0.002 from the edge, leaving a 0.0008 mm wall, below
     // the 0.001 mm minimum feature.
-    await page.selectOption("#shape", "plate");
+    await page.click("#toolbar [data-shape=plate]");
     for (const id of ["width", "depth"]) await setSize(id, 0.008);
     await page.waitForFunction(() => document.querySelector("#error").textContent.includes("features must be at least"));
     for (const [id, v] of [["width", 40], ["depth", 30]]) await setSize(id, v);
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");
-    await page.selectOption("#shape", "box");
+    await page.click("#toolbar [data-shape=box]");
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
   });
 
-  /** Clicks "Download STL"; returns the file's name and its triangles (f32 corners). */
+  /** Clicks the toolbar's STL button; returns the file's name and its triangles (f32 corners). */
   const downloadStl = async () => {
-    const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#download-stl")]);
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#toolbar [data-op=export_stl]")]);
     const bytes = readFileSync(await dl.path());
     const n = bytes.readUInt32LE(80);
     const tris = [];
@@ -265,8 +267,8 @@ try {
   const stlVolume = (tris) =>
     tris.reduce((v, [a, b, c]) => v + (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6, 0);
 
-  await check("Download STL saves the box as a binary STL with hand-worked contents", async () => {
-    await page.selectOption("#shape", "box");
+  await check("the STL button saves the box as a binary STL with hand-worked contents", async () => {
+    await page.click("#toolbar [data-shape=box]");
     await page.fill("#width", "40");
     await page.fill("#depth", "30");
     await page.fill("#height", "20");
@@ -283,7 +285,7 @@ try {
   });
 
   await check("a cylinder's STL is the prism the viewer shows", async () => {
-    await page.selectOption("#shape", "cylinder");
+    await page.click("#toolbar [data-shape=cylinder]");
     await page.fill("#width", "40");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
     const f = await downloadStl();
@@ -302,7 +304,7 @@ try {
     // to 999,999.3125 in single precision (spacing 1/16 there), 0.0125 mm
     // off, over the 1 µm smallest feature. A cube, so its faces are big
     // enough on screen to see the overlay.
-    await page.selectOption("#shape", "box");
+    await page.click("#toolbar [data-shape=box]");
     for (const id of ["width", "depth", "height"]) await page.fill(`#${id}`, "999999.3");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
     const f = await downloadStl();
@@ -358,7 +360,7 @@ try {
 
   await check("each placeholder workspace says what it will do and 'Coming soon', and keeps the viewport", async () => {
     // Back to a known body, then remember the camera's view of it.
-    await page.selectOption("#shape", "box");
+    await page.click("#toolbar [data-shape=box]");
     await page.fill("#width", "40");
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
     await page.waitForTimeout(300); // let orbit damping settle
@@ -391,7 +393,7 @@ try {
     await page.click("[data-workspace=design]");
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
     assert.equal(await page.inputValue("#width"), "40");
-    assert.equal(await page.inputValue("#shape"), "box");
+    assert.equal(await page.getAttribute("#toolbar [data-shape=box]", "aria-pressed"), "true");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius);
     await page.screenshot({ path: "e2e/workspace-design.png" });
   });
