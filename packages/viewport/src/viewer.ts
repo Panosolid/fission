@@ -1,10 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
+import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type ImageRep, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
 import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
 import { selectionFraming } from "./framing.ts";
+import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -27,6 +28,11 @@ export class Viewer implements SharedViewport {
   private hover: { face: number | null; edge: number | null } = { face: null, edge: null };
   private overlays = new Map<string, AnalysisOverlay>();
   private legend = document.createElement("ul");
+  private cube: ViewCube;
+  private grid: THREE.GridHelper;
+  private axes = new THREE.AxesHelper(20);
+  /** The image on show (showImage), and the 3D camera to give back when it goes. */
+  private image: { mesh: THREE.Mesh; texture: THREE.DataTexture; widthMm: number; heightMm: number; saved: { position: THREE.Vector3; target: THREE.Vector3; near: number; far: number } } | null = null;
   readonly element: HTMLElement;
 
   private container: HTMLElement;
@@ -41,6 +47,7 @@ export class Viewer implements SharedViewport {
     this.legend.hidden = true;
     container.appendChild(this.legend);
     const cube = new ViewCube((name) => this.setView(name));
+    this.cube = cube;
     container.appendChild(cube.element);
 
     this.camera.position.set(80, -100, 70);
@@ -48,12 +55,13 @@ export class Viewer implements SharedViewport {
     this.controls.enableDamping = true;
 
     const grid = new THREE.GridHelper(200, 20, 0x3a3f47, 0x2a2e35);
+    this.grid = grid;
     grid.rotation.x = Math.PI / 2; // lay the grid on the XY plane
     const key = new THREE.DirectionalLight(0xffffff, 2.2);
     key.position.set(1, -2, 3);
     const fill = new THREE.DirectionalLight(0xffffff, 0.6);
     fill.position.set(-2, 1, -1);
-    this.scene.add(grid, new THREE.AxesHelper(20), new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body);
+    this.scene.add(grid, this.axes, new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body);
 
     // A click picks; a press that moves further is the camera orbiting.
     let down: { x: number; y: number; id: number } | null = null;
@@ -92,7 +100,7 @@ export class Viewer implements SharedViewport {
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
-      cube.render(this.renderer, this.camera);
+      if (!this.image) cube.render(this.renderer, this.camera);
     });
   }
 
@@ -251,13 +259,14 @@ export class Viewer implements SharedViewport {
     return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
   }
 
-  /** Frames the current body from the home view; returns what it framed (null if none). */
+  /** Frames the current body from the home view (or the image from above while one is shown); returns what it framed (null if none). */
   fit(): Framing | null {
     return this.setView("home");
   }
 
-  /** Turns the camera to a standard view, framing the current body; returns what it framed (null if none). */
+  /** Turns the camera to a standard view, framing the current body; while an image is shown every view frames it from above. Returns what it framed (null if none). */
   setView(name: ViewName): Framing | null {
+    if (this.image) return this.frameImage();
     const framing = this.bodyFraming();
     if (!(framing.radius > 0)) return null;
     const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
@@ -272,7 +281,7 @@ export class Viewer implements SharedViewport {
    */
   fitSelection(): Framing | null {
     const { body, faces, edges } = this.highlight;
-    if (!this.mesh) return null;
+    if (!this.mesh || this.image) return null;
     const framing = faces.length || edges.length ? selectionFraming(this.mesh, faces, edges) : body ? this.bodyFraming() : null;
     if (!framing || !(framing.radius > 0)) return null;
     this.spendDamping();
@@ -306,6 +315,92 @@ export class Viewer implements SharedViewport {
     this.camera.far = dist * 100;
     this.camera.updateProjectionMatrix();
     this.controls.update();
+  }
+
+  /**
+   * Shows an image as a flat sheet at its real size (see SharedViewport):
+   * nearest-neighbour when zoomed in, so each pixel stays a crisp square,
+   * smoothed with mipmaps when zoomed out. The texture is sRGB and the
+   * material unlit, so the screen shows the image's own colours.
+   */
+  showImage(image: ImageRep) {
+    checkTextureSize(image.width, image.height, this.renderer.capabilities.maxTextureSize);
+    const sheet = imageSheet(image.width, image.height, image.mmPerPixel);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(sheet.positions, 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(sheet.uvs, 2));
+    geometry.setIndex(sheet.indices);
+    // The same bytes viewed as Uint8Array, no copy; decoded pixels never live in shared memory.
+    const bytes = new Uint8Array(image.rgba.buffer as ArrayBuffer, image.rgba.byteOffset, image.rgba.byteLength);
+    const texture = new THREE.DataTexture(bytes, image.width, image.height, THREE.RGBAFormat);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.generateMipmaps = true;
+    texture.unpackAlignment = 1;
+    texture.needsUpdate = true;
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: texture, transparent: true }));
+    const first = !this.image;
+    const saved = this.image?.saved ?? { position: this.camera.position.clone(), target: this.controls.target.clone(), near: this.camera.near, far: this.camera.far };
+    this.removeImage();
+    this.image = { mesh, texture, widthMm: sheet.widthMm, heightMm: sheet.heightMm, saved };
+    this.scene.add(mesh);
+    this.element.dataset.image = `${image.width} x ${image.height} px, ${+sheet.widthMm.toPrecision(12)} x ${+sheet.heightMm.toPrecision(12)} mm`; // read by the e2e test
+    if (first) {
+      this.body.visible = this.grid.visible = this.axes.visible = false;
+      this.cube.element.hidden = true;
+      // Top-down 2D: the left button pans instead of orbiting.
+      this.controls.enableRotate = false;
+      this.controls.screenSpacePanning = true;
+      this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+      this.controls.touches.ONE = THREE.TOUCH.PAN;
+      this.frameImage();
+    }
+  }
+
+  clearImage() {
+    if (!this.image) return;
+    const { saved } = this.image;
+    this.removeImage();
+    this.image = null;
+    delete this.element.dataset.image;
+    this.body.visible = this.grid.visible = this.axes.visible = true;
+    this.cube.element.hidden = false;
+    this.controls.enableRotate = true;
+    this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    this.controls.touches.ONE = THREE.TOUCH.ROTATE;
+    this.controls.minDistance = 0;
+    this.controls.maxDistance = Infinity;
+    this.spendDamping();
+    this.controls.target.copy(saved.target);
+    this.camera.position.copy(saved.position);
+    this.camera.near = saved.near;
+    this.camera.far = saved.far;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+  }
+
+  private removeImage() {
+    if (!this.image) return;
+    this.scene.remove(this.image.mesh);
+    this.image.mesh.geometry.dispose();
+    (this.image.mesh.material as THREE.Material).dispose();
+    this.image.texture.dispose();
+  }
+
+  /** Looks straight down on the image's sheet, the whole of it in view; +Y up on screen. */
+  private frameImage(): Framing | null {
+    if (!this.image) return null;
+    const { widthMm, heightMm } = this.image;
+    const dist = topDownDistance(widthMm, heightMm, this.camera.fov, this.camera.aspect);
+    this.place([0, 0, dist], [0, 0, 0], [0, 1, 0]);
+    const range = imageZoomRange(dist);
+    this.controls.minDistance = range.minDistance;
+    this.controls.maxDistance = range.maxDistance;
+    this.camera.near = range.near;
+    this.camera.far = range.far;
+    this.camera.updateProjectionMatrix();
+    return { centre: [0, 0, 0], radius: Math.hypot(widthMm, heightMm) / 2 };
   }
 
   private resize() {
