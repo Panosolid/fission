@@ -58,7 +58,7 @@ export function resetImageWorkspace() {
   message = null;
 }
 
-const PROPERTIES = `
+const PROPERTIES = `<div class="image">
   <h2>Image</h2>
   <p id="image-empty">Open a PNG or JPEG to see it at its real size.</p>
   <dl id="image-size" hidden>
@@ -71,12 +71,13 @@ const PROPERTIES = `
     <label>mm per pixel <input id="image-mmpp" type="number" step="any" min="0" /></label>
   </div>
   <div id="image-adjust" hidden>
-    <label for="image-brightness">Brightness</label>
-    <input id="image-brightness" type="range" min="-100" max="100" step="1" value="0" />
-    <output id="image-brightness-value" for="image-brightness">0 %</output>
+    <label>Brightness <input id="image-brightness-number" type="number" min="-100" max="100" step="1" value="0" /></label>
+    <span aria-hidden="true">%</span>
+    <input id="image-brightness" type="range" min="-100" max="100" step="1" value="0" aria-label="Brightness slider" />
   </div>
   <p id="image-not-saved" hidden></p>
-  <p id="image-error" class="bad" role="alert"></p>`;
+  <p id="image-error" class="bad" role="alert"></p>
+</div>`;
 
 /** The one layer's id (G1 has one layer; choosing among several comes with the stack, G4). */
 const layerId = (doc: ImageDocument) => doc.layers[0].id;
@@ -129,11 +130,11 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): Mount
       } catch (e) {
         current = null;
         message = (e as Error).message;
-        ctx.viewport.clearImage();
+        ctx.viewport.showImage(null);
         return false;
       }
     } else {
-      ctx.viewport.clearImage();
+      ctx.viewport.showImage(null); // Image's own empty view, never Design's body
     }
     return true;
   }
@@ -151,7 +152,7 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): Mount
       ctx.browser.replaceChildren(heading, empty);
     } else {
       const ul = page.createElement("ul");
-      ul.className = "tree";
+      ul.className = "tree image";
       ul.id = "layer-list";
       for (const r of rows) {
         const li = page.createElement("li");
@@ -188,9 +189,10 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): Mount
       $("image-source").textContent = v.source;
       $<HTMLInputElement>("image-dpi").value = v.dpi;
       $<HTMLInputElement>("image-mmpp").value = v.mmPerPixel;
+      // The slider and the number box always show the document's brightness, so each follows the other.
       const b = brightnessView(current, layerId(current));
-      $<HTMLInputElement>("image-brightness").value = String(b.percent);
-      $("image-brightness-value").textContent = b.label;
+      $<HTMLInputElement>("image-brightness").value = $<HTMLInputElement>("image-brightness-number").value = String(b.percent);
+      $("image-brightness").setAttribute("aria-valuetext", b.label); // read out as "+20 %"
     }
     $("image-error").textContent = message ?? "";
   }
@@ -229,18 +231,22 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): Mount
   edit("DPI", $<HTMLInputElement>("image-dpi"));
   edit("mm per pixel", $<HTMLInputElement>("image-mmpp"));
 
-  // Brightness: every step of the slider is shown at once, without moving the camera.
-  const brightness = $<HTMLInputElement>("image-brightness");
-  brightness.addEventListener("input", () => {
-    if (!current) return;
-    try {
-      current = setBrightness(current, layerId(current), parseBrightnessInput(brightness.value));
-      message = null;
-    } catch (e) {
-      message = (e as Error).message;
-    }
-    show(false);
-  });
+  // Brightness: every step of the slider is shown at once, and an exact
+  // percent typed in the box once it is entered, without moving the camera.
+  // A bad value is refused with its message and both go back to the document's.
+  const brightness = (el: HTMLInputElement, event: "input" | "change") =>
+    el.addEventListener(event, () => {
+      if (!current) return;
+      try {
+        current = setBrightness(current, layerId(current), parseBrightnessInput(el.value));
+        message = null;
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      show(false);
+    });
+  brightness($<HTMLInputElement>("image-brightness"), "input");
+  brightness($<HTMLInputElement>("image-brightness-number"), "change");
 
   ctx.viewport.onPick = null;
   show(true);

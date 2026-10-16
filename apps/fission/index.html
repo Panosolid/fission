@@ -14,8 +14,8 @@
       <button id="menu-toggle" type="button" aria-expanded="false" aria-controls="topbar-actions" title="Save, Open, the AI assistant and Community">Menu</button>
       <div id="topbar-actions">
         <button id="save" type="button" title="Save the whole project as a .fission.json file">Save</button>
-        <button id="open" type="button" title="Open a .fission.json project file">Open</button>
-        <input id="open-file" type="file" accept=".json,application/json" hidden />
+        <button id="open" type="button" title="Open a project or an image">Open</button>
+        <input id="open-file" type="file" hidden /><!-- accept: set from the registered importers (src/main.ts) -->
         <button id="assistant-toggle" type="button" aria-pressed="false" title="The optional AI assistant (coming soon). No AI provider is active: nothing is sent anywhere.">AI <span id="ai-status">off</span></button>
         <button id="community" type="button" title="Shared models, free to download (coming soon)">Community</button>
       </div>
