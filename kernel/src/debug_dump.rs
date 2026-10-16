@@ -403,6 +403,7 @@ draw();
 mod tests {
     use super::*;
     use crate::fixtures::hand_cube;
+    use crate::tessellate::{tessellate, TessOptions};
     use glam::DVec3;
     use serde_json::Value;
 
@@ -568,6 +569,35 @@ mod tests {
     }
 
     #[test]
+    fn a_body_that_cannot_be_meshed_is_drawn_from_its_edge_curves() {
+        // Face 0 (the bottom, z = 0) given a plane facing +x: seen along x
+        // its square boundary is a line, so it can't be meshed. The edges
+        // are fine, so they are drawn from their curves, 17 points each.
+        // Edge 0 runs vertex 0 (0,0,0) → vertex 2 (0,1,0): sample 8 of 16
+        // is its middle (0, 0.5, 0), sample 16 its end (0, 1, 0).
+        let mut b = hand_cube();
+        if let crate::geom::Surface::Plane { normal, x_dir, .. } = &mut b.faces[0].surface {
+            *normal = DVec3::X;
+            *x_dir = DVec3::Y;
+        }
+        let dir = temp_dir("no-mesh");
+        let out = dump(&dir, "x", &[("edge-on", &b)], "").unwrap();
+        let scene = scene_of(&out);
+        // validate stops before meshing: edges 0–1 and 1–3 leave the plane
+        // x = 0, so it reports them off face 0 first.
+        assert!(scene[0]["errors"].as_array().unwrap().iter().any(|e| e.as_str().unwrap().contains("off face 0")));
+        assert_eq!(numbers(&scene[0]["positions"]).len(), 0);
+        assert!(!out.join("edge-on.stl").exists());
+        let edges = scene[0]["edges"].as_array().unwrap();
+        assert_eq!(edges.len(), 12);
+        let e0 = numbers(&edges[0]);
+        assert_eq!(e0.len(), 3 * 17);
+        assert_eq!(&e0[3 * 8..3 * 9], [0.0, 0.5, 0.0]);
+        assert_eq!(&e0[3 * 16..], [0.0, 1.0, 0.0]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn dangling_references_are_listed_not_drawn() {
         // A coedge pointing at edge 999 of 12: validate stops at that, and
         // the dump must neither panic nor try to mesh or sample it.
@@ -651,6 +681,41 @@ mod tests {
     }
 
     #[test]
+    fn ascii_stl_normals_by_hand() {
+        // The unit cube: 12 facets, two on each face, so each outward axis
+        // direction ±x, ±y, ±z is written exactly twice, and every facet's
+        // corners run counter-clockwise about it: (b − a) × (c − a) is the
+        // normal times twice the triangle's area (1, half the unit square).
+        let m = tessellate(&hand_cube(), &TessOptions::DISPLAY).unwrap();
+        let text = stl("cube", &m);
+        assert!(text.starts_with("solid cube\n") && text.ends_with("endsolid cube\n"));
+        let nums = |line: &str, skip: usize| -> DVec3 {
+            let v: Vec<f64> = line.split_whitespace().skip(skip).map(|x| x.parse().unwrap()).collect();
+            DVec3::new(v[0], v[1], v[2])
+        };
+        let lines: Vec<&str> = text.lines().collect();
+        let mut normals = Vec::new();
+        for (i, l) in lines.iter().enumerate().filter(|(_, l)| l.trim_start().starts_with("facet normal")) {
+            let n = nums(l, 2);
+            let [a, b, c] = [2, 3, 4].map(|k| nums(lines[i + k], 1));
+            assert_eq!((b - a).cross(c - a), n, "facet {l}");
+            normals.push(n.to_array());
+        }
+        assert_eq!(normals.len(), 12);
+        for axis in [DVec3::X, DVec3::Y, DVec3::Z, -DVec3::X, -DVec3::Y, -DVec3::Z] {
+            assert_eq!(normals.iter().filter(|n| **n == axis.to_array()).count(), 2, "{axis}");
+        }
+    }
+
+    #[test]
+    fn file_names_keep_only_safe_characters() {
+        // Letters, digits, '-' and '_' stay; anything else (space, slash,
+        // dot, non-ASCII) becomes '_', so a label can't leave the folder.
+        assert_eq!(sanitize("seed1f-a_b"), "seed1f-a_b");
+        assert_eq!(sanitize("../x y/é"), "___x_y__");
+    }
+
+    #[test]
     fn json_strings_are_escaped() {
         // A quote, a backslash, a newline and a closing script tag must not
         // break out of the embedded data.
@@ -659,5 +724,8 @@ mod tests {
             r#""a\"b\\c\n\u003c/script>""#
         );
         assert_eq!(json_nums(&[1.5, f64::NAN]), "[1.5e0,null]");
+        // Other control characters as \u escapes: tab is 0x09, 0x1f the
+        // last control character; space (0x20) is plain.
+        assert_eq!(json_str("\t\u{1f} "), r#""\u0009\u001f ""#);
     }
 }
