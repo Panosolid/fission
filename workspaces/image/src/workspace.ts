@@ -1,12 +1,13 @@
-// The Image workspace's page (G1b): Open in the toolbar, the layer in the
-// browser, the size in the properties, and the image itself drawn at its
-// real size in the shared viewport, seen from above. The open image is kept
+// The Image workspace's page (G1b, G1c): Open in the toolbar, the layer in
+// the browser with its hide toggle, the size and Brightness in the
+// properties, and the image itself drawn at its real size in the shared
+// viewport, seen from above. The open image is kept
 // while other workspaces are shown, but not saved with the project yet (G3).
 
 import type { WorkspaceContext } from "@fission/core";
-import { setDpi, setMmPerPixel, toImageRep, type ImageDocument, type Pixels } from "./document.ts";
+import { setBrightness, setDpi, setLayerVisible, setMmPerPixel, toImageRep, type ImageDocument, type Pixels } from "./document.ts";
 import { openImage } from "./open.ts";
-import { layerRows, NOT_SAVED_NOTE, parseSizeInput, sizeView } from "./panels.ts";
+import { brightnessView, layerRows, NOT_SAVED_NOTE, parseBrightnessInput, parseSizeInput, sizeView } from "./panels.ts";
 import type { PhysicalSize } from "./physical-size.ts";
 
 /**
@@ -51,8 +52,16 @@ const PROPERTIES = `
     <label>DPI <input id="image-dpi" type="number" step="any" min="0" /></label>
     <label>mm per pixel <input id="image-mmpp" type="number" step="any" min="0" /></label>
   </div>
+  <div id="image-adjust" hidden>
+    <label for="image-brightness">Brightness</label>
+    <input id="image-brightness" type="range" min="-100" max="100" step="1" value="0" />
+    <output id="image-brightness-value" for="image-brightness">0 %</output>
+  </div>
   <p id="image-not-saved" hidden></p>
   <p id="image-error" class="bad" role="alert"></p>`;
+
+/** The one layer's id (G1 has one layer; choosing among several comes with the stack, G4). */
+const layerId = (doc: ImageDocument) => doc.layers[0].id;
 
 export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () => void {
   const page = ctx.toolbar.ownerDocument;
@@ -83,7 +92,7 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
   ctx.properties.innerHTML = PROPERTIES;
   $("image-not-saved").textContent = NOT_SAVED_NOTE;
 
-  /** Puts the document (and the last message) on screen; `frame` re-frames the camera on the image. */
+  /** Puts the document (and the last message) on screen; `frame` re-frames the camera on the image, and live edits leave it where it is. */
   function show(frame: boolean) {
     if (current) {
       try {
@@ -117,7 +126,19 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
         row.className = "tree-row";
         row.dataset.node = r.id; // read by the e2e test
         row.textContent = r.name;
-        li.append(row);
+        const eye = page.createElement("button");
+        eye.type = "button";
+        eye.className = "layer-visibility";
+        eye.textContent = r.visible ? "Hide" : "Show";
+        eye.setAttribute("aria-label", `${r.visible ? "Hide" : "Show"} ${r.name}`);
+        eye.setAttribute("aria-pressed", String(!r.visible)); // pressed = hidden
+        eye.addEventListener("click", () => {
+          if (!current) return;
+          current = setLayerVisible(current, r.id, !r.visible);
+          show(false);
+        });
+        li.className = r.visible ? "" : "layer-hidden";
+        li.append(row, eye);
         ul.append(li);
       }
       ctx.browser.replaceChildren(heading, ul);
@@ -126,7 +147,7 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
     // Properties: the size rows.
     const has = current !== null;
     $("image-empty").hidden = has;
-    $("image-size").hidden = $("image-size-inputs").hidden = $("image-not-saved").hidden = !has;
+    $("image-size").hidden = $("image-size-inputs").hidden = $("image-adjust").hidden = $("image-not-saved").hidden = !has;
     if (current) {
       const v = sizeView(current);
       $("image-pixels").textContent = v.pixels;
@@ -134,6 +155,9 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
       $("image-source").textContent = v.source;
       $<HTMLInputElement>("image-dpi").value = v.dpi;
       $<HTMLInputElement>("image-mmpp").value = v.mmPerPixel;
+      const b = brightnessView(current, layerId(current));
+      $<HTMLInputElement>("image-brightness").value = String(b.percent);
+      $("image-brightness-value").textContent = b.label;
     }
     $("image-error").textContent = message ?? "";
   }
@@ -170,6 +194,19 @@ export function mountImage(ctx: WorkspaceContext, decode = browserDecode): () =>
     });
   edit("DPI", $<HTMLInputElement>("image-dpi"));
   edit("mm per pixel", $<HTMLInputElement>("image-mmpp"));
+
+  // Brightness: every step of the slider is shown at once, without moving the camera.
+  const brightness = $<HTMLInputElement>("image-brightness");
+  brightness.addEventListener("input", () => {
+    if (!current) return;
+    try {
+      current = setBrightness(current, layerId(current), parseBrightnessInput(brightness.value));
+      message = null;
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    show(false);
+  });
 
   ctx.viewport.onPick = null;
   show(true);

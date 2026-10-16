@@ -183,3 +183,86 @@ test("a file that finishes decoding after the page is hidden writes nothing", as
   assert.equal(f.shown.length, 0);
   again();
 });
+
+// A 2 × 1 PNG decoded as 50 % grey (128) on the left and white on the right, fully opaque.
+const greyPlate = png(ihdr(2, 1), idat(), iend());
+const decodeGrey: Decoder = async () => ({ width: 2, height: 1, rgba: new Uint8ClampedArray([128, 128, 128, 255, 255, 255, 255, 255]) });
+
+test("Brightness at +20 % shows 50 % grey as 179 at once, without moving the camera; back to 0 % gives the original", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  const hide = mountImage(f.ctx, decodeGrey);
+  assert.equal(hidden(f.ctx, "image-adjust"), true, "no slider with nothing open");
+  await pick(f.ctx, greyPlate);
+  assert.equal(hidden(f.ctx, "image-adjust"), false);
+  const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
+  assert.deepEqual([slider.min, slider.max, slider.step, slider.value], ["-100", "100", "1", "0"]);
+  assert.equal(text(f.ctx, "image-brightness-value"), "0 %");
+  const fits = f.log.filter((l) => l === "fit").length;
+  slider.value = "20";
+  slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
+  // +20 % is an offset of round(0.2 × 255) = 51: grey 128 + 51 = 179; white 255 + 51 clips to 255; alpha stays 255.
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [179, 179, 179, 255, 255, 255, 255, 255]);
+  assert.equal(text(f.ctx, "image-brightness-value"), "+20 %");
+  assert.equal(f.log.filter((l) => l === "fit").length, fits, "a live edit keeps the camera");
+  slider.value = "0";
+  slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [128, 128, 128, 255, 255, 255, 255, 255], "non-destructive");
+  assert.equal(text(f.ctx, "image-brightness-value"), "0 %");
+  hide();
+});
+
+test("a slider value outside -100…+100 is refused with its message and the image stays as it was", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  const hide = mountImage(f.ctx, decodeGrey);
+  await pick(f.ctx, greyPlate);
+  const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
+  // A range input clamps what is typed into it, so the bad value is forced past it, as a script could.
+  Object.defineProperty(slider, "value", { configurable: true, get: () => "150", set() {} });
+  slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
+  assert.equal(text(f.ctx, "image-error"), 'Brightness must be a whole percent from -100 to +100, not "150".');
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [128, 128, 128, 255, 255, 255, 255, 255]);
+  hide();
+});
+
+test("Hide on the layer shows nothing (fully transparent) and Show brings it back with its brightness; the camera stays", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  const hide = mountImage(f.ctx, decodeGrey);
+  await pick(f.ctx, greyPlate);
+  const win = f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis;
+  const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
+  slider.value = "20";
+  slider.dispatchEvent(new win.Event("input"));
+  const fits = f.log.filter((l) => l === "fit").length;
+  const eye = () => f.ctx.browser.querySelector("#layer-list .layer-visibility") as HTMLButtonElement;
+  assert.deepEqual([eye().textContent, eye().getAttribute("aria-label"), eye().getAttribute("aria-pressed")], ["Hide", "Hide Layer 1", "false"]);
+  eye().click();
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [0, 0, 0, 0, 0, 0, 0, 0], "hidden: every pixel transparent");
+  assert.deepEqual([eye().textContent, eye().getAttribute("aria-label"), eye().getAttribute("aria-pressed")], ["Show", "Show Layer 1", "true"]);
+  assert.equal(f.ctx.browser.querySelector("#layer-list li")!.className, "layer-hidden");
+  assert.equal(text(f.ctx, "image-brightness-value"), "+20 %", "hiding keeps the brightness");
+  eye().click();
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [179, 179, 179, 255, 255, 255, 255, 255]);
+  assert.equal(f.log.filter((l) => l === "fit").length, fits, "neither toggle moves the camera");
+  hide();
+});
+
+test("brightness and visibility are kept across a switch away and back", async () => {
+  resetImageWorkspace();
+  const f = fake();
+  let hide = mountImage(f.ctx, decodeGrey);
+  await pick(f.ctx, greyPlate);
+  const slider = f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement;
+  slider.value = "-30";
+  slider.dispatchEvent(new (f.ctx.toolbar.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
+  (f.ctx.browser.querySelector("#layer-list .layer-visibility") as HTMLButtonElement).click();
+  hide();
+  hide = mountImage(f.ctx, decodeGrey);
+  assert.equal((f.ctx.properties.querySelector("#image-brightness") as HTMLInputElement).value, "-30");
+  assert.equal(text(f.ctx, "image-brightness-value"), "\u221230 %");
+  assert.equal((f.ctx.browser.querySelector("#layer-list .layer-visibility") as HTMLButtonElement).textContent, "Show");
+  assert.deepEqual([...f.shown.at(-1)!.rgba], [0, 0, 0, 0, 0, 0, 0, 0]);
+  hide();
+});

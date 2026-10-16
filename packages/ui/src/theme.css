@@ -135,4 +135,11 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #image-size dt { color: #8a919c; }
 #image-size dd { margin: 0; font-family: ui-monospace, monospace; }
 #image-size-inputs { display: grid; gap: 6px; }
+#image-adjust { display: grid; grid-template-columns: auto 1fr 4.5em; align-items: center; gap: 8px; margin: 10px 0; }
+#image-adjust input { width: 100%; min-width: 0; margin: 0; }
+#image-brightness-value { font-family: ui-monospace, monospace; text-align: right; }
+#layer-list li { display: flex; align-items: center; gap: 4px; }
+#layer-list .tree-row { flex: 1; min-width: 0; }
+#layer-list .layer-hidden .tree-row { opacity: 0.5; }
+#layer-list .layer-visibility { padding: 2px 8px; font-size: 12px; }
 #image-error { color: #ff6b6b; margin: 0; white-space: pre-wrap; }

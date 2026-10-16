@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createImageDocument, setDpi, setLayerVisible } from "../src/document.ts";
-import { layerRows, parseSizeInput, sizeView } from "../src/panels.ts";
+import { createImageDocument, setBrightness, setDpi, setLayerVisible } from "../src/document.ts";
+import { brightnessView, layerRows, parseBrightnessInput, parseSizeInput, sizeView } from "../src/panels.ts";
 import { readPhysicalSize } from "../src/physical-size.ts";
 import { idat, iend, ihdr, phys, png, refusal } from "./helpers.ts";
 
@@ -51,5 +51,26 @@ test("typed sizes: positive numbers are read, anything else is refused with its 
     const r = refusal(() => parseSizeInput(bad, "DPI"));
     assert.equal(r.code, "invalid-size", bad);
     assert.equal(r.message, `DPI must be a positive number, not ${JSON.stringify(bad)}.`);
+  }
+});
+
+test("the Brightness label: a plus or minus sign, a whole percent, and 0 % with no sign", () => {
+  const doc = docFrom(png(ihdr(2, 2), idat(), iend()));
+  const id = doc.layers[0].id;
+  assert.deepEqual(brightnessView(doc, id), { percent: 0, label: "0 %" }, "no adjustment: 0 %");
+  assert.deepEqual(brightnessView(setBrightness(doc, id, 0.2), id), { percent: 20, label: "+20 %" });
+  assert.deepEqual(brightnessView(setBrightness(doc, id, -0.35), id), { percent: -35, label: "\u221235 %" });
+  assert.deepEqual(brightnessView(setBrightness(doc, id, 1), id), { percent: 100, label: "+100 %" });
+  assert.equal(refusal(() => brightnessView(doc, "nope")).code, "invalid-input");
+});
+
+test("the slider's value: whole percents from -100 to +100, and nothing else", () => {
+  // 20 % is an amount of 20 / 100 = 0.2; the ends are exactly -1 and +1.
+  assert.equal(parseBrightnessInput("20"), 0.2);
+  assert.equal(parseBrightnessInput("-100"), -1);
+  assert.equal(parseBrightnessInput("100"), 1);
+  assert.equal(parseBrightnessInput("0"), 0);
+  for (const bad of ["101", "-101", "20.5", "", " ", "abc", "NaN", "Infinity"]) {
+    assert.equal(refusal(() => parseBrightnessInput(bad)).code, "invalid-input", JSON.stringify(bad));
   }
 });

@@ -1,6 +1,7 @@
-// Browser check of the Image workspace (G1b): opening a PNG shows it at its
-// real size in the shared viewport, seen from above, with pan and zoom and
-// no orbit; switching back to Design gives back the body and its camera.
+// Browser check of the Image workspace (G1b, G1c): opening a PNG shows it at
+// its real size in the shared viewport, seen from above, with pan and zoom
+// and no orbit; switching back to Design gives back the body and its camera;
+// Brightness changes the colours on screen at once and Hide shows nothing.
 // The test image is made here: 200 × 100 pixels at 254 DPI (10 px per mm),
 // in four coloured quarters, so where each colour lands on screen shows the
 // image is the right way up and the right shape.
@@ -98,6 +99,24 @@ const sheetOnScreen = () =>
     const xs = [...Array(c.width).keys()].filter((x) => isSheet(x, cy));
     const ys = [...Array(c.height).keys()].filter((y) => isSheet(cx, y));
     return { width: xs.at(-1) - xs[0] + 1, height: ys.at(-1) - ys[0] + 1, canvas: [c.width, c.height] };
+  });
+
+/** The grey sheet's extent on screen: pixels clearly lighter than the background (20, 22, 26), along the middle row and column. */
+const sheetOnScreenGrey = () =>
+  page.evaluate(() => {
+    const src = document.querySelector("#viewport canvas");
+    const c = document.createElement("canvas");
+    c.width = src.width;
+    c.height = src.height;
+    const ctx = c.getContext("2d");
+    ctx.drawImage(src, 0, 0);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    const isSheet = (x, y) => d[4 * (y * c.width + x)] > 60;
+    const cy = Math.floor(c.height / 2);
+    const cx = Math.floor(c.width / 2);
+    const xs = [...Array(c.width).keys()].filter((x) => isSheet(x, cy));
+    const ys = [...Array(c.height).keys()].filter((y) => isSheet(cx, y));
+    return { left: xs[0], right: xs.at(-1), top: ys[0], bottom: ys.at(-1) };
   });
 
 let failed = false;
@@ -238,6 +257,55 @@ try {
     await page.waitForFunction(() => document.querySelector("#image-error")?.textContent === "This file is not a PNG or JPEG image.");
     // The image that was open stays open.
     assert.equal(await page.textContent("#image-mm"), "40 × 20 mm");
+  });
+
+  // A plain 50 % grey image (128, 128, 128), 200 × 100 at 254 DPI.
+  const grey = makePng(200, 100, () => [128, 128, 128, 255], 10000);
+  await page.setInputFiles("#image-file", { name: "grey.png", mimeType: "image/png", buffer: grey });
+  await page.waitForFunction(() => document.querySelector("#image-mm")?.textContent === "20 × 10 mm");
+  await settle();
+
+  await check("50 % grey shows as 128 grey, and Brightness +20 % shows it as 179 at once, the camera unmoved", async () => {
+    near(await pixel(0.5, 0.5), [128, 128, 128], "before");
+    const before = await sheetOnScreenGrey();
+    await page.$eval("#image-brightness", (el) => {
+      el.value = "20";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    assert.equal(await page.textContent("#image-brightness-value"), "+20 %");
+    await page.waitForTimeout(100);
+    // +20 % is an offset of round(0.2 × 255) = 51 on each channel: 128 + 51 = 179.
+    near(await pixel(0.5, 0.5), [179, 179, 179], "at +20 %");
+    assert.deepEqual(await sheetOnScreenGrey(), before, "the sheet did not move or change size");
+  });
+
+  await check("the slider moves by keyboard too: Home goes to −100 % (black), End to +100 % (white)", async () => {
+    await page.focus("#image-brightness");
+    await page.keyboard.press("Home");
+    assert.equal(await page.textContent("#image-brightness-value"), "\u2212100 %");
+    await page.waitForTimeout(100);
+    near(await pixel(0.5, 0.5), [0, 0, 0], "at -100 %");
+    await page.keyboard.press("End");
+    assert.equal(await page.textContent("#image-brightness-value"), "+100 %");
+    await page.waitForTimeout(100);
+    near(await pixel(0.5, 0.5), [255, 255, 255], "at +100 %");
+    await page.$eval("#image-brightness", (el) => {
+      el.value = "20";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
+
+  await page.screenshot({ path: "e2e/image-brightness.png" });
+
+  await check("Hide on the layer shows the empty viewport's dark background; Show brings it back at +20 %", async () => {
+    await page.click("#layer-list .layer-visibility");
+    await page.waitForTimeout(100);
+    assert.equal(await page.textContent("#layer-list .layer-visibility"), "Show");
+    near(await pixel(0.5, 0.5), [20, 22, 26], "hidden");
+    await page.click("#layer-list .layer-visibility");
+    await page.waitForTimeout(100);
+    assert.equal(await page.textContent("#layer-list .layer-visibility"), "Hide");
+    near(await pixel(0.5, 0.5), [179, 179, 179], "shown again");
   });
 
   await check("no page errors", async () => assert.deepEqual(errors, []));

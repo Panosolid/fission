@@ -43,6 +43,23 @@ export function sizeView(doc: ImageDocument): SizeView {
   };
 }
 
+/** The layer's brightness as a whole percent for the slider (-100 to +100), and its label ("+20 %", "0 %", "-35 %"). */
+export function brightnessView(doc: ImageDocument, layerId: string): { percent: number; label: string } {
+  const layer = doc.layers.find((l) => l.id === layerId);
+  if (!layer) throw new ImageError("invalid-input", `There is no layer ${JSON.stringify(layerId)}.`);
+  const amount = layer.adjustments.find((a) => a.type === "brightness")?.amount ?? 0;
+  const percent = Math.round(amount * 100);
+  return { percent, label: `${percent > 0 ? "+" : percent < 0 ? "\u2212" : ""}${Math.abs(percent)} %` };
+}
+
+/** The slider's value as a brightness amount (-1 to +1); anything but a whole percent from -100 to +100 is refused. */
+export function parseBrightnessInput(text: string): number {
+  const t = text.trim();
+  const n = t === "" ? NaN : Number(t);
+  if (!Number.isInteger(n) || n < -100 || n > 100) throw new ImageError("invalid-input", `Brightness must be a whole percent from -100 to +100, not ${JSON.stringify(text)}.`);
+  return n / 100;
+}
+
 /** Reads a number the user typed into DPI or mm per pixel; anything that is not a positive number is refused with a message. */
 export function parseSizeInput(text: string, what: "DPI" | "mm per pixel"): number {
   const t = text.trim();
