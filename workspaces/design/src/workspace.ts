@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type Selected, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, partOf, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -16,16 +16,7 @@ import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { designReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
-
-/** Hands `bytes` to the browser as a file download. */
-function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
-  const url = URL.createObjectURL(new Blob([bytes], { type: "model/stl" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
+import { DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
 /**
  * What the user last entered (as typed), kept while other workspaces are
@@ -171,6 +162,17 @@ function mount(ctx: WorkspaceContext): () => void {
     viewport.showSelection(highlightOf(items, featureId));
     lightRows(ctx.browser, doc, items);
     panel.showSelection(selectionRows(items, featureId, lastView));
+    // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
+    const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
+    panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
+  }
+
+  /** Runs a registered verb on these targets and shows what it said. */
+  async function runAction(id: string, targets: readonly Selected[]) {
+    const action = ctx.actions.get(id);
+    if (!action) return panel.showActionNote(`No action ${id} is registered.`, true);
+    const outcome = await action.run(targets, ctx);
+    if (shown) panel.showActionNote(outcome.message, outcome.bad);
   }
 
   // The body is built from the part's feature intent (document.ts).
@@ -180,9 +182,6 @@ function mount(ctx: WorkspaceContext): () => void {
   function markStale(failed = false) {
     panel.markStale(ctx.graph.isStale(PART_VIEW), failed);
   }
-
-  /** The STL-precision overlay: the whole part, while its last export warned. */
-  const STL_OVERLAY = "design.stl-precision";
 
   /** The command the toolbar and the inputs stand for: set_part with this shape and these sizes. */
   function partCommand(): Command {
@@ -197,7 +196,11 @@ function mount(ctx: WorkspaceContext): () => void {
    * one shows its message, as when typed).
    */
   function run(command: Command) {
-    if (command.op === "export_stl") return exportStl();
+    // The whole part's STL: the same verb a selected body offers, from the registry.
+    if (command.op === "export_stl") {
+      const doc = ctx.project.workspaces.design as DesignDocument | undefined;
+      return runAction(DOWNLOAD_STL, doc ? [partBody(doc)] : []);
+    }
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
     shape = command.shape as ShapeKind;
     for (const [i, key] of SIZE_KEYS.entries()) if (typeof command[key] === "number") inputs[i].value = String(command[key]);
@@ -259,22 +262,6 @@ function mount(ctx: WorkspaceContext): () => void {
     }
   }
 
-  async function exportStl() {
-    const kind = shape;
-    try {
-      const doc = documentFor(partCommand());
-      const file = await kernel.call("export_stl", specOf(doc, lastFeature(doc)), kind);
-      download(file.bytes, `fission-${kind}.stl`);
-      panel.showStlNote(file.warning ?? "", Boolean(file.warning));
-      // Mark the part on screen too: every face moves in single precision.
-      if (file.warning)
-        viewport.setOverlay({ id: STL_OVERLAY, label: "Too big for an accurate STL", detail: file.warning, marks: [{ target: { body: true }, severity: "warning" }] });
-      else viewport.clearOverlay(STL_OVERLAY);
-    } catch (e) {
-      panel.showStlNote(e instanceof Error ? e.message : String(e), true);
-    }
-  }
-
   // Picking (17b): a click on a face selects it, Shift adds, empty space or Escape clears.
   viewport.onPick = (pick) => {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
@@ -314,6 +301,7 @@ export const designWorkspace: WorkspacePlugin = {
   status: "working",
   representations: { produces: ["solid", "mesh", "outline"], accepts: [] },
   registerRepresentations: registerDesign,
+  registerActions: (registry) => registerDesignActions(registry),
   readData: readDesignDocument,
   commands: DESIGN_COMMANDS,
   mount,

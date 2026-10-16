@@ -139,10 +139,11 @@ A workspace is a `WorkspacePlugin` with these parts:
 
 - `id`, `title`, `summary` and `status` ("working" or "placeholder");
 - `representations: { produces, accepts }`, plus `registerRepresentations(registry, kernel)`, which the shell calls once at start-up;
+- `registerActions(registry)`, which registers the verbs it offers on a selection (`actions.ts`: each verb names the selection kinds it takes, the representation it works on and whether it takes one thing or many); the shell calls it once at start-up, and whatever shows the selection offers `ctx.actions.actionsFor(...)`. Placeholders register none;
 - `readData(data)`, which checks its own part of a loaded project and brings it up to date;
 - `mount(ctx)`, which fills the layout slots around the shared viewport (`ctx.toolbar` above, `ctx.browser` left, `ctx.properties` right; placeholders show their page in `properties`) and returns a function that hides it again and leaves every slot empty.
 
-`ctx` holds the project, the kernel, the selection, the history, the dependency graph, the shared viewport and the registry.
+`ctx` holds the project, the kernel, the selection, the history, the dependency graph, the shared viewport, the representation registry and the action registry.
 
 A workspace imports only `@fission/core`, `@fission/ui` and `@fission/viewport` entry points, plus its own files. It never imports another workspace or a package's internals. `packages/testing/test/workspace-api.test.ts` checks this, and checks that each workspace's declarations are true.
 

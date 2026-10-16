@@ -716,9 +716,9 @@ try {
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
 
-  /** Clicks the toolbar's STL button; returns the file's name and its triangles (f32 corners). */
-  const downloadStl = async () => {
-    const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#toolbar [data-op=export_stl]")]);
+  /** Clicks the toolbar's STL button (or `button`); returns the file's name and its triangles (f32 corners). */
+  const downloadStl = async (button = "#toolbar [data-op=export_stl]") => {
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.click(button)]);
     const bytes = readFileSync(await dl.path());
     const n = bytes.readUInt32LE(80);
     const tris = [];
@@ -747,7 +747,27 @@ try {
     assert.equal(f.size, 684);
     assert.equal(f.tris.length, 12);
     assert.equal(stlVolume(f.tris), 24000);
-    assert.equal(await text("stl-note"), "");
+    assert.equal(await text("action-note"), "");
+  });
+
+  await check("a selected body offers Download STL from the action registry, and it saves the same file", async () => {
+    // Verbs, not apps (X1): nothing selected, no verbs; Body 1 selected,
+    // the registry's Download STL; it gives the hand-worked box file above.
+    const verbs = () => page.$$eval("#selection-actions button", (bs) => bs.map((b) => [b.textContent, b.dataset.action]));
+    assert.equal(await page.isVisible("#selection-actions"), false);
+    await page.click("#browser [data-node=body-1]");
+    await page.waitForFunction(() => document.body.dataset.selection === "body:feature-1");
+    assert.deepEqual(await verbs(), [["Download STL", "design.download-stl"]]);
+    assert.equal(await page.isVisible("#selection-actions"), true);
+    const f = await downloadStl("#selection-actions [data-action='design.download-stl']");
+    assert.equal(f.name, "fission-box.stl");
+    assert.equal(f.size, 684);
+    assert.equal(stlVolume(f.tris), 24000); // 40 × 30 × 20, exact in single precision
+    assert.equal(await text("action-note"), "");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.body.dataset.selection === "");
+    assert.deepEqual(await verbs(), []);
+    assert.equal(await page.isVisible("#selection-actions"), false);
   });
 
   await check("a cylinder's STL is the prism the viewer shows", async () => {
@@ -775,7 +795,7 @@ try {
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
     const f = await downloadStl();
     assert.equal(f.tris.length, 12);
-    assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 1\.250e-2 mm/);
+    assert.match(await text("action-note"), /single-precision numbers: this part's corners move by up to 1\.250e-2 mm/);
     // The analysis overlay marks the part itself, with a legend.
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.overlays), "design.stl-precision");
     assert.equal(await page.textContent(".overlay-legend"), "Too big for an accurate STL");
@@ -805,7 +825,7 @@ try {
     // Only the red X axis line is left (a few dozen pixels).
     assert.ok((await amber()) < 1000, `nothing amber once the overlay is cleared (${await amber()} px)`);
     await downloadStl();
-    assert.equal(await text("stl-note"), ""); // the warning goes once the part fits again
+    assert.equal(await text("action-note"), ""); // the warning goes once the part fits again
   });
 
   await check("the switcher lists the ten workspaces, Design first, Design and Image working", async () => {
