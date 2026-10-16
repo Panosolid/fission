@@ -4,15 +4,23 @@
 // from the first click to the result; `judge` gives the verdict against the
 // journey's click and time limits. Journeys waiting for a workspace are
 // listed as PENDING and never pass.
+// Then each journey is compared with its baseline in tests/baseline.json
+// (X8b, `compareToBaseline`): an extra click always fails; a slowest walk more
+// than 15% over fails only with JOURNEY_NIGHTLY=1 (the nightly run), since
+// one PR run's time is too noisy to judge. JOURNEY_REPORT=<file> writes the
+// baseline lines there for the nightly summary.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { chromium } from "playwright";
 import { preview } from "vite";
-import { MAGIC_JOURNEYS, judge, reportLine } from "../../../packages/testing/src/magic.ts";
+import { MAGIC_JOURNEYS, baselineLine, compareToBaseline, judge, parseBaselines, reportLine } from "../../../packages/testing/src/magic.ts";
 
 /** Walks per journey; the slowest one is judged, so a limit holds every time. */
 const WALKS = 5;
+const NIGHTLY = process.env.JOURNEY_NIGHTLY === "1";
+const baselines = parseBaselines(JSON.parse(readFileSync(new URL("../../../tests/baseline.json", import.meta.url), "utf8")).journeys);
 
 const server = await preview({ preview: { port: 4180, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4180/";
@@ -156,6 +164,43 @@ try {
       await page.close();
     }
   });
+
+  await check("deliberate breaks are flagged against the baseline: one extra click, a slowest walk 16.5% over", async () => {
+    const journey = MAGIC_JOURNEYS.find((j) => j.name === "Design: shape to STL");
+    const base = baselines.get(journey.name);
+    const page = await fresh();
+    try {
+      const run = await designShapeToStl(page, { extraClick: true });
+      const extra = compareToBaseline(journey, { clicks: run.clicks, slowestMs: run.ms }, { ...base, slowestMs: run.ms });
+      assert.equal(extra.kind, "flag");
+      assert.deepEqual(extra.flags.map((f) => f.kind), ["clicks"]);
+      // A real walk against baselines that put it at 0.9× and 1.1× of the 15% margin.
+      const walked = { clicks: 3, slowestMs: run.ms };
+      assert.equal(compareToBaseline(journey, walked, { clicks: 3, slowestMs: run.ms / 1.135 }).kind, "ok");
+      const slow = compareToBaseline(journey, walked, { clicks: 3, slowestMs: run.ms / 1.165 });
+      assert.deepEqual(slow.kind === "flag" && slow.flags.map((f) => f.kind), ["time"]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  const lines = [];
+  await check(`against tests/baseline.json: no extra click${NIGHTLY ? ", slowest walk at most 15% over" : " (time judged nightly only)"}`, async () => {
+    const bad = [];
+    for (const journey of MAGIC_JOURNEYS) {
+      const m = journey.status === "ready" ? (measured[journey.name] ?? null) : null;
+      const b = baselines.get(journey.name);
+      const c = compareToBaseline(journey, m && { clicks: m.clicks, slowestMs: m.slowestMs }, b);
+      lines.push(baselineLine(journey, m, b, c));
+      if (c.kind === "flag" && c.flags.some((f) => f.kind !== "time" || NIGHTLY)) bad.push(lines.at(-1));
+    }
+    console.log(lines.map((l) => `  ${l}`).join("\n"));
+    assert.deepEqual(bad, []);
+  });
+  if (process.env.JOURNEY_REPORT) {
+    mkdirSync(dirname(process.env.JOURNEY_REPORT), { recursive: true });
+    writeFileSync(process.env.JOURNEY_REPORT, lines.join("\n") + "\n");
+  }
 
   await check("no page errors", async () => assert.deepEqual(errors, []));
 } finally {

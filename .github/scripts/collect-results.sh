@@ -76,6 +76,16 @@ add_run() {
     echo "$today,$short,$BRANCH,$finished,$MUTANT_SHARDS,$caught,$missed,$timeout,$unviable,$new_missed,$RUN_URL" >>mutants/log.csv
   fi
 
+  # The magic-moment journeys against tests/baseline.json: the latest run's
+  # lines, and every FLAG line ever in journeys/flags.txt.
+  if [ -f "$IN/journeys/report.txt" ]; then
+    mkdir -p journeys
+    { echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"; cat "$IN/journeys/report.txt"; } >journeys/latest.txt
+    grep '^FLAG' "$IN/journeys/report.txt" | sed "s|^|$today,$short,$BRANCH,|" >>journeys/flags.txt
+  elif [ -d journeys ]; then
+    echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"$'\n'"no report: the journeys job stopped before the walk" >journeys/latest.txt
+  fi
+
   awk -F, -v now="$today UTC" 'NR > 1 {
       rounds++; cases += $3; fails += ($4 == "FAIL"); bodies += $5; dis += $6; secs += $7
       if ($4 == "FAIL" || $6 > 0) last = $1 " (seed " $2 ($9 ? ", commit " $9 " on " $10 : "") ")"
@@ -106,6 +116,9 @@ add_run() {
       print "  survivors not in the previous complete run: " $10
       print "mutants/missed.txt lists every survivor; mutants/log.csv has one line per night."
     }' >>summary.txt
+  fi
+  if [ -f journeys/latest.txt ]; then
+    { echo ""; echo "Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):"; sed 's/^/  /' journeys/latest.txt; echo "journeys/flags.txt lists every FLAG line so far."; } >>summary.txt
   fi
 }
 
