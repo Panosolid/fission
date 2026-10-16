@@ -11,7 +11,7 @@ Read with the root CLAUDE.md (top rules, general testing rules, git workflow). w
 - `packages/testing`: the Workspace API boundary test, the "zero exports" journeys (`journeys/*.journey.ts`, on the real kernel through `src/node-kernel.ts`; `JOURNEYS`/`ROUND_TRIPS` list the ones waiting), and DRAFT harness interfaces.
 - `packages/ai`: the optional AI assistant (docs/ai.md): providers (placeholders), `askForCommands`, `buildContext`, specialist models and per-workspace plans; the panel itself is `apps/fission/src/assistant.ts`.
 - `packages/storage`, `packages/community`: placeholders (interfaces only; every function throws "not implemented").
-- `workspaces/design`: the CAD workspace (`workspace.ts`; `profiles.ts` ready-made outlines until the sketcher). `workspaces/render`, `simulate`, `manufacture`, `laser`, `slice`, `circuit`, `vector`, `image`, `layout`: placeholders.
+- `workspaces/design`: the CAD workspace (`workspace.ts`; `profiles.ts` ready-made outlines until the sketcher). `workspaces/image`: its page is still a placeholder, but its pure core is built (G1a: `physical-size.ts` file headers, `limits.ts`, `document.ts`, `adjust.ts`; Pillow oracle fixtures in `test/fixtures/`, a seeded fuzz in `test/fuzz.test.ts`). `workspaces/render`, `simulate`, `manufacture`, `laser`, `slice`, `circuit`, `vector`, `layout`: placeholders.
 - `apps/fission`: the app shell (`src/main.ts`: top bar, workspace switcher, the toolbar/browser/properties slots around the shared viewport; `#design`, `#slice`… links open a workspace), `e2e/smoke.mjs` browser test, `e2e/dump-viewer.mjs` browser check of the kernel's failure-dump page (both run by `npm run e2e`).
 
 ## Commands

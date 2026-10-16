@@ -226,9 +226,31 @@ Vector workspace (logo / 2D design; starts after CAD step 31: reuses the sketche
 - [ ] V2. Boolean path operations, text to outlines, SVG import and export
 - [ ] V3. A graphic becomes, live-linked: an emboss or deboss in Design, an engraving or cut in Laser, a decal in Render, silkscreen in Circuit
 
-Image workspace (photo / texture editing; starts after CAD step 33 and Render R1–R2)
-- [ ] G1. Layers, masks, adjustments, brushes, selections; PNG and JPEG import and export with physical size (DPI or mm per pixel)
+Image workspace (photo / texture editing). The base (G1, substeps in CLAUDE.md) started early on the owner's request (2026-10-16) and runs alongside the CAD steps without touching the kernel; G2 onwards starts after CAD step 33 and Render R1–R2.
+
+How Image stays integrated (rules in docs/integration.md):
+- It declares what it produces and accepts: Image (pixels with mm per pixel) out, Image in (renders from Render, pages from Layout). Every image carries its physical size from the moment it opens, so Laser, Slice and Render never ask "how big is this?".
+- One shared viewport (an image is a flat sheet at real size, so it can sit next to or on a part), one project file, one selection, one undo history (step 20), one units system.
+- One owner per value: Image owns the pixels and the physical size. A Laser engraving or a Render texture holds a live link to the layer, never a copy; resizing it from Laser is a previewed command for Image.
+- Edits are non-destructive: the original pixels are never changed, adjustments are data on the layer, so every link always rebuilds from the original.
+
+Getting to a professional editor:
+- [ ] G1. The base: open a PNG or JPEG at its real size, pan and zoom, one layer, Brightness (substeps G1a–G1d in CLAUDE.md)
 - [ ] G2. An image becomes: a texture or material map in Render, a raster engraving in Laser, a lithophane in Slice, traced outlines in Vector or a Design sketch
+- [ ] G3. Images in the project file: pixels stored as binary assets beside the JSON (a format bump with a migration), the original kept, adjustments as data; save then open gives identical pixels
+- [ ] G4. The non-destructive stack: many layers, opacity and blend modes, adjustment layers (levels, curves, hue and saturation, and Exposure in linear light beside the simple Brightness), masks
+- [ ] G5. Colour management: embedded ICC profiles (sRGB, Display P3) read and honoured, maths in linear light where it must be, a proof view for print and engraving
+- [ ] G6. 16 bits per channel and floating-point images (16-bit PNG; HDR renders from Render)
+- [ ] G7. Selections (rectangle, ellipse, lasso, by colour), brushes, crop, rotate and resize with named resampling filters
+- [ ] G8. Export PNG and JPEG with the physical size written back (pHYs, JFIF density), EXIF resolution read on import, and copy-out as PNG through the representation registry
+
+Testing Image as heavily as the kernel:
+- Hand-worked tests with the working shown (DPI ↔ mm per pixel, checksums, pixel values), 0.9×/1.1× boundary tests on every limit, and a test for each way a file can be broken, asserting its own message.
+- [ ] GT1. Seeded fuzzing of the file readers in `npm test` (cut-off and bit-flipped files must give an `ImageError`, never another exception, never a hang) (G1a)
+- [ ] GT2. An oracle, as OpenCascade is for the kernel: Pillow writes reference files and its own reading of them (`prototypes/oracle/image_fixtures.py`, results committed in `workspaces/image/test/fixtures/`), and our readers must agree (G1a); later every adjustment is compared pixel by pixel against Pillow or another trusted library
+- [ ] GT3. A nightly long fuzz of the readers in "Random testing", with failing files saved to `tests/regressions/`
+- [ ] GT4. Mutation testing of the Image modules (StrykerJS), every surviving mutant killed or explained, like the kernel's
+- [ ] GT5. Browser tests read pixels back from the screen (e2e), not just the numbers in the panel
 
 Layout workspace (graphic design: posters, social posts, slides; starts after CAD step 33, once Vector V1–V2 and Image G1 work). Placeholder added on the owner's request (pages, switcher, tests, this section)
 - [ ] Y1. Pages with real sizes (mm for print, pixels for screens) and preset formats (A-sizes, square and portrait posts, 16:9 slides); text with fonts, shapes, grids, guides and snapping; our own starter templates
