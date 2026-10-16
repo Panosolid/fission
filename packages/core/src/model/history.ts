@@ -34,6 +34,15 @@ export interface History {
   redo(): string | null;
   /** Forgets every step: the project as it is now becomes the start (a project opened or started afresh). */
   reset(): void;
+  /**
+   * Takes the project as it is now into the present, without a new step:
+   * for a change nobody made, which Undo must not take back (a workspace
+   * filling in its defaults the first time it is shown). Returns false when
+   * there was nothing to take in, or during a restore. A present step left
+   * the same as the state before it has nothing to undo, so it is removed.
+   * The next record starts a step of its own (no merging across this).
+   */
+  amend(): boolean;
   /** Called once after every change to what can be undone or redone; returns an unsubscribe. */
   onChange(listener: () => void): () => void;
 }
@@ -148,6 +157,19 @@ export function createHistory(options: HistoryOptions): History {
     reset() {
       start();
       changed();
+    },
+    amend() {
+      if (restoring) return false;
+      const snapshot = options.capture();
+      if (snapshot === entries[index].snapshot) return false;
+      entries[index] = { ...entries[index], snapshot };
+      if (index > 0 && snapshot === entries[index - 1].snapshot) {
+        entries.splice(index, 1);
+        index--;
+      }
+      lastWasRecord = false;
+      changed();
+      return true;
     },
     onChange(listener) {
       listeners.add(listener);

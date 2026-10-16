@@ -111,9 +111,28 @@ test("clashes: a key the browser keeps (new document, close, new tab)", () => {
   for (const r of BROWSER_RESERVED) assert.equal(parseChord(r), r);
 });
 
+test("undo and redo (step 20b): Ctrl or Cmd with Z undoes, with Shift+Z or Y redoes, never while typing", () => {
+  const t = new ShortcutTable(SHELL_SHORTCUTS, [{ id: "design", shortcuts: design }, { id: "image", shortcuts: image }]);
+  const run = (key: string, mods: Partial<KeyPress>) => t.lookup(chordOf(press(key, mods))!, ["design"])?.id ?? null;
+  // Worked out from the browser's key events: Ctrl+Z on Windows and Linux and
+  // Cmd+Z on a Mac both send key "z"; Shift turns it into "Z"; Ctrl+Y sends "y".
+  assert.equal(run("z", { ctrlKey: true }), "undo");
+  assert.equal(run("z", { metaKey: true }), "undo");
+  assert.equal(run("Z", { ctrlKey: true, shiftKey: true }), "redo");
+  assert.equal(run("Z", { metaKey: true, shiftKey: true }), "redo");
+  assert.equal(run("y", { ctrlKey: true }), "redo-y");
+  // Not undo: Z alone, Alt+Z, Ctrl+Alt+Z.
+  assert.equal(run("z", {}), null);
+  assert.equal(run("z", { altKey: true }), null);
+  assert.equal(run("z", { ctrlKey: true, altKey: true }), null);
+  // In a text field the browser's own undo of the typing runs instead.
+  for (const id of ["undo", "redo", "redo-y"]) assert.equal(t.of("app").find((e) => e.id === id)?.inText, undefined, id);
+  assert.deepEqual(t.clashes(), []);
+});
+
 test("the help list puts the workspaces on screen first, then the app, then the rest; scopes with no keys left out", () => {
   const t = new ShortcutTable(SHELL_SHORTCUTS, [{ id: "design", shortcuts: design }, { id: "slice" }, { id: "image", shortcuts: image }]);
-  assert.deepEqual(t.help(["image"]).map((g) => [g.scope, g.onScreen, g.entries.length]), [["image", true, 3], ["app", false, 2], ["design", false, 2]]);
+  assert.deepEqual(t.help(["image"]).map((g) => [g.scope, g.onScreen, g.entries.length]), [["image", true, 3], ["app", false, 5], ["design", false, 2]]);
   assert.deepEqual(t.help(["slice", "design"]).map((g) => g.scope), ["design", "app", "image"]);
   assert.deepEqual(t.help([]).map((g) => g.scope), ["app", "design", "image"]);
 });

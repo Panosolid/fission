@@ -1,6 +1,6 @@
 // Random edit/undo/redo sessions on the one history (step 20a), on a real
 // project: Design's real part document, captured with projectToJson and put
-// back with projectFromJson and Design's own reader, as the shell will. Each
+// back with projectFromJson and Design's own reader, as the shell does. Each
 // step is checked against a simple model of the rules kept as two stacks
 // (what undo would put back, what redo would), written independently of the
 // history's one-list-and-a-pointer code. Seeded: the same seed gives the
@@ -50,13 +50,13 @@ function session(seed: bigint, steps: number) {
   let undos: Undo[] = [];
   let redos: { after: number; label: string }[] = [];
   let lastWasRecord = false;
-  const counts = { edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0 };
+  const counts = { edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0 };
 
   for (let i = 0; i < steps; i++) {
     const at = `seed ${seed} step ${i}`;
     t += Math.floor(r.next() * 2 * MERGE);
     const n = r.next();
-    if (n < 0.5) {
+    if (n < 0.46) {
       // An edit: mostly a new width, sometimes the same, sometimes back to the one before.
       const key = pick(r, KEYS);
       const label = key ? `Change ${key}` : "Change shape";
@@ -89,6 +89,21 @@ function session(seed: bigint, steps: number) {
           counts.edits++;
         }
         present = w;
+      }
+    } else if (n < 0.5) {
+      // A change nobody made (a workspace filling in a default when first
+      // shown): taken into the present, not a step; back to the state before
+      // the present step, that step goes. The redo stays.
+      const w = r.next() < 0.1 ? present : r.next() < 0.3 && undos.length ? undos[undos.length - 1].before : 1 + Math.floor(r.next() * 20);
+      project = projectWith(w);
+      assert.equal(h.amend(), w !== present, at);
+      if (w !== present) {
+        if (undos.length && undos[undos.length - 1].before === w) {
+          undos.pop();
+          counts.amendedAway++;
+        } else counts.amends++;
+        present = w;
+        lastWasRecord = false;
       }
     } else if (n < 0.53) {
       // A width a file can't hold: refused while capturing, nothing moves.

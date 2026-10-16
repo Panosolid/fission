@@ -13,7 +13,7 @@ import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
 import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
-import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS, ShortcutTable, type Chord, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS, ShortcutTable, type Chord, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, createHistory, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { changeNote, shortcutList, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -64,10 +64,10 @@ const viewer = new Viewer($("viewport"));
 const pane = paneViewports(viewer);
 const ctx: WorkspaceContext = {
   project: emptyProject(),
-  projectChanged: () => autosave?.changed(),
+  projectChanged: (label, mergeKey) => projectChanged(label, mergeKey),
   kernel,
   selection: createSelection(),
-  history: historyNotBuilt,
+  history: null!, // created just below: it captures the project as it starts
   graph: new DependencyGraph(),
   // The page's first slots; each workspace gets slots of its own (paneCtx, X7).
   toolbar: $("toolbar"),
@@ -81,6 +81,34 @@ const ctx: WorkspaceContext = {
   openWorkspace: (id) => openFrom("main", id),
   workspaceTitle,
 };
+
+// The one undo history (step 20): whole-project snapshots, put back the way
+// a file is opened, then every workspace on screen is mounted afresh on it.
+ctx.history = createHistory({ capture: () => projectToJson(ctx.project), restore: restoreSnapshot });
+/** Mounts in progress: a change a workspace makes while being mounted is a default filled in, not an undo step. */
+let mounting = 0;
+function projectChanged(label = "Edit", mergeKey?: string) {
+  autosave?.changed();
+  if (mounting === 0) ctx.history.record(label, mergeKey);
+}
+/** Runs a show or mount; once the last one ends, takes whatever defaults the workspaces filled in into the present undo step. */
+function mountingDone<T>(run: () => T): T {
+  mounting++;
+  try {
+    return run();
+  } finally {
+    if (--mounting === 0) ctx.history.amend(); // ignored while an undo is putting a snapshot back
+  }
+}
+/** Puts an undo snapshot back: read like an opened file, so a snapshot that doesn't read cleanly leaves everything as it was. */
+function restoreSnapshot(text: string) {
+  const project = projectFromJson(text, workspaces);
+  ctx.project = project;
+  pool.forgetAll(); // every warm workspace showed the project as it was
+  show(current);
+  if (split) mountSplit(split.id);
+  autosave?.changed();
+}
 
 // The View group: the shell owns each pane's view buttons, over its
 // viewport's corner. Fit frames the selection when there is one (from the
@@ -227,6 +255,9 @@ const markTab = workspaceSwitcher(
 );
 
 function show(page: Page) {
+  mountingDone(() => showPage(page));
+}
+function showPage(page: Page) {
   // Choosing the workspace that is in the second pane swaps the two panes.
   const swap = split?.id === page ? current : null;
   const workspace = workspaces.find((w) => w.id === page);
@@ -280,7 +311,7 @@ function paneCtx(pane: PaneId, slots: Slots): WorkspaceContext {
     set changeNotes(n) {
       ctx.changeNotes = n;
     },
-    projectChanged: () => ctx.projectChanged(),
+    projectChanged: (label, mergeKey) => ctx.projectChanged(label, mergeKey),
     kernel: ctx.kernel,
     selection: ctx.selection,
     history: ctx.history,
@@ -309,6 +340,9 @@ function fillSplitChoice() {
 }
 /** Shows workspace `id` in the second pane, opening the split if it is closed (the camera of an open one stays). */
 function mountSplit(id: WorkspaceId) {
+  mountingDone(() => mountSplitPane(id));
+}
+function mountSplitPane(id: WorkspaceId) {
   const workspace = workspaces.find((w) => w.id === id);
   if (!workspace) return;
   if (!split) {
@@ -449,6 +483,7 @@ function openProject(text: string) {
   pool.forgetAll(); // every warm workspace showed the old project
   show(current); // mounts the workspace on the opened project
   if (split) mountSplit(split.id); // and the second one
+  ctx.history.reset(); // a new start: nothing from the old project to undo
   fileStatus("");
 }
 $("open-file").addEventListener("change", async () => {
@@ -521,6 +556,9 @@ const panesInUse = (): PaneId[] => (activePane === "split" ? ["split", "main"] :
 const inText = (t: EventTarget | null) => t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])") !== null;
 const shellShortcuts: Record<string, (e: Event) => boolean> = {
   shortcuts: () => (showShortcuts(), true),
+  undo: () => (undoRedo("undo"), true),
+  redo: () => (undoRedo("redo"), true),
+  "redo-y": () => (undoRedo("redo"), true),
   "paste-files": (e) => {
     const files = [...((e as ClipboardEvent).clipboardData?.files ?? [])];
     if (files.length === 0) return false; // text pastes as usual
@@ -559,6 +597,32 @@ function showShortcuts() {
   shortcutDialog.querySelector(".close")!.addEventListener("click", () => shortcutDialog.close());
   shortcutDialog.showModal();
 }
+// Undo and Redo (step 20b): the top bar's buttons and the keys above. Each
+// button says what it would take back or do again, and is off when there is
+// nothing; a snapshot that can't be put back says why and moves nothing.
+function undoRedo(which: "undo" | "redo") {
+  try {
+    ctx.history[which]();
+  } catch (e) {
+    return fileStatus(`Couldn't ${which}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  ctx.history.amend(); // defaults the remounted workspaces filled in
+}
+function showUndoRedo() {
+  const buttons = [
+    ["undo", "Undo", ctx.history.undoLabel(), "Mod+Z"],
+    ["redo", "Redo", ctx.history.redoLabel(), "Mod+Shift+Z"],
+  ] as const;
+  for (const [id, verb, label, chord] of buttons) {
+    const b = $<HTMLButtonElement>(id);
+    b.disabled = label === null;
+    b.title = label === null ? `Nothing to ${id}` : `${verb} ${label} (${chordLabel(chord, mac)})`;
+  }
+}
+$("undo").addEventListener("click", () => undoRedo("undo"));
+$("redo").addEventListener("click", () => undoRedo("redo"));
+ctx.history.onChange(showUndoRedo);
+showUndoRedo();
 // One assistant panel for every workspace, beside the viewport.
 $("assistant-toggle").addEventListener("click", () => {
   const panel = $("assistant");
@@ -597,7 +661,8 @@ async function start() {
   } catch (e) {
     canKeep = false;
     fileStatus(`Projects can't be kept in this browser (${why(e)}). Use Save to keep your work as a file.`);
-    return show(fromHash());
+    show(fromHash());
+    return ctx.history.reset();
   }
   try {
     if (newest) {
@@ -610,6 +675,10 @@ async function start() {
     fileStatus(`Couldn't open the last project (${why(e)}), so a new one was started. The old one is still kept in this browser.`);
   }
   show(fromHash());
+  ctx.history.reset(); // the project as it opened is the start
 }
 void start();
-ctx.kernel.call("kernel_version").then((v) => ($("version").textContent = `kernel v${v}`));
+ctx.kernel.call("kernel_version").then((v) => {
+  $("version").textContent = `kernel v${v}`;
+  $("version").parentElement!.title = `Fission, kernel v${v}`; // where the version shows when the bar has no room for it
+});

@@ -1248,6 +1248,14 @@ try {
       for (const t of await wide.$$eval("#workspaces [role=tab]", (els) => els.map((e) => e.getBoundingClientRect().toJSON()))) {
         assert.ok(t.right <= nav.right + 0.5, "every tab shows");
       }
+      // Again in DejaVu Sans, the wide font CI's Linux uses for system-ui: the
+      // row once fitted locally and overflowed there (20b's Undo/Redo).
+      await wide.addStyleTag({ content: "html, body { font-family: 'DejaVu Sans' !important; }" });
+      const navDejaVu = await rect("#workspaces");
+      for (const t of await wide.$$eval("#workspaces [role=tab]", (els) => els.map((e) => e.getBoundingClientRect().toJSON()))) {
+        assert.ok(t.right <= navDejaVu.right + 0.5, "every tab shows in DejaVu Sans");
+      }
+      assert.equal((await rect("#topbar")).height, 44, "one row in DejaVu Sans");
       for (const id of ["save", "open", "save-status", "assistant-toggle", "community"]) {
         const b = await rect(`#${id}`);
         assert.ok(b.width > 0 && b.right <= 1280 && b.top >= bar.top && b.bottom <= bar.bottom, id);
