@@ -23,5 +23,6 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
   - `overlay.ts`.
   - `workspace.ts`: the public Workspace API; `mount` returns a `MountedWorkspace` (`sleep`, `wake`, `unmount`: workspaces stay warm, X7).
   - `shortcuts.ts`: the one shortcut table (X7b): `ShortcutTable` (the shell's `SHELL_SHORTCUTS` and each plugin's `shortcuts`), `parseChord`/`chordOf`/`chordLabel`, `lookup` (pane in use, other pane, shell), `clashes` (same key or id in one scope, a workspace key the shell uses, `BROWSER_RESERVED`), `help` (the list's order). Workspaces run theirs in `MountedWorkspace.shortcut`.
-  - `session.ts`: `createSelection`, the one selection; its undo/redo half is DRAFT until step 20.
+  - `session.ts`: `createSelection`, the one selection; `historyNotBuilt` until the shell wires the history (20b).
+  - `history.ts`: `createHistory`, the one undo/redo history of whole-project snapshots (labels, merge keys, limit, `reset` on open; step 20a).
 - `src/model/`, DRAFT: `material.ts`, `machines.ts`, `search.ts`, `feedback.ts`, `parameters.ts`, `references.ts`, `viewport.ts`.

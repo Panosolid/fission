@@ -1,0 +1,8 @@
+# cargo-mutants settings for the kernel (read by the nightly run and the
+# pull request check, kernel/CLAUDE.md "Mutation testing").
+#
+# exclude_re: mutants that no input can tell apart from the real code
+# (equivalent). Each needs the reason, here and in its file's "Mutation
+# testing (...) leaves these survivors" paragraph. Match the mutant's name
+# without line numbers, e.g. "replace < with <= in mass::theta_minus_sine".
+exclude_re = []

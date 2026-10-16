@@ -10,7 +10,7 @@ import { ImageError } from "./errors.ts";
  * runs from -1 (black) to +1 (white); the offset is round(amount × 255),
  * added to red, green and blue in the stored (sRGB) values and clipped to
  * 0–255; alpha is untouched. A physically based Exposure in linear light is
- * a separate adjustment later (roadmap G4).
+ * a separate adjustment later (roadmap G5).
  */
 export interface Brightness {
   type: "brightness";

@@ -1,8 +1,12 @@
 // Shared by every workspace: one selection and one undo/redo history, so
 // switching workspaces keeps both. The selection is built (step 17a); the
-// history is a DRAFT until step 20.
+// history is built in history.ts (step 20a) and handed to workspaces once the
+// shell wires it (20b); until then the shell passes historyNotBuilt.
 
+import type { History } from "./history.ts";
 import type { GeometryReference } from "./references.ts";
+
+export type { History } from "./history.ts";
 
 export interface Selection {
   readonly items: readonly GeometryReference[];
@@ -13,14 +17,6 @@ export interface Selection {
   clear(): void;
   /** Called once after every change that alters the items, never for a no-op; returns an unsubscribe. */
   onChange(listener: (items: readonly GeometryReference[]) => void): () => void;
-}
-
-/** Undo/redo across all workspaces (roadmap step 20; timeline edits from step 32). */
-export interface History {
-  canUndo(): boolean;
-  canRedo(): boolean;
-  undo(): void;
-  redo(): void;
 }
 
 /** Two references name the same thing when kind and id match. */
@@ -58,18 +54,18 @@ export function createSelection(): Selection {
   };
 }
 
-/** Undo/redo until step 20: every call says it is not built yet. */
+/** Undo/redo until the shell wires createHistory (step 20b): every call says it is not built yet. */
+const notBuilt = (): never => {
+  throw new Error("not implemented");
+};
 export const historyNotBuilt: History = {
-  canUndo() {
-    throw new Error("not implemented");
-  },
-  canRedo() {
-    throw new Error("not implemented");
-  },
-  undo() {
-    throw new Error("not implemented");
-  },
-  redo() {
-    throw new Error("not implemented");
-  },
+  canUndo: notBuilt,
+  canRedo: notBuilt,
+  undoLabel: notBuilt,
+  redoLabel: notBuilt,
+  record: notBuilt,
+  undo: notBuilt,
+  redo: notBuilt,
+  reset: notBuilt,
+  onChange: notBuilt,
 };
