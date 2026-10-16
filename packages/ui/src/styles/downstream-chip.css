@@ -1,0 +1,6 @@
+/* The downstream chip (downstream-chip.ts): what another workspace makes from the design, and its state. */
+.downstream-chip { font: inherit; font-size: 12px; padding: 2px 8px; margin: 0 4px 4px 0; border-radius: 10px; border: 1px solid #2a2e35; background: #23272e; color: inherit; cursor: pointer; }
+.downstream-chip:hover, .downstream-chip:focus-visible { border-color: #4aa8ff; }
+.downstream-chip .chip-mark { color: #f5b14c; }
+.downstream-chip.updating .chip-value, .downstream-chip.needs-rerun .chip-value { opacity: 0.6; }
+.downstream-chip.missing .chip-mark { color: #ff6b6b; }

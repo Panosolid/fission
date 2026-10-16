@@ -1,3 +1,7 @@
+/* The base theme: page, top bar, workspace layout, split view, phone width.
+   A feature's own styles go in a file of their own, src/styles/<feature>.css
+   (packages/ui or a workspace), with every selector starting with .<feature>;
+   the app loads them all, so adding one never edits this file or a list. */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: #14161a; color: #e6e8eb; font: 14px system-ui, sans-serif; }
 body { display: flex; flex-direction: column; }
@@ -156,21 +160,6 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #save-status[data-state="saving"]::before { content: "…"; }
 }
 [hidden] { display: none !important; }
-.link-badge { font-size: 12px; padding: 1px 6px; border-radius: 8px; background: #23272e; }
-.link-badge.unresolved { color: #f5b14c; }
-.downstream-chip { font: inherit; font-size: 12px; padding: 2px 8px; margin: 0 4px 4px 0; border-radius: 10px; border: 1px solid #2a2e35; background: #23272e; color: inherit; cursor: pointer; }
-.downstream-chip:hover, .downstream-chip:focus-visible { border-color: #4aa8ff; }
-.downstream-chip .chip-mark { color: #f5b14c; }
-.downstream-chip.updating .chip-value, .downstream-chip.needs-rerun .chip-value { opacity: 0.6; }
-.downstream-chip.missing .chip-mark { color: #ff6b6b; }
-.change-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; padding: 6px 8px; margin-bottom: 6px; border-radius: 6px; border-left: 3px solid #4aa8ff; background: #23272e; }
-.change-note.needs-rerun { border-left-color: #f5b14c; }
-.change-note .note-body { flex: 1; }
-.change-note details { margin-top: 4px; color: #aab0b8; }
-.change-note summary { cursor: pointer; }
-.change-note ol { margin: 4px 0 0; padding-left: 18px; }
-.change-note .note-dismiss { font: inherit; font-size: 14px; line-height: 1; background: none; border: none; color: inherit; cursor: pointer; padding: 0 2px; opacity: 0.7; }
-.change-note .note-dismiss:hover, .change-note .note-dismiss:focus-visible { opacity: 1; }
 #assistant { width: 320px; padding: 16px; background: #1c1f24; border-left: 1px solid #2a2e35; overflow-y: auto; }
 #assistant[hidden] { display: none; }
 #assistant h4 { margin: 12px 0 4px; }
