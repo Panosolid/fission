@@ -35,6 +35,7 @@ Several threads run at once, one per workstream. So they never edit the same lin
 - `integration.md`: the integration experience steps (X…) and the I, A and other cross-workspace items.
 - `booleans.md`: the boolean design review B0 and the boolean steps.
 - `image.md`: the Image workspace (G…).
+- `ai.md`: the AI assistant (AI1…, and the A items in `docs/roadmap.md`).
 - A new workstream (Render, Vector, Layout…) gets a new file here the day it starts, added to this list in its own small PR.
 
 Rules:

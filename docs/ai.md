@@ -36,7 +36,14 @@ This page explains the architecture for contributors. The code is in `packages/a
 | Your own API key | the provider (Anthropic, OpenAI or others) | The user pays for their own usage, and is shown what will be sent first. |
 | Browser built-in | the browser | Offered only when the browser has a built-in model. |
 
-`createProvider`, `detectProviders` and the key store are placeholders for now.
+`createProvider(settings)` makes one; `detectProviders()` says which can run in this browser and why the others can't. How each one talks to its model:
+
+- **Ollama** (`ollama.ts`): `POST /api/chat` with the schema as `format` and temperature 0. If Ollama can't be reached, the check names `OLLAMA_ORIGINS`.
+- **Your own API key** (`hosted.ts`): Anthropic's Messages API, with the schema enforced as the one tool the model must use; OpenAI's Chat Completions with `response_format`; or any OpenAI-compatible address the user gives (https only, or http to their own computer), whose answers are validated and retried instead.
+- **In your browser** (`local.ts`): WebLLM on WebGPU. The graphics-card check (WebGPU, an adapter, 16-bit shaders for f16 models, buffers of 128 MiB for small models and 1 GiB for others) runs before anything downloads; the download size is read from the model's file list first. The default model is `IN_BROWSER_MODEL` until the A10 check picks one.
+- **Browser built-in** (`local.ts`): the browser's `LanguageModel`, with the schema as its response constraint.
+
+Keys (`keys.ts`) are filed under the origin they are sent to, so a key can only be read for that one host; changing a custom address finds no key. Every request goes through `http.ts`: a time limit, no cookies, no referrer, and error messages with the key blanked out.
 
 ## How a workspace exposes its commands
 
