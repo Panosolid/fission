@@ -37,6 +37,7 @@ use fission_kernel::ops::{primitives, transform, KernelError};
 use fission_kernel::tessellate::TessOptions;
 use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
 use fission_kernel::placed::Placed;
+use fission_kernel::stl;
 use fission_kernel::topology::Body;
 use fission_kernel::validate::validate;
 use glam::{DVec2, DVec3};
@@ -825,6 +826,51 @@ fn body_reach(b: &Placed) -> f64 {
     lo.abs().max(hi.abs()).max_element()
 }
 
+/// Export as STL and read it back: the same triangles in the same order,
+/// each corner the nearest f32 to the kernel's (so no corner moved by more
+/// than the reported rounding); and, when the rounding is too small to merge
+/// two distinct corners, a closed mesh whose volume is the mesh's to that
+/// rounding (each corner moved by at most it: |ΔV| ≤ area × rounding).
+fn check_stl(b: &Placed) -> Result<(), String> {
+    let mesh = b.tessellate(&TessOptions::DISPLAY).map_err(|e| format!("tessellation failed: {}", e.message))?;
+    let out = stl::export(&mesh, "body");
+    let back = stl::read(&out.bytes)?;
+    if back.triangles.len() != mesh.triangles.len() {
+        return Err(format!("STL holds {} triangles, the mesh {}", back.triangles.len(), mesh.triangles.len()));
+    }
+    let mut moved = 0.0f64;
+    for (t, tri) in back.triangles.iter().enumerate() {
+        for (p, q) in tri.iter().zip(mesh.triangle(t)) {
+            if *p != q.as_vec3() {
+                return Err(format!("STL corner {p} is not the f32 nearest {q}"));
+            }
+            moved = moved.max((p.as_dvec3() - q).abs().max_element());
+        }
+    }
+    if moved != out.rounding {
+        return Err(format!("STL reported rounding {} but corners moved up to {moved}", out.rounding));
+    }
+    if (out.rounding > MIN_FEATURE) != out.warning.is_some() {
+        return Err(format!("STL rounding {} with warning {:?}", out.rounding, out.warning));
+    }
+    let shortest = (0..mesh.triangles.len())
+        .flat_map(|t| {
+            let [a, b, c] = mesh.triangle(t);
+            [a.distance(b), b.distance(c), c.distance(a)]
+        })
+        .fold(f64::INFINITY, f64::min);
+    if 4.0 * out.rounding < shortest {
+        let welded = back.welded();
+        welded.check_closed().map_err(|e| format!("STL mesh not closed after reading back: {} problems", e.len()))?;
+        let slack = mesh.area() * out.rounding * 2.0 + tolerance::rounding_slack(body_reach(b)) * mesh.area();
+        let (v0, v1) = (mesh.signed_volume(), welded.signed_volume());
+        if (v0 - v1).abs() > slack {
+            return Err(format!("STL volume {v1} vs mesh {v0} (allowed {slack:e})"));
+        }
+    }
+    Ok(())
+}
+
 fn panic_message(p: Box<dyn std::any::Any + Send>) -> String {
     let msg = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
     let loc = LAST_PANIC_LOCATION.with(|l| l.borrow().clone());
@@ -1394,6 +1440,12 @@ fn check_chain(ops: &[Op], seen: Option<&AtomicUsize>) -> Result<Vec<Slot>, Fail
         t.time += dt;
         if dt > t.slowest.0 {
             t.slowest = (dt, format!("{op:?}"));
+        }
+    }
+    // Every finished body survives an STL round trip.
+    for (i, s) in slots.iter().enumerate() {
+        if let Some(b) = &s.body {
+            check_stl(b).map_err(|message| Failure { step: ops.len() - 1, op: format!("STL round trip of shape {i}"), message, bodies: vec![("body".into(), b.baked())] })?;
         }
     }
     // Determinism: same chain, same bits.

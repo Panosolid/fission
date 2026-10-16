@@ -17,9 +17,10 @@ The owner is a student learning the maths behind every algorithm. Correctness be
   - `src/mesh.rs`: triangle mesh, volume (double-double determinants), area, closed-mesh check.
   - `src/mass.rs`: exact volume and area of a B-rep from its edges (vector area by Stokes, divergence theorem, cylinder flux, Gauss–Bonnet on spheres), written to keep digits for far-away and huge-radius geometry. The app shows these, not mesh values.
   - `src/display.rs`: mesh shaped for the viewer (per-face normals, edge lines).
+  - `src/stl.rs`: binary STL export (reports the largest rounding to single precision and warns past MIN_FEATURE) and reading it back.
   - `src/ops/`: modelling operations (`primitives.rs`: box, cylinder, sphere; `profile.rs`: profiles of lines, arcs (bulges) and circles, and their validity rules; `extrude.rs`: extrusion of a profile; `transform.rs`: move, rotate, which take and return `Placed`; a rotation pivot must lie in model space). Each returns `Result<Body, KernelError>` via `ops::finish`.
   - `src/fixtures.rs`: hand-built test bodies (cube, cylinder, sphere, half cylinder, tube, sphere cap/slice/octant) that don't use `ops`, so validation and tessellation are tested against shapes whose correctness is obvious from the code.
-  - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_cylinder`, `make_sphere`, `make_extrude` → `BodyView`, with exact volume and area). Keep it thin.
+  - `src/lib.rs`: the `#[wasm_bindgen]` API the app calls (`make_box`, `make_cylinder`, `make_sphere`, `make_extrude` → `BodyView`, with exact volume and area; `export_stl(spec, name)` → `StlFile`, where a `BodySpec` names the same shapes). Keep it thin.
   - `src/debug_dump.rs`: failure dumps (STL + HTML viewer with problem edges/faces in red).
   - `tests/stateful.rs`: stateful random-testing harness (see its header). When a kernel operation lands, add it to `Op`, `Scene::transitions`, `apply_op` and `replay_op` the same day.
   - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
@@ -125,7 +126,7 @@ Kernel foundations
 - [x] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
 - [x] 11. Sphere primitive; accurate volume and area
 - [x] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 44). Acceptance case: today a 26.5 × 0.0124 × 27 box placed 37.8 km out and moved back loses 8.7e-8 of its volume to rounding there (OpenCascade oracle, seed 0x5eed, 3000 cases); after this step it must not
-- [ ] 13. STL export + download button + round-trip test
+- [x] 13. STL export + download button + round-trip test
 - [ ] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
 - [ ] 15. Self-intersection check in validate(). Easy for planes/cylinders/spheres; must be extended for general surfaces when NURBS arrive (63–64)
 

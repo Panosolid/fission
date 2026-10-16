@@ -31,3 +31,19 @@ export interface Outline {
   outer: Loop;
   holes: Loop[];
 }
+
+/** What to build, as the kernel's BodySpec (kernel/src/lib.rs). */
+export type BodySpec =
+  | { box: { width: number; depth: number; height: number } }
+  | { cylinder: { radius: number; height: number } }
+  | { sphere: { radius: number } }
+  | { extrude: { profile: Outline; distance: number } };
+
+/** A binary STL file from the kernel. */
+export interface StlFile {
+  bytes: Uint8Array<ArrayBuffer>;
+  /** Largest rounding of any corner to single precision (mm). */
+  rounding: number;
+  /** Set when that rounding is more than the smallest feature. */
+  warning: string | null;
+}

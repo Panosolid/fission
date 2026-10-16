@@ -13,6 +13,7 @@ pub mod display;
 pub mod mesh;
 pub mod ops;
 pub mod placed;
+pub mod stl;
 pub mod tessellate;
 pub mod tolerance;
 pub mod topology;
@@ -133,6 +134,60 @@ pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsError>
     to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
 }
 
+/// What to build, in the app's words: the same shapes as `make_box`,
+/// `make_cylinder`, `make_sphere` and `make_extrude`. In JavaScript:
+/// `{ box: { width, depth, height } }`, `{ cylinder: { radius, height } }`,
+/// `{ sphere: { radius } }` or `{ extrude: { profile, distance } }`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BodySpec {
+    Box { width: f64, depth: f64, height: f64 },
+    Cylinder { radius: f64, height: f64 },
+    Sphere { radius: f64 },
+    Extrude { profile: ProfileIn, distance: f64 },
+}
+
+/// Builds the body a spec describes (with the same checks as the make_*
+/// functions).
+pub fn build(spec: BodySpec) -> Result<Body, String> {
+    let made = match spec {
+        BodySpec::Box { width, depth, height } => ops::primitives::make_box(width, depth, height),
+        BodySpec::Cylinder { radius, height } => ops::primitives::make_cylinder(radius, height),
+        BodySpec::Sphere { radius } => ops::primitives::make_sphere(radius),
+        BodySpec::Extrude { profile, distance } => ops::extrude::extrude(&profile_from_input(profile)?, distance),
+    };
+    made.map_err(|e| e.to_string())
+}
+
+/// An STL file for the app to download.
+#[derive(Debug, Serialize)]
+pub struct StlFile {
+    /// Binary STL (a Uint8Array in JavaScript).
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
+    /// Largest rounding of any corner to single precision (mm).
+    pub rounding: f64,
+    /// Set when that rounding is more than the smallest feature.
+    pub warning: Option<String>,
+}
+
+/// The body as a binary STL, from its display mesh (the same triangles the
+/// viewer shows), with `name` in the file's header.
+pub fn stl_of(spec: BodySpec, name: &str) -> Result<StlFile, String> {
+    let body = build(spec)?;
+    let mesh = tessellate(&body, &TessOptions::DISPLAY).map_err(|e| format!("face {}: {}", e.face, e.message))?;
+    let out = stl::export(&mesh, name);
+    Ok(StlFile { bytes: out.bytes, rounding: out.rounding, warning: out.warning })
+}
+
+/// `stl_of` for the app (see `BodySpec`).
+#[wasm_bindgen]
+pub fn export_stl(spec: JsValue, name: &str) -> Result<JsValue, JsError> {
+    let spec: BodySpec = serde_wasm_bindgen::from_value(spec).map_err(|e| JsError::new(&format!("bad body: {e}")))?;
+    let file = stl_of(spec, name).map_err(|e| JsError::new(&e))?;
+    serde_wasm_bindgen::to_value(&file).map_err(|e| JsError::new(&e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +295,31 @@ mod tests {
         })
         .unwrap();
         assert!(matches!(ops::extrude::extrude(&p, 1.0), Err(ops::KernelError::InvalidInput(_))));
+    }
+
+    #[test]
+    fn stl_of_each_kind_by_hand() {
+        // A 40 × 30 × 20 box: 12 triangles, 84 + 12 × 50 = 684 bytes; a
+        // cylinder and sphere: whatever their meshes hold, 84 + 50 n bytes
+        // with n the count in the file; an extruded L (6 corners): 6 side
+        // faces of 2 triangles plus 2 caps of 6 − 2 = 4 triangles each = 20
+        // triangles, 84 + 20 × 50 = 1084 bytes.
+        let size = |f: &StlFile| f.bytes.len();
+        let count = |f: &StlFile| u32::from_le_bytes(f.bytes[80..84].try_into().unwrap()) as usize;
+        let b = stl_of(BodySpec::Box { width: 40.0, depth: 30.0, height: 20.0 }, "box").unwrap();
+        assert_eq!((size(&b), count(&b), b.rounding, b.warning.clone()), (684, 12, 0.0, None));
+        for spec in [BodySpec::Cylinder { radius: 20.0, height: 20.0 }, BodySpec::Sphere { radius: 20.0 }] {
+            let f = stl_of(spec, "round").unwrap();
+            assert_eq!(size(&f), 84 + 50 * count(&f));
+            assert!(f.warning.is_none());
+        }
+        let l = ProfileIn {
+            outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 4.0, 0.0, 4.0, 1.0, 1.0, 1.0, 1.0, 3.0, 0.0, 3.0], bulges: vec![] },
+            holes: vec![],
+        };
+        let e = stl_of(BodySpec::Extrude { profile: l, distance: 2.0 }, "L").unwrap();
+        assert_eq!((count(&e), size(&e)), (20, 1084));
+        // Bad shapes give the kernel's reason, not a file.
+        assert!(stl_of(BodySpec::Box { width: -1.0, depth: 1.0, height: 1.0 }, "bad").unwrap_err().contains("must be"));
     }
 }

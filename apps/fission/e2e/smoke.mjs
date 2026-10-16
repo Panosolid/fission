@@ -1,7 +1,7 @@
 // Browser smoke test: serves the built app, drives it like a user and checks
 // what is on screen. Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { preview } from "vite";
 
@@ -236,6 +236,70 @@ try {
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");
     await page.selectOption("#shape", "box");
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+  });
+
+  /** Clicks "Download STL"; returns the file's name and its triangles (f32 corners). */
+  const downloadStl = async () => {
+    const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#download-stl")]);
+    const bytes = readFileSync(await dl.path());
+    const n = bytes.readUInt32LE(80);
+    const tris = [];
+    for (let t = 0; t < n; t++) {
+      const at = 84 + 50 * t + 12;
+      const p = (k) => [0, 1, 2].map((i) => bytes.readFloatLE(at + 12 * k + 4 * i));
+      tris.push([p(0), p(1), p(2)]);
+    }
+    return { name: dl.suggestedFilename(), size: bytes.length, header: bytes.subarray(0, 12).toString("latin1"), tris };
+  };
+  /** Volume enclosed by triangles (divergence theorem: Σ a·(b×c)/6). */
+  const stlVolume = (tris) =>
+    tris.reduce((v, [a, b, c]) => v + (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6, 0);
+
+  await check("Download STL saves the box as a binary STL with hand-worked contents", async () => {
+    await page.selectOption("#shape", "box");
+    await page.fill("#width", "40");
+    await page.fill("#depth", "30");
+    await page.fill("#height", "20");
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    const f = await downloadStl();
+    // 12 triangles: 84 + 12 × 50 = 684 bytes. Corners 0/40, 0/30, 0/20 are
+    // exact in single precision, so the volume is exactly 40 × 30 × 20.
+    assert.equal(f.name, "fission-box.stl");
+    assert.equal(f.header, "Fission STL:");
+    assert.equal(f.size, 684);
+    assert.equal(f.tris.length, 12);
+    assert.equal(stlVolume(f.tris), 24000);
+    assert.equal(await text("stl-note"), "");
+  });
+
+  await check("a cylinder's STL is the prism the viewer shows", async () => {
+    await page.selectOption("#shape", "cylinder");
+    await page.fill("#width", "40");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
+    const f = await downloadStl();
+    // n sides: 2n side triangles + 2 caps of n − 2 = 4n − 4 triangles, so
+    // n = (count + 4) / 4. The prism over the inscribed n-gon of r = 20,
+    // h = 20 has V = (n/2) r² sin(2π/n) h (single-precision corners: ~1e-6).
+    const n = (f.tris.length + 4) / 4;
+    assert.ok(Number.isInteger(n) && n >= 3, `${f.tris.length} triangles`);
+    const expected = (n / 2) * 400 * Math.sin((2 * Math.PI) / n) * 20;
+    assert.ok(Math.abs(stlVolume(f.tris) - expected) <= 1e-6 * expected, `${stlVolume(f.tris)} vs ${expected}`);
+    assert.equal(f.name, "fission-cylinder.stl");
+  });
+
+  await check("a part too big for single precision is exported with a warning", async () => {
+    // A 9,999,999.3 mm box: the far corners round to 9,999,999 in single
+    // precision (spacing 1 there), 0.3 mm off, over the 1 µm smallest feature.
+    await page.selectOption("#shape", "box");
+    await page.fill("#width", "9999999.3");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
+    const f = await downloadStl();
+    assert.equal(f.tris.length, 12);
+    assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 3\.000e-1 mm/);
+    await page.fill("#width", "40");
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
+    await downloadStl();
+    assert.equal(await text("stl-note"), ""); // the warning goes once the part fits again
   });
 
   await check("the switcher lists the six workspaces, Design first and working", async () => {

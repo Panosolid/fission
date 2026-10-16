@@ -6,6 +6,7 @@ import { latestOnly, type Framing, type WorkspaceContext, type WorkspacePlugin }
 import { formatQuantity as fmt } from "@fission/ui";
 import { needsRefit } from "@fission/viewport";
 import { outline, type ShapeKind } from "./profiles.ts";
+import { specFor } from "./spec.ts";
 
 const PANEL = `
   <label>Shape
@@ -28,7 +29,19 @@ const PANEL = `
     <dt>Topology</dt><dd id="topology">…</dd>
     <dt>Validation</dt><dd id="status">…</dd>
   </dl>
-  <p id="error"></p>`;
+  <p id="error"></p>
+  <button id="download-stl" type="button">Download STL</button>
+  <p id="stl-note"></p>`;
+
+/** Hands `bytes` to the browser as a file download. */
+function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: "model/stl" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
 
 /** What the user last entered, kept while other workspaces are shown. */
 let saved: { shape: string; sizes: string[] } | null = null;
@@ -89,6 +102,22 @@ function mount(ctx: WorkspaceContext): () => void {
     }
   }
 
+  async function exportStl() {
+    const [w, d, h] = inputs.map((i) => Number(i.value));
+    const kind = shape.value as ShapeKind;
+    const note = $("stl-note");
+    try {
+      const file = await kernel.call("export_stl", specFor(kind, w, d, h), kind);
+      download(file.bytes, `fission-${kind}.stl`);
+      note.textContent = file.warning ?? "";
+      note.className = file.warning ? "bad" : "";
+    } catch (e) {
+      note.textContent = e instanceof Error ? e.message : String(e);
+      note.className = "bad";
+    }
+  }
+
+  $("download-stl").addEventListener("click", exportStl);
   inputs.forEach((i) => i.addEventListener("input", update));
   shape.addEventListener("change", update);
   update();

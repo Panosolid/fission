@@ -26,6 +26,10 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #status.bad { color: #ff6b6b; }
 #error { color: #ff6b6b; min-height: 1em; margin: 0; white-space: pre-wrap; }
 #viewport { flex: 1; min-width: 0; }
+#panel button { padding: 7px 10px; background: #262a31; border: 1px solid #353a43; color: inherit; border-radius: 4px; font: inherit; cursor: pointer; }
+#panel button:hover { background: #2e333b; }
+#stl-note { margin: 0; font-size: 13px; min-height: 1em; }
+#stl-note.bad { color: #ff6b6b; }
 
 /* Placeholder pages. */
 .placeholder h2 { font-size: 18px; margin: 0; text-transform: none; letter-spacing: 0; color: #e6e8eb; }
