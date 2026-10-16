@@ -138,6 +138,36 @@ def build(shape):
     raise ValueError(kind)
 
 
+def centred(shape):
+    """The same extrusion with its profile moved to around the origin when
+    it was drawn farther out than its own size: volume and area don't
+    change with a move, but OpenCascade integrates them in the coordinates
+    it is given, and a profile drawn 50-100 km out lost up to 3x of its
+    volume there (seed 110640103211452: 6.26 for an exact 2.09). Each
+    coordinate minus a centre within a factor of two of it is exact
+    (Sterbenz), so this is the same shape, not a rounded copy."""
+    (kind, p), = shape.items()
+    if kind != "Extrude":
+        return shape
+    rings = [p["outer"]] + p["holes"]
+    xs, ys = [], []
+    for r in rings:
+        (k, q), = r.items()
+        pts = [q["c"]] if k == "Circle" else q["pts"]
+        xs += [float(x) for x, _ in pts]
+        ys += [float(y) for _, y in pts]
+    c = ((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0)
+    if max(abs(c[0]), abs(c[1])) <= max(max(xs) - min(xs), max(ys) - min(ys)):
+        return shape
+    move = lambda xy: [repr(float(xy[0]) - c[0]), repr(float(xy[1]) - c[1])]
+    def ring(r):
+        (k, q), = r.items()
+        if k == "Circle":
+            return {k: {**q, "c": move(q["c"])}}
+        return {k: {**q, "pts": [move(xy) for xy in q["pts"]]}}
+    return {kind: {**p, "outer": ring(p["outer"]), "holes": [ring(h) for h in p["holes"]]}}
+
+
 def place(shape, m):
     t = gp_Trsf()
     t.SetValues(*m)
@@ -161,7 +191,14 @@ def measure(shape):
 
 def compare(case):
     kind, shape, size = build(case["shape"])
-    vol, area, lo, hi, faces = measure(place(shape, case["matrix"]))
+    _, lo, hi, faces = measure(place(shape, case["matrix"]))[1:]
+    # Volume and area from the unplaced shape, around its own centre: a
+    # rigid motion changes neither, and OpenCascade's integration loses
+    # digits on a big thin part turned and moved far out (a 32 m frame
+    # 0.0011 mm wide: 3.5e-4 of its volume placed, 4.6e-10 unplaced, with
+    # the exact value worked out in fractions). The kernel's own placement
+    # rounding is still covered: its mesh numbers are from the placed body.
+    vol, area = measure(build(centred(case["shape"]))[1])[:2]
     issues = []
     if (case["faces"], faces) != FACES[kind]:
         issues.append(f"faces: fission {case['faces']}, occ {faces}, expected {FACES[kind]}")
