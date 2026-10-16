@@ -40,6 +40,9 @@ export interface ViewportHighlight {
 /** Nothing highlighted. */
 export const NO_HIGHLIGHT: ViewportHighlight = Object.freeze({ body: false, faces: [], edges: [] });
 
+/** The standard views: "home" (three-quarter, the default), "top", "front", "right". */
+export type ViewName = "home" | "top" | "front" | "right";
+
 export interface SharedViewport {
   /** The element the viewport fills. */
   readonly element: HTMLElement;
@@ -48,6 +51,8 @@ export interface SharedViewport {
   bodyFraming(): Framing;
   /** Frames the current body; returns what it framed (null if none). */
   fit(): Framing | null;
+  /** Turns the camera to a standard view framing the current body; returns what it framed (null if none). */
+  setView(name: ViewName): Framing | null;
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
   setOverlay(overlay: AnalysisOverlay): void;
   clearOverlay(id: string): void;

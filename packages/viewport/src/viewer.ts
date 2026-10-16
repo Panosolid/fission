@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
+import { viewBasis, type ViewName } from "./views.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -245,8 +246,13 @@ export class Viewer implements SharedViewport {
     return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
   }
 
-  /** Frames the current body; returns what it framed (null if none). */
+  /** Frames the current body from the home view; returns what it framed (null if none). */
   fit(): Framing | null {
+    return this.setView("home");
+  }
+
+  /** Turns the camera to a standard view, framing the current body; returns what it framed (null if none). */
+  setView(name: ViewName): Framing | null {
     const framing = this.bodyFraming();
     if (!(framing.radius > 0)) return null;
     // Spend any orbit still easing out (damping) first, so the camera does
@@ -254,15 +260,18 @@ export class Viewer implements SharedViewport {
     this.controls.enableDamping = false;
     this.controls.update();
     this.controls.enableDamping = true;
-    const centre = new THREE.Vector3(...framing.centre);
-    const radius = framing.radius;
-    const dist = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2));
-    const dir = new THREE.Vector3(0.6, -0.8, 0.55).normalize();
-    this.camera.position.copy(centre).addScaledVector(dir, dist);
-    this.controls.target.copy(centre);
+    const { position, target, up } = viewBasis(name, framing, this.camera.fov);
+    // The orbit stays about Z (camera.up); straight down, the view's own up
+    // picks the camera's roll: a nudge of 1e-6 of the distance against it.
+    const offset = new THREE.Vector3(...position).sub(new THREE.Vector3(...target));
+    const dist = offset.length();
+    if (offset.clone().cross(this.camera.up).lengthSq() === 0) offset.addScaledVector(new THREE.Vector3(...up), -1e-6 * dist);
+    this.controls.target.set(...target);
+    this.camera.position.copy(this.controls.target).add(offset);
     this.camera.near = dist / 1000;
     this.camera.far = dist * 100;
     this.camera.updateProjectionMatrix();
+    this.controls.update();
     return framing;
   }
 
