@@ -1,34 +1,91 @@
 name: Random testing
 
-# Tier 3, around the clock on GitHub's computers (free for public repos):
-# every 6 hours, 4 parallel jobs each run kernel/scripts/endless.sh (the
-# stateful harness plus the OpenCascade oracle, a fresh random seed per
-# round) for about 5 hours. A final job adds every round to the
-# `test-results` branch (log.csv, summary.txt, failures/<seed>/) and opens an
-# issue when something new was found. Scheduled runs only fire from the
-# default branch; "Run workflow" on the Actions tab starts one by hand.
+# Tier 3 on GitHub's computers (free for public repos).
+#
+# Nightly, 11pm to 7am Perth (UTC+8, no daylight saving), so 15:00 to 23:00
+# UTC, testing main: 8 parallel jobs run kernel/scripts/endless.sh (the
+# stateful harness plus the OpenCascade oracle, a fresh random seed per round)
+# in two legs, because a GitHub job may last at most 6 hours, until 22:35 UTC;
+# alongside the first leg, 4 jobs run cargo mutants over the whole kernel
+# (lib tests, one shard each). Every job is cut off at 22:35 UTC however late
+# it started (GitHub sometimes starts scheduled runs late), so the last
+# results are on the branch before 23:00 UTC.
+#
+# "Run workflow" on the Actions tab (or workflow_dispatch from a thread) tests
+# any branch: 4 jobs for `minutes`, mutation testing only if asked.
+#
+# A final job adds everything to the `test-results` branch
+# (.github/scripts/collect-results.sh: log.csv, summary.txt, failures/<seed>/,
+# mutants/) and opens an issue when something new was found. Scheduled runs
+# only fire from the default branch.
 on:
   schedule:
-    - cron: "23 */6 * * *"
+    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       minutes:
-        description: "Minutes of testing per job"
+        description: "Minutes of random testing per job"
         default: "290"
+      mutants:
+        description: "Also run cargo mutants over the whole kernel"
+        type: boolean
+        default: false
 
-# Runs queue rather than overlap, so two collect jobs never race on the branch.
+# The nightly run has its own group, and every branch its own, so runs started
+# from threads during the day never cancel the night's run, and a new run on
+# a branch replaces one still waiting on that branch. Runs on different
+# branches do run at once; the collect script copes with that.
 concurrency:
-  group: random-testing
+  group: random-testing-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      deadline: ${{ steps.plan.outputs.deadline }}
+      jobs: ${{ steps.plan.outputs.jobs }}
+      second_leg: ${{ steps.plan.outputs.second_leg }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - id: plan
+        env:
+          NIGHTLY: ${{ github.event_name == 'schedule' }}
+          MINUTES: ${{ inputs.minutes || '290' }}
+          MUTANTS: ${{ inputs.mutants }}
+        run: |
+          now=$(date +%s)
+          if [ "$NIGHTLY" = true ]; then
+            # 22:35 UTC of the day the run started (it is meant to start at
+            # 15:00 UTC, so this is the same UTC day).
+            deadline=$(date -u -d "$(date -u +%F) 22:35" +%s)
+            jobs="[0,1,2,3,4,5,6,7]" shards=4
+          else
+            deadline=$(( now + MINUTES * 60 ))
+            jobs="[0,1,2,3]" shards=0
+            [ "$MUTANTS" = true ] && shards=4
+          fi
+          # A leg lasts at most 315 minutes of testing (job limit 350); a second
+          # leg runs when the first can't reach the deadline.
+          second_leg=false
+          [ $(( deadline - now )) -gt $(( 330 * 60 )) ] && second_leg=true
+          echo "Testing until $(date -u -d "@$deadline" '+%F %H:%M UTC'); second leg: $second_leg; mutation shards: $shards"
+          {
+            echo "deadline=$deadline"
+            echo "jobs=$jobs"
+            echo "second_leg=$second_leg"
+            echo "shards=$(if [ $shards -gt 0 ]; then seq -s, 0 $((shards - 1)) | sed 's/.*/[&]/'; else echo '[]'; fi)"
+          } >>"$GITHUB_OUTPUT"
+
   test:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
       fail-fast: false
       matrix:
-        job: [0, 1, 2, 3]
+        job: ${{ fromJSON(needs.plan.outputs.jobs) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -42,19 +99,96 @@ jobs:
       - name: Random rounds until the time is up
         working-directory: kernel
         env:
-          FISSION_ENDLESS_MINUTES: ${{ inputs.minutes || '290' }}
-        run: scripts/endless.sh 2000 0 python
+          DEADLINE: ${{ needs.plan.outputs.deadline }}
+        run: scripts/run-until.sh "$DEADLINE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: endless-${{ matrix.job }}
+          name: endless-a-${{ matrix.job }}
           path: kernel/endless-results/
           if-no-files-found: ignore
 
+  test-second-leg:
+    needs: [plan, test]
+    if: ${{ !cancelled() && needs.plan.outputs.second_leg == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(needs.plan.outputs.jobs) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cadquery-ocp
+      - name: Random rounds until the time is up
+        working-directory: kernel
+        env:
+          DEADLINE: ${{ needs.plan.outputs.deadline }}
+        run: scripts/run-until.sh "$DEADLINE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: endless-b-${{ matrix.job }}
+          path: kernel/endless-results/
+          if-no-files-found: ignore
+
+  mutants:
+    needs: plan
+    if: ${{ needs.plan.outputs.shards != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: Mutation testing, one shard of the whole kernel
+        working-directory: kernel
+        env:
+          DEADLINE: ${{ needs.plan.outputs.deadline }}
+          SHARDS: ${{ strategy.job-total }}
+          # Unoptimised builds are about five times faster and give the same
+          # result (kernel/CLAUDE.md, Mutation testing).
+          CARGO_PROFILE_DEV_OPT_LEVEL: "0"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+        run: |
+          out="$RUNNER_TEMP/mutants"
+          left=$(( DEADLINE - $(date +%s) ))
+          code=124
+          if [ $left -gt 60 ]; then
+            code=0
+            timeout -s INT -k 60 $left cargo mutants --shard ${{ matrix.shard }}/$SHARDS --sharding round-robin \
+              -j 4 --output "$RUNNER_TEMP" -- --lib || code=$?
+          fi
+          mkdir -p "$out"
+          cp "$RUNNER_TEMP"/mutants.out/*.txt "$out"/ 2>/dev/null || true
+          echo $code >"$out/exit-code.txt"
+          echo "cargo mutants exit code $code (0 all caught, 2 some missed, 3 some timed out, 124/130 cut off at the deadline)"
+          grep -c . "$out"/caught.txt "$out"/missed.txt "$out"/timeout.txt "$out"/unviable.txt 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-${{ matrix.shard }}
+          path: ${{ runner.temp }}/mutants/
+          if-no-files-found: ignore
+
   collect:
-    needs: test
+    needs: [plan, test, test-second-leg, mutants]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       issues: write
@@ -64,66 +198,18 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          pattern: endless-*
           path: ${{ runner.temp }}/incoming
       - name: Add this run to the test-results branch
         env:
           IN: ${{ runner.temp }}/incoming
+          MUTANT_SHARDS: ${{ needs.plan.outputs.shards == '[]' && '0' || '4' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           # The code every round of this run tested, so old failures can be
           # told apart from current ones.
           COMMIT: ${{ github.sha }}
           BRANCH: ${{ github.ref_name }}
           GH_TOKEN: ${{ github.token }}
+        # Copied out first: the script switches this checkout to test-results.
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code origin test-results >/dev/null; then
-            git switch test-results
-          else
-            git switch --orphan test-results
-          fi
-          [ -f log.csv ] || echo "finished,seed,cases,harness,oracle_bodies,disagreements,seconds,run,commit,branch" >log.csv
-          # Logs from before the commit column was added: widen the header
-          # (their old rows just leave the last two columns empty).
-          head -1 log.csv | grep -q ',commit,branch$' || sed -i '1s/$/,commit,branch/' log.csv
-          short=$(echo "$COMMIT" | cut -c1-7)
-          found=0 list=""
-          for d in "$IN"/*/; do
-            [ -f "$d/log.csv" ] && tail -n +2 "$d/log.csv" | sed "s|\$|,$RUN_URL,$short,$BRANCH|" >>log.csv
-            for f in "$d"seed-*; do
-              [ -d "$f" ] || continue
-              mkdir -p failures && cp -r "$f" failures/
-              echo "tested commit $COMMIT on branch $BRANCH ($RUN_URL)" >"failures/$(basename "$f")/commit.txt"
-              found=$((found + 1))
-              list="$list- failures/$(basename "$f"): $(grep -h -m1 'step\|line ' "$f/report.txt" "$f/oracle-disagreements.txt" 2>/dev/null | head -c 400)"$'\n'
-            done
-          done
-          awk -F, -v now="$(date -u '+%Y-%m-%d %H:%M UTC')" 'NR > 1 {
-              rounds++; cases += $3; fails += ($4 == "FAIL"); bodies += $5; dis += $6; secs += $7
-              if ($4 == "FAIL" || $6 > 0) last = $1 " (seed " $2 ($9 ? ", commit " $9 " on " $10 : "") ")"
-            } END {
-              print "Fission random testing, all runs so far (updated " now ")"
-              print ""
-              printf "hours of testing:                 %.1f\n", secs / 3600
-              print  "rounds:                           " rounds
-              print  "random operation chains:          " cases
-              print  "rounds where the harness failed:  " fails
-              print  "bodies compared with OpenCascade: " bodies
-              print  "OpenCascade disagreements:        " dis
-              print  "last problem found:               " (last ? last : "none yet")
-              print ""
-              print "Every round is a line in log.csv. Each round that found a problem has a"
-              print "folder in failures/ named after its seed: report.txt says what went wrong,"
-              print "the .json file is the shortest chain of operations that shows it, and"
-              print "failure-dumps/*/index.html is a 3D view with the problem in red."
-              print "The commit and branch columns of log.csv (and commit.txt in each"
-              print "failures folder) say which code a round tested."
-            }' log.csv >summary.txt
-          cat summary.txt >>"$GITHUB_STEP_SUMMARY"
-          git add -A log.csv summary.txt failures 2>/dev/null || git add -A log.csv summary.txt
-          git commit -qm "Random testing run ${{ github.run_id }}: $found round(s) found something" || exit 0
-          for i in 1 2 3 4; do git push -q origin test-results && break; sleep $((2 ** i)); done
-          if [ "$found" -gt 0 ]; then
-            gh issue create --title "Random testing found $found problem(s)" --body "$(printf 'Run: %s (commit %s on %s)\n\n%s\nDetails are on the test-results branch, in the failures folder.\n' "$RUN_URL" "$short" "$BRANCH" "$list")"
-          fi
+          cp .github/scripts/collect-results.sh "$RUNNER_TEMP/collect.sh"
+          bash "$RUNNER_TEMP/collect.sh"

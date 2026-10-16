@@ -11,8 +11,9 @@
 #     python defaults to python3; the oracle runs only if it can `import OCP`
 #     (pip install cadquery-ocp). Without it the harness still runs.
 #
-# FISSION_ENDLESS_MINUTES=<m> stops starting new rounds after m minutes (used
-# by the GitHub workflow, whose jobs have a time limit).
+# FISSION_ENDLESS_MINUTES=<m> stops starting new rounds after m minutes, and
+# FISSION_ENDLESS_UNTIL=<unix time> at that moment (used by the GitHub workflow,
+# whose jobs have a time limit and whose nightly run must end by 7am Perth).
 #
 # Results go to kernel/endless-results/ (gitignored):
 #   log.csv           one line per round: when, seed, cases, harness result,
@@ -45,6 +46,7 @@ cargo test --release --test stateful --no-run -q || { echo "Build failed; fix th
 
 DEADLINE=0
 [ -n "${FISSION_ENDLESS_MINUTES:-}" ] && DEADLINE=$(( $(date +%s) + FISSION_ENDLESS_MINUTES * 60 ))
+[ -n "${FISSION_ENDLESS_UNTIL:-}" ] && DEADLINE=$FISSION_ENDLESS_UNTIL
 rounds=0 fails=0 bodies_total=0 disagree_total=0 folders=0
 stop=0
 # Ctrl+C also reaches the harness and kills it mid-round, so an interrupted
