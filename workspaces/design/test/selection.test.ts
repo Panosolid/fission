@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { BodyView, GeometryReference, StableId } from "@fission/core";
-import { designReference, readDesignReference } from "../src/references.ts";
-import { droppedNote, highlightOf, NOT_ON_BODY, selectionRows, survivors } from "../src/selection.ts";
+import { XY_PLANE, type BodyView, type GeometryReference, type StableId } from "@fission/core";
+import type { ReadyProfile } from "../src/document.ts";
+import { designReference, profileReference, readDesignReference, readProfileReference } from "../src/references.ts";
+import { droppedNote, highlightOf, NOT_IN_DESIGN, NOT_ON_BODY, selectionRows, survivors } from "../src/selection.ts";
 
 const face = (i: number, feature = "feature-1") => designReference("face", feature, i);
 const edge = (i: number) => designReference("edge", "feature-1", i);
@@ -69,4 +70,45 @@ test("with no earlier body only the index is checked; others' references are lef
 test("the note names what was dropped, and is empty when nothing was", () => {
   assert.equal(droppedNote([]), "");
   assert.match(droppedNote([face(1), edge(4)]), /^Taken out of the selection: Face 1, Edge 4\. /);
+});
+
+// ---- Profiles (X6b): selectable from the browser as outlines ----
+
+const slotProfile: ReadyProfile = { id: "profile-1", kind: "slot", width: 60, depth: 20, plane: XY_PLANE };
+const profile = profileReference("profile-1");
+
+test("profileReference names a profile by its own id, and readProfileReference undoes it", () => {
+  assert.deepEqual(profile, { kind: "outline", id: "outline:profile-1" });
+  assert.equal(readProfileReference(profile), "profile-1");
+  // Ids it did not build, or of another kind, are not profiles.
+  assert.equal(readProfileReference(body), null);
+  assert.equal(readProfileReference({ kind: "outline", id: "outline:a/b" }), null);
+  assert.equal(readProfileReference({ kind: "body", id: "outline:profile-1" }), null);
+  assert.throws(() => profileReference(""), /invalid profile id ""/);
+  assert.throws(() => profileReference("a:b"), /invalid profile id "a:b"/);
+  // designReference never makes one of these (it builds bodies, faces and edges from a feature).
+  assert.equal(readDesignReference(profile), null);
+});
+
+test("a selected profile: named as the browser names it, of type outline, drawn on no face", () => {
+  assert.deepEqual(selectionRows([profile, body], "feature-1", boxView, [slotProfile]), [
+    { name: "Slot with round ends profile", type: "outline", id: "outline:profile-1" },
+    { name: "Body 1", type: "solid", id: "body:feature-1" },
+  ]);
+  // A profile the document no longer has says so.
+  assert.deepEqual(selectionRows([profile], "feature-1", boxView, []), [{ name: "Outline", type: NOT_IN_DESIGN, id: "outline:profile-1" }]);
+  // The profile is not part of the body: selecting it lights nothing in the viewport.
+  assert.deepEqual(highlightOf([profile], "feature-1"), { body: false, faces: [], edges: [] });
+});
+
+test("a rebuild keeps the profile while the part has it; a change to a box drops it, with a note", () => {
+  // A resize or a change of profile kind keeps profile-1.
+  assert.deepEqual(survivors([profile, body], "feature-1", boxView, boxView, ["profile-1"]), { kept: [profile, body], dropped: [] });
+  // A box has no profiles.
+  assert.deepEqual(survivors([profile, body], "feature-1", boxView, boxView, []), { kept: [body], dropped: [profile] });
+  assert.equal(droppedNote([profile]), "Taken out of the selection: the profile. The part has no profile now.");
+  assert.equal(
+    droppedNote([face(1), profile]),
+    "Taken out of the selection: Face 1, the profile. The edit renumbered the body's faces and edges, so these could not be followed. The part has no profile now.",
+  );
 });

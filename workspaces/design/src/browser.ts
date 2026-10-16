@@ -1,9 +1,9 @@
 // Design's browser panel, read from the Design document (document.ts):
-// the timeline's features in build order, the bodies they make, and the
-// origin's planes and axes. A pure function of the document, so step 32's
+// the timeline's features in build order, the profiles they use, the
+// bodies they make, and the origin's planes and axes. A pure function of the document, so step 32's
 // longer timeline only adds rows here.
 
-import type { DesignDocument } from "./document.ts";
+import { profileLabel, type DesignDocument } from "./document.ts";
 
 export interface BrowserNode {
   /** Stable within the document: a feature's id, "body-1", "origin-xy"… */
@@ -27,7 +27,8 @@ const ORIGIN: BrowserNode[] = [
  * The browser's tree for a document. Each feature is a row numbered in
  * build order with its intent summary; a suppressed one says so. Until
  * booleans make several bodies (step 48), the features that build make
- * one body, Body 1; with none building there are no bodies.
+ * one body, Body 1; with none building there are no bodies. Each profile
+ * is a row by its own id ("profile-1"), selectable as an outline.
  */
 export function browserTree(document: DesignDocument): BrowserNode[] {
   const features = document.timeline.features;
@@ -38,6 +39,7 @@ export function browserTree(document: DesignDocument): BrowserNode[] {
       label: "Timeline",
       children: features.map((f, i) => ({ id: f.id, label: `${i + 1}. ${f.intent.summary}${f.suppressed ? " (suppressed)" : ""}` })),
     },
+    { id: "profiles", label: "Profiles", children: document.profiles.map((p) => ({ id: p.id, label: profileLabel(p) })) },
     { id: "bodies", label: "Bodies", children: building ? [{ id: "body-1", label: "Body 1" }] : [] },
     { id: "origin", label: "Origin", children: ORIGIN },
   ];

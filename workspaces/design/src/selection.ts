@@ -3,11 +3,13 @@
 // are unit-tested; workspace.ts applies them on every selection change.
 
 import type { BodyView, GeometryReference, ViewportHighlight } from "@fission/core";
-import { readDesignReference } from "./references.ts";
+import { profileLabel, type ReadyProfile } from "./document.ts";
+import { readDesignReference, readProfileReference } from "./references.ts";
 
 /**
  * The viewport highlight for these items on the body `featureId` built.
- * References to other bodies, or not built by `designReference`, draw nothing.
+ * References to other bodies, or not built by `designReference` (a
+ * profile among them: it is not part of the body), draw nothing.
  */
 export function highlightOf(items: readonly GeometryReference[], featureId: string): ViewportHighlight {
   const highlight = { body: false, faces: [] as number[], edges: [] as number[] };
@@ -21,7 +23,7 @@ export function highlightOf(items: readonly GeometryReference[], featureId: stri
 }
 
 export interface SelectionRow {
-  /** "Body 1", "Face 3", "Edge 4": the kind and kernel index, numbered from 0 like the ids. */
+  /** "Body 1", "Face 3", "Edge 4": the kind and kernel index, numbered from 0 like the ids; a profile's name. */
   name: string;
   /** The body's kind, or the face's surface or the edge's curve type, from the last built body. */
   type: string;
@@ -31,14 +33,22 @@ export interface SelectionRow {
 
 /** Said in place of a type the last built body cannot give. */
 export const NOT_ON_BODY = "not on the current body";
+/** Said for a selected outline that is not one of the document's profiles. */
+export const NOT_IN_DESIGN = "not in the design";
 
 /**
  * One row per selected item, in selection order. `view` is the last built
  * body (null before the first build): a face or edge index it does not
  * have, or a reference to another feature's body, says so instead of a type.
+ * A profile is named from `profiles` (the document's), as the browser names
+ * it, of type "outline"; one the document no longer has says so.
  */
-export function selectionRows(items: readonly GeometryReference[], featureId: string, view: BodyView | null): SelectionRow[] {
+export function selectionRows(items: readonly GeometryReference[], featureId: string, view: BodyView | null, profiles: readonly ReadyProfile[] = []): SelectionRow[] {
   return items.map((item) => {
+    if (item.kind === "outline") {
+      const profile = profiles.find((p) => p.id === readProfileReference(item));
+      return profile ? { name: profileLabel(profile), type: "outline", id: item.id } : { name: "Outline", type: NOT_IN_DESIGN, id: item.id };
+    }
     const r = readDesignReference(item);
     const kind = item.kind[0].toUpperCase() + item.kind.slice(1);
     if (!r) return { name: kind, type: NOT_ON_BODY, id: item.id };
@@ -58,16 +68,26 @@ export function selectionRows(items: readonly GeometryReference[], featureId: st
  * earlier body is known (first build, or back from another workspace):
  * then the index and nothing else is checked. Body references to `featureId`
  * stay; references this function cannot read, or to another feature, are
- * left alone (not Design's to judge here).
+ * left alone (not Design's to judge here). A profile (an outline reference
+ * Design built) is kept while `profileIds` has it: a change to a shape
+ * with no profile, a box, drops it.
  */
-export function survivors(items: readonly GeometryReference[], featureId: string, before: BodyView | null, after: BodyView): { kept: GeometryReference[]; dropped: GeometryReference[] } {
+export function survivors(
+  items: readonly GeometryReference[],
+  featureId: string,
+  before: BodyView | null,
+  after: BodyView,
+  profileIds: readonly string[] = [],
+): { kept: GeometryReference[]; dropped: GeometryReference[] } {
   const sameTopology = before === null || (before.vertices === after.vertices && before.edges === after.edges && before.faces === after.faces);
   const kept: GeometryReference[] = [];
   const dropped: GeometryReference[] = [];
   for (const item of items) {
     const r = readDesignReference(item);
     let keep = true;
-    if (r && r.featureId === featureId && r.kind !== "body") {
+    const profile = readProfileReference(item);
+    if (profile !== null) keep = profileIds.includes(profile);
+    else if (r && r.featureId === featureId && r.kind !== "body") {
       const types = (v: BodyView) => (r.kind === "face" ? v.face_types : v.edge_types);
       const now = types(after)[r.index!];
       keep = now !== undefined && sameTopology && (before === null || types(before)[r.index!] === now);
@@ -81,8 +101,13 @@ export function survivors(items: readonly GeometryReference[], featureId: string
 export function droppedNote(dropped: readonly GeometryReference[]): string {
   if (dropped.length === 0) return "";
   const names = dropped.map((d) => {
+    if (readProfileReference(d) !== null) return "the profile";
     const r = readDesignReference(d);
     return r ? `${d.kind[0].toUpperCase()}${d.kind.slice(1)} ${r.index}` : d.id;
   });
-  return `Taken out of the selection: ${names.join(", ")}. The edit renumbered the body's faces and edges, so these could not be followed.`;
+  const why = [
+    ...(dropped.some((d) => d.kind !== "outline") ? ["The edit renumbered the body's faces and edges, so these could not be followed."] : []),
+    ...(dropped.some((d) => d.kind === "outline") ? ["The part has no profile now."] : []),
+  ];
+  return `Taken out of the selection: ${names.join(", ")}. ${why.join(" ")}`;
 }

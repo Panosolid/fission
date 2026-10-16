@@ -23,7 +23,13 @@ export interface EdgeReference {
   id: StableId;
 }
 
-export type GeometryReference = BodyReference | FaceReference | EdgeReference;
+/** A closed 2D shape: a Design profile now, sketch profiles from step 21, Vector paths from V1. */
+export interface OutlineReference {
+  kind: "outline";
+  id: StableId;
+}
+
+export type GeometryReference = BodyReference | FaceReference | EdgeReference | OutlineReference;
 
 /**
  * What a reference points at after the latest design rebuild. An unresolved

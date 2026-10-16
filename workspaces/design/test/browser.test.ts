@@ -28,21 +28,25 @@ test("a hand-built two-feature document: rows in build order, one body, the orig
   };
   assert.deepEqual(shape(browserTree(doc)), [
     ["Timeline", ["1. Extrude: slot by 5 mm", "2. Box: 1 × 2 × 3 mm (suppressed)"]],
+    ["Profiles", ["Slot with round ends profile"]],
     ["Bodies", ["Body 1"]],
     ORIGIN,
   ]);
   // Rows keep the feature's own id, so a click names the feature.
   assert.deepEqual(browserTree(doc)[0].children!.map((n) => n.id), ["feature-1", "feature-2"]);
+  // A profile's row keeps the profile's id, so a click names the profile.
+  assert.deepEqual(browserTree(doc)[1].children!.map((n) => n.id), ["profile-1"]);
 });
 
 test("with every feature suppressed there is no body", () => {
   const doc: DesignDocument = { version: 1, profiles: [], timeline: { features: [feature("feature-1", "Sphere: ⌀4 mm", true)] } };
-  assert.deepEqual(shape(browserTree(doc))[1], ["Bodies", []]);
+  assert.deepEqual(shape(browserTree(doc))[2], ["Bodies", []]);
 });
 
 test("today's one-step part: feature #1 with its intent summary", () => {
   assert.deepEqual(shape(browserTree(partDocument("cylinder", 40, 30, 20))), [
     ["Timeline", ["1. Cylinder: ⌀40 × 20 mm"]],
+    ["Profiles", []],
     ["Bodies", ["Body 1"]],
     ORIGIN,
   ]);

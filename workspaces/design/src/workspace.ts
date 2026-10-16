@@ -14,9 +14,9 @@ import { toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
-import { designReference } from "./references.ts";
+import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
-import { DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
+import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
 /**
  * What the user last entered (as typed), kept while other workspaces are
@@ -61,7 +61,8 @@ const folded = new Set<string>();
 
 /** The browser rows that stand for selectable geometry, and the reference each selects. */
 function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  return node === "body-1" ? designReference("body", lastFeature(doc).id) : null;
+  if (node === "body-1") return designReference("body", lastFeature(doc).id);
+  return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
 }
 
 /** Lights the browser rows whose geometry is selected (aria-current), and only those. */
@@ -75,7 +76,7 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
 
 /**
  * Fills the browser slot with the document's tree: groups fold (native
- * details/summary). A row for selectable geometry (Body 1) is a button
+ * details/summary). A row for selectable geometry (Body 1, a profile) is a button
  * that selects it (Shift adds or takes out); the others are plain rows
  * until features (step 32) and origin planes (step 21) can be selected.
  * Rebuilt on every edit; folding is kept by id.
@@ -161,7 +162,7 @@ function mount(ctx: WorkspaceContext): () => void {
     const items = ctx.selection.items;
     viewport.showSelection(highlightOf(items, featureId));
     lightRows(ctx.browser, doc, items);
-    panel.showSelection(selectionRows(items, featureId, lastView));
+    panel.showSelection(selectionRows(items, featureId, lastView, doc.profiles));
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -255,7 +256,7 @@ function mount(ctx: WorkspaceContext): () => void {
       }
       panel.showBody(view);
       // Faces and edges the edit renumbered leave the selection, with a note (17e).
-      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView, view);
+      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView, view, doc.profiles.map((p) => p.id));
       lastView = view;
       note = droppedNote(dropped);
       if (dropped.length > 0) {
@@ -285,8 +286,20 @@ function mount(ctx: WorkspaceContext): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") ctx.selection.clear();
   };
+  // Copy (Ctrl+C, or the browser's Edit menu) with one profile selected runs
+  // Copy as SVG; in a text field, or with anything else selected, the
+  // browser copies as usual.
+  const onCopy = (e: ClipboardEvent) => {
+    const target = e.target as Element | null;
+    if (target?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;
+    const items = ctx.selection.items;
+    if (items.length !== 1 || items[0].kind !== "outline") return;
+    e.preventDefault();
+    void runAction(COPY_SVG, items);
+  };
   const keys = viewport.element.ownerDocument;
   keys.addEventListener("keydown", onKey);
+  keys.addEventListener("copy", onCopy);
   const stopWatching = ctx.selection.onChange(() => {
     // The user's next change of selection retires the note about dropped items.
     if (!settling && note) panel.showSelectionNote((note = ""));
@@ -301,6 +314,7 @@ function mount(ctx: WorkspaceContext): () => void {
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
     keys.removeEventListener("keydown", onKey);
+    keys.removeEventListener("copy", onCopy);
     for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
   };
 }
