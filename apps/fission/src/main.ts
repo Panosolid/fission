@@ -125,6 +125,7 @@ function notesStrip(host: HTMLElement): HTMLElement {
   return strip;
 }
 const notesStrips = { main: notesStrip($("viewport")), split: notesStrip($("split-viewport")) };
+notesStrips.split.classList.add("in-split"); // below the split bar
 const drawn = new WeakMap<HTMLElement, string>();
 /** Draws `notes` in `strip`, keeping open any "Why?" the user opened; nothing changes when nothing would. */
 function drawNotes(strip: HTMLElement, notes: ChangeNote[]) {

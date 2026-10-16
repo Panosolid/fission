@@ -946,6 +946,14 @@ try {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    // The canvas keeps the size it was drawn at until the viewer's resize
+    // observer runs (a frame after layout), so measure only once it has
+    // followed the viewport to phone width; before that it can stick out.
+    await page.waitForFunction(() => {
+      const v = document.querySelector("#viewport");
+      const c = v?.querySelector("canvas");
+      return c && v.clientWidth > 0 && Math.abs(c.getBoundingClientRect().width - v.clientWidth) < 1;
+    });
     const overflow = () =>
       page.evaluate(() =>
         ["html", "body", "#topbar", "#workspace", "#panel-toggles"]

@@ -165,10 +165,6 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #assistant h4 { margin: 12px 0 4px; }
 #assistant .where { font-weight: normal; font-size: 12px; color: #8a919c; }
 #ai-status { font-size: 12px; color: #8a919c; }
-.notes-strip { position: absolute; top: 8px; left: 8px; right: 112px; max-width: 440px; z-index: 1; }
-.notes-strip:empty { display: none; }
-#split-viewport .notes-strip { top: 48px; }
-.notes-strip .change-note { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
 /* Image workspace (G1b) */
 #image-size { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0; }
 #image-size dt { color: #8a919c; }
