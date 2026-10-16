@@ -70,6 +70,12 @@ const folded = new Set<string>();
  */
 function browser(slot: HTMLElement, doc: DesignDocument) {
   const document = slot.ownerDocument;
+  // The toggle event fires a task after the click, so a rebuild can come
+  // first: read the folding from the tree being replaced, not only events.
+  for (const d of slot.querySelectorAll<HTMLDetailsElement>("details[data-node]")) {
+    if (d.open) folded.delete(d.dataset.node!);
+    else folded.add(d.dataset.node!);
+  }
   const list = (nodes: BrowserNode[]) => {
     const ul = document.createElement("ul");
     ul.className = "tree";
@@ -79,7 +85,9 @@ function browser(slot: HTMLElement, doc: DesignDocument) {
         const details = document.createElement("details");
         details.open = !folded.has(n.id);
         details.dataset.node = n.id; // read by the e2e test
-        details.addEventListener("toggle", () => (details.open ? folded.delete(n.id) : folded.add(n.id)));
+        details.addEventListener("toggle", () => {
+          if (details.isConnected) details.open ? folded.delete(n.id) : folded.add(n.id);
+        });
         const summary = document.createElement("summary");
         summary.textContent = n.label;
         details.append(summary, list(n.children));

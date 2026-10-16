@@ -84,6 +84,18 @@ $("assistant-toggle").addEventListener("click", () => {
   $("assistant-toggle").setAttribute("aria-pressed", String(!panel.hidden));
   if (!panel.hidden) showAssistant(panel, current, workspaces.find((w) => w.id === current)?.title ?? "Community");
 });
+// At phone width the browser and properties fold away behind two toggles
+// (theme.css hides a closed one there); wider screens hide the toggles and
+// show both panels. The state lives on #workspace, so it survives switching.
+for (const slot of ["browser", "properties"] as const) {
+  const toggle = $(`${slot}-toggle`);
+  const set = (open: boolean) => {
+    toggle.setAttribute("aria-expanded", String(open));
+    $("workspace").dataset[slot] = open ? "open" : "closed";
+  };
+  set(toggle.getAttribute("aria-expanded") === "true");
+  toggle.addEventListener("click", () => set(toggle.getAttribute("aria-expanded") !== "true"));
+}
 const pages: string[] = [...workspaces.map((w) => w.id), "community"];
 const fromHash = (): Page => {
   const id = location.hash.slice(1);

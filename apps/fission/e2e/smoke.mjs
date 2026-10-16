@@ -452,6 +452,70 @@ try {
     await page.click('[data-workspace="design"]');
   });
 
+  await check("desktop: focus moves top bar, toolbar, browser, properties; panel toggles hidden", async () => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(url + "#design");
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    assert.equal(await page.isVisible("#panel-toggles"), false);
+    assert.equal(await page.isVisible("#browser"), true);
+    assert.equal(await page.isVisible("#properties"), true);
+    // Tab from the top of the page and note which region each stop is in;
+    // the regions must come in reading order, each once.
+    const regions = [];
+    for (let i = 0; i < 120 && regions.at(-1) !== "properties"; i++) {
+      await page.keyboard.press("Tab");
+      const region = await page.evaluate(() => document.activeElement?.closest("#topbar, #toolbar, #browser, #properties")?.id ?? "other");
+      if (region !== regions.at(-1)) regions.push(region);
+    }
+    assert.deepEqual(regions, ["topbar", "toolbar", "browser", "properties"]);
+    await page.screenshot({ path: "e2e/design-1280.png" });
+  });
+
+  await check("phone width: no sideways scroll, browser and properties fold behind toggles", async () => {
+    await page.setViewportSize({ width: 375, height: 740 });
+    await page.goto(url + "#design");
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    const overflow = () =>
+      page.evaluate(() =>
+        ["html", "body", "#topbar", "#workspace", "#panel-toggles"]
+          .map((s) => document.querySelector(s))
+          .filter((el) => el.scrollWidth > el.clientWidth)
+          .map((el) => `${el.id || el.tagName}: ${el.scrollWidth} > ${el.clientWidth}`),
+      );
+    assert.deepEqual(await overflow(), []);
+    // The viewport keeps the full width and a fixed share of the height;
+    // properties start open below it, browser closed.
+    const box = await page.$eval("#viewport", (el) => el.getBoundingClientRect().toJSON());
+    assert.equal(box.width, 375);
+    assert.ok(Math.abs(box.height - 0.55 * 740) < 1, `viewport height ${box.height}`);
+    assert.equal(await page.isVisible("#browser"), false);
+    assert.equal(await page.isVisible("#properties"), true);
+    assert.equal(await page.getAttribute("#browser-toggle", "aria-expanded"), "false");
+    await page.screenshot({ path: "e2e/design-375.png" });
+    await page.$eval("#workspace", (el) => el.scrollTo(0, el.scrollHeight));
+    await page.screenshot({ path: "e2e/design-375-scrolled.png" });
+    await page.click("#browser-toggle");
+    assert.equal(await page.getAttribute("#browser-toggle", "aria-expanded"), "true");
+    assert.equal(await page.textContent("#browser [data-node=feature-1]"), "1. Box: 40 × 30 × 20 mm");
+    await page.click("#properties-toggle");
+    assert.equal(await page.isVisible("#properties"), false);
+    assert.deepEqual(await overflow(), []);
+    await page.screenshot({ path: "e2e/design-375-browser.png" });
+    // Editing still works with the panel reopened.
+    await page.click("#properties-toggle");
+    await setSize("width", 50);
+    // V = 50·30·20 = 30000.
+    await page.waitForFunction(() => document.querySelector("#volume").textContent === "30,000 mm³");
+    // A placeholder fills only properties: no browser toggle, its page shows.
+    await page.click("[data-workspace=laser]");
+    assert.equal(await page.isVisible("#browser-toggle"), false);
+    assert.equal(await page.isVisible(".placeholder h2"), true);
+    assert.deepEqual(await overflow(), []);
+    await page.screenshot({ path: "e2e/laser-375.png" });
+    await page.click("[data-workspace=design]");
+    await page.setViewportSize({ width: 1000, height: 640 });
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });
