@@ -1,5 +1,17 @@
 //! `validate` checks that a body is a well-formed closed solid. Every kernel
 //! operation must finish with `checked`, which runs it.
+//!
+//! Mutation testing (`cargo mutants`, lib tests) leaves one survivor,
+//! equivalent for what `validate` decides:
+//! - `check_geometry`, the outer loop's area `< 0.0` → `<= 0.0`: differs
+//!   only when the first loop's area is exactly zero while the face's net
+//!   area is above AREA, so another loop has positive area. A zero-area
+//!   outer loop doubles back on itself (overlapping or zero-length edges)
+//!   and a positive inner loop runs the wrong way, so the body is already
+//!   rejected (self-intersection, ZeroLengthEdge, LoopOrientation); the
+//!   mutant only adds a FaceOrientation label to a body that is invalid
+//!   either way. The `> LINEAR` ties for vertex-off-edge and edge-off-face
+//!   are pinned by tests at exactly LINEAR.
 
 use crate::geom::{Curve, Surface};
 use crate::tessellate::{tessellate, TessOptions};
@@ -481,6 +493,36 @@ mod tests {
             let r = validate(&b);
             assert_eq!(r.is_ok(), ok, "{factor}× tolerance: {r:?}");
         }
+    }
+
+    #[test]
+    fn vertex_exactly_linear_off_its_edges_is_on() {
+        // "Within tolerance" includes the tolerance itself. Vertex 0 is the
+        // origin and starts all three of its edges at t0 = 0, so eval(t0) is
+        // exactly (0,0,0). Moved to (0,0,−LINEAR), its distance is
+        // sqrt(fl(LINEAR²)), which is LINEAR exactly (a correctly rounded
+        // square root of a correctly rounded square gives back |x| in binary
+        // floating point, barring underflow). So `> LINEAR` must not fire.
+        let mut b = hand_cube();
+        b.vertices[0].point.z = -tolerance::LINEAR;
+        let d = b.edges[0].curve.eval(b.edges[0].t0).distance(b.vertices[0].point);
+        assert_eq!(d.to_bits(), tolerance::LINEAR.to_bits(), "the setup must hit LINEAR exactly");
+        assert_eq!(validate(&b), Ok(()));
+    }
+
+    #[test]
+    fn edges_exactly_linear_off_a_face_are_on() {
+        // The bottom face (0) is z = 0 with normal −z, and its four edges lie
+        // in z = 0. Moving its plane's origin to z = −LINEAR puts every edge
+        // sample p at |(p − origin)·(−z)| = |0 − (−LINEAR)| = LINEAR, exact
+        // (one subtraction from zero and products with 0 and −1).
+        let mut b = hand_cube();
+        if let Surface::Plane { origin, .. } = &mut b.faces[0].surface {
+            origin.z = -tolerance::LINEAR;
+        }
+        let d = b.faces[0].surface.distance(b.edges[0].point_at(0.5));
+        assert_eq!(d.to_bits(), tolerance::LINEAR.to_bits(), "the setup must hit LINEAR exactly");
+        assert_eq!(validate(&b), Ok(()));
     }
 
     #[test]
