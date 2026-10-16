@@ -35,6 +35,6 @@ export const renderWorkspace: WorkspacePlugin = {
       plans: ["Path-traced images of the bodies in the current design, updated when the design changes", "Materials from the shared library (the same ones Design shows)", "Lighting, environments and saved cameras", "Scenes saved in the project file next to the design"],
       startsAfter: "after CAD step 33 (editing the timeline and rebuilding)",
     });
-    return () => ctx.properties.replaceChildren();
+    return { unmount: () => ctx.properties.replaceChildren() };
   },
 };

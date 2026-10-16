@@ -6,3 +6,4 @@ export { changeNote, type ChangeNoteInfo, type NoteState } from "./change-note.t
 export { linkBadge, type LinkBadgeState } from "./link-badge.ts";
 export { workspaceSwitcher, type SwitcherEntry } from "./switcher.ts";
 export { SPLIT_MIN_WIDTH_PX, defaultSplit, splitChoices, type SplitEntry } from "./split.ts";
+export { WarmPool, type WarmHooks } from "./warm.ts";

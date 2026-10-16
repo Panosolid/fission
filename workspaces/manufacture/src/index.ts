@@ -34,6 +34,6 @@ export const manufactureWorkspace: WorkspacePlugin = {
       plans: ["Setups with stock and work coordinates", "A tool library shared across projects", "2D, 2.5D and 3D strategies on design faces and edges, by reference", "Toolpath simulation in the shared viewport", "G-code through post-processors for different machines"],
       startsAfter: "after CAD step 50 (booleans and full topological naming), so a toolpath stays on the right pocket",
     });
-    return () => ctx.properties.replaceChildren();
+    return { unmount: () => ctx.properties.replaceChildren() };
   },
 };
