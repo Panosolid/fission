@@ -28,12 +28,12 @@ export const manufactureWorkspace: WorkspacePlugin = {
   representations: { produces: [], accepts: [] },
   commands: [],
   mount(ctx) {
-    showPlaceholder(ctx.panel, {
+    showPlaceholder(ctx.properties, {
       title: "Manufacture",
       summary: "CNC toolpaths from the design: setups, stock, tools, strategies, simulation and G-code.",
       plans: ["Setups with stock and work coordinates", "A tool library shared across projects", "2D, 2.5D and 3D strategies on design faces and edges, by reference", "Toolpath simulation in the shared viewport", "G-code through post-processors for different machines"],
       startsAfter: "after CAD step 50 (booleans and full topological naming), so a toolpath stays on the right pocket",
     });
-    return () => {};
+    return () => ctx.properties.replaceChildren();
   },
 };

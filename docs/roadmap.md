@@ -51,6 +51,15 @@ Test infrastructure (in place before booleans, which are built against it)
 - [ ] 40. Overnight fuzzing + simulated-user bot (Tier 3), extended as each new feature lands
 
 Booleans
+- [ ] B0. Boolean design review (before 41; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. From an expert's review of the B-rep (2026-10-16):
+  - P-curves: store each edge's curve in every face's uv space, or write down why uv computed on demand from the 3D edge is exact for the supported surfaces (and when that stops holding: 46–47, NURBS).
+  - Model contract: closed, manifold solids only, stated as a rule (validate's "every edge used exactly twice" follows from it). What a boolean does with a non-manifold result (two boxes touching along an edge): an error, or separate bodies (45).
+  - Bodies with several pieces and with voids (a subtraction that splits a part or seals a hollow): how Body and Shell represent them, and what validate and the inside-out check then require.
+  - Curve types for intersection curves: an ellipse (slanted plane through a cylinder, 46) and a representation for general crossings (cylinder–cylinder, 47): fitted spline or procedural "where these two surfaces meet".
+  - Tolerance model: one global LINEAR, or per-edge/per-vertex tolerances for intersection edges that never lie exactly on both surfaces.
+  - Tidying results: merging faces that lie on the same surface, removing sliver faces and tiny edges, and how topological naming (32, 50) survives that.
+  - Point-in-face on curved trimmed faces (42–43) and robust predicates beyond planes (interval arithmetic or error bounds).
+  - Validation in four separate categories, each tested on its own: topological consistency, geometric consistency, solid validity (inside/outside), and correctness against the operation (boolean identities, oracle). The self-intersection check's known limits (`self_intersect.rs` header) are extended where booleans make such faces.
 - [ ] 41. Plane–plane and line–plane intersection
 - [ ] 42. Splitting planar faces along intersection lines
 - [ ] 43. Inside/outside classification with exact predicates
@@ -186,6 +195,10 @@ AI assistant (owner's spec "AI assistant — architecture and placeholders"; opt
 - [ ] A7. Design commands for real (after step 32): plain-English commands, parameter edits, failure explanations, design review (printability, thin walls), parameter variants
 - [ ] A8. Each workspace's AI features once that workspace is real: Render (scene setup, material suggestions, camera framing); Simulate (loads and constraints in plain English, explain results, suggest fixes, parameter sweeps); Manufacture (strategies, tools, feeds/speeds with reasons, explain G-code, flag risky moves; never runs a machine); Laser (power/speed suggestions, parametric finger-joint boxes, photo tracing); Slice (diagnose failures from descriptions or photos, settings and orientation); Circuit (datasheet and component Q&A, explain DRC errors, schematic drafts marked "AI draft — review required"); Vector (tracing, clean-up, layout; image generation only via the user's own API key); Image (background removal, upscaling, smart selection, inpainting); suite-wide ("what breaks if I change this?" from the dependency graph, project questions like total filament, cost and parts, build instructions). The lists are in `packages/ai/src/features.ts` and shown in the assistant panel
 - [x] A9. NOW: docs/ai.md (architecture, how a workspace exposes its commands) and the AI rules in CLAUDE.md. Done: docs/ai.md; the rules are in docs/ai.md, pointed to from "Ecosystem" in CLAUDE.md
+- [ ] A10. Fission's own model, the gate (with A7): score 2 or 3 off-the-shelf small models through Ollama on the eval suite; if one is good enough, it becomes the in-browser default and A11–A13 are skipped. Plan and rules for the model are in docs/ai.md, "Fission's own model"
+- [ ] A11. Training data generator (separate repository): random valid commands from every CommandSpec list, each one built on the kernel and kept only if it is valid; English from templates and paraphrases; a hand-written held-out eval set
+- [ ] A12. LoRA fine-tune of a small open base model (with a licence that allows free redistribution); free tiers first, about 100 US dollars cap until it ships
+- [ ] A13. Ship "Fission model" as a provider (in-browser and Ollama formats), with the training switch off by default; it becomes the default only if it beats the base model; retrained as A8 adds commands
 - Report back to the owner when A1–A6 and A9 land: built vs placeholdered, test status, decisions needed
 
 Community (free sharing only; starts after CAD step 33, needs a server first, see docs/community.md)

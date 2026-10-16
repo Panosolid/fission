@@ -14,8 +14,14 @@
       <button id="community" type="button" title="Shared models, free to download (coming soon)">Community</button>
     </header>
     <main id="workspace">
-      <aside id="panel"></aside>
+      <div id="toolbar" role="toolbar" aria-label="Tools"></div>
+      <div id="panel-toggles" aria-label="Panels">
+        <button id="browser-toggle" type="button" aria-controls="browser" aria-expanded="false">Browser</button>
+        <button id="properties-toggle" type="button" aria-controls="properties" aria-expanded="true">Properties</button>
+      </div>
+      <aside id="browser" aria-label="Browser"></aside>
       <div id="viewport"></div>
+      <aside id="properties" aria-label="Properties"></aside>
       <aside id="assistant" hidden></aside>
     </main>
     <script type="module" src="/src/main.ts"></script>

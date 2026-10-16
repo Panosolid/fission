@@ -13,25 +13,43 @@ body { display: flex; flex-direction: column; }
 #topbar button.soon { color: #6f7680; }
 #topbar button.soon[aria-selected="true"] { color: #b5bbc4; }
 
-/* Workspace: its panel beside the shared viewport. */
-#workspace { flex: 1; display: flex; min-height: 0; }
-#panel { width: 280px; padding: 16px; background: #1c1f24; border-right: 1px solid #2a2e35; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
-#panel h2 { font-size: 13px; margin: 8px 0 0; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
+/* Workspace: toolbar above, browser left, properties right of the shared
+   viewport. Columns are placed explicitly so an empty slot (hidden) leaves
+   the others where they are. */
+#workspace { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+#toolbar { grid-column: 1 / -1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; background: #1c1f24; border-bottom: 1px solid #2a2e35; }
+#browser { grid-column: 1; grid-row: 2; width: 220px; border-right: 1px solid #2a2e35; }
+#viewport { grid-column: 2; grid-row: 2; }
+#properties { grid-column: 3; grid-row: 2; width: 300px; border-left: 1px solid #2a2e35; }
+#assistant { grid-column: 4; grid-row: 2; }
+#browser, #properties { padding: 16px; background: #1c1f24; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+#toolbar:empty, #browser:empty, #properties:empty { display: none; }
+#workspace aside h2 { font-size: 13px; margin: 8px 0 0; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
 label { display: flex; align-items: center; gap: 8px; }
 label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background: #14161a; border: 1px solid #2a2e35; color: inherit; border-radius: 4px; font-family: ui-monospace, monospace; }
-#stats, #properties { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0 0; }
-#stats dt, #properties dt { color: #8a919c; }
+#stats, #feature-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 8px 0 0; }
+#stats dt, #feature-info dt { color: #8a919c; }
 #stats dd { margin: 0; font-family: ui-monospace, monospace; }
-#properties dd { margin: 0; }
+#feature-info dd { margin: 0; }
 #stats.stale dd { opacity: 0.45; }
 #stale-note { color: #f5b14c; }
 #status.ok { color: #3ddc97; }
 #status.bad { color: #ff6b6b; }
 #error { color: #ff6b6b; min-height: 1em; margin: 0; white-space: pre-wrap; }
-#viewport { flex: 1; min-width: 0; position: relative; }
+#viewport { min-width: 0; position: relative; }
 .overlay-legend { position: absolute; top: 8px; right: 8px; margin: 0; padding: 6px 10px; list-style: none; background: rgba(20, 22, 26, 0.85); color: #f5b14c; border-radius: 6px; font-size: 13px; }
-#panel button { padding: 7px 10px; background: #262a31; border: 1px solid #353a43; color: inherit; border-radius: 4px; font: inherit; cursor: pointer; }
-#panel button:hover { background: #2e333b; }
+#workspace button { padding: 7px 10px; background: #262a31; border: 1px solid #353a43; color: inherit; border-radius: 4px; font: inherit; cursor: pointer; }
+#workspace button:hover { background: #2e333b; }
+.tool-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.tool-group + .tool-group { border-left: 1px solid #2a2e35; padding-left: 10px; margin-left: 4px; }
+.tool-group-name { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; margin-right: 4px; }
+#toolbar button[aria-pressed="true"] { background: #23384f; border-color: #4aa8ff; }
+.tree { list-style: none; margin: 0; padding: 0; }
+.tree .tree { padding-left: 14px; }
+.tree summary { cursor: pointer; padding: 4px 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
+#workspace .tree-row { display: block; width: 100%; text-align: left; padding: 4px 6px; background: none; border: 1px solid transparent; overflow-wrap: anywhere; }
+#workspace .tree-row:hover { background: #262a31; }
+#workspace .tree-row[aria-current="true"] { background: #23384f; border-color: #4aa8ff; }
 #stl-note { margin: 0; font-size: 13px; min-height: 1em; }
 #stl-note.bad { color: #ff6b6b; }
 
@@ -43,10 +61,27 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 .placeholder .coming-soon { display: inline-block; padding: 2px 8px; border: 1px solid #4aa8ff; border-radius: 10px; color: #4aa8ff; font-size: 12px; }
 .placeholder .starts-after { color: #8a919c; font-size: 13px; margin-top: 14px; }
 
+/* Toggles for the side panels, shown only at phone width. */
+#panel-toggles { display: none; }
+
+/* Phone width: one column (toolbar, panel toggles, viewport, then the open
+   panels), never wider than the screen. The toolbar scrolls sideways inside
+   itself; a closed panel is hidden, and a toggle for an empty slot too. */
 @media (max-width: 640px) {
-  #workspace { flex-direction: column; }
-  #panel { width: auto; border-right: none; border-bottom: 1px solid #2a2e35; max-height: 45vh; }
-  #viewport { min-height: 50vh; }
+  #workspace { display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
+  #toolbar { flex-wrap: nowrap; overflow-x: auto; flex-shrink: 0; }
+  .tool-group { flex-wrap: nowrap; }
+  #toolbar button { white-space: nowrap; }
+  #panel-toggles { display: flex; gap: 6px; padding: 6px 12px; order: 1; flex-shrink: 0; background: #1c1f24; border-bottom: 1px solid #2a2e35; }
+  #panel-toggles button[aria-expanded="true"] { background: #23384f; border-color: #4aa8ff; }
+  #workspace:has(#browser:empty) #browser-toggle, #workspace:has(#properties:empty) #properties-toggle { display: none; }
+  #viewport { height: 55vh; flex-shrink: 0; order: 2; }
+  #browser, #properties { width: auto; flex-shrink: 0; border-left: none; border-right: none; border-top: 1px solid #2a2e35; overflow-y: visible; }
+  #browser { order: 3; }
+  #properties { order: 4; }
+  #workspace[data-browser="closed"] #browser, #workspace[data-properties="closed"] #properties { display: none; }
+  #workspace #assistant { width: auto; order: 5; flex-shrink: 0; border-left: none; border-top: 1px solid #2a2e35; }
+  #topbar { gap: 8px; padding: 0 8px; }
   #topbar h1 #version { display: none; }
 }
 [hidden] { display: none !important; }

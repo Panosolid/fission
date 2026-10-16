@@ -1,6 +1,8 @@
 // The app shell: one project, one kernel, one viewport, and a switcher
-// between workspaces. Each workspace fills the side panel; the viewport is
-// shared, so switching keeps the camera and what is on screen.
+// between workspaces. Each workspace fills the layout slots around the
+// shared viewport (toolbar above, browser left, properties right) and
+// empties them on hide; the viewport is shared, so switching keeps the
+// camera and what is on screen.
 import "@fission/ui/theme.css";
 import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt, KernelClient, selectionNotBuilt, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
@@ -35,14 +37,15 @@ const representations = new RepresentationRegistry();
 for (const w of workspaces) w.registerRepresentations?.(representations, kernel);
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const panel = $("panel");
 const ctx = {
   project: emptyProject(),
   kernel,
   selection: selectionNotBuilt,
   history: historyNotBuilt,
   graph: new DependencyGraph(),
-  panel,
+  toolbar: $("toolbar"),
+  browser: $("browser"),
+  properties: $("properties"),
   viewport: new Viewer($("viewport")),
   representations,
 };
@@ -61,7 +64,10 @@ function show(page: Page) {
   hide = () => {};
   const workspace = workspaces.find((w) => w.id === page);
   if (workspace) hide = workspace.mount(ctx);
-  else showPlaceholder(panel, communityPage);
+  else {
+    showPlaceholder(ctx.properties, communityPage);
+    hide = () => ctx.properties.replaceChildren();
+  }
   markTab(page);
   $("community").setAttribute("aria-pressed", String(page === "community"));
   document.body.dataset.activeWorkspace = page; // read by the e2e test
@@ -78,6 +84,18 @@ $("assistant-toggle").addEventListener("click", () => {
   $("assistant-toggle").setAttribute("aria-pressed", String(!panel.hidden));
   if (!panel.hidden) showAssistant(panel, current, workspaces.find((w) => w.id === current)?.title ?? "Community");
 });
+// At phone width the browser and properties fold away behind two toggles
+// (theme.css hides a closed one there); wider screens hide the toggles and
+// show both panels. The state lives on #workspace, so it survives switching.
+for (const slot of ["browser", "properties"] as const) {
+  const toggle = $(`${slot}-toggle`);
+  const set = (open: boolean) => {
+    toggle.setAttribute("aria-expanded", String(open));
+    $("workspace").dataset[slot] = open ? "open" : "closed";
+  };
+  set(toggle.getAttribute("aria-expanded") === "true");
+  toggle.addEventListener("click", () => set(toggle.getAttribute("aria-expanded") !== "true"));
+}
 const pages: string[] = [...workspaces.map((w) => w.id), "community"];
 const fromHash = (): Page => {
   const id = location.hash.slice(1);

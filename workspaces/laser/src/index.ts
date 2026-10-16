@@ -26,12 +26,12 @@ export const laserWorkspace: WorkspacePlugin = {
   representations: { produces: [], accepts: [] },
   commands: [],
   mount(ctx) {
-    showPlaceholder(ctx.panel, {
+    showPlaceholder(ctx.properties, {
       title: "Laser",
       summary: "2D jobs for laser and vinyl cutters: cut, engrave and score layers, preview and machine control.",
       plans: ["Cut, engrave and score layers with power and speed settings", "Flat faces and sketches taken straight from Design, by reference (sheet-metal flat patterns later)", "Job preview with time estimate", "DXF and SVG import and export", "Machine control for common controllers"],
       startsAfter: "after CAD step 31 (when the sketcher is solid)",
     });
-    return () => {};
+    return () => ctx.properties.replaceChildren();
   },
 };

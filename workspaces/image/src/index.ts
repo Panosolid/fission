@@ -35,7 +35,7 @@ export const imageWorkspace: WorkspacePlugin = {
   representations: { produces: [], accepts: [] },
   commands: [],
   mount(ctx) {
-    showPlaceholder(ctx.panel, {
+    showPlaceholder(ctx.properties, {
       title: "Image",
       summary,
       plans: [
@@ -46,6 +46,6 @@ export const imageWorkspace: WorkspacePlugin = {
       ],
       startsAfter: "after CAD step 33 and Render's first steps (R1–R2)",
     });
-    return () => {};
+    return () => ctx.properties.replaceChildren();
   },
 };

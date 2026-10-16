@@ -1,7 +1,7 @@
 // Design's commands, as data (the command API in core). The panel and the
 // AI assistant do the same thing through these: the AI gets schemas
 // generated from them and can't do anything a user couldn't. Until the
-// timeline (step 32) there is one: set the part.
+// timeline (step 32) there are two: set the part, and export it.
 
 import type { Command, CommandSpec } from "@fission/core";
 import { partDocument, type DesignDocument } from "./document.ts";
@@ -20,10 +20,16 @@ export const DESIGN_COMMANDS: readonly CommandSpec[] = [
       height: { type: "length", description: "height, or how far a profile is extruded (ignored by spheres)" },
     },
   },
+  {
+    op: "export_stl",
+    summary: "Download the part as a binary STL file, for printing or another program. Warns when the part is too big for STL's single-precision numbers.",
+    params: {},
+  },
 ];
 
 /** The document a parsed Design command makes. */
 export function documentFor(command: Command): DesignDocument {
+  // export_stl makes no document: it saves the one there is.
   if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
   const { shape, width, depth, height } = command as unknown as { shape: ShapeKind; width: number; depth: number; height: number };
   return partDocument(shape, width, depth, height);
