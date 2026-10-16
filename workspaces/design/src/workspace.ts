@@ -13,6 +13,7 @@ import { buildSpec } from "./spec.ts";
 import { toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
+import { pickChange } from "./picking.ts";
 
 /** Hands `bytes` to the browser as a file download. */
 function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
@@ -206,10 +207,27 @@ function mount(ctx: WorkspaceContext): () => void {
     }
   }
 
+  // Picking (17b): a click on a face selects it, Shift adds, empty space or Escape clears.
+  viewport.onPick = (pick) => {
+    const doc = ctx.project.workspaces.design as DesignDocument | undefined;
+    if (!doc) return;
+    const c = pickChange(pick, lastFeature(doc).id);
+    if (c.change === "set") ctx.selection.set([c.item]);
+    else if (c.change === "toggle") ctx.selection.toggle(c.item);
+    else if (c.change === "clear") ctx.selection.clear();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") ctx.selection.clear();
+  };
+  const keys = viewport.element.ownerDocument;
+  keys.addEventListener("keydown", onKey);
+
   inputs.forEach((i) => i.addEventListener("input", update));
   update();
   return () => {
     shown = false;
+    viewport.onPick = null;
+    keys.removeEventListener("keydown", onKey);
     for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
   };
 }

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport } from "@fission/core";
+import { triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportPick } from "@fission/core";
+import { faceOfTriangle, isClick } from "./picking.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -13,6 +14,9 @@ export class Viewer implements SharedViewport {
   private body = new THREE.Group();
   private mesh: DisplayMesh | null = null;
   private faces: THREE.BufferGeometry | null = null;
+  private faceMesh: THREE.Mesh | null = null;
+  private raycaster = new THREE.Raycaster();
+  onPick: ((pick: ViewportPick) => void) | null = null;
   private overlays = new Map<string, AnalysisOverlay>();
   private legend = document.createElement("ul");
   readonly element: HTMLElement;
@@ -40,6 +44,19 @@ export class Viewer implements SharedViewport {
     const fill = new THREE.DirectionalLight(0xffffff, 0.6);
     fill.position.set(-2, 1, -1);
     this.scene.add(grid, new THREE.AxesHelper(20), new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body);
+
+    // A click picks; a press that moves further is the camera orbiting.
+    let down: { x: number; y: number; id: number } | null = null;
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener("pointerdown", (e) => {
+      down = e.isPrimary && e.button === 0 ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+    });
+    canvas.addEventListener("pointerup", (e) => {
+      const start = down;
+      down = null;
+      if (!start || start.id !== e.pointerId || !isClick(start, { x: e.clientX, y: e.clientY })) return;
+      this.onPick?.({ face: this.faceAt(e.clientX, e.clientY), shift: e.shiftKey });
+    });
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -71,8 +88,9 @@ export class Viewer implements SharedViewport {
     });
     const edges = new THREE.BufferGeometry();
     edges.setAttribute("position", new THREE.Float32BufferAttribute(mesh.edge_lines, 3));
+    this.faceMesh = new THREE.Mesh(geometry, material);
     this.body.add(
-      new THREE.Mesh(geometry, material),
+      this.faceMesh,
       new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x0b0c0e })),
     );
     this.paint();
@@ -112,6 +130,18 @@ export class Viewer implements SharedViewport {
       if (c) for (let k = 0; k < 3; k++) colours.set(linear(c), 3 * this.mesh!.indices[3 * t + k]);
     });
     this.faces.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+  }
+
+  /** The kernel face index under a point on screen (client pixels), or null for empty space. */
+  private faceAt(clientX: number, clientY: number): number | null {
+    if (!this.mesh || !this.faceMesh) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    // Nearest hit first; for indexed geometry faceIndex is the triangle number.
+    const [hit] = this.raycaster.intersectObject(this.faceMesh, false);
+    return faceOfTriangle(this.mesh.triangle_faces, hit?.faceIndex);
   }
 
   /** Sphere around the current body's bounding box (radius 0 if none). */

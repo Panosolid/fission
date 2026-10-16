@@ -71,6 +71,58 @@ try {
     assert.notDeepEqual(centre, background, "centre of the view should show the body");
   });
 
+  await check("clicking faces selects them: click, Shift-click, drag, empty space, Escape", async () => {
+    // Where a point of the box lands on screen, worked out here from the
+    // framing in viewer.ts fit() rather than asked of the viewer: the
+    // 40×30×20 box is framed as a sphere at its centre (20, 15, 10) with
+    // r = √(40² + 30² + 20²)/2 = √2900/2, the camera sits r / sin(22.5°)
+    // away along (0.6, −0.8, 0.55), looks at the centre with Z up, fov 45°.
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const screen = ([px, py, pz]) => {
+      const n = Math.hypot(0.6, -0.8, 0.55);
+      const dir = [0.6 / n, -0.8 / n, 0.55 / n];
+      const centre = [20, 15, 10];
+      const dist = Math.sqrt(2900) / 2 / Math.sin(Math.PI / 8);
+      const cam = centre.map((c, i) => c + dir[i] * dist);
+      const fwd = dir.map((d) => -d);
+      const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      const unit = (a) => a.map((x) => x / Math.hypot(...a));
+      const right = unit(cross(fwd, [0, 0, 1]));
+      const up = cross(right, fwd);
+      const v = [px - cam[0], py - cam[1], pz - cam[2]];
+      const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const t = Math.tan(Math.PI / 8);
+      const ndcX = dot(v, right) / (dot(v, fwd) * t * (box.width / box.height));
+      const ndcY = dot(v, up) / (dot(v, fwd) * t);
+      return { x: box.x + ((ndcX + 1) / 2) * box.width, y: box.y + ((1 - ndcY) / 2) * box.height };
+    };
+    const selection = () => page.evaluate(() => document.body.dataset.selection ?? "");
+    // Kernel face order for a box (primitives.rs): −Z, +Z, −Y, +Y, −X, +X.
+    const top = screen([20, 15, 20]); // centre of the +Z face: face 1
+    const front = screen([20, 0, 10]); // centre of the −Y face: face 2
+    await page.mouse.click(top.x, top.y);
+    assert.equal(await selection(), "face:feature-1/1", "a click on the top face selects face 1");
+    await page.keyboard.down("Shift");
+    await page.mouse.click(front.x, front.y);
+    await page.keyboard.up("Shift");
+    assert.equal(await selection(), "face:feature-1/1 face:feature-1/2", "Shift-click adds the front face");
+    // A press that moves 30 px is the camera orbiting, not a pick: nothing changes.
+    await page.mouse.move(front.x, front.y);
+    await page.mouse.down();
+    await page.mouse.move(front.x + 30, front.y, { steps: 5 });
+    await page.mouse.up();
+    assert.equal(await selection(), "face:feature-1/1 face:feature-1/2", "a drag does not pick");
+    await page.mouse.click(box.x + 0.02 * box.width, box.y + 0.02 * box.height);
+    assert.equal(await selection(), "", "a click on empty space clears");
+    await page.mouse.click(top.x, top.y);
+    await page.keyboard.press("Escape");
+    assert.equal(await selection(), "", "Escape clears");
+    // Put the camera back where fit() left it for the checks below.
+    await page.click("#toolbar [data-shape=cylinder]");
+    await page.click("#toolbar [data-shape=box]");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
+  });
+
   await check("editing a size rebuilds the body", async () => {
     await setSize("width", 100);
     // V = 100·30·20 = 60000.

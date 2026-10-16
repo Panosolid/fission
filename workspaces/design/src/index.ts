@@ -10,3 +10,4 @@ export { lastFeature, partDocument, profileLabel, readDesignDocument, specOf, ty
 export { PART_VIEW, syncGraph } from "./graph.ts";
 export { designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
 export { designReference, PLACEHOLDER_ID_NOTE } from "./references.ts";
+export { pickChange, type SelectionChange } from "./picking.ts";

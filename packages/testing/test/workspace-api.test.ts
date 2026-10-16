@@ -86,6 +86,7 @@ function testContext(): WorkspaceContext {
     fit: () => null,
     setOverlay() {},
     clearOverlay() {},
+    onPick: null,
   };
   return {
     project: emptyProject(),
@@ -158,6 +159,35 @@ test("every workspace leaves the shared selection as it found it and drops its l
     assert.deepEqual(ctx.selection.items, [picked], `${p.id} keeps the selection after hide`);
     assert.equal(open, 0, `${p.id} drops every selection listener on hide`);
   }
+});
+
+// Picking (17b): the shown workspace owns the viewport's click handler, so
+// a hidden one must hand it back or its clicks would edit the selection.
+test("every workspace puts the viewport's pick handler back to none on hide", async () => {
+  for (const p of plugins) {
+    const ctx = testContext();
+    const hide = p.mount(ctx);
+    await settle();
+    hide();
+    assert.equal(ctx.viewport.onPick, null, `${p.id} cleared onPick on hide`);
+  }
+});
+
+test("Design turns viewport picks and Escape into the shared selection", async () => {
+  const ctx = testContext();
+  const hide = plugins.find((p) => p.id === "design")!.mount(ctx);
+  await settle();
+  const ids = () => ctx.selection.items.map((r) => r.id);
+  ctx.viewport.onPick!({ face: 1, shift: false });
+  ctx.viewport.onPick!({ face: 4, shift: true });
+  assert.deepEqual(ids(), ["face:feature-1/1", "face:feature-1/4"]);
+  const doc = ctx.viewport.element.ownerDocument;
+  doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
+  assert.deepEqual(ids(), []);
+  ctx.viewport.onPick!({ face: 2, shift: false });
+  hide();
+  doc.dispatchEvent(new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event);
+  assert.deepEqual(ids(), ["face:feature-1/2"], "Escape after hide no longer clears");
 });
 
 test("Design shows a kernel failure in its panel rather than throwing", async () => {

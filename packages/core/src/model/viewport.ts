@@ -12,6 +12,16 @@ export interface Framing {
   radius: number;
 }
 
+/**
+ * What a click (not a camera drag) in the viewport hit: the kernel index of
+ * the body's face under the pointer, or null for empty space, and whether
+ * Shift was held. The workspace on show decides what that selects.
+ */
+export interface ViewportPick {
+  face: number | null;
+  shift: boolean;
+}
+
 export interface SharedViewport {
   /** The element the viewport fills. */
   readonly element: HTMLElement;
@@ -23,4 +33,6 @@ export interface SharedViewport {
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
   setOverlay(overlay: AnalysisOverlay): void;
   clearOverlay(id: string): void;
+  /** Called on every click in the viewport; the shown workspace sets it and puts back null on hide. */
+  onPick: ((pick: ViewportPick) => void) | null;
 }

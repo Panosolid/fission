@@ -50,6 +50,9 @@ const ctx = {
   representations,
 };
 
+// What is selected, read by the e2e test (17d draws it on screen).
+ctx.selection.onChange((items) => (document.body.dataset.selection = items.map((r) => r.id).join(" ")));
+
 type Page = WorkspaceId | "community";
 let hide: () => void = () => {};
 let current: Page = "design";
