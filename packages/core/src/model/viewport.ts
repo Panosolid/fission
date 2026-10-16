@@ -5,6 +5,7 @@
 
 import type { DisplayMesh } from "../kernel/kernel-types.ts";
 import type { AnalysisOverlay } from "./overlay.ts";
+import type { ImageRep } from "./representation.ts";
 
 /** A sphere around a body: what the camera frames. */
 export interface Framing {
@@ -69,4 +70,15 @@ export interface SharedViewport {
    * pointer is drawn hovered.
    */
   onPick: ((pick: ViewportPick) => void) | null;
+  /**
+   * Shows an image as a flat sheet at its real size in mm, lying on the XY
+   * plane with its centre at the origin and its top towards +Y, in a
+   * top-down 2D view (pan and zoom, no orbit; the standard views and fit
+   * all frame the sheet). The body is hidden meanwhile. A second call
+   * replaces the image and keeps the camera. Throws a readable Error when
+   * the screen's graphics can't hold an image that large.
+   */
+  showImage(image: ImageRep): void;
+  /** Removes the image and gives back the body and the 3D camera as they were before showImage. Does nothing when no image is shown. */
+  clearImage(): void;
 }
