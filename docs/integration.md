@@ -1,6 +1,6 @@
 # How Fission's workspaces work together
 
-Fission is ten workspaces sharing one project: Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image and Layout. The goal is that anything made in one workspace can go straight into any other, stays linked to its source, and never loses information, without anyone exporting a file. This page is for contributors. It explains the model and where each piece lives. The code in `packages/core/src/model/` is the reference.
+Fission is ten workspaces sharing one project: Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image and Layout. The goal is that anything made in one workspace can go straight into any other, stays linked to its source, and never loses information, without anyone exporting a file. This page is for contributors. It explains the model and where each piece lives. The code in `packages/core/src/model/` is the reference. Which links exist between which workspaces, and when each can be built, is in [integration-map.md](integration-map.md).
 
 ## The rules
 
@@ -14,6 +14,10 @@ Fission is ten workspaces sharing one project: Design, Render, Simulate, Manufac
 8. **One of each.** There is one selection, one undo history, one units system, one materials library, one machine library and one viewport, which carries analysis overlays.
 9. **Placeholders stay placeholders.** A workspace that isn't built shows a page saying what it will do and "Coming soon". It declares no representations, and its functions throw "not implemented".
 10. **No private shortcuts.** Our workspaces are plugins on the same public API an outside developer would use.
+
+## Why this matters
+
+Integration is Fission's flagship and its main way to compete with established tools, even where its CAD is less capable. Moving a design (your own or a shared one) between workspaces should feel as if everything was always one tool. CAD reliability still comes first: integration never hides a broken boolean, and integration work never slows the kernel roadmap. Only what can be built for real is built; the rest is written here as rules and in `docs/roadmap.md` as planned steps ("Integration experience").
 
 ## Representations (`representation.ts`)
 
@@ -63,6 +67,71 @@ Any workspace can paint faces of the body on screen through `viewport.setOverlay
 The first use is in Design: after an STL export that warns about single-precision rounding, the whole part is painted amber. Downstream feedback (printability, machinability, stress, clearance; `feedback.ts`) will arrive the same way.
 
 The app never shows invalid parts. The kernel refuses to hand them out, and only the developer failure-dump viewer (step 14) draws them.
+
+## The owner's five decisions (2026-10-16)
+
+### 1. One owner per value
+
+Every linked value has exactly one owner. An edit made from the side that doesn't own it becomes a proposed edit for the owner: a previewed command (the same commands the user and the AI issue) that the user accepts or rejects. There is no two-way sync.
+
+- Why: with two owners, a disagreement has no answer for which side wins, and the user can't tell why a value changed. One owner makes every change traceable to one place.
+- The UI shows the owner next to the value ("Owned by Design"), so it is clear why an edit became a suggestion.
+- Ownership can be transferred per value. Sometimes the enclosure drives the mounting holes, sometimes the board does. Transferring is itself an undoable command, recorded in the value's provenance.
+
+### 2. Vector curves in Design before NURBS (step 65)
+
+Until the kernel has exact splines, a Vector Bézier entering Design is fitted with biarcs: pairs of arcs that meet tangent to each other and to their neighbours, within the kernel's tolerance. Printed or cut parts have no visible kinks, because the fitted outline is tangent-continuous. Design shows a note saying the curve is approximated.
+
+- All faces created from one fitted curve form one logical face for topological naming (step 32). References point to that group, never to an individual arc face, so the switch to exact NURBS at step 65 changes no references.
+- The original stays in Vector as the owner (decision 1), so nothing is lost and the Vector → Design → Vector round trip is exact.
+- Biarc fitting is an operation of the kernel's 2D curve library (decision 5), so it uses the kernel's tolerance.
+
+### 3. Lithophanes are a Design feature ("relief from image")
+
+"Relief from image" is a Design feature with intent (image, size, minimum and maximum thickness), so Slice, Render and Manufacture receive it like any other body and it sits in the timeline. Before exact surfaces exist, its output is a mesh body, governed by the policy in decision 4.
+
+### 4. Meshes are never turned into exact solids automatically
+
+Scans, imported STL files and relief features are **mesh bodies**: a clearly marked, separate kind of body. The browser and properties panel show the kind ("Mesh body"), and the operations available are listed below; anything else is not offered for them, rather than offered and failing.
+
+Mesh bodies can:
+- be shown, moved, turned, measured (volume, area, bounding box) and sectioned;
+- be printed, rendered, and sent to Laser as a projected outline;
+- be used as a reference to sketch over (projected points and outlines, step 25);
+- be combined with an exact solid or another mesh body by a mesh boolean (after step 45, sharing its exact predicates). The result is a mesh body, clearly marked, and the exact input is kept unchanged in the timeline;
+- be exported as STL or 3MF.
+
+Mesh bodies cannot be filleted, chamfered, shelled or drafted, and their faces cannot be picked as exact faces. A mesh body must be closed and consistently oriented to be printed or used in a boolean; the kernel's watertight mesh check (step 5) decides.
+
+A later, user-initiated "fit exact surfaces" feature (reverse engineering: fitting planes, cylinders, spheres and later NURBS to regions of a scan) is planned. It is never automatic, it previews what it fitted and how far each surface is from the scan, and it produces a new exact body next to the mesh.
+
+### 5. One 2D curve library, in the kernel
+
+The sketcher, Vector, Laser and Layout share one 2D curve library: lines, arcs, Béziers, offsets, path booleans, biarc fitting, and later the constraint solver's geometry. It lives in the Rust kernel and uses `tolerance.rs`, not TypeScript, so sketcher constraints, Vector path booleans and laser kerf offsets use exactly the same maths. Its operations go through `validate`-style checks for 2D results and into the stateful random-testing harness like any kernel operation. It is built a piece at a time as its users need it: lines and arcs with the sketcher (steps 21–23), offsets with step 31, Béziers, path booleans and biarc fitting with Vector (V1–V3).
+
+## Experience principles
+
+These describe what the user feels. Each one turns into a rule for code below and a step in the roadmap.
+
+1. **Verbs, not apps.** Selecting anything shows actions that lead into the right workspace with the object already set up: a flat face offers Cut on laser, Engrave and Make sheet-metal part; a body offers Print, Machine, Simulate and Render; a logo offers Emboss, Engrave, Decal and Silkscreen. Workspaces are places you end up, not places you have to go. Each workspace registers the verbs it offers for each representation in one action registry in `packages/core`; Design's own actions (Download STL) live there too.
+2. **It already knew.** When an object lands in a workspace it is already set up, and the user only confirms. Slice orients for the fewest supports, takes the filament from the part's material and picks the user's usual printer. Laser finds the flat faces, takes the thickness from the material, applies the kerf and nests the parts on the sheet. Simulate takes material properties from the library and suggests bolt holes as fixed points. Render applies Design's materials with a sensible camera and lighting. No workspace opens on a blank setup when there is enough information to fill it.
+3. **Side by side.** Any two workspaces can be shown split-screen, and editing one updates the other live (drag the enclosure wall, watch the board outline follow). The split layout lives in the UI kit.
+4. **Downstream results while designing.** Design's properties panel shows a live chip for each downstream use ("Print: 2 h 14 m · 38 g", "Laser: 6 min · 1 sheet", "Safety factor 1.4"). Hover shows a preview, click goes there. Cheap results update in the background; expensive ones show as out of date until rerun, from the dependency graph.
+5. **Motion that explains.** A short animation (about half a second, skippable, off when the system asks for reduced motion) when an object moves between representations: a box unfolds into laser panels, a part drops onto the print bed, a logo wraps onto a surface. One shared transition helper in the UI kit, added with the first real cross-workspace move.
+6. **Conversions, not just moves.** Linked transformations between kinds of making, each staying live: a solid box becomes finger-jointed laser panels (sheet thickness a parameter), a solid becomes a sheet-metal part, a logo becomes a stamp, cookie cutter or keychain, a photo becomes a lithophane and then a print. Each is a feature with intent, so it rebuilds when its source changes.
+7. **Shared designs are complete recipes.** A shared design carries the whole recipe: the design, print settings, laser jobs, render scenes and instructions. "Make it for my machine" adapts a recipe to the user's own printers, lasers, materials and units. Remixes stay linked to the original like a git branch: when the author updates it, the remixer sees "Update available from the author" and can bring it in with their own changes kept on top. The format for this is planned in [project-format.md](project-format.md).
+8. **The outside world flows in and out.** Dropping or pasting a supported file anywhere (SVG, PNG or JPEG, STEP, STL, DXF, PDF) routes it through the representation registry to the right representation. Pasting an image straight onto a face offers to engrave it. Copying from Fission gives other apps something useful: SVG for outlines, PNG for renders and images.
+9. **Always explain changes.** When something updates because of something else, a short dismissible note names the cause ("Print plate updated: you changed wall thickness in Design"), with one click to the full provenance chain. Nothing updates silently in a way the user would find surprising.
+10. **Fast and the same everywhere.** Switching workspaces takes under 100 ms, because workspaces stay warm in the background. Shortcuts, gizmos, selection behaviour, units and undo are the same in every workspace. A browser test measures switching time and fails above 100 ms.
+
+## Measuring the magic
+
+The zero-exports suite gets "magic moment" journeys: browser tests with a click count and a time limit, for example "draw a box, click Cut on laser, change the thickness to 6 mm, check the panels updated, in under 5 clicks, with no exports". A journey whose workspaces don't exist yet is listed as pending and never reported as passing. The nightly summary reports clicks and seconds per journey next to the fuzzer's numbers and compares them to a baseline (the 15% performance rule applies to seconds; any extra click is flagged).
+
+Three flagship demos are perfected first, in this order, and each must be reliable, fast and explained before another demo is added:
+1. Box → laser panels (after Laser's basics).
+2. Logo → emboss, engrave and render (after Vector, Laser and Render's basics).
+3. Enclosure and board side by side (after Circuit's basics).
 
 ## The Workspace API (`workspace.ts`, version 1)
 

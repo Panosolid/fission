@@ -46,17 +46,17 @@ App shell (18: in CLAUDE.md)
 - [ ] 20. Undo/redo (document snapshots for now; switches to timeline edits at 32–33)
 
 Sketcher
-- [ ] 21. Sketch on ground plane: lines with grid snapping. Sketches must produce Outline through the existing representation registry (I8), with a test; no sketch-only path (register `design.sketch` with `outlineProducer`; the stand-in test in workspaces/design/test/document.test.ts shows the shape)
+- [ ] 21. Sketch on ground plane: lines with grid snapping. Its geometry comes from the kernel's 2D curve library (K1), not TypeScript. Sketches must produce Outline through the existing representation registry (I8), with a test; no sketch-only path (register `design.sketch` with `outlineProducer`; the stand-in test in workspaces/design/test/document.test.ts shows the shape)
 - [ ] 22. Rectangle and circle tools
 - [ ] 23. Arc tools (3-point, tangent)
 - [ ] 24. Sketch on any planar face
 - [ ] 25. Project/include edges into a sketch (copies for now; linked to their source through the naming scheme from 32)
 - [ ] 26. Profile detection (closed regions, nested)
-- [ ] 27. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical
+- [ ] 27. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical (in the kernel, on K1's curves, with its tolerances)
 - [ ] 28. Parallel, perpendicular, equal, tangent
 - [ ] 29. Editable dimensions (length, radius, angle)
 - [ ] 30. Constraint status colours
-- [ ] 31. Trim, extend, offset, mirror
+- [ ] 31. Trim, extend, offset, mirror (offsets in K1, shared with Laser kerf and Vector)
 
 Parametric
 - [ ] 32. Feature timeline (sketch → extrude replayed on rebuild). Decide the topological naming ID scheme here (e.g. "face created by feature X, from profile edge Y, side Z") and give every face/edge such an ID, so 50 is an upgrade, not a rewrite. Undo/redo becomes "undo this timeline edit"
@@ -136,9 +136,9 @@ Extras
 - [ ] 81. Tetrahedral meshing + FEM stress
 - [ ] 82. CAM: 2.5D toolpaths, G-code
 - [ ] 83. Sheet metal
-- [ ] 84. Cloud saving, versions, sharing
+- [ ] 84. Cloud saving, versions, sharing (recipes, origin and remix lineage: X12)
 
-Integration (the priority whenever a workspace is built; each item lands before the workspace that first needs it)
+Integration (the priority whenever a workspace is built; each item lands before the workspace that first needs it). Every link between workspaces, with what flows and when it can be built, is planned in `docs/integration-map.md`; a workspace's rows there become its integration tests
 - [ ] I1. Project file holds every workspace's data; save/load round-trips it (with step 19)
 - [ ] I2. Stable-ID references, re-resolved after every rebuild, warning when unresolved (rule: packages/CLAUDE.md, "Ecosystem"; with steps 32–33, completed at 50)
 - [ ] I3. One materials library used by Design appearances (62) and every later workspace
@@ -163,6 +163,30 @@ Integration foundations (owner's spec "Ecosystem integration — design and foun
 - [ ] I20. NOW: "Zero exports" journeys in packages/testing with no file exports, each also checking live links update and round trips are lossless. Now: Design → STL. Later: logo → emboss → engrave → render; enclosure → PCB outline → mounting holes → print; photo → lithophane → slice; part → simulate → change parameter → rerun. NOW part done: `npm run journeys` (Design → STL on the real kernel, in CI); the later ones are listed in `JOURNEYS`
 - [x] I21. NOW: docs/integration.md (the integration model for contributors) and the rules in "Ecosystem" in CLAUDE.md (which now points to docs/integration.md)
 - Report back to the owner when I7–I21's NOW parts land: built for real vs drafted, test status, the nine workspaces, open design questions
+
+Integration experience (owner's spec "Integration as the flagship", 2026-10-16; rules in packages/CLAUDE.md "Ecosystem", reasons in docs/integration.md, links in docs/integration-map.md). Never slows the kernel steps; each item is small, one thread and one commit, and lands when its dependency does. Items marked NOW can be built before any second workspace is real
+- [ ] X1. NOW (after 19a, which also changes Design's toolbar): action registry in `packages/core`: each workspace registers verbs per representation (and per selection kind: body, face, edge, outline); the selection shows the verbs that apply; Design's Download STL moves into it. Tests: Design's verbs for a body, none for an empty selection, a placeholder registers none, the boundary test still passes; e2e: Download STL works from the registry
+- [ ] X2. NOW (core only): one owner per linked value: `owner` on links and linked values, `proposeEdit` turns an edit from the non-owning side into a previewed command, `transferOwnership` as an undoable command (needs step 20 for the undo half). UI ("Owned by Design" beside the value, Accept/Reject on proposals) with the first two-way link (E3)
+- [ ] X3. NOW (UI kit): split view: any two workspaces side by side, each with its own viewport view of the one project; with Design and a placeholder today, live updates proved when a second workspace is real (I5's live-view half)
+- [ ] X4. NOW (interface and component): downstream chips: `DownstreamSummary` in core (label, value, cost, fresh or out of date from the graph, preview, target workspace) and a chip in the UI kit; Design's properties panel shows none until a downstream workspace registers one; e2e with the first (Slice's "Print: time · weight" at P2)
+- [ ] X5. NOW (core and UI kit): change notes: when the graph rebuilds something because of a change, a dismissible note names the cause, with a link to the provenance chain; first real use with the first cross-workspace link
+- [ ] X6. NOW for Design's formats: file and clipboard routing through the representation registry: dropping or pasting a file routes it by type (`.fission.json` after 19a; others are refused with a message naming the workspace that will take them); copying a Design profile gives SVG (an Outline → SVG writer, with a hand-worked test). STL in (as a mesh body) with X10, SVG/DXF in with V2/L2, PNG/JPEG with G1, STEP with 71, PDF with Y3
+- [ ] X7. NOW (after 19a, which also changes the shell): warm workspaces and switch speed: switching hides instead of unmounting; a browser test measures switching time and fails above 100 ms; one shortcut table shared by all workspaces
+- [ ] X8. NOW: magic-moment journeys: browser tests with a click counter and a time limit in packages/testing; a Design-only one runs today, the others are listed as pending; the nightly summary reports clicks and seconds per journey against a baseline in `tests/baseline.json` (baseline set once the owner confirms the first numbers)
+- [ ] X9. Transition helper in the UI kit (about half a second, skippable, off under reduced motion), with the first real cross-workspace move
+- [ ] X10. Mesh bodies in Design: a marked kind of body with the operation list in docs/integration.md; STL import as a mesh body (after 20); mesh booleans with exact solids, giving a marked mesh (after 45, sharing its predicates)
+- [ ] X11. Smart defaults: `WorkspacePlugin.receive` (draft in the Workspace API, version 2) returns a set-up proposal for an arriving object; each workspace fills it when it becomes real (Slice orientation, filament and printer; Laser flat faces, thickness, kerf, nesting; Simulate materials and bolt-hole fixtures; Render materials, camera and lights)
+- [ ] X12. Recipe format: project format bump for `recipe`, `origin` and `lineage` (docs/project-format.md, "Planned"), after 19; "Make it for my machine" with the machine library (I15); "Update available from the author" as a three-way merge of timeline features, with C4
+- [ ] X13. Conversion: solid box → finger-jointed laser panels, sheet thickness a parameter, live (after L1, 34 and 48)
+- [ ] X14. Conversion: solid → sheet-metal part (after 83)
+- [ ] X15. Conversion: logo → stamp, cookie cutter or keychain (after V3, 48 and the curve library's offsets)
+- [ ] X16. Conversion: photo → lithophane ("relief from image", a mesh body) → print (after G2, P1 and X10)
+- [ ] X17. Biarc fitting of Vector curves in the kernel's curve library, with the faces from one curve grouped as one logical face for naming (after V1 and 32); exact at 65 with no reference changes
+- [ ] X18. Fit exact surfaces (reverse engineering), started by the user only: planes, cylinders and spheres fitted to regions of a mesh body, previewed with their distance from the scan, giving a new exact body (after 69 and X10)
+- [ ] D1. Flagship demo 1: box → laser panels, flawless (reliable, fast, explained, magic journey under its click and time limits) (after L1–L3 and X13)
+- [ ] D2. Flagship demo 2: logo → emboss, engrave and render (after V1–V3, L1, R1 and D1)
+- [ ] D3. Flagship demo 3: enclosure and board side by side (after E3, X2, X3 and D2)
+- [ ] K1. Kernel 2D curve library (owner's decision 5): lines and arcs with steps 21–23, offsets with 31, Béziers, path booleans and biarc fitting with V1–V3; every operation in the stateful harness and with its own 2D checks
 
 Render workspace (starts after CAD step 33)
 - [ ] R1. Scenes in the project: bodies by reference, materials from the shared library, environment, cameras
@@ -198,7 +222,7 @@ Circuit workspace (PCB / electronics; starts after CAD step 75: full topological
 - [ ] E3. ECAD–MCAD co-design: board outline from a Design face or sketch by reference; components in 3D inside the enclosure with live collision checks; mounting holes linked both ways with the enclosure's screw posts
 
 Vector workspace (logo / 2D design; starts after CAD step 31: reuses the sketcher's curves and constraints)
-- [ ] V1. Paths, shapes, Bézier editing, layers
+- [ ] V1. Paths, shapes, Bézier editing, layers (curves from K1)
 - [ ] V2. Boolean path operations, text to outlines, SVG import and export
 - [ ] V3. A graphic becomes, live-linked: an emboss or deboss in Design, an engraving or cut in Laser, a decal in Render, silkscreen in Circuit
 
