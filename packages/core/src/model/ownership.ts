@@ -179,12 +179,16 @@ export const TRANSFER_OWNERSHIP: CommandSpec = {
   },
 };
 
-export type Transfer = { ok: true; value: LinkedValue; command: Command; inverse: Command } | { ok: false; error: string };
+export type Transfer = { ok: true; value: LinkedValue; command: Command; inverse: Command; label: string } | { ok: false; error: string };
 
 /**
  * Hands `v` to workspace `to`, recording the change in its ownership
- * history. `inverse` hands it back; step 20 puts it on the undo history.
- * Proposals still pending for the old owner can no longer be accepted.
+ * history. Whoever stores `value` does it inside `history.step(label, …)`,
+ * so the hand-over and anything it updates are one undo step named
+ * `label` ("Hand Hole spacing to Circuit"), and Undo puts the old owner back
+ * (step 20c; the history keeps snapshots, so `inverse`, which hands it back
+ * as a command, is for the timeline from step 32). Proposals still pending
+ * for the old owner can no longer be accepted.
  */
 export function transferOwnership(v: LinkedValue, to: WorkspaceId): Transfer {
   if (!isWorkspace(to)) return { ok: false, error: `unknown workspace ${JSON.stringify(to)}` };
@@ -194,5 +198,6 @@ export function transferOwnership(v: LinkedValue, to: WorkspaceId): Transfer {
     value: { ...v, owner: to, ownership: [...v.ownership, { from: v.owner, to }] },
     command: { op: TRANSFER_OWNERSHIP.op, value: v.id, to },
     inverse: { op: TRANSFER_OWNERSHIP.op, value: v.id, to: v.owner },
+    label: `Hand ${v.label} to ${workspaceName(to)}`,
   };
 }

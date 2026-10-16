@@ -15,6 +15,7 @@ import {
   type ProposedEdit,
 } from "../src/model/ownership.ts";
 import { parseCommand } from "../src/model/commands.ts";
+import { createHistory } from "../src/model/history.ts";
 import type { WorkspaceId } from "../src/model/project.ts";
 
 // The owner's own command for the shared value: Design's hole spacing on an
@@ -130,6 +131,33 @@ test("handing a value over records it, gives the owner's label, and comes with t
   const back = transferOwnership(r.value, "design");
   assert.ok(back.ok);
   assert.deepEqual(back.value.ownership, [{ from: "design", to: "circuit" }, { from: "circuit", to: "design" }]);
+  assert.equal(back.label, "Hand Hole spacing to Design");
+});
+
+test("hand-worked: a hand-over stored inside history.step is one undo step named for it, and Undo gives the value back", () => {
+  // A project holding the one linked value, captured as JSON (the shell captures projectToJson).
+  let held = spacing();
+  let notes: string[] = [];
+  const h = createHistory({ capture: () => JSON.stringify({ held, notes }), restore: (s) => ({ held, notes } = JSON.parse(s)) });
+  const r = transferOwnership(held, "circuit");
+  assert.ok(r.ok);
+  assert.equal(r.label, "Hand Hole spacing to Circuit");
+  // The hand-over and the note it leaves are two changes, each reported as the shell's projectChanged would.
+  h.step(r.label, () => {
+    held = r.value;
+    h.record("Edit");
+    notes.push("Circuit now owns Hole spacing");
+    h.record("Edit");
+  });
+  // One step: one undo goes from (Circuit, 1 note) straight back to (Design, no notes).
+  assert.equal(h.undoLabel(), "Hand Hole spacing to Circuit");
+  assert.equal(h.undo(), "Hand Hole spacing to Circuit");
+  assert.equal(held.owner, "design");
+  assert.deepEqual(held.ownership, []);
+  assert.deepEqual(notes, []);
+  assert.equal(h.canUndo(), false);
+  assert.equal(h.redo(), "Hand Hole spacing to Circuit");
+  assert.equal(ownedBy(held), "Owned by Circuit");
 });
 
 test("a hand-over to the current owner or an unknown workspace is refused", () => {

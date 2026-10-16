@@ -68,5 +68,7 @@ export const historyNotBuilt: History = {
   redo: notBuilt,
   reset: notBuilt,
   amend: notBuilt,
+  step: notBuilt,
+  restoring: notBuilt,
   onChange: notBuilt,
 };

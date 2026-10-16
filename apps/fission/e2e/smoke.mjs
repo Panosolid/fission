@@ -1054,7 +1054,7 @@ try {
     }
   });
 
-  await check("phone width: focus moves top bar, toolbar, panel toggles, View buttons, properties", async () => {
+  await check("phone width: focus moves top bar, toolbar, panel toggles, Undo and Redo, View buttons, properties", async () => {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
@@ -1066,7 +1066,7 @@ try {
       for (let i = 0; i < 120 && regions.at(-1)?.id !== "properties"; i++) {
         await page.keyboard.press("Tab");
         const r = await page.evaluate(() => {
-          const el = document.activeElement?.closest("#topbar, #toolbar, #panel-toggles, #browser, #view-controls, #properties");
+          const el = document.activeElement?.closest("#topbar, #toolbar, #panel-toggles, #browser, #undo-redo, #view-controls, #properties");
           return el ? { id: el.id, top: el.getBoundingClientRect().top + document.querySelector("#workspace").scrollTop } : { id: "other", top: -1 };
         });
         if (r.id !== regions.at(-1)?.id) regions.push(r);
@@ -1077,13 +1077,13 @@ try {
     const downward = (regions) => regions.every((r, i) => i === 0 || r.top >= regions[i - 1].top);
     if ((await page.getAttribute("#browser-toggle", "aria-expanded")) === "true") await page.click("#browser-toggle");
     let regions = await tabRegions();
-    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "view-controls", "properties"], "browser folded: no stops in it");
+    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "undo-redo", "view-controls", "properties"], "browser folded: no stops in it");
     assert.ok(downward(regions), JSON.stringify(regions));
     // Opened, the browser sits under its toggle, above the viewport, so focus still moves down the screen.
     await page.click("#browser-toggle");
     await page.screenshot({ path: "e2e/design-375-browser-open.png" });
     regions = await tabRegions();
-    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "browser", "view-controls", "properties"]);
+    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "browser", "undo-redo", "view-controls", "properties"]);
     assert.ok(downward(regions), JSON.stringify(regions));
     await page.click("#browser-toggle");
     await page.setViewportSize({ width: 1000, height: 640 });

@@ -619,6 +619,20 @@ function showUndoRedo() {
     b.title = label === null ? `Nothing to ${id}` : `${verb} ${label} (${chordLabel(chord, mac)})`;
   }
 }
+// At phone width the pair leaves Menu for the main viewport's bottom-right
+// corner, across from the View buttons (step 20c): one tap, by the thumb,
+// beside the part it changes; the bar keeps its room for the workspace
+// tabs. Wider screens keep it on the bar before Save.
+const phone = matchMedia("(max-width: 640px)");
+function placeUndoRedo() {
+  const pair = $("undo-redo");
+  pair.classList.toggle("docked", phone.matches);
+  // Before the View buttons in the page: its top is higher, so keyboard focus still moves down the screen.
+  if (phone.matches) $("view-controls").before(pair);
+  else $("topbar-actions").prepend(pair);
+}
+phone.addEventListener("change", placeUndoRedo);
+placeUndoRedo();
 $("undo").addEventListener("click", () => undoRedo("undo"));
 $("redo").addEventListener("click", () => undoRedo("redo"));
 ctx.history.onChange(showUndoRedo);

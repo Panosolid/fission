@@ -27,6 +27,16 @@ import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, t
 let saved: { doc: DesignDocument; shape: ShapeKind; sizes: string[] } | null = null;
 let framed: Framing | null = null;
 let framedKind: ShapeKind | null = null;
+/**
+ * The last body Design built, kept across mounts: Undo and Redo re-mount
+ * Design on the restored project (step 20c), and the selection follows
+ * only if the restored body is compared with the one that was on screen.
+ */
+let lastBuilt: BodyView | null = null;
+/** Design was put away by an Undo or Redo made in another workspace: the next mount is that restore's, not an opened file's. */
+let putAwayByRestore = false;
+/** How many times Design has framed the part, read by the e2e test (an undo must not add one). */
+let fits = 0;
 
 /** Fills the toolbar slot with the command groups; returns each button with its element. */
 function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void): [ToolButton, HTMLButtonElement][] {
@@ -138,8 +148,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shape = part.shape;
     for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
     loaded = held;
-    framedKind = null;
+    framedKind = null; // an opened file is a new part: frame it (not after Undo or Redo: keepCamera)
   }
+  /** Mounted by Undo or Redo (step 20c): the first build keeps the camera unless the body no longer fits, even for another shape. */
+  let keepCamera = ctx.history.restoring() || putAwayByRestore;
+  putAwayByRestore = false;
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
   const { kernel, viewport } = ctx;
   /** On screen (awake); false while asleep (X7) and after unmount. */
@@ -255,16 +268,22 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       ctx.graph.markFresh(PART_VIEW);
       markStale();
       viewport.showBody(view.mesh);
-      // A different shape is a new part: frame it.
-      if (kind !== framedKind || needsRefit(framed, viewport.bodyFraming())) {
+      // A different shape is a new part: frame it (not when Undo or Redo put
+      // it back: the camera stays unless the body no longer fits).
+      const newPart = kind !== framedKind && !keepCamera;
+      keepCamera = false;
+      if (newPart || needsRefit(framed, viewport.bodyFraming())) {
         framed = viewport.fit();
-        framedKind = kind;
         viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
+        viewport.element.dataset.fits = String(++fits);
       }
+      framedKind = kind;
       panel.showBody(view);
       // Faces and edges the edit renumbered leave the selection, with a note (17e).
-      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView, view, doc.profiles.map((p) => p.id));
-      lastView = view;
+      // A fresh mount compares with the body Design last built (Undo and
+      // Redo: the selection follows when the faces are still the same ones).
+      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView ?? lastBuilt, view, doc.profiles.map((p) => p.id));
+      lastView = lastBuilt = view;
       note = droppedNote(dropped);
       if (dropped.length > 0) {
         settling = true;
@@ -335,6 +354,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       markStale();
     },
     unmount() {
+      putAwayByRestore = ctx.history.restoring();
       sleep();
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
     },

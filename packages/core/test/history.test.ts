@@ -303,3 +303,154 @@ test("a nonsense limit or merge time is refused", () => {
   assert.throws(() => createHistory({ capture, restore, mergeMs: NaN }), /merge time/);
   assert.throws(() => createHistory({ capture, restore, mergeMs: -1 }), /merge time/);
 });
+
+// One labelled step for many changes (step 20c): an ownership hand-over or
+// an accepted AI command.
+test("hand-worked: a step with three changes inside is one undo step with its label", () => {
+  const { h, doc, edit, restores } = rig();
+  edit(50); // 40 → 50, "Width 50"
+  const out = h.step("AI: widen and deepen", () => {
+    // Inside, records fold into the step and say so by returning false.
+    assert.equal(edit(60), false);
+    assert.equal(edit(61, "Change width", "width"), false);
+    doc.w = 70; // a change nobody recorded counts too
+    return "done";
+  });
+  assert.equal(out, "done");
+  // Steps: 40 →(Width 50) 50 →(AI) 70. One undo takes the AI step back to 50, not to 61 or 60.
+  assert.equal(h.undoLabel(), "AI: widen and deepen");
+  assert.equal(h.undo(), "AI: widen and deepen");
+  assert.equal(doc.w, 50);
+  assert.equal(h.undo(), "Width 50");
+  assert.equal(doc.w, 40);
+  assert.equal(h.redo(), "Width 50");
+  assert.equal(h.redo(), "AI: widen and deepen");
+  assert.equal(doc.w, 70);
+  assert.deepEqual(restores, [50, 40, 50, 70]);
+});
+
+test("a step that throws puts the project back, records nothing and passes the error on", () => {
+  const { h, doc, edit, restores } = rig();
+  edit(50);
+  edit(60);
+  h.undo(); // 50 now, with "Width 60" to redo
+  assert.throws(
+    () =>
+      h.step("AI: two changes", () => {
+        edit(80);
+        throw new Error("second command refused");
+      }),
+    /second command refused/,
+  );
+  // Put back to 50 (one restore after the undo's), nothing recorded, the redo is still there.
+  assert.equal(doc.w, 50);
+  assert.deepEqual(restores, [50, 50]);
+  assert.equal(h.undoLabel(), "Width 50");
+  assert.equal(h.redoLabel(), "Width 60");
+  // A step that fails before changing anything restores nothing.
+  assert.throws(() => h.step("x", () => { throw new Error("no"); }), /no/);
+  assert.deepEqual(restores, [50, 50]);
+});
+
+test("a step that changes nothing records nothing and keeps the redo", () => {
+  const { h, doc, edit, changes } = rig();
+  edit(50);
+  h.undo();
+  const before = changes();
+  h.step("Hand over", () => {
+    edit(55);
+    doc.w = 40; // and back: no net change
+  });
+  assert.equal(changes(), before, "no change call");
+  assert.equal(h.redoLabel(), "Width 50");
+  assert.equal(h.undoLabel(), null);
+});
+
+test("a step drops the redo, never merges with its neighbours, and nested steps are one", () => {
+  const { h, edit, tick } = rig();
+  edit(41, "Change width", "width");
+  h.undo();
+  h.step("Outer", () => {
+    edit(42, "Change width", "width");
+    h.step("Inner", () => edit(43));
+  });
+  assert.equal(h.redoLabel(), null, "a step drops the redo");
+  // Same merge key 1 ms later: still a step of its own, after a step.
+  tick(1);
+  edit(44, "Change width", "width");
+  assert.equal(h.undo(), "Change width");
+  assert.equal(h.undo(), "Outer", "the inner step joined the outer one");
+  assert.equal(h.undo(), null);
+});
+
+test("a step takes earlier unrecorded changes into the present first, so a failure keeps them", () => {
+  const { h, doc } = rig();
+  doc.w = 45; // a default filled in, never recorded
+  assert.throws(() => h.step("x", () => { doc.w = 99; throw new Error("bad"); }), /bad/);
+  // Put back to 45 (the present as the step started), not to 40.
+  assert.equal(doc.w, 45);
+  assert.equal(h.canUndo(), false);
+});
+
+test("a step that leaves a project which can't be captured fails and is put back", () => {
+  const doc = { w: 40 };
+  const h = createHistory({
+    capture: () => {
+      if (!Number.isFinite(doc.w)) throw new Error("can't save a NaN width");
+      return JSON.stringify(doc);
+    },
+    restore: (s) => (doc.w = JSON.parse(s).w),
+  });
+  assert.throws(() => h.step("AI: bad", () => (doc.w = NaN)), /NaN width/);
+  assert.equal(doc.w, 40);
+  assert.equal(h.canUndo(), false);
+});
+
+test("undo, redo and reset inside a step are refused; a step during a restore is refused", () => {
+  let h!: ReturnType<typeof createHistory>;
+  const doc = { w: 40 };
+  let duringRestore: unknown = null;
+  h = createHistory({
+    capture: () => JSON.stringify(doc),
+    restore: (s) => {
+      doc.w = JSON.parse(s).w;
+      assert.equal(h.restoring(), true);
+      try {
+        h.step("x", () => {});
+      } catch (e) {
+        duringRestore = e;
+      }
+    },
+  });
+  doc.w = 50;
+  h.record("Width 50");
+  for (const [what, call] of [["undo", () => h.undo()], ["redo", () => h.redo()], ["start the history afresh", () => h.reset()]] as const) {
+    assert.throws(() => h.step("s", call), new RegExp(`can't ${what} while an undo step is running`));
+  }
+  assert.equal(h.amend(), false, "amend inside nothing changed is false anyway");
+  assert.equal(h.restoring(), false);
+  h.undo();
+  assert.match(String(duringRestore), /can't start an undo step while undo or redo is putting a snapshot back/);
+  assert.equal(h.restoring(), false, "and false again after");
+});
+
+test("amend inside a step does nothing; the step takes the change in", () => {
+  const { h, doc } = rig();
+  h.step("Hand over", () => {
+    doc.w = 50;
+    assert.equal(h.amend(), false);
+  });
+  assert.equal(h.undo(), "Hand over");
+  assert.equal(doc.w, 40);
+});
+
+test("a step counts towards the limit like any step", () => {
+  const { h, edit } = rig({ limit: 2 });
+  edit(41);
+  h.step("S", () => edit(42));
+  edit(43);
+  // Limit 2: the oldest ("Width 41") dropped; undo twice reaches 41, then nothing.
+  assert.equal(h.undo(), "Width 43");
+  assert.equal(h.undo(), "S");
+  assert.equal(h.undo(), null);
+});
