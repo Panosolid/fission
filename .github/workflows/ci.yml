@@ -115,6 +115,39 @@ jobs:
             ${{ runner.temp }}/lcov.info
             ${{ runner.temp }}/coverage-html/
 
+  # Speed and memory against tests/baseline.json (.github/scripts/baseline.py):
+  # kernel instructions (callgrind), heap and allocations fail past their
+  # margin; app time only warns. The table is in the job summary.
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq valgrind
+      - run: npm ci
+      - run: npm run kernel
+        working-directory: apps/fission
+      - run: python3 .github/scripts/baseline.py --save "$RUNNER_TEMP/measured.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseline-measured
+          path: ${{ runner.temp }}/measured.json
+          if-no-files-found: ignore
+
   app:
     runs-on: ubuntu-latest
     steps:

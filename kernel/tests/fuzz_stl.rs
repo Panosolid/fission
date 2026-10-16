@@ -503,14 +503,19 @@ fn fuzz_stl_random() {
 #[test]
 fn saved_fuzz_inputs_still_pass() {
     quiet_panics();
-    let Ok(dir) = std::fs::read_dir(regressions()) else { return };
-    for entry in dir {
+    let mut n = 0;
+    for entry in std::fs::read_dir(regressions()).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "stl") {
             let bytes = std::fs::read(&path).unwrap();
             assert_eq!(check(&bytes, false), None, "{}", path.display());
+            n += 1;
         }
     }
+    // The inputs that broke the deliberately broken readers in the pull
+    // request that added this file (a short file, one byte too many, a NaN
+    // corner under a "solid" header, a count past the most).
+    assert!(n >= 4, "only {n} saved inputs");
 }
 
 // ---- The fuzzer's own tests: the model by hand, and that it can fail.
