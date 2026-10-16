@@ -30,6 +30,21 @@ export class DependencyGraph {
   /** id → the ids it reads. */
   private inputs = new Map<string, string[]>();
   private staleIds = new Set<string>();
+  private listeners = new Set<() => void>();
+
+  /**
+   * Calls `listener` after every change to the graph (a node set or removed,
+   * something marked out of date or fresh), so whatever shows state read
+   * from it (the change notes) can redraw. Returns a function that stops it.
+   */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  }
+
+  private notify(): void {
+    for (const l of [...this.listeners]) l();
+  }
 
   /**
    * Adds or replaces a node. Its inputs must already be in the graph, and
@@ -42,6 +57,7 @@ export class DependencyGraph {
     }
     this.nodes.set(node.id, node);
     this.inputs.set(node.id, [...dependsOn]);
+    this.notify();
   }
 
   /** Removes a node; anything still reading it is marked out of date and keeps a dangling input, reported by missingInputs(). */
@@ -50,6 +66,7 @@ export class DependencyGraph {
     this.nodes.delete(id);
     this.inputs.delete(id);
     this.staleIds.delete(id);
+    this.notify();
     return result;
   }
 
@@ -117,6 +134,7 @@ export class DependencyGraph {
       this.staleIds.add(n);
       (this.nodes.get(n)!.cost === "cheap" ? result.updateNow : result.awaitingRerun).push(n);
     }
+    if (result.updateNow.length + result.awaitingRerun.length > 0) this.notify();
     return result;
   }
 
@@ -126,7 +144,7 @@ export class DependencyGraph {
 
   /** A result was rebuilt from its current inputs. */
   markFresh(id: string): void {
-    this.staleIds.delete(id);
+    if (this.staleIds.delete(id)) this.notify();
   }
 
   stale(): string[] {

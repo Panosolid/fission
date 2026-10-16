@@ -235,3 +235,24 @@ test("seeded random sessions: notes match a model of the graph, and every chain 
     }
   }
 });
+
+test("onChange: told when a note is made or dismissed, not when a record makes none", () => {
+  const g = sample();
+  const notes = new ChangeNotes();
+  let calls = 0;
+  const stop = notes.onChange(() => calls++);
+  // Part changing reaches only Slice and Simulate results: one call for the batch.
+  notes.record({ ...thickness, node: "part", label: "Part" }, g.changed("part"), g);
+  assert.equal(calls, 1);
+  // A change with no readers outside Design makes no note and no call.
+  notes.record(thickness, { updateNow: ["part"], awaitingRerun: [] }, g);
+  assert.equal(calls, 1);
+  const [first] = notes.current(g);
+  notes.dismiss(first.id);
+  assert.equal(calls, 2);
+  notes.dismiss(first.id); // already gone
+  assert.equal(calls, 2);
+  stop();
+  notes.record(thickness, g.changed("thickness"), g);
+  assert.equal(calls, 2);
+});

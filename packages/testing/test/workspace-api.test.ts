@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRegistry, DependencyGraph, DownstreamRegistry, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -148,6 +148,7 @@ function testContext(): WorkspaceContext {
     representations: new RepresentationRegistry(),
     actions: new ActionRegistry(),
     downstream: new DownstreamRegistry(),
+    changeNotes: new ChangeNotes(),
     openWorkspace(id) {
       opened.set(this, [...(opened.get(this) ?? []), id]);
     },

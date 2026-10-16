@@ -230,7 +230,7 @@ function mount(ctx: WorkspaceContext): () => void {
     const before = loaded ? null : ((ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
     loaded = undefined;
     saved = { doc, shape, sizes: inputs.map((i) => i.value) };
-    syncGraph(ctx.graph, doc, before);
+    syncGraph(ctx.graph, doc, before, ctx.changeNotes);
     const changed = ctx.project.workspaces.design !== doc;
     ctx.project.workspaces.design = doc;
     if (changed) ctx.projectChanged(); // the shell autosaves (19c)
