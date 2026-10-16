@@ -12,8 +12,21 @@ import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
 import { laserWorkspace } from "@fission/laser";
 import { sliceWorkspace } from "@fission/slice";
+import { circuitWorkspace } from "@fission/circuit";
+import { vectorWorkspace } from "@fission/vector";
+import { imageWorkspace } from "@fission/image";
 
-const workspaces: WorkspacePlugin[] = [designWorkspace, renderWorkspace, simulateWorkspace, manufactureWorkspace, laserWorkspace, sliceWorkspace];
+const workspaces: WorkspacePlugin[] = [
+  designWorkspace,
+  renderWorkspace,
+  simulateWorkspace,
+  manufactureWorkspace,
+  laserWorkspace,
+  sliceWorkspace,
+  circuitWorkspace,
+  vectorWorkspace,
+  imageWorkspace,
+];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const panel = $("panel");
