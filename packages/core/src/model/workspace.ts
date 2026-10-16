@@ -74,6 +74,26 @@ export interface WorkspaceContext {
   workspaceTitle(id: WorkspaceId): string;
 }
 
+/**
+ * A workspace the shell has mounted (X7, docs/integration.md principle 10).
+ * The slots stay the workspace's own between sleep and wake; the shell
+ * takes them off screen and puts them back, so a sleeping workspace never
+ * has to empty or refill them.
+ */
+export interface MountedWorkspace {
+  /**
+   * Going off screen: stop listening to the viewport (onPick back to null),
+   * keys and the selection, and take back what it drew in the viewport.
+   * Work finishing while asleep must not draw; it waits for wake.
+   * Leave out when the workspace listens to nothing (placeholders).
+   */
+  sleep?(): void;
+  /** Back on screen: listen again and redraw what may have changed meanwhile (the selection, the graph, the viewport). */
+  wake?(): void;
+  /** Gone for good (a project opened, its pane closed): stops listening if awake, and empties every slot it filled. */
+  unmount(): void;
+}
+
 export interface WorkspacePlugin {
   id: WorkspaceId;
   title: string;
@@ -81,8 +101,13 @@ export interface WorkspacePlugin {
   summary: string;
   /** Placeholders say so; the shell marks them in the switcher. */
   status: "working" | "placeholder";
-  /** Shows the workspace in ctx's layout slots. Returns a function that hides it again and empties every slot it filled. */
-  mount(ctx: WorkspaceContext): () => void;
+  /**
+   * Shows the workspace in ctx's layout slots, the first time it is opened
+   * in a pane. The shell keeps it warm after that (X7): switching away puts
+   * it to sleep and keeps its slots as they are, off screen; switching back
+   * wakes it, so nothing is built twice and nothing typed is lost.
+   */
+  mount(ctx: WorkspaceContext): MountedWorkspace;
   /** What it can hand to other workspaces, and take from them. Placeholders declare nothing. */
   representations: { produces: RepresentationKind[]; accepts: RepresentationKind[] };
   /** Registers its producers with the shared registry; called once at start-up. */
