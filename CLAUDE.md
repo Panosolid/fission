@@ -23,29 +23,33 @@ Each folder with its own CLAUDE.md (kernel/, packages/, workspaces/, apps/) has 
 - `kernel/`: Rust geometry kernel → WebAssembly. `src/tolerance.rs` is the only place epsilons live; every operation's result goes through `validate::checked()`; when a kernel operation lands, add it to the stateful harness (`tests/stateful.rs`: `Op`, `Scene::transitions`, `apply_op`, `replay_op`) the same day.
 - `packages/`: shared TypeScript (core document model and kernel bridge, viewport, ui, testing, ai; storage and community are placeholders). `packages/core/src/kernel/kernel-client.ts` is the only way the app talks to the kernel.
 - `workspaces/`: the ten workspaces (Design real, the rest placeholders). `apps/fission`: the app shell and browser tests.
-- `docs/`: `roadmap.md` (the full roadmap), `integration.md`, `integration-map.md` (every link between workspaces), `ai.md`, `project-format.md`, `community.md`.
+- `docs/`: `progress/` (one progress file per workstream, see below), `roadmap.md` (the full roadmap), `integration.md`, `integration-map.md` (every link between workspaces), `ai.md`, `project-format.md`, `community.md`.
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust (and `oracle/compare.py`, the OpenCascade oracle).
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing", results on the `test-results` branch; see kernel/CLAUDE.md).
 - Generated, never committed: `kernel/target/`, `kernel/endless-results/`, `kernel/mutants.out*/`, `packages/core/src/kernel/wasm/`, `apps/fission/dist/`, `node_modules/`.
 
-## Current work
+## Workstreams and where progress lives
 
-Keep this section current: update it whenever a step lands.
+Several threads run at once, one per workstream. So they never edit the same lines, each workstream keeps its own progress file in `docs/progress/` (what is done, the next step and its substeps, the branch the next thread starts from):
+- `cad.md`: the numbered CAD steps (1, 2, … 20 undo/redo onward) and the kernel.
+- `integration.md`: the integration experience steps (X…) and the I, A and other cross-workspace items.
+- `booleans.md`: the boolean design review B0 and the boolean steps.
+- `image.md`: the Image workspace (G…).
+- A new workstream (Render, Vector, Layout…) gets a new file here the day it starts, added to this list in its own small PR.
 
-Done: steps 1–19 (step 15: the self-intersection check, mutation-tested; 16: the Design layout; 17: one selection of bodies, faces and edges, with placeholder ids until step 32; 18: view controls, Fit framed to the narrower field of view, and the view cube; 19: save and open a .fission.json file, projects kept in the browser, autosave, and the phone top bar menu); the modelling range is 1 km / 10 nm (decided during step 15, measured and guarded by a test); the Image workspace base G1 (open a PNG or JPEG at its real size, Brightness, layer Hide; `docs/roadmap.md`); integration I7, X1 (the action registry: verbs for the selection, Download STL among them), X2 (one owner per linked value, in core: proposed edits, hand-overs; UI with E3), X3 (split view: a second workspace beside the first, own panels and camera, one scene and selection), X4 (downstream chips in Design's properties panel, state from the graph; none registered until P2) and the NOW parts of I8–I21, A1–A6 and A9 (each item in `docs/roadmap.md` says what remains), with the owner's three decisions: one generic Outline producer (the sketcher plugs into it at step 21); today's single shape is feature #1 of a one-step timeline using the exact intent, provenance and dependency structures step 32 will use; the overlay's real use is marking faces of a part too big for accurate STL (and, if cheap, the failure-dump viewer through the same overlay format; never show rejected parts in the app). Report back to the owner on these as the specs ask. Once PR #8 and the integration branch are merged into `main`, scheduled random testing and the Pages app run the latest work.
+Rules:
+- A thread updates only its own workstream's file, and in `docs/roadmap.md` only its own section. Never edit another workstream's file, even to tick something; if another workstream needs to know something, say so in the thread.
+- Package and workspace details (which file does what) live in that folder's own CLAUDE.md (for example `packages/core/CLAUDE.md`, `workspaces/image/CLAUDE.md`), so each thread edits the folder it works in. Add a line there when you add a file.
+- Shared rule files (this file, `packages/CLAUDE.md`, `kernel/CLAUDE.md`, `docs/integration*.md`) change only when a rule changes, in a small edit, never to record progress.
+- Order (owner's decision): integration X1–X8 one per thread, then step 20 (undo/redo); step 20 never runs alongside an X step, since both touch the action and ownership code. Image and booleans run in parallel.
 
-Next steps (the rest of the roadmap, in as much detail as it needs, is `docs/roadmap.md`; each item lives in one file only: move the next item here when one is ticked, and ticked ones back there):
-Order after step 19 (owner's decision): the integration experience steps X1–X8 (X1–X5 and X6a are done) (`docs/roadmap.md`, "Integration experience"), one per thread, before step 20 (undo/redo).
-- [ ] X6. NOW for Design's formats: file and clipboard routing through the representation registry: dropping or pasting a file routes it by type (`.fission.json` after 19a; others are refused with a message naming the workspace that will take them); copying a Design profile gives SVG (an Outline → SVG writer, with a hand-worked test). STL in (as a mesh body) with X10, SVG/DXF in with V2/L2, PNG/JPEG with G1, STEP with 71, PDF with Y3
-  - [x] X6a. Files in: `packages/core/src/model/files.ts`: `identifyFile` (strong signatures decide alone: PNG, JPEG, PDF, STEP, project, SVG; STL and DXF only with their extension; a name claiming a format its contents don't match is "renamed"), `FILE_FORMATS` (each format's representation and who will take it), `routeFiles` (one file at a time, through importers registered on the representation registry: `registerImporter`/`importerFor`, one per format); the shell registers projects, Image registers PNG/JPEG (`openImageFile`); drop anywhere or paste outside a text field, refusals in the top bar naming the workspace that will take them, a dashed outline while files are dragged over. Tests: hand-worked signatures and binary STL sizes (134 = 80 + 4 + 50; 133 and 135 refused), every message in full, 5 seeds × 2,000 files built by construction against a model of the rules, 13 deliberate breaks all caught; `e2e/files.mjs` in Chromium (drop, paste, split pane, project, refusals, screenshots), 2 shell breaks caught.
-  - [ ] X6b. Copy out: copying a Design profile gives SVG. Starting point: an Outline → SVG writer in core (`Outline` in `packages/core/src/kernel/kernel-types.ts`: lines and arcs; a hand-worked test with the path data written out, arcs as SVG `A` commands with the right large-arc and sweep flags, y flipped since SVG's y points down, sizes in mm via `width="…mm"` and a matching `viewBox`); Design's profiles are `ReadyProfile` with `outline(kind, w, d)` in `workspaces/design/src/profiles.ts`; register it as a "Copy as SVG" verb in the action registry (X1, `actions.ts`) for a profile, writing `image/svg+xml` and `text/plain` with `navigator.clipboard.write`; the shell's paste handler (`receive` in `apps/fission/src/main.ts`) ignores clipboard text today, so a copied SVG pasted back is refused through the same routing until V2.
 ## Definition of done for a roadmap item
 
 1. Tier 1 is clean (kernel: kernel/CLAUDE.md; TypeScript: `npm test` and `npm run typecheck`, packages/CLAUDE.md): no lint warnings, and the tests for the changed modules pass.
 2. Tier 2 property tests for the feature exist and pass, with nasty cases included (the kernel's Tier 2 list is in kernel/CLAUDE.md).
 3. The test quality rules below are met (hand-worked test with the working shown, 0.9×/1.1× boundary tests).
 4. If the feature is visible, it has been checked in a real browser (the e2e smoke test, or a Playwright screenshot).
-5. The roadmap item is ticked (above, or in `docs/roadmap.md`), then committed and pushed with a message saying what was done and how it was verified.
+5. The roadmap item is ticked (in your workstream's `docs/progress/` file, or in `docs/roadmap.md`), then committed and pushed with a message saying what was done and how it was verified.
 
 ## Testing rules (all code)
 
@@ -83,7 +87,7 @@ After a run, report briefly: PASS/FAIL per tier; any metric that moved from base
 
 ## Saving usage
 
-- Split every step into substeps before starting it (15a, 15b, … under the step in Current work), each small enough for one short thread and one commit. Finish a substep, commit and push, tick it, and write the next one's starting point into its line (files, commands, what is already known), so a fresh thread can carry on without reading old threads. Start a new thread every substep or two: a long thread re-reads its whole history on every message.
+- Split every step into substeps before starting it (15a, 15b, … under the step in your workstream's `docs/progress/` file), each small enough for one short thread and one commit. Finish a substep, commit and push, tick it, and write the next one's starting point into its line (files, commands, what is already known), so a fresh thread can carry on without reading old threads. Start a new thread every substep or two: a long thread re-reads its whole history on every message.
 - At the start of a session, read only `summary.txt` from the `test-results` branch. Open `failures/` only if the summary shows a new failure.
 - Read only relevant files; search instead of reading whole files.
 - Keep modules small with clear interfaces (curves, surfaces, topology, intersect, boolean, fillet, io, sketch, timeline).
