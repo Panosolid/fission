@@ -38,6 +38,8 @@ export const WORKSPACE_API_VERSION = 1;
 /** What the shell hands a workspace when it is shown. */
 export interface WorkspaceContext {
   project: Project;
+  /** Call after changing `project`, so the shell can autosave it. */
+  projectChanged(): void;
   kernel: KernelCalls;
   selection: Selection;
   history: History;

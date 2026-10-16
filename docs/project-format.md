@@ -33,6 +33,10 @@ A Fission project is one JSON document. The format is open: anyone may read and 
 
 Today a part is feature #1 of a one-step timeline. Step 32 adds features to the same list, so no migration is needed.
 
+## Saving and opening
+
+Save writes the project as `<name>.fission.json` (`projectToJson`): keys sorted at every level and two-space indents, so the same project always gives the same bytes. A number JSON can't hold (NaN, Infinity) is refused when saving instead of being written as `null`. Open (`projectFromJson`) parses the text, runs `readProject` (the migrations below), then hands each workspace its own part (`readData`); a part no workspace in this build reads is kept as it is. Bad JSON, a non-project, a newer format or a workspace refusing its part refuses the whole file with one message; the open project stays as it was.
+
 ## Planned: recipes, origin and remixes (a later version; nothing reads these yet)
 
 A shared design is a complete recipe (docs/integration.md, principle 7). These fields are planned now so the format grows into them without a redesign. They arrive as one format bump with a migration (old files get an empty recipe and no origin), no earlier than step 19's save and load, and are used by sharing (C2–C4).

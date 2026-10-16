@@ -4,10 +4,11 @@
 // empties them on hide; the viewport is shared, so switching keeps the
 // camera and what is on screen.
 import "@fission/ui/theme.css";
-import { DependencyGraph, emptyProject, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { DependencyGraph, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { showPlaceholder, workspaceSwitcher } from "@fission/ui";
 import { Viewer } from "@fission/viewport";
 import { communityPage } from "@fission/community";
+import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
 import { showAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
@@ -41,6 +42,7 @@ for (const w of workspaces) w.registerRepresentations?.(representations, kernel)
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const ctx = {
   project: emptyProject(),
+  projectChanged: () => autosave?.changed(),
   kernel,
   selection: createSelection(),
   history: historyNotBuilt,
@@ -109,6 +111,88 @@ function show(page: Page) {
 }
 
 $("community").addEventListener("click", () => show("community"));
+
+// At phone width Save, Open, AI and Community fold behind Menu (theme.css),
+// leaving the top bar's row to the workspace tabs. Choosing one, Escape or
+// a tap anywhere else closes it; Escape puts focus back on Menu.
+{
+  const toggle = $("menu-toggle");
+  const setMenu = (open: boolean) => {
+    toggle.setAttribute("aria-expanded", String(open));
+    $("topbar").dataset.menu = open ? "open" : "closed";
+  };
+  setMenu(false);
+  toggle.addEventListener("click", () => setMenu(toggle.getAttribute("aria-expanded") !== "true"));
+  $("topbar-actions").addEventListener("click", () => setMenu(false)); // after the chosen button's own handler
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || toggle.getAttribute("aria-expanded") !== "true") return;
+    setMenu(false);
+    toggle.focus();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!(e.target instanceof Node) || toggle.contains(e.target) || $("topbar-actions").contains(e.target)) return;
+    setMenu(false);
+  });
+}
+
+// Autosave (19c): the project is kept in this browser and saved a moment
+// after each change; the top bar says "Saving…", "Saved" or what went wrong.
+// Each project has its own stored id: an opened file becomes a new stored
+// project rather than overwriting the one that was open.
+const store = localStore(workspaces);
+let autosave: Autosave | null = null;
+const saveStatus = (s: AutosaveStatus) => {
+  const el = $("save-status");
+  el.dataset.state = s.state; // read by the e2e test
+  el.textContent = s.state === "saving" ? "Saving…" : s.state === "saved" ? "Saved" : `Not saved: ${s.message}`;
+  el.title = el.textContent; // the words behind the mark at phone width
+};
+const newId = () => globalThis.crypto?.randomUUID?.() ?? `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+/** False once the browser has shown it can't keep projects: then nothing autosaves, and Save/Open use files. */
+let canKeep = true;
+function keep(id: string) {
+  autosave?.stop();
+  if (!canKeep) return;
+  autosave = startAutosave(store, id, () => ctx.project, saveStatus);
+  document.body.dataset.projectId = id; // read by the e2e test
+}
+
+// Save and Open: the whole project, every workspace's data, as one
+// .fission.json file (docs/project-format.md). Opening replaces the project
+// only once all of it has read cleanly; a refused file leaves the open
+// project as it was and says why.
+const fileStatus = (message: string) => ($("file-status").textContent = message);
+$("file-dismiss").addEventListener("click", () => fileStatus(""));
+$("save").addEventListener("click", () => {
+  try {
+    const url = URL.createObjectURL(new Blob([projectToJson(ctx.project)], { type: "application/json" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: `${ctx.project.name.replace(/[\\/:*?"<>|]/g, "-") || "Untitled"}.fission.json` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    fileStatus("");
+  } catch (e) {
+    fileStatus(e instanceof Error ? e.message : String(e));
+  }
+});
+$("open").addEventListener("click", () => $("open-file").click());
+$("open-file").addEventListener("change", async () => {
+  const input = $<HTMLInputElement>("open-file");
+  const file = input.files?.[0];
+  input.value = ""; // so choosing the same file again opens it again
+  if (!file) return;
+  try {
+    const project = projectFromJson(await file.text(), workspaces);
+    ctx.selection.clear(); // it named the old part's faces
+    ctx.project = project;
+    ctx.graph = new DependencyGraph();
+    keep(newId());
+    autosave?.changed(); // store the opened file as it is
+    show(current); // re-mounts the workspace on the opened project
+    fileStatus("");
+  } catch (e) {
+    fileStatus(`Couldn't open ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+});
 // One assistant panel for every workspace, beside the viewport.
 $("assistant-toggle").addEventListener("click", () => {
   const panel = $("assistant");
@@ -135,5 +219,31 @@ const fromHash = (): Page => {
 };
 // Links (and back/forward) can name a workspace: #design, #slice, …
 window.addEventListener("hashchange", () => show(fromHash()));
-show(fromHash());
+// Start on the project saved most recently in this browser, or a new one.
+// One that can't be read is left stored as it is, and a new project starts
+// with a message saying so; a browser that can't keep projects at all still
+// gets a working app (Save and Open use files). Never a blank app.
+async function start() {
+  const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  let newest: string | undefined;
+  try {
+    newest = (await store.list())[0]?.id;
+  } catch (e) {
+    canKeep = false;
+    fileStatus(`Projects can't be kept in this browser (${why(e)}). Use Save to keep your work as a file.`);
+    return show(fromHash());
+  }
+  try {
+    if (newest) {
+      ctx.project = await store.open(newest);
+      keep(newest);
+      saveStatus({ state: "saved" });
+    } else keep(newId());
+  } catch (e) {
+    keep(newId());
+    fileStatus(`Couldn't open the last project (${why(e)}), so a new one was started. The old one is still kept in this browser.`);
+  }
+  show(fromHash());
+}
+void start();
 ctx.kernel.call("kernel_version").then((v) => ($("version").textContent = `kernel v${v}`));

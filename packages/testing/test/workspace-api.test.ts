@@ -79,6 +79,9 @@ const leftovers = (slots: Slots) => (["toolbar", "browser", "properties"] as con
 /** The last highlight each test viewport was asked to draw. */
 const shownHighlights = new WeakMap<SharedViewport, ViewportHighlight>();
 
+/** How many times each test context was told the project changed. */
+const changes = new WeakMap<WorkspaceContext, number>();
+
 function testContext(): WorkspaceContext {
   const doc = new Window().document as unknown as Document;
   const el = () => doc.createElement("div") as unknown as HTMLElement;
@@ -98,6 +101,9 @@ function testContext(): WorkspaceContext {
   };
   return {
     project: emptyProject(),
+    projectChanged() {
+      changes.set(this, (changes.get(this) ?? 0) + 1);
+    },
     // Every kernel call fails, as when the kernel is not loaded: the workspace must show it, not crash.
     kernel: { call: (() => Promise.reject(new Error("no kernel in this test"))) as KernelCalls["call"] },
     selection: createSelection(),
@@ -245,6 +251,31 @@ test("Design shows a kernel failure in its panel rather than throwing", async ()
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[role=group]")].map((g) => g.getAttribute("aria-label")), ["Create", "Export"]);
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[aria-pressed=true]")].map((b) => b.textContent), ["Box"]);
   hide();
+});
+
+// Autosave (19c): the shell saves when told the project changed, so a
+// workspace that edits the project must say so, and one that doesn't edit it
+// must not (a placeholder that did would mark the project changed for nothing).
+test("Design says the project changed when it writes the part; placeholders never do", async () => {
+  for (const p of plugins) {
+    const ctx = testContext();
+    const hide = p.mount(ctx);
+    await settle();
+    if (p.id !== "design") {
+      assert.equal(changes.get(ctx) ?? 0, 0, `${p.id} changed nothing`);
+      assert.deepEqual(Object.keys(ctx.project.workspaces), [], `${p.id} wrote nothing`);
+    } else {
+      // Mounting on an empty project writes the default part: one change.
+      assert.equal(changes.get(ctx), 1);
+      const before = ctx.project.workspaces.design;
+      const width = ctx.properties.querySelector("input") as HTMLInputElement;
+      width.value = "50";
+      width.dispatchEvent(new (ctx.properties.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
+      assert.notEqual(ctx.project.workspaces.design, before, "the edit wrote a new document");
+      assert.equal(changes.get(ctx), 2, "and said so once");
+    }
+    hide();
+  }
 });
 
 test("the slot check can fail: a workspace that leaves its toolbar filled is caught", () => {
