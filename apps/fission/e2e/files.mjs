@@ -4,7 +4,8 @@
 // and every other file is refused in the top bar with what will take it;
 // several at once, a renamed file and an unknown one each say so. Dragging
 // files over the app outlines it; a paste into a text field is left alone;
-// the browser never navigates to a dropped file.
+// the browser never navigates to a dropped file. The top bar's Open routes
+// a chosen file the same way.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -218,6 +219,40 @@ try {
       await drop(page, "#viewport", [{ name: "half.fission.json", bytes: bytes('{"formatVersion": 2, "name": "Cut') }]);
       await waitStatus(page, /^Couldn't open “half\.fission\.json”: not a Fission project: the file is not valid JSON/);
       assert.equal(await page.textContent("#volume"), "30,000 mm³");
+    } finally {
+      await page.close();
+    }
+  });
+
+  await check("the top-bar Open takes what a drop takes: a PNG opens in Image, a project opens, an STL is refused the same way", async () => {
+    const page = await fresh();
+    try {
+      await page.setInputFiles("#open-file", { name: "logo.png", mimeType: "image/png", buffer: png });
+      await page.waitForFunction(() => document.body.dataset.activeWorkspace === "image" || document.querySelector("#file-status").textContent !== "");
+      assert.equal(await status(page), "");
+      assert.equal(await page.evaluate(() => document.body.dataset.activeWorkspace), "image");
+      // 200 × 100 px at 0.1 mm per pixel: 20 × 10 mm.
+      await page.waitForFunction(() => document.querySelector("#image-mm")?.textContent === "20 × 10 mm");
+      assert.equal(await status(page), "");
+      await page.screenshot({ path: "e2e/files-open-png.png" });
+      // A project still opens as a project.
+      await page.click("[data-workspace=design]");
+      await page.waitForSelector("#width");
+      await page.fill("#width", "50");
+      await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³"); // 50 · 30 · 20
+      const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
+      const saved = await download.path().then((p) => import("node:fs").then((fs) => fs.readFileSync(p)));
+      await page.fill("#width", "40");
+      await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await page.setInputFiles("#open-file", { name: "Untitled.fission.json", mimeType: "application/json", buffer: saved });
+      await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
+      // Refused through Open with the same words as a refused drop.
+      await page.setInputFiles("#open-file", { name: "part.stl", mimeType: "model/stl", buffer: bytes("solid cube\n") });
+      await waitStatus(page, /^Couldn't open “part\.stl”: Fission can't open STL meshes yet\. Design will take them as mesh bodies\.$/);
+      assert.equal(await page.textContent("#volume"), "30,000 mm³");
+      // The picker offers images as well as projects.
+      const accept = (await page.getAttribute("#open-file", "accept")).split(",");
+      for (const ext of [".json", ".png", ".jpg", ".jpeg"]) assert.ok(accept.includes(ext), `Open's picker accepts ${accept}, not ${ext}`);
     } finally {
       await page.close();
     }
