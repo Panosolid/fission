@@ -1,0 +1,69 @@
+{
+  "pillow": "12.3.0",
+  "files": [
+    {
+      "file": "png-300dpi.png",
+      "format": "png",
+      "width": 20,
+      "height": 10,
+      "dpi": [
+        299.9994,
+        299.9994
+      ]
+    },
+    {
+      "file": "png-254dpi.png",
+      "format": "png",
+      "width": 200,
+      "height": 100,
+      "dpi": [
+        254.0,
+        254.0
+      ]
+    },
+    {
+      "file": "png-72dpi-odd.png",
+      "format": "png",
+      "width": 7,
+      "height": 3,
+      "dpi": [
+        72.009,
+        72.009
+      ]
+    },
+    {
+      "file": "png-no-size.png",
+      "format": "png",
+      "width": 5,
+      "height": 4,
+      "dpi": null
+    },
+    {
+      "file": "jpeg-300dpi.jpg",
+      "format": "jpeg",
+      "width": 20,
+      "height": 10,
+      "dpi": [
+        300.0,
+        300.0
+      ]
+    },
+    {
+      "file": "jpeg-96dpi-progressive.jpg",
+      "format": "jpeg",
+      "width": 33,
+      "height": 17,
+      "dpi": [
+        96.0,
+        96.0
+      ]
+    },
+    {
+      "file": "jpeg-no-size.jpg",
+      "format": "jpeg",
+      "width": 8,
+      "height": 8,
+      "dpi": null
+    }
+  ]
+}

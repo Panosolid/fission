@@ -130,6 +130,8 @@ function testContext(): WorkspaceContext {
       shownHighlights.set(viewport, h);
     },
     onPick: null,
+    showImage() {},
+    clearImage() {},
   };
   return {
     project: emptyProject(),
