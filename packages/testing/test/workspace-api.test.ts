@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -63,6 +63,19 @@ test("placeholders declare no representations; working workspaces produce every 
     const given = new Set<string>();
     for (const type of ["design.feature", "design.profile"]) for (const k of registry.produces(type)) given.add(k);
     for (const k of p.representations.produces) assert.ok(given.has(k), `${p.id} declares ${k} but registers no producer for it`);
+  }
+});
+
+// Files dropped or pasted (X6): an importer a workspace registers opens in that workspace, never another.
+test("every file importer a workspace registers names that workspace", () => {
+  const kernel: KernelCalls = { call: (() => Promise.reject(new Error("no kernel in this test"))) as KernelCalls["call"] };
+  for (const p of plugins) {
+    const registry = new RepresentationRegistry();
+    p.registerRepresentations?.(registry, kernel);
+    for (const f of FILE_FORMATS) {
+      const importer = registry.importerFor(f.format);
+      if (importer) assert.equal(importer.workspace, p.id, `${p.id} registered an importer for ${f.format} files that opens elsewhere`);
+    }
   }
 });
 

@@ -21,6 +21,8 @@ body { display: flex; flex-direction: column; }
    a last project that wouldn't open, a failed autosave (storage full). */
 #file-notice { order: 99; flex-basis: 100%; display: flex; align-items: baseline; gap: 8px; padding: 0 0 8px; color: #f5b14c; font-size: 12px; }
 #file-notice:has(#file-status:empty) { display: none; }
+/* Files dragged over the app (X6): the whole workspace is the drop target. */
+body[data-drop="on"] #workspace { outline: 3px dashed #4aa8ff; outline-offset: -3px; }
 #file-status { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 #topbar #file-dismiss { padding: 2px 8px; font-size: 12px; border: 1px solid #2a2e35; border-radius: 4px; }
 #save-status { color: #b5bbc4; font-size: 12px; white-space: nowrap; }
