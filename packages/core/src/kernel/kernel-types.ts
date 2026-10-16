@@ -17,6 +17,10 @@ export interface BodyView {
   vertices: number;
   edges: number;
   faces: number;
+  /** Each face's surface type by kernel face index: "plane", "cylinder", "sphere". */
+  face_types: string[];
+  /** Each edge's curve type by kernel edge index: "line", "circle". */
+  edge_types: string[];
   errors: string[];
 }
 

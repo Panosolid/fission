@@ -6,6 +6,8 @@
 import { describeProvenance, type BodyView, type Feature } from "@fission/core";
 import { formatQuantity as fmt } from "@fission/ui";
 import type { ShapeKind } from "./profiles.ts";
+import { PLACEHOLDER_ID_NOTE } from "./references.ts";
+import type { SelectionRow } from "./selection.ts";
 
 export type SizeKey = "width" | "depth" | "height";
 export const SIZE_KEYS: SizeKey[] = ["width", "depth", "height"];
@@ -34,6 +36,9 @@ export function parameterRows(shape: ShapeKind): ParameterRow[] {
 // The ids are read by the e2e test (#width, #stats[data-stale], #stl-note…).
 const DEFAULT_SIZES: Record<SizeKey, string> = { width: "40", depth: "30", height: "20" };
 const HTML = `
+  <h2>Selection</h2>
+  <p id="selection-empty">Nothing selected: click a face or an edge, or Body 1 in the browser.</p>
+  <ul id="selection-list" class="selection-list"></ul>
   <h2>Parameters</h2>
   ${SIZE_KEYS.map((k) => `<label id="${k}-row"><span id="${k}-label"></span> <input id="${k}" type="number" value="${DEFAULT_SIZES[k]}" step="any" /> mm</label>`).join("\n  ")}
   <h2>Feature</h2>
@@ -58,6 +63,8 @@ export interface PropertiesPanel {
   /** Labels and shows the size inputs for this shape. */
   setShape(shape: ShapeKind): void;
   showFeature(feature: Feature): void;
+  /** What is selected: one row per item, or the empty note. */
+  showSelection(rows: readonly SelectionRow[]): void;
   /** The built body's numbers and validation; clears the error line. */
   showBody(view: BodyView): void;
   showError(message: string): void;
@@ -82,6 +89,21 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
     showFeature(feature) {
       $("intent").textContent = feature.intent.summary;
       $("provenance").textContent = describeProvenance(feature.provenance);
+    },
+    showSelection(rows) {
+      const document = slot.ownerDocument;
+      $("selection-empty").hidden = rows.length > 0;
+      $("selection-list").replaceChildren(
+        ...rows.map((r) => {
+          const li = document.createElement("li");
+          li.dataset.id = r.id; // read by the e2e test
+          const id = document.createElement("code");
+          id.textContent = r.id;
+          id.title = PLACEHOLDER_ID_NOTE;
+          li.append(`${r.name} · ${r.type} `, id);
+          return li;
+        }),
+      );
     },
     showBody(view) {
       $("volume").textContent = `${fmt(view.volume)} mm³`;

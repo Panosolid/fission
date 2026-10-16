@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, type Command, type Framing, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -14,6 +14,8 @@ import { toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
+import { designReference } from "./references.ts";
+import { highlightOf, selectionRows } from "./selection.ts";
 
 /** Hands `bytes` to the browser as a file download. */
 function download(bytes: Uint8Array<ArrayBuffer>, name: string) {
@@ -59,17 +61,31 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void): [ToolButt
   return made;
 }
 
-/** The browser row the user last clicked; only highlighted until selection (step 17). */
-let highlighted: string | null = null;
 /** Browser groups the user folded, kept across rebuilds and workspace switches. */
 const folded = new Set<string>();
 
+/** The browser rows that stand for selectable geometry, and the reference each selects. */
+function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
+  return node === "body-1" ? designReference("body", lastFeature(doc).id) : null;
+}
+
+/** Lights the browser rows whose geometry is selected (aria-current), and only those. */
+function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly GeometryReference[]) {
+  for (const row of slot.querySelectorAll<HTMLElement>(".tree-row")) {
+    const ref = rowReference(row.dataset.node!, doc);
+    if (ref && items.some((i) => i.kind === ref.kind && i.id === ref.id)) row.setAttribute("aria-current", "true");
+    else row.removeAttribute("aria-current");
+  }
+}
+
 /**
  * Fills the browser slot with the document's tree: groups fold (native
- * details/summary), rows are buttons, and a click on a row highlights it.
- * Rebuilt on every edit; the highlight and folding are kept by id.
+ * details/summary). A row for selectable geometry (Body 1) is a button
+ * that selects it (Shift adds or takes out); the others are plain rows
+ * until features (step 32) and origin planes (step 21) can be selected.
+ * Rebuilt on every edit; folding is kept by id.
  */
-function browser(slot: HTMLElement, doc: DesignDocument) {
+function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void) {
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
@@ -94,17 +110,13 @@ function browser(slot: HTMLElement, doc: DesignDocument) {
         details.append(summary, list(n.children));
         li.append(details);
       } else {
-        const row = document.createElement("button");
-        row.type = "button";
+        const ref = rowReference(n.id, doc);
+        const row = document.createElement(ref ? "button" : "span");
+        if (ref) row.setAttribute("type", "button");
         row.className = "tree-row";
         row.textContent = n.label;
         row.dataset.node = n.id;
-        if (n.id === highlighted) row.setAttribute("aria-current", "true");
-        row.addEventListener("click", () => {
-          highlighted = n.id;
-          for (const r of slot.querySelectorAll(".tree-row")) r.removeAttribute("aria-current");
-          row.setAttribute("aria-current", "true");
-        });
+        if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
         li.append(row);
       }
       ul.append(li);
@@ -122,6 +134,25 @@ function mount(ctx: WorkspaceContext): () => void {
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
   const { kernel, viewport } = ctx;
   let shown = true;
+  /** The last body that built, for the selection's surface and curve types. */
+  let lastView: BodyView | null = null;
+
+  /** The browser's Body 1 row: a click selects the body, Shift adds or takes it out. */
+  function selectRow(ref: GeometryReference, shift: boolean) {
+    if (shift) ctx.selection.toggle(ref);
+    else ctx.selection.set([ref]);
+  }
+
+  /** Draws the selection: the viewport's colours, the lit browser rows, the properties' rows. */
+  function showSelection() {
+    const doc = ctx.project.workspaces.design as DesignDocument | undefined;
+    if (!doc) return;
+    const featureId = lastFeature(doc).id;
+    const items = ctx.selection.items;
+    viewport.showSelection(highlightOf(items, featureId));
+    lightRows(ctx.browser, doc, items);
+    panel.showSelection(selectionRows(items, featureId, lastView));
+  }
 
   // The body is built from the part's feature intent (document.ts).
   const build = latestOnly((doc: DesignDocument) => buildSpec(kernel, specOf(doc, lastFeature(doc))));
@@ -164,7 +195,8 @@ function mount(ctx: WorkspaceContext): () => void {
     const doc = documentFor(partCommand());
     syncGraph(ctx.graph, doc, (ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
     ctx.project.workspaces.design = doc;
-    browser(ctx.browser, doc);
+    browser(ctx.browser, doc, selectRow);
+    showSelection();
     markStale();
     const feature = lastFeature(doc);
     panel.showFeature(feature);
@@ -183,6 +215,8 @@ function mount(ctx: WorkspaceContext): () => void {
         viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
       }
       panel.showBody(view);
+      lastView = view;
+      showSelection();
       viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
     } catch (e) {
       if (!shown) return;
@@ -221,12 +255,15 @@ function mount(ctx: WorkspaceContext): () => void {
   };
   const keys = viewport.element.ownerDocument;
   keys.addEventListener("keydown", onKey);
+  const stopWatching = ctx.selection.onChange(showSelection);
 
   inputs.forEach((i) => i.addEventListener("input", update));
   update();
   return () => {
     shown = false;
     viewport.onPick = null;
+    viewport.showSelection(NO_HIGHLIGHT);
+    stopWatching();
     keys.removeEventListener("keydown", onKey);
     for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
   };

@@ -45,6 +45,10 @@ pub struct BodyView {
     pub vertices: usize,
     pub edges: usize,
     pub faces: usize,
+    /// The surface type of each face, by face index ("plane", "cylinder", "sphere").
+    pub face_types: Vec<&'static str>,
+    /// The curve type of each edge, by edge index ("line", "circle").
+    pub edge_types: Vec<&'static str>,
     /// Empty when the body passed validation.
     pub errors: Vec<String>,
 }
@@ -63,8 +67,27 @@ pub fn view_body(body: &Body) -> Result<BodyView, String> {
         vertices: body.vertices.len(),
         edges: body.edges.len(),
         faces: body.faces.len(),
+        face_types: body.faces.iter().map(|f| surface_type(&f.surface)).collect(),
+        edge_types: body.edges.iter().map(|e| curve_type(&e.curve)).collect(),
         errors,
     })
+}
+
+/// What the app's properties panel calls a face's surface.
+fn surface_type(surface: &geom::Surface) -> &'static str {
+    match surface {
+        geom::Surface::Plane { .. } => "plane",
+        geom::Surface::Cylinder { .. } => "cylinder",
+        geom::Surface::Sphere { .. } => "sphere",
+    }
+}
+
+/// What the app's properties panel calls an edge's curve.
+fn curve_type(curve: &geom::Curve) -> &'static str {
+    match curve {
+        geom::Curve::Line { .. } => "line",
+        geom::Curve::Circle { .. } => "circle",
+    }
 }
 
 fn to_js(view: BodyView) -> Result<JsValue, JsError> {
@@ -266,6 +289,31 @@ mod tests {
         let v = view_body(&ops::extrude::extrude(&profile, 2.0).unwrap()).unwrap();
         assert!(rel_eq(v.volume, 102.0, FP_REL) && rel_eq(v.area, 182.0, FP_REL), "{} {}", v.volume, v.area);
         assert_eq!((v.vertices, v.edges, v.faces), (12, 18, 8));
+    }
+
+    #[test]
+    fn views_name_each_face_surface_and_edge_curve() {
+        // A box is six planes bounded by twelve lines. A cylinder
+        // (primitives.rs) is the bottom cap, the top cap, then the side,
+        // bounded by two circles; a sphere two hemispheres on one circle.
+        // An L extruded: 8 planar faces, 18 straight edges.
+        let types = |b: &Body| {
+            let v = view_body(b).unwrap();
+            (v.face_types, v.edge_types)
+        };
+        assert_eq!(types(&ops::primitives::make_box(1.0, 2.0, 3.0).unwrap()), (vec!["plane"; 6], vec!["line"; 12]));
+        assert_eq!(types(&ops::primitives::make_cylinder(2.0, 1.0).unwrap()), (vec!["plane", "plane", "cylinder"], vec!["circle"; 2]));
+        assert_eq!(types(&ops::primitives::make_sphere(2.0).unwrap()), (vec!["sphere"; 2], vec!["circle"]));
+        let outer = vec![0.0, 0.0, 10.0, 0.0, 10.0, 3.0, 3.0, 3.0, 3.0, 10.0, 0.0, 10.0];
+        let profile = profile_from_input(ProfileIn { outer: BoundaryIn::Path { corners: outer, bulges: vec![] }, holes: vec![] }).unwrap();
+        assert_eq!(types(&ops::extrude::extrude(&profile, 2.0).unwrap()), (vec!["plane"; 8], vec!["line"; 18]));
+        // A plate with a round hole: its side is a cylinder and the hole's rims are circles.
+        let square = BoundaryIn::Path { corners: vec![0.0, 0.0, 10.0, 0.0, 10.0, 10.0, 0.0, 10.0], bulges: vec![] };
+        let hole = BoundaryIn::Circle { center: [5.0, 5.0], radius: 2.0 };
+        let plate = profile_from_input(ProfileIn { outer: square, holes: vec![hole] }).unwrap();
+        let (faces, edges) = types(&ops::extrude::extrude(&plate, 1.0).unwrap());
+        assert_eq!((faces.iter().filter(|t| **t == "cylinder").count(), faces.len()), (1, 7));
+        assert_eq!((edges.iter().filter(|t| **t == "circle").count(), edges.len()), (2, 14));
     }
 
     #[test]

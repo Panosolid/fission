@@ -51,6 +51,8 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #workspace .tree-row:hover { background: #262a31; }
 #workspace .tree-row[aria-current="true"] { background: #23384f; border-color: #4aa8ff; }
 #stl-note { margin: 0; font-size: 13px; min-height: 1em; }
+#workspace .selection-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#workspace .selection-list code { color: #8a919c; font-size: 12px; overflow-wrap: anywhere; }
 #stl-note.bad { color: #ff6b6b; }
 
 /* Placeholder pages. */

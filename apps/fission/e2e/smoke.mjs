@@ -22,6 +22,31 @@ const setSize = async (id, value) => {
   await page.fill(`#${id}`, String(value));
 };
 
+// Where a point of the default 40×30×20 box lands on screen, worked out
+// here from the framing in viewer.ts fit() rather than asked of the viewer:
+// the box is framed as a sphere at its centre (20, 15, 10) with
+// r = √(40² + 30² + 20²)/2 = √2900/2, the camera sits r / sin(22.5°) away
+// along (0.6, −0.8, 0.55), looks at the centre with Z up, fov 45°.
+// `box` is the canvas's bounding box.
+function screenPoint(box, [px, py, pz]) {
+  const n = Math.hypot(0.6, -0.8, 0.55);
+  const dir = [0.6 / n, -0.8 / n, 0.55 / n];
+  const centre = [20, 15, 10];
+  const dist = Math.sqrt(2900) / 2 / Math.sin(Math.PI / 8);
+  const cam = centre.map((c, i) => c + dir[i] * dist);
+  const fwd = dir.map((d) => -d);
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = (a) => a.map((x) => x / Math.hypot(...a));
+  const right = unit(cross(fwd, [0, 0, 1]));
+  const up = cross(right, fwd);
+  const v = [px - cam[0], py - cam[1], pz - cam[2]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const t = Math.tan(Math.PI / 8);
+  const ndcX = dot(v, right) / (dot(v, fwd) * t * (box.width / box.height));
+  const ndcY = dot(v, up) / (dot(v, fwd) * t);
+  return { x: box.x + ((ndcX + 1) / 2) * box.width, y: box.y + ((1 - ndcY) / 2) * box.height };
+}
+
 /** RGB of the canvas pixel at a fraction of its width/height. */
 const pixel = (fx, fy) =>
   page.evaluate(
@@ -72,30 +97,8 @@ try {
   });
 
   await check("clicking faces and edges selects them: click, Shift-click, drag, empty space, Escape, hidden edges", async () => {
-    // Where a point of the box lands on screen, worked out here from the
-    // framing in viewer.ts fit() rather than asked of the viewer: the
-    // 40×30×20 box is framed as a sphere at its centre (20, 15, 10) with
-    // r = √(40² + 30² + 20²)/2 = √2900/2, the camera sits r / sin(22.5°)
-    // away along (0.6, −0.8, 0.55), looks at the centre with Z up, fov 45°.
     const box = await page.locator("#viewport canvas").boundingBox();
-    const screen = ([px, py, pz]) => {
-      const n = Math.hypot(0.6, -0.8, 0.55);
-      const dir = [0.6 / n, -0.8 / n, 0.55 / n];
-      const centre = [20, 15, 10];
-      const dist = Math.sqrt(2900) / 2 / Math.sin(Math.PI / 8);
-      const cam = centre.map((c, i) => c + dir[i] * dist);
-      const fwd = dir.map((d) => -d);
-      const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-      const unit = (a) => a.map((x) => x / Math.hypot(...a));
-      const right = unit(cross(fwd, [0, 0, 1]));
-      const up = cross(right, fwd);
-      const v = [px - cam[0], py - cam[1], pz - cam[2]];
-      const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-      const t = Math.tan(Math.PI / 8);
-      const ndcX = dot(v, right) / (dot(v, fwd) * t * (box.width / box.height));
-      const ndcY = dot(v, up) / (dot(v, fwd) * t);
-      return { x: box.x + ((ndcX + 1) / 2) * box.width, y: box.y + ((1 - ndcY) / 2) * box.height };
-    };
+    const screen = (p) => screenPoint(box, p);
     const selection = () => page.evaluate(() => document.body.dataset.selection ?? "");
     // Kernel face order for a box (primitives.rs): −Z, +Z, −Y, +Y, −X, +X.
     const top = screen([20, 15, 20]); // centre of the +Z face: face 1
@@ -118,10 +121,14 @@ try {
     await page.keyboard.press("Escape");
     assert.equal(await selection(), "", "Escape clears");
     // The drag above turned the camera; re-frame it (a shape change re-fits)
-    // so the hand-worked screen positions hold again.
+    // so the hand-worked screen positions hold again. The drag's orbit eases
+    // out over many frames (damping): a second's wait checks fit() stopped it
+    // rather than letting the camera drift off the framing (a flaky failure
+    // of the upright pick below before 17d).
     await page.click("#toolbar [data-shape=cylinder]");
     await page.click("#toolbar [data-shape=box]");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
+    await page.waitForTimeout(1000);
     await page.keyboard.press("Escape");
     // Edges (17c). Kernel edge order for a box (primitives.rs): the −Z face
     // makes edges 0–3, the +Z face 4–7 (first 4: corner 4 (0,0,20) to 5
@@ -156,6 +163,75 @@ try {
     await page.click("#toolbar [data-shape=cylinder]");
     await page.click("#toolbar [data-shape=box]");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
+  });
+
+  await check("the selection is drawn: faces and edges in the selection colour, hover, Body 1, and the properties agree", async () => {
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const at = (p) => screenPoint(box, p);
+    const colourAt = async (p) => {
+      await page.waitForTimeout(200); // a frame or two to paint
+      const s = at(p);
+      return pixel((s.x - box.x) / box.width, (s.y - box.y) / box.height);
+    };
+    // How green a pixel is: the selection colour is green, the body grey-blue.
+    const green = ([r, g, b]) => g - (r + b) / 2;
+    const away = () => page.mouse.move(box.x + 2, box.y + 2); // empty space: nothing hovered
+    const viewport = (key) => page.$eval("#viewport", (el, k) => el.dataset[k], key);
+    const listed = () => page.$$eval("#selection-list li", (els) => els.map((e) => e.textContent));
+    const lit = () => page.$$eval("#browser [aria-current=true]", (els) => els.map((e) => e.dataset.node));
+    const top = [20, 15, 20]; // face 1 (see the picking check)
+    const front = [20, 0, 10]; // face 2
+    await away();
+    const plainTop = await colourAt(top);
+    const plainFront = await colourAt(front);
+    assert.deepEqual(await listed(), []);
+    assert.equal(await page.isVisible("#selection-empty"), true);
+
+    await page.mouse.click(at(top).x, at(top).y);
+    await away();
+    const selectedTop = await colourAt(top);
+    assert.ok(green(selectedTop) > green(plainTop) + 40, `selected top face ${selectedTop} is green, was ${plainTop}`);
+    assert.deepEqual(await colourAt(front), plainFront, "the front face is not selected");
+    assert.equal(await viewport("highlight"), "faces 1 edges ");
+    assert.deepEqual(await listed(), ["Face 1 · plane face:feature-1/1"]);
+    assert.deepEqual(await lit(), []);
+
+    // Hover: the front face lights up less than a selected one, and goes back on leaving.
+    await page.mouse.move(at(front).x, at(front).y);
+    const hoveredFront = await colourAt(front);
+    assert.equal(await viewport("hover"), "face 2");
+    assert.ok(green(hoveredFront) > green(plainFront) + 10, `hovered front ${hoveredFront}, plain ${plainFront}`);
+    await away();
+    assert.equal(await viewport("hover"), "");
+    assert.deepEqual(await colourAt(front), plainFront, "leaving the face ends the hover");
+
+    // An edge: the top front edge (edge 4) and its curve type.
+    await page.mouse.click(at([20, 0, 20]).x, at([20, 0, 20]).y);
+    await away();
+    assert.equal(await viewport("highlight"), "faces  edges 4");
+    assert.deepEqual(await listed(), ["Edge 4 · line edge:feature-1/4"]);
+    assert.deepEqual(await colourAt(top), plainTop, "the face is no longer selected");
+
+    // Body 1 in the browser selects the whole body: every face tinted, its row lit.
+    await page.click("#browser [data-node=body-1]");
+    assert.equal(await viewport("highlight"), "body faces  edges ");
+    assert.ok(green(await colourAt(front)) > green(plainFront) + 40, "the body's front face is tinted too");
+    assert.deepEqual(await lit(), ["body-1"]);
+    assert.deepEqual(await listed(), ["Body 1 · solid body:feature-1"]);
+    // Shift-click a face adds it beside the body; a plain click replaces it and unlights the row.
+    await page.keyboard.down("Shift");
+    await page.mouse.click(at(top).x, at(top).y);
+    await page.keyboard.up("Shift");
+    assert.deepEqual(await listed(), ["Body 1 · solid body:feature-1", "Face 1 · plane face:feature-1/1"]);
+    await page.mouse.click(at(top).x, at(top).y);
+    assert.deepEqual(await lit(), []);
+    await page.keyboard.press("Escape");
+    await away();
+    assert.deepEqual(await colourAt(top), plainTop, "Escape takes the colour away");
+    assert.equal(await page.isVisible("#selection-empty"), true);
+    await page.click("#browser [data-node=body-1]");
+    await page.screenshot({ path: "e2e/selection.png" });
+    await page.keyboard.press("Escape");
   });
 
   await check("editing a size rebuilds the body", async () => {
@@ -256,7 +332,7 @@ try {
     await page.screenshot({ path: "e2e/l-bracket.png" });
   });
 
-  await check("the browser lists the timeline, Body 1 and the origin; a click highlights one row", async () => {
+  await check("the browser lists the timeline, Body 1 and the origin; Body 1 selects the body", async () => {
     // The L-bracket part from the check above: feature #1 with its intent.
     const rows = async (group) => page.$$eval(`#browser [data-node=${group}] .tree-row`, (els) => els.map((e) => e.textContent));
     assert.deepEqual(await rows("timeline"), ["1. Extrude: L-bracket profile 40 × 30 mm, by 20 mm"]);
@@ -266,17 +342,19 @@ try {
     assert.deepEqual(await current(), []);
     await page.click("#browser [data-node=body-1]");
     assert.deepEqual(await current(), ["body-1"]);
+    // Origin rows select nothing until sketches need them (step 21).
     await page.click("#browser [data-node=origin-z]");
-    assert.deepEqual(await current(), ["origin-z"]);
+    assert.deepEqual(await current(), ["body-1"]);
     // Folding a group keeps it folded when an edit rebuilds the tree.
     await page.click("#browser [data-node=origin] summary");
     await setSize("height", 21);
     await page.waitForFunction(() => document.querySelector("#browser [data-node=feature-1]").textContent.endsWith("by 21 mm"));
     assert.equal(await page.$eval("#browser [data-node=origin]", (el) => el.open), false);
-    assert.deepEqual(await current(), ["origin-z"]);
+    assert.deepEqual(await current(), ["body-1"], "the body stays selected through the edit");
     await page.click("#browser [data-node=origin] summary");
     await setSize("height", 20);
     await page.screenshot({ path: "e2e/browser.png" });
+    await page.keyboard.press("Escape");
   });
 
   await check("plate with two round holes: area minus the holes, times the distance", async () => {

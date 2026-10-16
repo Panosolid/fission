@@ -26,3 +26,13 @@ export function designReference(kind: GeometryReference["kind"], featureId: stri
   if (index === undefined || !Number.isInteger(index) || index < 0) throw new Error(`a ${kind} reference needs a kernel index (a whole number ≥ 0), got ${index}`);
   return { kind, id: `${kind}:${featureId}/${index}` as StableId };
 }
+
+/**
+ * What `designReference` built a reference from: its kind, feature id and
+ * (for a face or edge) kernel index; null for an id it did not build.
+ */
+export function readDesignReference(ref: GeometryReference): { kind: GeometryReference["kind"]; featureId: string; index?: number } | null {
+  const m = /^(body|face|edge):([^:/]+)(?:\/(0|[1-9]\d*))?$/.exec(ref.id);
+  if (!m || m[1] !== ref.kind || (m[3] === undefined) !== (ref.kind === "body")) return null;
+  return m[3] === undefined ? { kind: ref.kind, featureId: m[2] } : { kind: ref.kind, featureId: m[2], index: Number(m[3]) };
+}

@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportPick } from "@fission/core";
+import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
+import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -15,8 +16,12 @@ export class Viewer implements SharedViewport {
   private mesh: DisplayMesh | null = null;
   private faces: THREE.BufferGeometry | null = null;
   private faceMesh: THREE.Mesh | null = null;
+  private edges: THREE.BufferGeometry | null = null;
   private raycaster = new THREE.Raycaster();
-  onPick: ((pick: ViewportPick) => void) | null = null;
+  private picker: ((pick: ViewportPick) => void) | null = null;
+  private highlight: ViewportHighlight = NO_HIGHLIGHT;
+  /** The face or edge under the pointer while picking is on (at most one is set). */
+  private hover: { face: number | null; edge: number | null } = { face: null, edge: null };
   private overlays = new Map<string, AnalysisOverlay>();
   private legend = document.createElement("ul");
   readonly element: HTMLElement;
@@ -58,6 +63,24 @@ export class Viewer implements SharedViewport {
       const edge = this.edgeAt(e.clientX, e.clientY);
       this.onPick?.({ face: edge === null ? this.faceAt(e.clientX, e.clientY) : null, edge, shift: e.shiftKey });
     });
+    // Hover: what a click would pick, looked up at most once a frame, never while a button is held.
+    let pointer: { x: number; y: number } | null = null;
+    let queued = false;
+    canvas.addEventListener("pointermove", (e) => {
+      pointer = e.buttons === 0 ? { x: e.clientX, y: e.clientY } : null;
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        if (!pointer || !this.picker) return this.setHover(null, null);
+        const edge = this.edgeAt(pointer.x, pointer.y);
+        this.setHover(edge === null ? this.faceAt(pointer.x, pointer.y) : null, edge);
+      });
+    });
+    canvas.addEventListener("pointerleave", () => {
+      pointer = null;
+      this.setHover(null, null);
+    });
 
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
@@ -89,11 +112,31 @@ export class Viewer implements SharedViewport {
     });
     const edges = new THREE.BufferGeometry();
     edges.setAttribute("position", new THREE.Float32BufferAttribute(mesh.edge_lines, 3));
+    this.edges = edges;
     this.faceMesh = new THREE.Mesh(geometry, material);
-    this.body.add(
-      this.faceMesh,
-      new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x0b0c0e })),
-    );
+    this.body.add(this.faceMesh, new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ vertexColors: true })));
+    this.hover = { face: null, edge: null }; // indices of the old body
+    this.paint();
+  }
+
+  get onPick() {
+    return this.picker;
+  }
+
+  /** Picking also turns hover on; null turns both off. */
+  set onPick(handler: ((pick: ViewportPick) => void) | null) {
+    this.picker = handler;
+    if (!handler) this.setHover(null, null);
+  }
+
+  showSelection(highlight: ViewportHighlight) {
+    this.highlight = { body: highlight.body, faces: [...highlight.faces], edges: [...highlight.edges] };
+    this.paint();
+  }
+
+  private setHover(face: number | null, edge: number | null) {
+    if (face === this.hover.face && edge === this.hover.edge) return;
+    this.hover = { face, edge };
     this.paint();
   }
 
@@ -106,10 +149,18 @@ export class Viewer implements SharedViewport {
     if (this.overlays.delete(id)) this.paint();
   }
 
-  /** Colours the body's faces from the overlays and lists them in the legend. */
+  /**
+   * Colours the body's faces from the overlays, tints the selected and
+   * hovered ones, colours selected and hovered edges, and lists the
+   * overlays in the legend.
+   */
   private paint() {
     const overlays = [...this.overlays.values()];
-    this.element.dataset.overlays = overlays.map((o) => o.id).join(" "); // read by the e2e test
+    // Read by the e2e test.
+    this.element.dataset.overlays = overlays.map((o) => o.id).join(" ");
+    const { body, faces, edges } = this.highlight;
+    this.element.dataset.highlight = `${body ? "body " : ""}faces ${faces.join(",")} edges ${edges.join(",")}`;
+    this.element.dataset.hover = this.hover.edge !== null ? `edge ${this.hover.edge}` : this.hover.face !== null ? `face ${this.hover.face}` : "";
     this.legend.hidden = overlays.length === 0;
     this.legend.replaceChildren(
       ...overlays.map((o) => {
@@ -122,15 +173,26 @@ export class Viewer implements SharedViewport {
     if (!this.mesh || !this.faces) return;
     // Vertices belong to one face each (display.rs), so per-vertex colour is per-face colour.
     // Vertex colours are linear; THREE.Color converts from sRGB.
-    const base = new THREE.Color(0x9aa7b8).toArray();
-    const linear = (c: [number, number, number]) => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace).toArray();
+    // Tints are mixed in sRGB, like the colours are chosen.
+    const linear = (c: Rgb) => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace).toArray();
     const perTriangle = triangleColours(this.mesh.triangle_faces, overlays);
+    const mixes = faceMixes(this.mesh.triangle_faces, this.highlight, this.hover.face);
     const colours = new Float32Array(this.mesh.positions.length).fill(0);
-    for (let i = 0; i < colours.length / 3; i++) colours.set(base, 3 * i);
+    for (let i = 0; i < colours.length / 3; i++) colours.set(linear(BASE_COLOUR), 3 * i);
     perTriangle.forEach((c, t) => {
-      if (c) for (let k = 0; k < 3; k++) colours.set(linear(c), 3 * this.mesh!.indices[3 * t + k]);
+      if (!c && mixes[t] === 0) return;
+      const colour = linear(tint(c ?? BASE_COLOUR, SELECTION_COLOUR, mixes[t]));
+      for (let k = 0; k < 3; k++) colours.set(colour, 3 * this.mesh!.indices[3 * t + k]);
     });
     this.faces.setAttribute("color", new THREE.BufferAttribute(colours, 3));
+    if (!this.edges) return;
+    const lineColours = new Float32Array(this.mesh.edge_lines.length);
+    segmentColours(this.mesh.edge_line_edges, this.highlight, this.hover.edge).forEach((c, s) => {
+      const colour = linear(c);
+      lineColours.set(colour, 6 * s);
+      lineColours.set(colour, 6 * s + 3);
+    });
+    this.edges.setAttribute("color", new THREE.BufferAttribute(lineColours, 3));
   }
 
   /** The kernel face index under a point on screen (client pixels), or null for empty space. */
@@ -187,6 +249,11 @@ export class Viewer implements SharedViewport {
   fit(): Framing | null {
     const framing = this.bodyFraming();
     if (!(framing.radius > 0)) return null;
+    // Spend any orbit still easing out (damping) first, so the camera does
+    // not drift away from the new framing over the next frames.
+    this.controls.enableDamping = false;
+    this.controls.update();
+    this.controls.enableDamping = true;
     const centre = new THREE.Vector3(...framing.centre);
     const radius = framing.radius;
     const dist = radius / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2));
