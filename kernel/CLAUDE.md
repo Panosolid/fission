@@ -47,6 +47,11 @@ Every serious kernel works inside a fixed range (commercial kernels commonly use
 - Volumes, areas and projections are computed relative to a local origin (the body's or mesh's bounding-box centre, or a point on the face), never the world origin.
 - The fuzzer spends ~95% of its inputs inside the range and ~5% on extreme inputs, which only have to produce clean errors.
 
+## Planned for the integration work (owner's decisions, docs/integration.md)
+
+- One 2D curve library for the sketcher, Vector, Laser and Layout lives here (lines, arcs, Béziers, offsets, path booleans, biarc fitting, later the solver's geometry), using `tolerance.rs`; each operation joins the stateful harness the day it lands, like any other.
+- Mesh bodies are a separate kind of body: closed and consistently oriented (the watertight check) before printing or a boolean; a boolean with a mesh body gives a mesh body, never an exact one.
+
 ## Conventions
 
 - Units are millimetres. Z is up (the viewer sets `Object3D.DEFAULT_UP` to +Z).
