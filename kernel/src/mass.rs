@@ -91,7 +91,8 @@ fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) {
     if c.reversed { (&e.curve, e.t1, e.t0) } else { (&e.curve, e.t0, e.t1) }
 }
 
-/// ½ ∫ (x − o) × dx along a curve from `ta` to `tb`.
+/// ½ ∫ (x − o) × dx along a curve from `ta` to `tb`, between the corners
+/// `a` and `b` it joins.
 ///
 /// Line from a to b: ½ (a − o) × (b − a) = ½ (a − o) × (b − o), the
 /// triangle o, a, b. A circular arc sweeps that triangle plus the segment
@@ -100,8 +101,15 @@ fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) {
 /// gives 0 + πr². This form never cancels the large terms that
 /// ½ ∫ [(c − o) + r(cos t X + sin t Y)] × r(−sin t X + cos t Y) dt would
 /// for a shallow arc of a huge circle.
-fn half_moment(curve: &Curve, ta: f64, tb: f64, o: DVec3) -> DVec3 {
-    let chord = 0.5 * (curve.eval(ta) - o).cross(curve.eval(tb) - o);
+///
+/// The chord runs between the corners themselves, not the curve's ends:
+/// a far-out arc's centre is rounded, so its circle can miss its corners
+/// by up to LINEAR, and with the straight sides between corners the loop
+/// would not close. The gap, a sliver as long as the face, times its
+/// distance from the body's centre swamped a thin far-out slot's volume
+/// (see `a_thin_slot_far_out_keeps_its_volume`).
+fn half_moment(curve: &Curve, ta: f64, tb: f64, a: DVec3, b: DVec3, o: DVec3) -> DVec3 {
+    let chord = 0.5 * (a - o).cross(b - o);
     match *curve {
         Curve::Line { .. } => chord,
         Curve::Circle { axis, radius, .. } => chord + axis * (0.5 * radius * radius * theta_minus_sin(tb - ta)),
@@ -172,7 +180,8 @@ fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
     let vector_area: DVec3 = coedges()
         .map(|c| {
             let (curve, ta, tb) = travel(body, c);
-            half_moment(curve, ta, tb, p)
+            let (a, b) = (body.vertices[body.coedge_start(c)].point, body.vertices[body.coedge_end(c)].point);
+            half_moment(curve, ta, tb, a, b, p)
         })
         .sum();
     match face.surface {
@@ -249,6 +258,28 @@ pub(crate) mod tests {
         // 2·π(4 − 1) + outer wall 2π·2·3 + bore 2π·1·3 = 6π + 12π + 6π. The
         // bore has sense false: its radius term counts negatively.
         check(&hand_tube(1.0, 2.0, 3.0, 0.3), 9.0 * PI, 24.0 * PI);
+    }
+
+    #[test]
+    fn a_thin_slot_far_out_keeps_its_volume() {
+        // Regression (OpenCascade oracle, seed 33200934698058; OpenCascade
+        // agreed with a 50-digit calculation, Fission was 1.1e-6 high): a
+        // slot 364.5 mm long with half-round ends, drawn at y = 5e7, so its
+        // width is w = (5e7 + 0.0022) − 5e7 as doubles = 0.00219999998808
+        // (exact by Sterbenz), extruded 96. V = (364.5·w + π(w/2)²)·96: a
+        // rectangle plus two half discs of radius w/2.
+        let (y0, y1) = (5e7, 5e7 + 0.0022);
+        let w = y1 - y0;
+        let corners = vec![DVec2::new(0.0, y0), DVec2::new(364.5, y0), DVec2::new(364.5, y1), DVec2::new(0.0, y1)];
+        let slot = Profile { outer: Boundary::Path { corners, bulges: vec![0.0, 1.0, 0.0, 1.0] }, holes: vec![] };
+        let v = (364.5 * w + PI * w * w / 4.0) * 96.0;
+        // The arcs' centres (5e7 + w/2) round by up to half an ulp there
+        // (3.7e-9), so the circles miss their corners by that much; the
+        // vector area used to follow the circles and the straight sides the
+        // corners, leaving a 2.5e-9 × 96 mm sliver per end, 182 mm from the
+        // centre: 8.7e-5 of volume. It now follows the corners.
+        let m = mass_properties(&extrude(&slot, 96.0).unwrap());
+        assert!(rel_eq(m.volume, v, FP_REL), "volume {} expected {v}", m.volume);
     }
 
     #[test]

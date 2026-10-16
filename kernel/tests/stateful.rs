@@ -191,9 +191,15 @@ impl Piece {
         }
         let phi = 4.0 * bulge.atan();
         let chord = b - a;
-        let r = chord.length() / (2.0 * (phi / 2.0).sin().abs());
+        // sin(φ/2) and cos(φ/2) straight from β (φ/2 = 2·atan β, so they are
+        // 2β/(1 + β²) and (1 − β²)/(1 + β²), written to stay finite for any
+        // β): taking the sine of φ/2 itself loses its digits near a full
+        // turn, where φ/2 ≈ π (seed74ed8ceb85a8: β = 1.1e6, a 605 mm arc on
+        // a 2.2 µm chord, whose radius came out 3.8e-11 of itself too large).
+        let (sin_half, cos_half) = (2.0 / (bulge + 1.0 / bulge), (1.0 / bulge - bulge) / (bulge + 1.0 / bulge));
+        let r = chord.length() / (2.0 * sin_half.abs());
         let left = DVec2::new(-chord.y, chord.x) / chord.length();
-        let c = (a + b) / 2.0 + left * (r * (phi / 2.0).cos() * phi.signum());
+        let c = (a + b) / 2.0 + left * (r * cos_half * phi.signum());
         Piece::Arc { a, b, c, r, phi }
     }
 
@@ -878,13 +884,13 @@ fn check_stl(b: &Placed) -> Result<(), String> {
     if (out.rounding > MIN_FEATURE) != out.warning.is_some() {
         return Err(format!("STL rounding {} with warning {:?}", out.rounding, out.warning));
     }
-    let shortest = (0..mesh.triangles.len())
-        .flat_map(|t| {
-            let [a, b, c] = mesh.triangle(t);
-            [a.distance(b), b.distance(c), c.distance(a)]
-        })
-        .fold(f64::INFINITY, f64::min);
-    if 4.0 * out.rounding < shortest {
+    // Rounding can only merge two corners closer than 2 × rounding (each
+    // moves by at most that), and any two distinct corners may be that
+    // close, not only the ends of one edge: across a thin wall or a gap
+    // between two holes they are not joined by an edge at all (seed
+    // f0cc04acbba8: two holes 0.6 mm apart at 1.9 km, where f32 rounds by
+    // 0.06 mm, merged corners while every edge was longer than 0.25 mm).
+    if !corners_closer_than(&mesh.positions, 4.0 * out.rounding) {
         let welded = back.welded();
         welded.check_closed().map_err(|e| format!("STL mesh not closed after reading back: {} problems", e.len()))?;
         let slack = mesh.area() * out.rounding * 2.0 + tolerance::rounding_slack(body_reach(b)) * mesh.area();
@@ -894,6 +900,33 @@ fn check_stl(b: &Placed) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Whether any two distinct points are within `d` of each other: points
+/// are bucketed in cubes of side `d`, so a close pair lies in the same or
+/// neighbouring cubes.
+fn corners_closer_than(points: &[DVec3], d: f64) -> bool {
+    if d <= 0.0 {
+        return false;
+    }
+    let mut cells: std::collections::HashMap<[i64; 3], Vec<DVec3>> = std::collections::HashMap::new();
+    let key = |p: DVec3| (p / d).floor().to_array().map(|x| x as i64);
+    for &p in points {
+        let [i, j, k] = key(p);
+        for di in -1..=1 {
+            for dj in -1..=1 {
+                for dk in -1..=1 {
+                    if let Some(qs) = cells.get(&[i + di, j + dj, k + dk]) {
+                        if qs.iter().any(|&q| q != p && q.distance(p) < d) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        cells.entry([i, j, k]).or_default().push(p);
+    }
+    false
 }
 
 fn panic_message(p: Box<dyn std::any::Any + Send>) -> String {
@@ -1717,6 +1750,33 @@ fn saved_regressions_still_pass() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn arc_pieces_by_hand() {
+    // Bulge 1 turns φ = 4·atan 1 = π over the chord (0,0)→(2,0): a
+    // semicircle of radius 1 centred on the chord's midpoint (1, 0).
+    let Piece::Arc { c, r, .. } = Piece::new(DVec2::ZERO, DVec2::new(2.0, 0.0), 1.0) else { panic!() };
+    assert!(tolerance::eq(r, 1.0) && tolerance::points_eq(c.extend(0.0), DVec3::new(1.0, 0.0, 0.0)), "{c} {r}");
+    // Regression (seed74ed8ceb85a8): bulge β = 1.1e6 over a 0.0022 mm
+    // chord. sin(φ/2) = 2β/(1 + β²), so r = c(1 + β²)/(4β)
+    // = 0.0022 × 1.21e12 / 4.4e6 + 0.0022 / 4.4e6 = 605 + 5e-10. Taking sin of φ/2 ≈ π − 1.8e-6 gave
+    // 605.0000000228 (3.8e-11 of it too large).
+    let Piece::Arc { r, .. } = Piece::new(DVec2::new(0.5, 0.0), DVec2::new(0.5, 0.0022), 1.1e6) else { panic!() };
+    assert!((r - (605.0 + 5e-10)).abs() <= 605.0 * 4.0 * f64::EPSILON, "{r}");
+}
+
+#[test]
+fn close_corners_by_hand() {
+    // Two corners 1 apart: closer than 1.1, not closer than 0.9.
+    let pair = [DVec3::ZERO, DVec3::X];
+    assert!(corners_closer_than(&pair, 1.1));
+    assert!(!corners_closer_than(&pair, 0.9));
+    // In neighbouring cells (1.05/0.11 → cell 9, 1.15/0.11 → cell 10),
+    // 0.1 apart: found.
+    assert!(corners_closer_than(&[DVec3::new(1.05, 0.0, 0.0), DVec3::new(1.15, 0.0, 0.0)], 0.11));
+    // The same corner twice is one corner, not two close ones.
+    assert!(!corners_closer_than(&[DVec3::ONE, DVec3::ONE], 1.0));
 }
 
 /// The harness must be able to fail: a chain whose checks are known to
