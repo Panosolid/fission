@@ -4,7 +4,7 @@
 // the panel only shows what it is given.
 
 import { describeProvenance, type BodyView, type Feature } from "@fission/core";
-import { formatQuantity as fmt } from "@fission/ui";
+import { downstreamChip, formatQuantity as fmt, type ChipInfo } from "@fission/ui";
 import type { ShapeKind } from "./profiles.ts";
 import { PLACEHOLDER_ID_NOTE } from "./references.ts";
 import type { SelectionRow } from "./selection.ts";
@@ -57,7 +57,11 @@ const HTML = `
     <dt>Validation</dt><dd id="status">…</dd>
   </dl>
   <p id="stale-note" hidden>Out of date: these numbers are for the last part that built.</p>
-  <p id="error"></p>`;
+  <p id="error"></p>
+  <section id="downstream" hidden>
+    <h2>Downstream</h2>
+    <div id="downstream-chips" role="group" aria-label="What other workspaces make from this design"></div>
+  </section>`;
 
 /** A verb as a button shows it: the action's id, label and one-line title. */
 export interface Verb {
@@ -85,6 +89,8 @@ export interface PropertiesPanel {
   showActions(verbs: readonly Verb[], onRun: (id: string) => void): void;
   /** What the last action said: a warning or an error, or "" for nothing. */
   showActionNote(text: string, bad: boolean): void;
+  /** What other workspaces make from the design, one chip each; a click opens the chip's workspace. None hides the whole section. */
+  showDownstream(chips: readonly ChipInfo[], onOpen: (target: string) => void): void;
 }
 
 /** Fills the properties slot and returns the handle that updates it. */
@@ -159,6 +165,12 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
       const note = $("action-note");
       note.textContent = text;
       note.className = bad ? "bad" : "";
+    },
+    showDownstream(chips, onOpen) {
+      $("downstream").hidden = chips.length === 0;
+      const box = $("downstream-chips");
+      box.innerHTML = chips.map(downstreamChip).join(""); // the chip escapes what it is given
+      for (const b of box.querySelectorAll<HTMLElement>(".downstream-chip")) b.addEventListener("click", () => onOpen(b.dataset.target!));
     },
   };
 }

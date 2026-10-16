@@ -103,6 +103,12 @@ try {
     assert.equal(await text("provenance"), "Feature 1 (box) was made in Design.");
   });
 
+  await check("no Downstream section shows while no workspace makes anything from the design (X4b)", async () => {
+    assert.equal(await page.$$eval("#properties #downstream", (els) => els.length), 1, "the section is in the panel");
+    assert.equal(await page.isVisible("#properties #downstream"), false);
+    assert.equal(await page.$$eval(".downstream-chip", (els) => els.length), 0);
+  });
+
   await check("the box is actually drawn", async () => {
     await page.waitForTimeout(300);
     const background = [0x14, 0x16, 0x1a];

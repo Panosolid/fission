@@ -128,3 +128,26 @@ test("the selection note shows what a rebuild dropped and hides when empty", () 
   p.showSelectionNote("");
   assert.equal($("selection-note").hidden, true);
 });
+
+// Downstream chips (X4b): the section is hidden until there is a chip,
+// each redraw replaces the chips (never piles them up), and a click hands
+// the chip's workspace to onOpen.
+test("the Downstream section: hidden with no chips, one button per chip, a click opens its workspace", () => {
+  const { p, $ } = panel();
+  const chip = (id: string, value: string | undefined) => ({ id, label: "Print", value, state: "fresh" as const, preview: "", target: "slice", targetName: "Slice" });
+  const opened: string[] = [];
+  const shown = () => [...$("downstream-chips").querySelectorAll<HTMLElement>("button")].map((b) => b.textContent);
+  assert.equal($("downstream").hidden, true, "hidden before anything is shown");
+  p.showDownstream([], (t) => opened.push(t));
+  assert.equal($("downstream").hidden, true);
+  p.showDownstream([chip("slice.print", "2 h 14 m · 38 g")], (t) => opened.push(t));
+  assert.equal($("downstream").hidden, false);
+  assert.deepEqual(shown(), ["Print: 2 h 14 m · 38 g"]);
+  p.showDownstream([chip("slice.print", "2 h 20 m · 40 g")], (t) => opened.push(t));
+  assert.deepEqual(shown(), ["Print: 2 h 20 m · 40 g"], "redrawn, not added to");
+  $("downstream-chips").querySelector<HTMLElement>("button")!.click();
+  assert.deepEqual(opened, ["slice"]);
+  p.showDownstream([], (t) => opened.push(t));
+  assert.equal($("downstream").hidden, true, "hidden again when the last chip goes");
+  assert.deepEqual(shown(), []);
+});
