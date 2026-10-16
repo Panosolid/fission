@@ -23,30 +23,33 @@ Each folder with its own CLAUDE.md (kernel/, packages/, workspaces/, apps/) has 
 - `kernel/`: Rust geometry kernel → WebAssembly. `src/tolerance.rs` is the only place epsilons live; every operation's result goes through `validate::checked()`; when a kernel operation lands, add it to the stateful harness (`tests/stateful.rs`: `Op`, `Scene::transitions`, `apply_op`, `replay_op`) the same day.
 - `packages/`: shared TypeScript (core document model and kernel bridge, viewport, ui, testing, ai; storage and community are placeholders). `packages/core/src/kernel/kernel-client.ts` is the only way the app talks to the kernel.
 - `workspaces/`: the ten workspaces (Design real, the rest placeholders). `apps/fission`: the app shell and browser tests.
-- `docs/`: `roadmap.md` (the full roadmap), `integration.md`, `integration-map.md` (every link between workspaces), `ai.md`, `project-format.md`, `community.md`.
+- `docs/`: `progress/` (one progress file per workstream, see below), `roadmap.md` (the full roadmap), `integration.md`, `integration-map.md` (every link between workspaces), `ai.md`, `project-format.md`, `community.md`.
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust (and `oracle/compare.py`, the OpenCascade oracle).
 - `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing", results on the `test-results` branch; see kernel/CLAUDE.md).
 - Generated, never committed: `kernel/target/`, `kernel/endless-results/`, `kernel/mutants.out*/`, `packages/core/src/kernel/wasm/`, `apps/fission/dist/`, `node_modules/`.
 
-## Current work
+## Workstreams and where progress lives
 
-Keep this section current: update it whenever a step lands.
+Several threads run at once, one per workstream. So they never edit the same lines, each workstream keeps its own progress file in `docs/progress/` (what is done, the next step and its substeps, the branch the next thread starts from):
+- `cad.md`: the numbered CAD steps (1, 2, … 20 undo/redo onward) and the kernel.
+- `integration.md`: the integration experience steps (X…) and the I, A and other cross-workspace items.
+- `booleans.md`: the boolean design review B0 and the boolean steps.
+- `image.md`: the Image workspace (G…).
+- A new workstream (Render, Vector, Layout…) gets a new file here the day it starts, added to this list in its own small PR.
 
-Done: steps 1–19 (step 15: the self-intersection check, mutation-tested; 16: the Design layout; 17: one selection of bodies, faces and edges, with placeholder ids until step 32; 18: view controls, Fit framed to the narrower field of view, and the view cube; 19: save and open a .fission.json file, projects kept in the browser, autosave, and the phone top bar menu); the modelling range is 1 km / 10 nm (decided during step 15, measured and guarded by a test); the Image workspace base G1 (open a PNG or JPEG at its real size, Brightness, layer Hide; `docs/roadmap.md`); integration I7, X1 (the action registry: verbs for the selection, Download STL among them), X2 (one owner per linked value, in core: proposed edits, hand-overs; UI with E3), X3 (split view: a second workspace beside the first, own panels and camera, one scene and selection), X4 (downstream chips in Design's properties panel, state from the graph; none registered until P2) and the NOW parts of I8–I21, A1–A6 and A9 (each item in `docs/roadmap.md` says what remains), with the owner's three decisions: one generic Outline producer (the sketcher plugs into it at step 21); today's single shape is feature #1 of a one-step timeline using the exact intent, provenance and dependency structures step 32 will use; the overlay's real use is marking faces of a part too big for accurate STL (and, if cheap, the failure-dump viewer through the same overlay format; never show rejected parts in the app). Report back to the owner on these as the specs ask. Once PR #8 and the integration branch are merged into `main`, scheduled random testing and the Pages app run the latest work.
+Rules:
+- A thread updates only its own workstream's file, and in `docs/roadmap.md` only its own section. Never edit another workstream's file, even to tick something; if another workstream needs to know something, say so in the thread.
+- Package and workspace details (which file does what) live in that folder's own CLAUDE.md (for example `packages/core/CLAUDE.md`, `workspaces/image/CLAUDE.md`), so each thread edits the folder it works in. Add a line there when you add a file.
+- Shared rule files (this file, `packages/CLAUDE.md`, `kernel/CLAUDE.md`, `docs/integration*.md`) change only when a rule changes, in a small edit, never to record progress.
+- Order (owner's decision): integration X1–X8 one per thread, then step 20 (undo/redo); step 20 never runs alongside an X step, since both touch the action and ownership code. Image and booleans run in parallel.
 
-Next steps (the rest of the roadmap, in as much detail as it needs, is `docs/roadmap.md`; each item lives in one file only: move the next item here when one is ticked, and ticked ones back there):
-Order after step 19 (owner's decision): the integration experience steps X1–X8 (X1–X4 are done) (`docs/roadmap.md`, "Integration experience"), one per thread, before step 20 (undo/redo).
-- [ ] X5. NOW (core and UI kit): change notes: when the graph rebuilds something because of a change, a dismissible note names the cause, with a link to the provenance chain; first real use with the first cross-workspace link
-  - Starting point: the graph is `packages/core/src/model/graph.ts` (`changed(id)` returns what it marked: `updateNow` and `awaitingRerun`; `upstreamOf` gives the chain), provenance is `describeProvenance` in `feature.ts`; Design's draw is `workspaces/design/src/workspace.ts` (`markStale` runs after every graph change; the Downstream chips redraw there too). Notes are dismissible and name their cause (packages/CLAUDE.md, experience rules). Split into substeps here first if it is more than one commit (core note model + UI kit note, then Design shows them).
-  - [x] X5a. Core and UI kit: `packages/core/src/model/change-notes.ts`: `ChangeNotes.record(cause, staleness, graph)` (cause = graph node, its label and workspace, and the words "you changed wall thickness"; pass what `graph.changed`/`graph.remove` just returned) makes one note per result in a workspace other than the cause's (a newer cause replaces it with a new id); `current(graph)` gives them oldest first with the state read from the graph (`updating` cheap and marked, `needs-rerun` expensive and marked, `updated` fresh) and drops notes whose result left the project; `dismiss(id)`; `noteText` ("Print plate updated: you changed wall thickness in Design."; "Stress out of date: … Rerun it in Simulate."); each note's `chain` is `graph.path(cause, result)` (new: the shortest chain, ties to the first input, works after the cause was removed) as lines "Part in Design". `packages/ui/src/change-note.ts` `changeNote(info)`: role="status", the line, "Why?" opening the chain, a × button with `data-dismiss`; styles in theme.css. Tests: hand-worked edit, reverse link, replacement, removal, refusals, `path` by hand, 5 seeds × 2,000 random steps against a model (chains checked as real and shortest by an independent search); 10 deliberate breaks all caught; screenshot checked in Chromium.
-  - [ ] X5b. Show them: a `changeNotes: ChangeNotes` on `WorkspaceContext` (`packages/core/src/model/workspace.ts`), built once by the shell (`apps/fission/src/main.ts`, beside `new DownstreamRegistry()`) and shared by both panes; wherever code calls `ctx.graph.changed`/`remove` for a user edit it also calls `record` with the cause's words; the shell shows `current(graph)` for the workspaces on screen in a notes strip over the viewport (redrawn after every graph change, like `markStale` in `workspaces/design/src/workspace.ts`), × calls `dismiss`. Today nothing crosses workspaces, so no note appears in normal use: unit test with a fake cross-workspace node, e2e (`apps/fission/e2e/smoke.mjs`) that the strip is empty today and that a note injected through a test hook shows, opens its chain and dismisses. The first real note comes with the first cross-workspace link (P2's print estimate).
 ## Definition of done for a roadmap item
 
 1. Tier 1 is clean (kernel: kernel/CLAUDE.md; TypeScript: `npm test` and `npm run typecheck`, packages/CLAUDE.md): no lint warnings, and the tests for the changed modules pass.
 2. Tier 2 property tests for the feature exist and pass, with nasty cases included (the kernel's Tier 2 list is in kernel/CLAUDE.md).
 3. The test quality rules below are met (hand-worked test with the working shown, 0.9×/1.1× boundary tests).
 4. If the feature is visible, it has been checked in a real browser (the e2e smoke test, or a Playwright screenshot).
-5. The roadmap item is ticked (above, or in `docs/roadmap.md`), then committed and pushed with a message saying what was done and how it was verified.
+5. The roadmap item is ticked (in your workstream's `docs/progress/` file, or in `docs/roadmap.md`), then committed and pushed with a message saying what was done and how it was verified.
 
 ## Testing rules (all code)
 
@@ -84,7 +87,7 @@ After a run, report briefly: PASS/FAIL per tier; any metric that moved from base
 
 ## Saving usage
 
-- Split every step into substeps before starting it (15a, 15b, … under the step in Current work), each small enough for one short thread and one commit. Finish a substep, commit and push, tick it, and write the next one's starting point into its line (files, commands, what is already known), so a fresh thread can carry on without reading old threads. Start a new thread every substep or two: a long thread re-reads its whole history on every message.
+- Split every step into substeps before starting it (15a, 15b, … under the step in your workstream's `docs/progress/` file), each small enough for one short thread and one commit. Finish a substep, commit and push, tick it, and write the next one's starting point into its line (files, commands, what is already known), so a fresh thread can carry on without reading old threads. Start a new thread every substep or two: a long thread re-reads its whole history on every message.
 - At the start of a session, read only `summary.txt` from the `test-results` branch. Open `failures/` only if the summary shows a new failure.
 - Read only relevant files; search instead of reading whole files.
 - Keep modules small with clear interfaces (curves, surfaces, topology, intersect, boolean, fillet, io, sketch, timeline).
