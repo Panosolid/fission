@@ -1,0 +1,55 @@
+name: Auto-merge
+
+# Merges Claude's pull requests (branches named claude/...) into main by
+# itself, once the branch contains the current main and every check on its
+# head passed; the rules and why they are safe are in
+# .github/scripts/automerge.py. To keep one pull request out, mark it a draft
+# or add the `hold` label; to stop all of it, disable this workflow on the
+# Actions tab.
+#
+# It wakes when CI finishes, when a pull request is marked ready or loses its
+# `hold` label, every half hour as a safety net, and on "Run workflow".
+# Pushes and merges made with this workflow's token start no other workflows,
+# so the script starts CI after updating a branch and the Pages deploy after
+# merging.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  # Runs main's copy of this workflow and never checks out the pull
+  # request's code, so it is safe with a write token.
+  pull_request_target:
+    types: [ready_for_review, unlabeled]
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print what it would do"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  checks: read
+
+# One at a time, so two runs never act on the same pull request at once.
+concurrency:
+  group: auto-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+      - env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python3 .github/scripts/automerge.py $DRY_RUN
