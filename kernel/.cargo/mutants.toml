@@ -5,4 +5,10 @@
 # (equivalent). Each needs the reason, here and in its file's "Mutation
 # testing (...) leaves these survivors" paragraph. Match the mutant's name
 # without line numbers, e.g. "replace < with <= in mass::theta_minus_sine".
-exclude_re = []
+exclude_re = [
+  # lib.rs: the #[wasm_bindgen] wrappers return a JsValue, which exists only
+  # in a WebAssembly build, so lib tests can't call them (their Rust halves,
+  # view_body, sketch_outline_of…, are tested). The journeys on the real
+  # kernel (packages/testing/journeys, `npm run journeys` in CI) catch these.
+  "-> Result<JsValue, JsError> with Ok\\(Default::default\\(\\)\\)",
+]

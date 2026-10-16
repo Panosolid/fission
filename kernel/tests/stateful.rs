@@ -1,7 +1,7 @@
 //! Stateful random testing of the kernel.
 //!
 //! Random chains of 1–10 operations (add a placed primitive or extrusion,
-//! move, rotate)
+//! some extrusions drawn as shuffled sketch lines first, move, rotate)
 //! are run against the kernel. After every step:
 //! - nothing panics;
 //! - the operation either returns a body that passes `validate()`, or a
@@ -37,6 +37,7 @@ use fission_kernel::ops::{primitives, transform, KernelError};
 use fission_kernel::tessellate::TessOptions;
 use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
 use fission_kernel::placed::Placed;
+use fission_kernel::sketch;
 use fission_kernel::stl;
 use fission_kernel::topology::Body;
 use fission_kernel::validate::validate;
@@ -98,7 +99,53 @@ enum Shape {
     /// `expect` is what the generator built it to be: Some(true) must be
     /// accepted, Some(false) refused, None not known (then `profile_expect`
     /// decides for straight outlines; curved ones may go either way).
-    Extrude { outer: Ring, holes: Vec<Ring>, dist: Num, expect: Option<bool> },
+    ///
+    /// `sketch`, when set on a straight outline without holes, draws the
+    /// outline as sketch lines instead (shuffled and some reversed by that
+    /// seed, `sketch_lines`) and extrudes the loop `sketch::sketch_outline`
+    /// finds; `apply_op` checks it is the loop drawn.
+    Extrude {
+        outer: Ring,
+        holes: Vec<Ring>,
+        dist: Num,
+        expect: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<u64>,
+    },
+}
+
+/// The sides of polygon `pts` as sketch lines, in an order and directions
+/// picked by `seed` (SplitMix64): a Fisher–Yates shuffle, then each line
+/// reversed on a coin flip.
+fn sketch_lines(pts: &[DVec2], seed: u64) -> Vec<sketch::Line> {
+    let mut state = seed;
+    let mut next = || {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    };
+    let n = pts.len();
+    let mut lines: Vec<sketch::Line> = (0..n).map(|i| sketch::Line { a: pts[i], b: pts[(i + 1) % n] }).collect();
+    for i in (1..n).rev() {
+        lines.swap(i, (next() % (i as u64 + 1)) as usize);
+    }
+    for l in &mut lines {
+        if next() % 2 == 1 {
+            *l = sketch::Line { a: l.b, b: l.a };
+        }
+    }
+    lines
+}
+
+/// The polygon a sketched extrusion draws, if it is one (`Shape::Extrude`'s
+/// `sketch` doc).
+fn sketched(shape: &Shape) -> Option<(Vec<DVec2>, u64)> {
+    match shape {
+        Shape::Extrude { outer, holes, sketch: Some(seed), .. } if holes.is_empty() => outer.polygon().map(|p| (p, *seed)),
+        _ => None,
+    }
 }
 
 /// One loop of an extrusion profile (kernel `ops::profile::Boundary`).
@@ -291,6 +338,13 @@ impl Shape {
             Shape::Box { w, d, h } => primitives::make_box(w.0, d.0, h.0),
             Shape::Cylinder { r, h } => primitives::make_cylinder(r.0, h.0),
             Shape::Sphere { r } => primitives::make_sphere(r.0),
+            Shape::Extrude { dist, .. } if sketched(self).is_some() => {
+                let (pts, seed) = sketched(self).unwrap();
+                match sketch::sketch_outline(&sketch_lines(&pts, seed))? {
+                    sketch::SketchOutline::Closed(profile) => extrude::extrude(&profile, dist.0),
+                    sketch::SketchOutline::Open(why) => Err(KernelError::InvalidInput(why.to_string())),
+                }
+            }
             Shape::Extrude { outer, holes, dist, .. } => {
                 let profile = Profile { outer: outer.boundary(), holes: holes.iter().map(Ring::boundary).collect() };
                 extrude::extrude(&profile, dist.0)
@@ -313,6 +367,7 @@ impl Op {
             Op::Add { shape: Shape::Box { .. }, .. } => "add box",
             Op::Add { shape: Shape::Cylinder { .. }, .. } => "add cylinder",
             Op::Add { shape: Shape::Sphere { .. }, .. } => "add sphere",
+            Op::Add { shape: Shape::Extrude { sketch: Some(_), .. }, .. } => "add sketch extrude",
             Op::Add { shape: Shape::Extrude { .. }, .. } => "add extrude",
             Op::Move { .. } => "move",
             Op::Rotate { .. } => "rotate",
@@ -578,14 +633,25 @@ fn polygon_profile(scene: &Scene) -> BoxedStrategy<Shape> {
             holes: holes.into_iter().map(Ring::straight).collect(),
             dist: Num(dist),
             expect: None,
+            sketch: None,
         })
         .boxed()
 }
 
 /// A random extrusion: half straight outlines (`polygon_profile`), half
 /// curved ones (`curved_profile`).
+/// Half of the straight ones without holes are drawn as sketch lines.
 fn extruded(scene: &Scene) -> BoxedStrategy<Shape> {
-    prop_oneof![polygon_profile(scene), curved_profile(scene)].boxed()
+    (prop_oneof![polygon_profile(scene), curved_profile(scene)], any::<u64>(), 0..4u8)
+        .prop_map(|(mut shape, seed, pick)| {
+            if let Shape::Extrude { outer, holes, sketch, .. } = &mut shape {
+                if pick < 2 && holes.is_empty() && outer.polygon().is_some() {
+                    *sketch = Some(seed);
+                }
+            }
+            shape
+        })
+        .boxed()
 }
 
 /// The generator's verdict from the thinnest feature it built in and the
@@ -719,7 +785,7 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
     (prop_oneof![1 => slot, 1 => plate, 1 => washer, 1 => lens, 1 => wavy], l)
         // The distance comes from `length`, always in range (MIN_FEATURE
         // itself is legal), so it doesn't change the verdict.
-        .prop_map(|((outer, holes, expect), dist)| Shape::Extrude { outer, holes, dist: Num(dist), expect })
+        .prop_map(|((outer, holes, expect), dist)| Shape::Extrude { outer, holes, dist: Num(dist), expect, sketch: None })
         .boxed()
 }
 
@@ -1299,6 +1365,29 @@ fn classify_motion(before: &Placed, r: Result<Result<Placed, KernelError>, Strin
 
 /// Applies one operation. With `checks` off it only runs the kernel (used
 /// for the determinism replay, whose results are compared bit for bit).
+/// The loop `sketch_outline` found for a sketched polygon is the polygon
+/// drawn: the same corners, bit for bit (each is a line end, copied), in
+/// order round the loop, either way round, starting where the first line
+/// in the shuffled list starts. Checked against the generator's polygon,
+/// not against anything the kernel computed.
+fn check_sketch_loop(pts: &[DVec2], seed: u64) -> Result<(), String> {
+    let lines = sketch_lines(pts, seed);
+    let found = match sketch::sketch_outline(&lines) {
+        Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, .. }, .. })) => corners,
+        other => return Err(format!("sketched polygon built, but its outline is {other:?}")),
+    };
+    let n = pts.len();
+    let Some(start) = pts.iter().position(|&p| p == lines[0].a) else {
+        return Err(format!("first line starts at {}, not a corner", lines[0].a));
+    };
+    let forward = (0..n).all(|i| found.get(i) == Some(&pts[(start + i) % n]));
+    let backward = (0..n).all(|i| found.get(i) == Some(&pts[(start + n - i) % n]));
+    if found.len() != n || !(forward || backward) {
+        return Err(format!("sketch loop {found:?} is not the polygon drawn {pts:?}"));
+    }
+    Ok(())
+}
+
 fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result<(), Failure> {
     if !checks {
         return replay_op(slots, op);
@@ -1311,11 +1400,17 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 Shape::Box { w, d, h } => size_ok(w.0) && size_ok(d.0) && size_ok(h.0),
                 Shape::Cylinder { r, h } => size_ok(r.0) && size_ok(h.0),
                 Shape::Sphere { r } => size_ok(r.0),
-                Shape::Extrude { outer, holes, dist, expect } => {
+                Shape::Extrude { outer, holes, dist, expect, .. } => {
                     let polygons: Option<Vec<Vec<DVec2>>> = std::iter::once(outer).chain(holes).map(Ring::polygon).collect();
+                    // Sketch lines must be within [MIN_FEATURE, MAX_SIZE] long,
+                    // which a profile only implies.
+                    let bad_line = sketched(shape).is_some_and(|(pts, _)| {
+                        (0..pts.len()).any(|i| !(MIN_FEATURE..=MAX_SIZE).contains(&pts[i].distance(pts[(i + 1) % pts.len()])))
+                    });
                     let verdict = if !size_ok(dist.0)
                         || shape.clone().numbers().iter().any(|v| !v.0.is_finite() || v.0.abs() > MAX_COORD)
                         || outer.certainly_too_big()
+                        || bad_line
                     {
                         Expect::Invalid
                     } else if let Some(e) = expect {
@@ -1340,6 +1435,9 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
                 return Ok(());
             };
+            if let Some((pts, seed)) = sketched(shape) {
+                check_sketch_loop(&pts, seed).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
+            }
             let built = Placed::new(base.clone());
             let m0 = measure(&built).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             check_primitive(shape, &m0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
@@ -1701,7 +1799,7 @@ fn print_report(r: &RunReport) -> String {
     for (kind, t) in STATS.lock().unwrap_or_else(|e| e.into_inner()).iter() {
         let total = t.ok + t.clean_error;
         s += &format!(
-            "  {kind:<13} {:>7} / {:<7} → {:5.1}%  {:>8.1?}  slowest {:.1?}\n",
+            "  {kind:<18} {:>7} / {:<7} → {:5.1}%  {:>8.1?}  slowest {:.1?}\n",
             t.ok,
             t.clean_error,
             100.0 * t.ok as f64 / total.max(1) as f64,
