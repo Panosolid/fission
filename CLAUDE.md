@@ -4,6 +4,29 @@ A free, open-source suite for making things: parametric CAD at its heart, with r
 
 The owner is a student learning the maths behind every algorithm. Correctness beats speed: geometry bugs are silent, so nothing is done until it is checked automatically.
 
+## End goal
+
+A world-class, free CAD suite that anyone can use instead of a paid subscription:
+- A kernel trusted like a commercial one: exact B-rep geometry, booleans, fillets, NURBS, STEP in and out, every result validated, crashes as rare as possible, tests that stay ahead of the features.
+- Parametric Design good enough for real parts: sketches with constraints, a feature timeline that survives edits (topological naming), assemblies and drawings.
+- The best integration of any creative and making tools: nine workspaces (Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image) sharing one project, live-linked, with lossless round trips and no exporting files between them.
+- An optional AI assistant that costs us nothing to run (the user picks the provider), only issues the same commands a user could, previews everything, and never controls a machine.
+- Free community sharing, no payments anywhere. A licence is chosen once the CAD is decent (the owner's call; not yet).
+
+## Where things stand and what comes next
+
+Keep this section current: update it whenever a step lands.
+
+Done: steps 1–14; step 15's self-intersection check works and is pushed; the modelling range is 1 km / 10 nm (decided after 15, measured and guarded by a test); integration I7 (Circuit, Vector, Image placeholders). PR #8 (to `main`) was green and mergeable when last checked; after it merges, scheduled random testing and the Pages app run the latest work.
+
+Next, in this order:
+1. Integration foundations, the NOW parts of I8–I21 (see the roadmap), with the owner's three decisions: one generic Outline producer (the sketcher plugs into it at step 21); today's single shape is feature #1 of a one-step timeline using the exact intent, provenance and dependency structures step 32 will use; the overlay's real use is marking faces of a part too big for accurate STL (and, if cheap, the failure-dump viewer through the same overlay format; never show rejected parts in the app). Then report back to the owner as the spec asks.
+2. AI architecture, the NOW parts of A1–A6 and A9. Then report back.
+3. Finish step 15: rerun mutation testing on `src/self_intersect.rs` and `src/intersect.rs` (the code changed with the range), add tests for real survivors and written reasons for equivalent ones, tick step 15.
+4. Step 16 onwards (Design workspace layout, selection, view controls, save/load, undo, then the sketcher).
+
+Standing habits: commit and push after every step and every bug fix; after every kernel push start a "Random testing" run on the branch and check `test-results` at the start of the next session; answer the owner's message first, in plain words, before carrying on with work.
+
 ## Repository layout
 
 - `kernel/`: Rust geometry kernel, compiled to WebAssembly with wasm-pack.
