@@ -68,5 +68,5 @@ export function parseSizeInput(text: string, what: "DPI" | "mm per pixel"): numb
   return n;
 }
 
-/** Said under the size until images join the project file (roadmap G3). */
+/** Said under the size until images join the project file (roadmap G6). */
 export const NOT_SAVED_NOTE = "Not saved with the project yet: this image is gone when the page is closed or reloaded.";
