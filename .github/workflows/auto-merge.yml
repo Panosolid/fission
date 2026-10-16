@@ -9,6 +9,8 @@ name: Auto-merge
 #
 # It wakes when CI finishes, when a pull request is marked ready or loses its
 # `hold` label, every half hour as a safety net, and on "Run workflow".
+# A pull request in conflict with main for 15 minutes gets one comment per
+# head commit naming the conflicted files, for its thread to resolve.
 # Pushes and merges made with this workflow's token start no other workflows,
 # so the script starts CI after updating a branch and the Pages deploy after
 # merging.
@@ -32,6 +34,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
   actions: write
   checks: read
 
@@ -45,10 +48,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Every branch, so a conflicted pull request's reminder can name the
+      # files git can't merge.
       - uses: actions/checkout@v4
         with:
           ref: main
-          sparse-checkout: .github/scripts
+          fetch-depth: 0
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
