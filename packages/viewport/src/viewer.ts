@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
-import { viewBasis, type ViewName } from "./views.ts";
+import { orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
+import { ViewCube } from "./viewcube.ts";
 import { selectionFraming } from "./framing.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
@@ -39,6 +40,8 @@ export class Viewer implements SharedViewport {
     this.legend.className = "overlay-legend";
     this.legend.hidden = true;
     container.appendChild(this.legend);
+    const cube = new ViewCube((name) => this.setView(name));
+    container.appendChild(cube.element);
 
     this.camera.position.set(80, -100, 70);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -89,6 +92,7 @@ export class Viewer implements SharedViewport {
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
       this.renderer.render(this.scene, this.camera);
+      cube.render(this.renderer, this.camera);
     });
   }
 
@@ -291,11 +295,11 @@ export class Viewer implements SharedViewport {
 
   private place(position: readonly number[], target: readonly number[], up: readonly number[]) {
     this.spendDamping();
-    // The orbit stays about Z (camera.up); straight down, the view's own up
-    // picks the camera's roll: a nudge of 1e-6 of the distance against it.
-    const offset = new THREE.Vector3(...position).sub(new THREE.Vector3(...target));
-    const dist = offset.length();
-    if (offset.clone().cross(this.camera.up).lengthSq() === 0) offset.addScaledVector(new THREE.Vector3(...up), -1e-6 * dist);
+    // The orbit stays about Z (camera.up); straight down or up, the view's
+    // own up picks the camera's roll (orbitSafeOffset).
+    const raw = new THREE.Vector3(...position).sub(new THREE.Vector3(...target));
+    const dist = raw.length();
+    const offset = new THREE.Vector3(...orbitSafeOffset(raw.toArray(), [up[0], up[1], up[2]]));
     this.controls.target.set(target[0], target[1], target[2]);
     this.camera.position.copy(this.controls.target).add(offset);
     this.camera.near = dist / 1000;

@@ -387,6 +387,87 @@ try {
     await pickAt(HOME, [20, 0, 10], "face:feature-1/2");
   });
 
+  await check("the view cube turns the camera like the View buttons and never picks", async () => {
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const cube = await page.locator("#viewport .view-cube").boundingBox();
+    const selection = () => page.evaluate(() => document.body.dataset.selection ?? "");
+    const settle = async () => {
+      await page.mouse.move(box.x + 2, box.y + box.height - 2); // nothing hovered, off the cube
+      await page.waitForTimeout(200);
+    };
+    const canvasImage = () => page.evaluate(() => document.querySelector("#viewport canvas").toDataURL());
+    // Where a point of the cube (−1…1) lands on screen for a camera looking
+    // along −toward with Z up: the cube's camera is orthographic with a
+    // half-height of 1.9 cube units over half the element's height, so a
+    // point lands at (p·right, p·up) × (height/2)/1.9 from the element's centre.
+    const cubePoint = (p, toward) => {
+      const unit = (a) => a.map((x) => x / Math.hypot(...a));
+      const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const fwd = unit(toward).map((d) => -d);
+      const right = unit(cross(fwd, [0, 0, 1]));
+      const up = cross(right, fwd);
+      const k = cube.height / 2 / 1.9;
+      return { x: cube.x + cube.width / 2 + dot(p, right) * k, y: cube.y + cube.height / 2 - dot(p, up) * k };
+    };
+    assert.ok(cube.x + cube.width <= box.x + box.width && cube.y >= box.y, "the cube is inside the viewport");
+    assert.ok(cube.x > box.x + box.width / 2 && cube.y < box.y + box.height / 2, "the cube sits in the top-right corner");
+
+    // A face is selected; clicking the cube must not pick (which would change it).
+    const top = screenPoint(box, [20, 15, 20]);
+    await page.mouse.click(top.x, top.y);
+    assert.equal(await selection(), "face:feature-1/1");
+
+    // The screen from the Top button, for comparison (whole canvas, cube included).
+    await page.click("#view-controls [data-view=top]");
+    await settle();
+    const fromButton = await canvasImage();
+    await page.click("#view-controls [data-view=home]");
+    await settle();
+    assert.ok((await canvasImage()) !== fromButton, "home and top differ on screen");
+
+    // Home looks along −(0.6, −0.8, 0.55)/1.14127: the top face's centre (0, 0, 1)
+    // has p·right = 0 (right = (0.8, 0.6, 0)) and p·up = √(1 − 0.4819²) = 0.8762,
+    // so it is 0.8762 × 48/1.9 = 22.1 px above the centre of a 96 px cube.
+    const topFace = cubePoint([0, 0, 1], HOME.toward);
+    assert.ok(Math.abs(topFace.y - (cube.y + cube.height / 2 - 0.8762 * (cube.height / 2 / 1.9))) < 0.5);
+    await page.mouse.move(topFace.x, topFace.y);
+    await page.waitForFunction(() => document.querySelector("#viewport .view-cube").dataset.hover === "top");
+    await page.mouse.click(topFace.x, topFace.y);
+    await settle();
+    assert.ok((await canvasImage()) === fromButton, "the cube's Top gives the Top button's camera");
+    assert.equal(await selection(), "face:feature-1/1", "the cube click did not pick");
+
+    await page.click("#view-controls [data-view=home]");
+    await settle();
+    // A corner: (0.8, −0.8, 1) is in the top face's top-front-right corner square (both past 0.6).
+    const corner = cubePoint([0.8, -0.8, 1], HOME.toward);
+    await page.mouse.move(corner.x, corner.y);
+    await page.waitForFunction(() => document.querySelector("#viewport .view-cube").dataset.hover === "top-front-right");
+    await page.mouse.click(corner.x, corner.y);
+    await settle();
+    // The camera now looks from (1, −1, 1): the top face and the front face pick where that view puts them.
+    const CORNER = { ...HOME, toward: [1, -1, 1] };
+    await page.keyboard.press("Escape");
+    for (const [p, expected] of [[[20, 15, 20], "face:feature-1/1"], [[20, 0, 10], "face:feature-1/2"]]) {
+      const s = screenPoint(box, p, CORNER);
+      await page.mouse.click(s.x, s.y);
+      assert.equal(await selection(), expected, `corner view: pick at ${p}`);
+      await page.keyboard.press("Escape");
+    }
+    // A press that drags on the cube turns nothing (no orbit, no view change).
+    await settle();
+    const before = await canvasImage();
+    await page.mouse.move(corner.x, corner.y);
+    await page.mouse.down();
+    await page.mouse.move(corner.x - 40, corner.y + 30, { steps: 5 });
+    await page.mouse.up();
+    await settle();
+    assert.ok((await canvasImage()) === before, "a drag on the cube changes nothing");
+    await page.click("#view-controls [data-view=home]");
+    await settle();
+  });
+
   await check("editing a size rebuilds the body", async () => {
     await setSize("width", 100);
     // V = 100·30·20 = 60000.

@@ -40,8 +40,11 @@ export interface ViewportHighlight {
 /** Nothing highlighted. */
 export const NO_HIGHLIGHT: ViewportHighlight = Object.freeze({ body: false, faces: [], edges: [] });
 
-/** The standard views: "home" (three-quarter, the default), "top", "front", "right". */
-export type ViewName = "home" | "top" | "front" | "right";
+/** A corner of the view cube: an isometric view from that corner (front is −Y, right is +X). */
+export type CornerView = `${"top" | "bottom"}-${"front" | "back"}-${"left" | "right"}`;
+
+/** The standard views: "home" (three-quarter, the default), the six faces of the view cube and its eight corners. */
+export type ViewName = "home" | "top" | "bottom" | "front" | "back" | "left" | "right" | CornerView;
 
 export interface SharedViewport {
   /** The element the viewport fills. */
