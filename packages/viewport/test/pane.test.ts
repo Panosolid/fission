@@ -16,6 +16,8 @@ function fakeScene() {
     setOverlay: (o) => void calls.push(`setOverlay ${o.id}`),
     clearOverlay: (id) => void calls.push(`clearOverlay ${id}`),
     showSelection: (h) => void calls.push(`showSelection faces ${h.faces.join(",")}`),
+    showImage: () => void calls.push("scene.showImage"),
+    clearImage: () => void calls.push("scene.clearImage"),
     onPick: null,
   };
   return { scene, calls };
@@ -29,6 +31,8 @@ function fakeView(name: string, calls: string[]): PaneCamera {
     fit: () => (calls.push(`${name}.fit`), framed),
     setView: (v) => (calls.push(`${name}.setView ${v}`), framed),
     fitSelection: () => (calls.push(`${name}.fitSelection`), null),
+    showImage: (image) => void calls.push(`${name}.showImage ${image.width}x${image.height}`),
+    clearImage: () => void calls.push(`${name}.clearImage`),
   };
 }
 
@@ -53,6 +57,16 @@ test("camera calls reach the pane's own view; scene calls reach the one viewer",
   // Never the scene's own camera: a pane must not turn another pane's view.
   assert.deepEqual(calls, ["right.setView top", "left.fit", "right.fitSelection", "setOverlay stl", "clearOverlay stl", "showSelection faces 2,5", "showBody"]);
   assert.ok(!calls.some((c) => c.startsWith("scene.")));
+});
+
+test("an image goes to the pane's own view only, so the other pane keeps the body", () => {
+  const { scene, calls } = fakeScene();
+  const pane = paneViewports(scene);
+  const left = pane(fakeView("left", calls));
+  pane(fakeView("right", calls));
+  left.showImage({ kind: "image", width: 4, height: 2, mmPerPixel: 1, rgba: new Uint8ClampedArray(32) } as never);
+  left.clearImage();
+  assert.deepEqual(calls, ["left.showImage 4x2", "left.clearImage"]);
 });
 
 test("the viewer picks for the pane that set its handler last and still has one", () => {
