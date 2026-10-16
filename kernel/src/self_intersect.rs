@@ -40,8 +40,10 @@
 //!   find what the samples would. Checked: 1200 pairs of star prisms (with
 //!   and without arcs), cubes and half cylinders turned by 1e-6, 1e-3 and
 //!   1 rad and moved by as much gave identical reports.
-//! - `> LINEAR` → `>= LINEAR` from a known vertex (`edges_meet`,
-//!   `edge_meets_face`): a candidate exactly LINEAR from a shared vertex.
+//! - `> LINEAR` → `>= LINEAR` from a known vertex in `edge_meets_face`: a
+//!   candidate exactly LINEAR from a shared vertex. (The same tie in
+//!   `edges_meet` is killed by
+//!   `validate::tests::vertex_exactly_linear_off_its_edges_is_on`.)
 //! - `edge_meets_face`, the `==` in the `known` dedup → `!=`: drops the
 //!   second shared vertex when both ends are f's vertices. That vertex is on
 //!   f's boundary, so `classify` never calls it inside; only dividing out
