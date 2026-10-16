@@ -1,12 +1,12 @@
-Fission random testing, all runs so far (updated 2026-10-16 17:15 UTC)
+Fission random testing, all runs so far (updated 2026-10-16 22:38 UTC)
 
-hours of testing:                 90.7
-rounds:                           1281
-random operation chains:          2562000
-rounds where the harness failed:  255
-bodies compared with OpenCascade: 4659229
-OpenCascade disagreements:        334
-last problem found:               2026-10-16 16:09:38 (seed 102661989004033, commit 4cf55c4 on claude/project-thread-lybwrn)
+hours of testing:                 143.2
+rounds:                           2078
+random operation chains:          4156000
+rounds where the harness failed:  261
+bodies compared with OpenCascade: 7910814
+OpenCascade disagreements:        335
+last problem found:               2026-10-16 22:27:31 (seed 231257289251944, commit 810d41c on main)
 
 Every round is a line in log.csv. Each round that found a problem has a
 folder in failures/ named after its seed: report.txt says what went wrong,
@@ -15,7 +15,7 @@ failure-dumps/*/index.html is a 3D view with the problem in red.
 The commit and branch columns of log.csv (and commit.txt in each
 failures folder) say which code a round tested.
 
-Latest mutation run (whole kernel, lib tests), 2026-10-16 16:14 UTC, commit 553b1cb on claude/project-thread-orcrab:
+Latest mutation run (whole kernel, lib tests), 2026-10-16 22:38 UTC, commit 810d41c on main:
   shards finished: 4 of 4
   caught 2348, missed 144, timed out 58, unviable 80
   survivors not in the previous complete run: 0
