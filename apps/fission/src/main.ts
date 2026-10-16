@@ -6,7 +6,11 @@
 // beside the first, in slots of its own, with its own camera on the same
 // scene and the same project and selection. Change notes (X5) show over
 // each pane's viewport, for the workspace in that pane.
+/// <reference types="vite/client" />
 import "@fission/ui/theme.css";
+// Every feature's own styles (src/styles/<feature>.css in packages/ui and the
+// workspaces), loaded without a list, so two features never edit one file.
+import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
 import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type ChangeNote, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { changeNote, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
@@ -437,7 +441,10 @@ async function receive(files: File[]) {
   else show(into);
 }
 const carriesFiles = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
-const dropHint = (on: boolean) => (document.body.dataset.drop = on ? "on" : "");
+const dropHint = (on: boolean) => {
+  document.body.dataset.drop = on ? "on" : ""; // read by the e2e test
+  $("workspace").classList.toggle("file-drop", on); // the outline (styles/file-drop.css)
+};
 window.addEventListener("dragover", (e) => {
   if (!carriesFiles(e)) return;
   e.preventDefault(); // allows the drop
