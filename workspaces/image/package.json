@@ -1,0 +1,16 @@
+{
+  "name": "@fission/image",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@fission/core": "*",
+    "@fission/ui": "*"
+  }
+}

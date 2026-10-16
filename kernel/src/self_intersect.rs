@@ -387,6 +387,7 @@ mod tests {
         hand_cube, hand_cylinder, hand_half_cylinder, hand_sphere, hand_sphere_octant, hand_tube, two_shells,
     };
     use crate::geom::Transform;
+    use crate::tolerance::{MAX_SIZE, MIN_FEATURE};
     use crate::ops::extrude::extrude;
     use crate::ops::profile::{Boundary, Profile};
     use crate::validate::validate;
@@ -569,14 +570,14 @@ mod tests {
         // Shapes whose parts come close, or meet tangentially, without
         // touching: each must pass.
         // Tangent joins (a slot's straight sides run into its round ends)
-        // at a radius of 2.5 km (the slot then spans 10 km, MAX_SIZE), where
+        // at a radius of 250 m (the slot then spans 1 km, MAX_SIZE), where
         // a straight side stays within LINEAR of the round end's cylinder
-        // for √(2 · 2.5e6 · 1e-6) ≈ 2.2 mm past the join.
+        // for √(2 · 2.5e5 · 1e-5) ≈ 2.2 mm past the join.
         let slot = |w: f64| {
             let corners = vec![DVec2::new(0.0, 0.0), DVec2::new(w, 0.0), DVec2::new(w, w), DVec2::new(0.0, w)];
             Profile { outer: Boundary::Path { corners, bulges: vec![0.0, 1.0, 0.0, 1.0] }, holes: vec![] }
         };
-        for w in [4.0, 5e6] {
+        for w in [4.0, MAX_SIZE / 2.0] {
             extrude(&slot(w), w / 2.0).unwrap();
         }
         // A U: the tops of its arms are in one plane, apart; each arm's
@@ -584,8 +585,17 @@ mod tests {
         let u = [(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (2.0, 3.0), (2.0, 1.0), (1.0, 1.0), (1.0, 3.0), (0.0, 3.0)];
         extrude(&Profile::polygon(u.iter().map(|&(x, y)| DVec2::new(x, y)).collect(), vec![]), 1.0).unwrap();
         // A wall of 1 µm (MIN_FEATURE) between coaxial cylinders 1 km
-        // across, and a part 100 km out.
-        let ring = Profile { outer: Boundary::Circle { center: DVec2::ZERO, radius: 1e6 }, holes: vec![Boundary::Circle { center: DVec2::ZERO, radius: 1e6 - 1e-3 }] };
+        // across (MAX_SIZE), and a part 100 km out.
+        // At r = 5e5 a double is 5.8e-11 apart, so r − MIN_FEATURE rounds to
+        // a wall 1.07e-11 thinner than 1 µm, which the profile check rightly
+        // refuses: take the nearest radius below whose wall is not thinner.
+        let r = MAX_SIZE / 2.0;
+        let mut inner = r - MIN_FEATURE;
+        while r - inner < MIN_FEATURE {
+            inner = inner.next_down();
+        }
+        assert!(r - inner < MIN_FEATURE * (1.0 + 1e-6), "still a 1 µm wall");
+        let ring = Profile { outer: Boundary::Circle { center: DVec2::ZERO, radius: r }, holes: vec![Boundary::Circle { center: DVec2::ZERO, radius: inner }] };
         extrude(&ring, 5.0).unwrap();
         let far = Profile::polygon(vec![DVec2::new(1e8 - 3.0, 0.0), DVec2::new(1e8, 0.0), DVec2::new(1e8, 2.0)], vec![]);
         extrude(&far, 1.0).unwrap();
@@ -702,15 +712,16 @@ mod tests {
 
     #[test]
     fn a_tangent_edge_at_a_shared_vertex_is_not_a_meeting() {
-        // A ball of radius 10 km, and an extra edge from its equator's
+        // A ball of radius MAX_SIZE (1 km), and an extra edge from its equator's
         // vertex v straight up, 1 m long: tangent to the ball at v, it
         // leaves the ball (at s along it, s²/2R off the surface) over the
         // upper hemisphere. Its only meeting with the ball is v, a double
-        // root. Turned to an awkward angle, rounding makes the root pair
-        // v ± √(rounding) ≈ ±0.1 mm apart; those points are within LINEAR of
-        // the sphere (0.1²/2e7 = 5e-10) and 0.1 mm inside the hemisphere, so
-        // only dividing out the known root v keeps them from being reported.
-        let r = 1e7;
+        // root. Turned to an awkward angle, rounding splits it into a pair
+        // of roots near v, within LINEAR of the sphere and inside the
+        // hemisphere, so only dividing out the known root v keeps them from
+        // being reported. Checked by hand: with v left out of `known`,
+        // turns 7 and 8 report a meeting (at 10 km and at 1 km alike).
+        let r = MAX_SIZE;
         for k in 1..=8 {
             let turn = Transform::rotation(DVec3::new(0.3, 1.0, 0.7 * k as f64), 0.37 * k as f64);
             let mut b = hand_sphere(r);

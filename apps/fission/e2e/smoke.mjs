@@ -288,21 +288,22 @@ try {
   });
 
   await check("a part too big for single precision is exported with a warning", async () => {
-    // A 9,999,999.3 mm box: the far corners round to 9,999,999 in single
-    // precision (spacing 1 there), 0.3 mm off, over the 1 µm smallest feature.
+    // A 999,999.3 mm box (just inside the 1 km limit): the far corners round
+    // to 999,999.3125 in single precision (spacing 1/16 there), 0.0125 mm
+    // off, over the 1 µm smallest feature.
     await page.selectOption("#shape", "box");
-    await page.fill("#width", "9999999.3");
+    await page.fill("#width", "999999.3");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
     const f = await downloadStl();
     assert.equal(f.tris.length, 12);
-    assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 3\.000e-1 mm/);
+    assert.match(await text("stl-note"), /single-precision numbers: this part's corners move by up to 1\.250e-2 mm/);
     await page.fill("#width", "40");
     await page.waitForFunction(() => document.querySelector("#volume").textContent === "24,000 mm³");
     await downloadStl();
     assert.equal(await text("stl-note"), ""); // the warning goes once the part fits again
   });
 
-  await check("the switcher lists the six workspaces, Design first and working", async () => {
+  await check("the switcher lists the nine workspaces, Design first and working", async () => {
     const tabs = await page.$$eval("#workspaces [role=tab]", (ts) => ts.map((t) => [t.textContent, t.classList.contains("soon")]));
     assert.deepEqual(tabs, [
       ["Design", false],
@@ -311,6 +312,9 @@ try {
       ["Manufacture", true],
       ["Laser", true],
       ["Slice", true],
+      ["Circuit", true],
+      ["Vector", true],
+      ["Image", true],
     ]);
     assert.equal(await page.getAttribute("[data-workspace=design]", "aria-selected"), "true");
   });
@@ -323,7 +327,7 @@ try {
     await page.waitForTimeout(300); // let orbit damping settle
     const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
     const before = await pixel(0.5, 0.5);
-    for (const [id, title] of [["render", "Render"], ["simulate", "Simulate"], ["manufacture", "Manufacture"], ["laser", "Laser"], ["slice", "Slice"]]) {
+    for (const [id, title] of [["render", "Render"], ["simulate", "Simulate"], ["manufacture", "Manufacture"], ["laser", "Laser"], ["slice", "Slice"], ["circuit", "Circuit"], ["vector", "Vector"], ["image", "Image"]]) {
       await page.click(`[data-workspace=${id}]`);
       assert.equal(await page.textContent(".placeholder h2"), title);
       assert.equal(await page.textContent(".placeholder .coming-soon"), "Coming soon");

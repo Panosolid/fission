@@ -7,7 +7,7 @@
 
 import type { Material } from "./material.ts";
 
-export type WorkspaceId = "design" | "render" | "simulate" | "manufacture" | "laser" | "slice";
+export type WorkspaceId = "design" | "render" | "simulate" | "manufacture" | "laser" | "slice" | "circuit" | "vector" | "image";
 
 /** One units system for every workspace. The kernel always works in mm. */
 export type LengthUnit = "mm" | "cm" | "m" | "in";

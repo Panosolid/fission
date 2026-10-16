@@ -223,13 +223,14 @@ mod tests {
     #[test]
     fn a_huge_thin_frame_turned_keeps_its_mesh_volume() {
         // Regression (random tester, seed 0x389ee678a942 and others): the
-        // 10 km frame with 1 µm walls (`mass` tests), turned a quarter
-        // turn. Its mesh is exactly its 18 corners, so its volume is the
-        // frame's, 39999.99999596 (see the mass test), to area ×
-        // rounding_slack (~11). Each wall strip is a triangle 1e7 long and
-        // 1e-3 high: its cross product cancelled terms ~1e13 (rounding
-        // ~2e-3) which, times its 5e6 mm lever from the middle, gave
-        // 41337.5. Exact arithmetic on the same rounded corners: 39999.98.
+        // frame with 1 µm walls (`mass` tests; 10 km then, 1 km now that
+        // MAX_SIZE is 1 km), turned a quarter turn. Its mesh is exactly its
+        // 18 corners, so its volume is the frame's, 3999.99999596, to area
+        // × rounding_slack (~0.04). At 10 km each wall strip, a triangle
+        // 1e7 long and 1e-3 high, had a cross product cancelling terms
+        // ~1e13 (rounding ~2e-3) which, times its 5e6 mm lever from the
+        // middle, gave 41337.5 instead of 39999.99. Exact arithmetic on the
+        // same rounded corners is right.
         let body = crate::mass::tests::huge_thin_frame();
         let turn = crate::geom::Transform::rotation(DVec3::new(0.0, 0.36568663456908856, -0.6439675223061451), std::f64::consts::FRAC_PI_2);
         for b in [body.clone(), body.transformed(&turn)] {
@@ -237,7 +238,7 @@ mod tests {
             let (lo, hi) = b.bounds();
             let slack = m.area() * crate::tolerance::rounding_slack(lo.abs().max(hi.abs()).max_element());
             let v = m.signed_volume();
-            assert!(crate::tolerance::measure_eq(v, 39999.99999596, slack), "volume {v} ± {slack}");
+            assert!(crate::tolerance::measure_eq(v, crate::mass::tests::HUGE_THIN_FRAME_VOLUME, slack), "volume {v} ± {slack}");
         }
     }
 

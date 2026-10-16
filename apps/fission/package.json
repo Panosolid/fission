@@ -21,6 +21,9 @@
     "@fission/manufacture": "*",
     "@fission/laser": "*",
     "@fission/slice": "*",
+    "@fission/circuit": "*",
+    "@fission/vector": "*",
+    "@fission/image": "*",
     "three": "^0.170.0"
   },
   "devDependencies": {

@@ -141,6 +141,25 @@ impl Ring {
         }
     }
 
+    /// True if this ring is certainly bigger than the kernel allows: its
+    /// corners alone (points on the outline, so a lower bound on its
+    /// extent) span more than MAX_SIZE, or a circle's radius is over it.
+    /// Saved regressions store the generator's verdict from the day they
+    /// were found; this keeps them right after the range changes.
+    fn certainly_too_big(&self) -> bool {
+        let over = |x: f64| x > MAX_SIZE * (1.0 + 1e-9);
+        match self {
+            Ring::Circle { r, .. } => over(r.0) || over(2.0 * r.0),
+            Ring::Path { pts, .. } => {
+                let (mut lo, mut hi) = (DVec2::INFINITY, DVec2::NEG_INFINITY);
+                for p in pts.iter().map(p2) {
+                    (lo, hi) = (lo.min(p), hi.max(p));
+                }
+                over((hi - lo).max_element())
+            }
+        }
+    }
+
     /// The pieces as the harness's own arcs (see `Piece`).
     fn pieces(&self) -> Vec<Piece> {
         match self {
@@ -345,7 +364,7 @@ fn from_pool(pool: &[f64], fallback: BoxedStrategy<f64>) -> BoxedStrategy<f64> {
 }
 
 /// An in-range size: ~70% coincident (0.5 grid, reused, near-miss), the
-/// rest random across the whole range (log-uniform 1 µm to 10 km) or at
+/// rest random across the whole range (log-uniform MIN_FEATURE to MAX_SIZE, 1 µm to 1 km) or at
 /// its edges.
 fn length(scene: &Scene) -> BoxedStrategy<f64> {
     let grid = (1..=200i32).prop_map(|k| k as f64 * 0.5).boxed();
@@ -611,7 +630,10 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
         let w = 2.0 * half;
         let pts = vec![c, c + DVec2::new(len, 0.0), c + DVec2::new(len, w), c + DVec2::new(0.0, w)];
         let bulges = vec![0.0, 1.0, 0.0, 1.0];
-        let r = reach(&pts, w / 2.0);
+        // The round ends bulge sideways only: x from c.x − w/2 to c.x + len
+        // + w/2, y from c.y to c.y + w. (Adding w/2 every way, as this once
+        // did, called a slot 99999999 out "past MAX_COORD"; seed 0xa3452331.)
+        let r = (c.x - w / 2.0).abs().max((c.x + len + w / 2.0).abs()).max(c.y.abs()).max((c.y + w).abs());
         let (pts, bulges) = if flip { reverse(pts, bulges) } else { (pts, bulges) };
         // Thinnest: the end radius w/2 and the straight sides' length.
         let expect = verdict((w / 2.0).min(len), len + w, r);
@@ -657,7 +679,10 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
         let pts = vec![c - DVec2::new(half, 0.0), c + DVec2::new(half, 0.0)];
         let (pts, bulges) = if flip { reverse(pts, vec![beta, beta]) } else { (pts, vec![beta, beta]) };
         let hole = Ring::straight(square.iter().map(|&q| c + q).collect());
-        (Ring::curved(pts, bulges), vec![hole], verdict(thinnest, 2.0 * half, c.abs().max_element() + half))
+        // The arcs reach half sideways and bulge β·half (their sagitta) up
+        // and down.
+        let r = (c.x.abs() + half).max(c.y.abs() + beta * half);
+        (Ring::curved(pts, bulges), vec![hole], verdict(thinnest, 2.0 * half, r))
     });
     let bulge = prop_oneof![
         3 => Just(0.0),
@@ -1255,7 +1280,10 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 Shape::Sphere { r } => size_ok(r.0),
                 Shape::Extrude { outer, holes, dist, expect } => {
                     let polygons: Option<Vec<Vec<DVec2>>> = std::iter::once(outer).chain(holes).map(Ring::polygon).collect();
-                    let verdict = if !size_ok(dist.0) || shape.clone().numbers().iter().any(|v| !v.0.is_finite() || v.0.abs() > MAX_COORD) {
+                    let verdict = if !size_ok(dist.0)
+                        || shape.clone().numbers().iter().any(|v| !v.0.is_finite() || v.0.abs() > MAX_COORD)
+                        || outer.certainly_too_big()
+                    {
                         Expect::Invalid
                     } else if let Some(e) = expect {
                         if *e { Expect::Valid } else { Expect::Invalid }
