@@ -359,7 +359,7 @@ try {
       await p.keyboard.press("Tab");
       const stop = await p.evaluate(() => {
         const el = document.activeElement;
-        return { region: el?.closest("#topbar, #toolbar, #panel-toggles, #browser, #view-controls, #properties")?.id ?? "other", id: el?.id || el?.className || el?.tagName };
+        return { region: el?.closest("#topbar, #toolbar, #panel-toggles, #browser, #view-controls, #split-toggle, #properties")?.id ?? "other", id: el?.id || el?.className || el?.tagName };
       });
       stops.push(stop.id);
       if (stop.region !== regions.at(-1)) regions.push(stop.region);
@@ -375,12 +375,12 @@ try {
         .map((el) => `${el.id || el.tagName}: ${el.scrollWidth} > ${el.clientWidth}`),
     );
 
-  await check("1280 px: focus moves top bar, toolbar (Open), browser (Hide), View buttons, properties (DPI, mm per pixel, Brightness)", async () => {
+  await check("1280 px: focus moves top bar, toolbar (Open), browser (Hide), View buttons, Split, properties (DPI, mm per pixel, Brightness)", async () => {
     const p = await withPlate({ viewport: { width: 1280, height: 800 } });
     try {
       assert.deepEqual(await overflow(p), []);
       const { regions, stops } = await focusOrder(p, "image-brightness");
-      assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "properties"]);
+      assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "split-toggle", "properties"]);
       assert.ok(stops.includes("image-open"), `Open is reachable: ${stops}`);
       assert.ok(stops.includes("layer-visibility"), `Hide is reachable: ${stops}`);
       const props = stops.slice(stops.indexOf("image-dpi"));
@@ -450,6 +450,52 @@ try {
       await p.$eval("#workspace", (el) => el.scrollTo(0, 0));
       const { regions } = await focusOrder(p, "image-brightness");
       assert.deepEqual(regions, ["topbar", "toolbar", "panel-toggles", "browser", "view-controls", "properties"]);
+    } finally {
+      await p.close();
+    }
+  });
+
+  await check("split view: Image beside Design shows the image in its own pane while Design's pane keeps the body", async () => {
+    const p = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    p.on("pageerror", (e) => errors.push(e.message));
+    try {
+      await p.goto(url + "#design");
+      await p.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await p.waitForTimeout(400);
+      const at = (sel, fx, fy) =>
+        p.evaluate(
+          ([sel, fx, fy]) => {
+            const src = document.querySelector(`${sel} > canvas`);
+            const c = document.createElement("canvas");
+            c.width = src.width;
+            c.height = src.height;
+            const ctx = c.getContext("2d");
+            ctx.drawImage(src, 0, 0);
+            return Array.from(ctx.getImageData(Math.floor(src.width * fx), Math.floor(src.height * fy), 1, 1).data.slice(0, 3));
+          },
+          [sel, fx, fy],
+        );
+      const isBody = ([r, g, b]) => r + g + b > 3 * 80; // the lit body, far brighter than the background
+      await p.click("#split-toggle");
+      await p.selectOption("#split-choice", "image");
+      await p.waitForSelector("#split-toolbar #image-open");
+      await p.setInputFiles("#split-toolbar #image-file", { name: "plate.png", mimeType: "image/png", buffer: plate });
+      await p.waitForFunction(() => document.querySelector("#split-properties #image-mm")?.textContent === "20 × 10 mm");
+      await p.waitForTimeout(400);
+      assert.equal(await p.$eval("#split-viewport", (el) => el.dataset.image), "200 x 100 px, 20 x 10 mm");
+      assert.equal(await p.$eval("#viewport", (el) => el.dataset.image ?? null), null);
+      // The image pane: the four quarters, the right way up, framed top-down.
+      near(await at("#split-viewport", 0.4, 0.48), RED, "split top-left");
+      near(await at("#split-viewport", 0.6, 0.52), WHITE, "split bottom-right");
+      // Design's pane: the body still at its centre, with its view cube; no image there.
+      assert.ok(isBody(await at("#viewport", 0.5, 0.5)), "Design's pane lost the body");
+      assert.equal(await p.isVisible("#viewport .view-cube"), true);
+      assert.equal(await p.isVisible("#split-viewport .view-cube"), false);
+      await p.screenshot({ path: "e2e/image-split.png" });
+      // Choosing another workspace for the pane takes the image away; Design is untouched.
+      await p.selectOption("#split-choice", "render");
+      await p.waitForFunction(() => document.querySelector("#split-viewport")?.dataset.image === undefined);
+      assert.ok(isBody(await at("#viewport", 0.5, 0.5)), "Design's pane after the image went");
     } finally {
       await p.close();
     }

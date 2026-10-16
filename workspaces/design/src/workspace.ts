@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type Selected, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type Selected, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, partOf, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -181,6 +181,17 @@ function mount(ctx: WorkspaceContext): () => void {
   /** Never shows stale numbers unmarked: dims them while out of date, and says so if the rebuild failed. */
   function markStale(failed = false) {
     panel.markStale(ctx.graph.isStale(PART_VIEW), failed);
+    showDownstream();
+  }
+
+  /**
+   * The chips for what other workspaces make from the design, their state
+   * read from the graph now: drawn after every change Design makes to the
+   * graph (markStale runs after each), so none shows a state it has lost.
+   */
+  function showDownstream() {
+    const chips = ctx.downstream.summaries("design", ctx.graph).map((s) => ({ ...s, targetName: ctx.workspaceTitle(s.target) }));
+    panel.showDownstream(chips, (target) => ctx.openWorkspace(target as WorkspaceId));
   }
 
   /** The command the toolbar and the inputs stand for: set_part with this shape and these sizes. */
