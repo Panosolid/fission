@@ -11,18 +11,19 @@
     "journeys": "node --experimental-strip-types --no-warnings --test journeys/*.journey.ts"
   },
   "dependencies": {
-    "@fission/core": "*",
-    "@fission/ai": "*"
+    "@fission/ai": "*",
+    "@fission/core": "*"
   },
   "devDependencies": {
+    "@fission/circuit": "*",
     "@fission/design": "*",
+    "@fission/image": "*",
+    "@fission/laser": "*",
+    "@fission/manufacture": "*",
     "@fission/render": "*",
     "@fission/simulate": "*",
-    "@fission/manufacture": "*",
-    "@fission/laser": "*",
     "@fission/slice": "*",
-    "@fission/circuit": "*",
     "@fission/vector": "*",
-    "@fission/image": "*"
+    "happy-dom": "20.14.5"
   }
 }

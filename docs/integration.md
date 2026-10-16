@@ -71,7 +71,7 @@ A workspace is a `WorkspacePlugin` with these parts:
 - `id`, `title`, `summary` and `status` ("working" or "placeholder");
 - `representations: { produces, accepts }`, plus `registerRepresentations(registry, kernel)`, which the shell calls once at start-up;
 - `readData(data)`, which checks its own part of a loaded project and brings it up to date;
-- `mount(ctx)`, which fills the side panel and returns a function that hides it again.
+- `mount(ctx)`, which fills the layout slots around the shared viewport (`ctx.toolbar` above, `ctx.browser` left, `ctx.properties` right; placeholders show their page in `properties`) and returns a function that hides it again and leaves every slot empty.
 
 `ctx` holds the project, the kernel, the selection, the history, the dependency graph, the shared viewport and the registry.
 

@@ -37,7 +37,7 @@ export const vectorWorkspace: WorkspacePlugin = {
   representations: { produces: [], accepts: [] },
   commands: [],
   mount(ctx) {
-    showPlaceholder(ctx.panel, {
+    showPlaceholder(ctx.properties, {
       title: "Vector",
       summary,
       plans: [
@@ -49,6 +49,6 @@ export const vectorWorkspace: WorkspacePlugin = {
       ],
       startsAfter: "after CAD step 31 (when the sketcher is solid: it reuses its curves and constraints)",
     });
-    return () => {};
+    return () => ctx.properties.replaceChildren();
   },
 };

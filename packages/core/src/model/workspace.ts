@@ -8,7 +8,8 @@
 //
 // The shell owns the one viewport, the project, the selection, the
 // history, the dependency graph and the representation registry; a
-// workspace adds its panel and tools, keeps its data in
+// workspace fills the three layout slots around the viewport (toolbar
+// above, browser left, properties right), keeps its data in
 // project.workspaces[id], and says what it can hand to and take from
 // other workspaces.
 
@@ -42,8 +43,12 @@ export interface WorkspaceContext {
   history: History;
   /** The project-wide dependency graph: what depends on what, and what is out of date. */
   graph: DependencyGraph;
-  /** The panel element the workspace fills (the viewport stays shared). */
-  panel: HTMLElement;
+  /** The strip above the viewport, for the workspace's tools. Empty when shown; leave it empty on hide. */
+  toolbar: HTMLElement;
+  /** The panel left of the viewport: what the workspace holds (timeline, bodies). Empty when shown; leave it empty on hide. */
+  browser: HTMLElement;
+  /** The panel right of the viewport: details of what is being edited; placeholders show their page here. Empty when shown; leave it empty on hide. */
+  properties: HTMLElement;
   viewport: SharedViewport;
   /** The one conversion layer between workspaces. */
   representations: RepresentationRegistry;
@@ -56,7 +61,7 @@ export interface WorkspacePlugin {
   summary: string;
   /** Placeholders say so; the shell marks them in the switcher. */
   status: "working" | "placeholder";
-  /** Shows the workspace in ctx.panel. Returns a function that hides it again. */
+  /** Shows the workspace in ctx's layout slots. Returns a function that hides it again and empties every slot it filled. */
   mount(ctx: WorkspaceContext): () => void;
   /** What it can hand to other workspaces, and take from them. Placeholders declare nothing. */
   representations: { produces: RepresentationKind[]; accepts: RepresentationKind[] };

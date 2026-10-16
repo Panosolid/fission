@@ -27,7 +27,7 @@ const PANEL = `
   <label><span id="width-label">Width</span> <input id="width" type="number" value="40" step="any" /> mm</label>
   <label id="depth-row">Depth <input id="depth" type="number" value="30" step="any" /> mm</label>
   <label id="height-row"><span id="height-label">Height</span> <input id="height" type="number" value="20" step="any" /> mm</label>
-  <dl id="properties">
+  <dl id="feature-info">
     <dt>Feature</dt><dd id="intent">…</dd>
     <dt>Made from</dt><dd id="provenance">…</dd>
   </dl>
@@ -58,8 +58,9 @@ let framed: Framing | null = null;
 let framedKind: ShapeKind | null = null;
 
 function mount(ctx: WorkspaceContext): () => void {
-  ctx.panel.innerHTML = PANEL;
-  const $ = <T extends HTMLElement>(id: string) => ctx.panel.querySelector<T>(`#${id}`)!;
+  // Until 16b–16d split it up, the whole old side panel sits in the properties slot.
+  ctx.properties.innerHTML = PANEL;
+  const $ = <T extends HTMLElement>(id: string) => ctx.properties.querySelector<T>(`#${id}`)!;
   const inputs = ["width", "depth", "height"].map((id) => $<HTMLInputElement>(id));
   const shape = $<HTMLSelectElement>("shape");
   if (saved) {
@@ -157,6 +158,7 @@ function mount(ctx: WorkspaceContext): () => void {
   update();
   return () => {
     shown = false;
+    for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
   };
 }
 

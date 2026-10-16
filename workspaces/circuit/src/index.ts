@@ -42,7 +42,7 @@ export const circuitWorkspace: WorkspacePlugin = {
   representations: { produces: [], accepts: [] },
   commands: [],
   mount(ctx) {
-    showPlaceholder(ctx.panel, {
+    showPlaceholder(ctx.properties, {
       title: "Circuit",
       summary,
       plans: [
@@ -55,6 +55,6 @@ export const circuitWorkspace: WorkspacePlugin = {
       ],
       startsAfter: "after CAD step 75 (full topological naming, then assemblies and joints)",
     });
-    return () => {};
+    return () => ctx.properties.replaceChildren();
   },
 };
