@@ -22,5 +22,6 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
   - `ownership.ts`: one owner per linked value: `proposeEdit`, `acceptProposal`/`rejectProposal`, `setOwnedValue`, `transferOwnership`.
   - `overlay.ts`.
   - `workspace.ts`: the public Workspace API; `mount` returns a `MountedWorkspace` (`sleep`, `wake`, `unmount`: workspaces stay warm, X7).
-  - `session.ts`: `createSelection`, the one selection; its undo/redo half is DRAFT until step 20.
+  - `session.ts`: `createSelection`, the one selection; `historyNotBuilt` until the shell wires the history (20b).
+  - `history.ts`: `createHistory`, the one undo/redo history of whole-project snapshots (labels, merge keys, limit, `reset` on open; step 20a).
 - `src/model/`, DRAFT: `material.ts`, `machines.ts`, `search.ts`, `feedback.ts`, `parameters.ts`, `references.ts`, `viewport.ts`.
