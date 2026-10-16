@@ -27,17 +27,23 @@ const setSize = async (id, value) => {
 // the box is framed as a sphere at its centre (20, 15, 10) with
 // r = √(40² + 30² + 20²)/2 = √2900/2, the camera sits r / sin(22.5°) away
 // along (0.6, −0.8, 0.55), looks at the centre with Z up, fov 45°.
-// `box` is the canvas's bounding box.
-function screenPoint(box, [px, py, pz]) {
-  const n = Math.hypot(0.6, -0.8, 0.55);
-  const dir = [0.6 / n, -0.8 / n, 0.55 / n];
-  const centre = [20, 15, 10];
-  const dist = Math.sqrt(2900) / 2 / Math.sin(Math.PI / 8);
+// `box` is the canvas's bounding box. `view` names another direction to
+// the camera and screen-up (the standard views of views.ts), and another
+// framed sphere (Fit on a selection).
+const HOME = { toward: [0.6, -0.8, 0.55], up: [0, 0, 1], centre: [20, 15, 10], radius: Math.sqrt(2900) / 2 };
+const TOP = { ...HOME, toward: [0, 0, 1], up: [0, 1, 0] }; // looking down −Z, +Y up on screen
+const FRONT = { ...HOME, toward: [0, -1, 0] }; // from −Y, +X to the right
+const RIGHT = { ...HOME, toward: [1, 0, 0] }; // from +X, +Y to the right
+function screenPoint(box, [px, py, pz], view = HOME) {
+  const { centre } = view;
+  const n = Math.hypot(...view.toward);
+  const dir = view.toward.map((d) => d / n);
+  const dist = view.radius / Math.sin(Math.PI / 8);
   const cam = centre.map((c, i) => c + dir[i] * dist);
   const fwd = dir.map((d) => -d);
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   const unit = (a) => a.map((x) => x / Math.hypot(...a));
-  const right = unit(cross(fwd, [0, 0, 1]));
+  const right = unit(cross(fwd, view.up));
   const up = cross(right, fwd);
   const v = [px - cam[0], py - cam[1], pz - cam[2]];
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -287,6 +293,98 @@ try {
     assert.deepEqual(await page.$$eval("#selection-list li", (els) => els.map((e) => e.textContent)), ["Face 1 · plane face:feature-1/1", "Edge 4 · line edge:feature-1/4"]);
     assert.equal(await page.isVisible("#selection-note"), false);
     await page.keyboard.press("Escape");
+  });
+
+  await check("the View buttons turn the camera to each view, and Fit frames the selection", async () => {
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const selection = () => page.evaluate(() => document.body.dataset.selection ?? "");
+    const sample = async (view, p) => {
+      const s = screenPoint(box, p, view);
+      return pixel((s.x - box.x) / box.width, (s.y - box.y) / box.height);
+    };
+    // The body is lit grey-blue, far brighter than the background
+    // (0x14, 0x16, 0x1a) and the grid lines on it.
+    const isBody = ([r, g, b]) => r + g + b > 3 * 80;
+    const clickView = async (name) => {
+      await page.click(`#view-controls [data-view=${name}]`);
+      await page.mouse.move(box.x + 2, box.y + 2); // nothing hovered
+      await page.waitForTimeout(200); // a frame or two to paint
+    };
+    const pickAt = async (view, p, expected) => {
+      const s = screenPoint(box, p, view);
+      await page.mouse.click(s.x, s.y);
+      assert.equal(await selection(), expected, `pick at ${p}`);
+      await page.keyboard.press("Escape");
+    };
+    // The group sits over the viewport, not in the workspace toolbar.
+    assert.deepEqual(await page.$$eval("#viewport #view-controls button", (bs) => bs.map((b) => b.textContent)), ["Home", "Top", "Front", "Right", "Fit"]);
+    assert.equal(await page.$("#toolbar #view-controls"), null);
+
+    // Top: the camera looks straight down at the centre (20, 15, 10), so
+    // the top face's centre (20, 15, 20) is on the canvas centre and the
+    // 40 × 30 face, all at one depth, shows as a rectangle 4 : 3 (same
+    // scale across and up at one depth), the side faces hidden behind it.
+    await clickView("top");
+    const c = screenPoint(box, [20, 15, 20], TOP);
+    assert.ok(Math.abs(c.x - (box.x + box.width / 2)) < 0.5 && Math.abs(c.y - (box.y + box.height / 2)) < 0.5);
+    const [l, r, t, b] = [[0, 15, 20], [40, 15, 20], [20, 30, 20], [20, 0, 20]].map((p) => screenPoint(box, p, TOP));
+    assert.ok(Math.abs((r.x - l.x) / (b.y - t.y) - 4 / 3) < 1e-9, "40 : 30 on screen");
+    assert.ok(t.y < b.y, "+Y is up on screen");
+    for (const p of [[1, 15, 20], [39, 15, 20], [20, 29, 20], [20, 1, 20], [1, 1, 20], [39, 29, 20]]) assert.ok(isBody(await sample(TOP, p)), `top: ${p} is on the face`);
+    // Just outside the face's edges (2 mm past, at the face's depth): the
+    // ray there passes the box and meets the floor, not the body.
+    for (const p of [[-2, 15, 20], [42, 15, 20], [20, 32, 20], [20, -2, 20]]) assert.ok(!isBody(await sample(TOP, p)), `top: ${p} is off the box`);
+    await page.screenshot({ path: "e2e/view-top.png" });
+    await pickAt(TOP, [20, 15, 20], "face:feature-1/1");
+
+    // Front: from −Y with Z up. The camera looks at (20, 15, 10) along +Y,
+    // and the front face's centre (20, 0, 10) lies on that line of sight,
+    // so it is on the canvas centre; (40, 0, 10) is right of it, (20, 0, 20) above.
+    await clickView("front");
+    const fc = screenPoint(box, [20, 0, 10], FRONT);
+    assert.ok(Math.abs(fc.x - (box.x + box.width / 2)) < 0.5 && Math.abs(fc.y - (box.y + box.height / 2)) < 0.5);
+    assert.ok(screenPoint(box, [40, 0, 10], FRONT).x > fc.x && screenPoint(box, [20, 0, 20], FRONT).y < fc.y);
+    for (const p of [[1, 0, 10], [39, 0, 10], [20, 0, 19], [20, 0, 1]]) assert.ok(isBody(await sample(FRONT, p)), `front: ${p} is on the face`);
+    for (const p of [[-2, 0, 10], [42, 0, 10]]) assert.ok(!isBody(await sample(FRONT, p)), `front: ${p} is off the box`);
+    await pickAt(FRONT, [20, 0, 10], "face:feature-1/2");
+    await pickAt(FRONT, [35, 0, 10], "face:feature-1/2");
+
+    // Right: from +X, Z up, +Y to the right: the 30 × 20 +X face (face 5).
+    await clickView("right");
+    assert.ok(screenPoint(box, [40, 30, 10], RIGHT).x > screenPoint(box, [40, 0, 10], RIGHT).x, "+Y to the right");
+    for (const p of [[40, 1, 10], [40, 29, 10]]) assert.ok(isBody(await sample(RIGHT, p)), `right: ${p} is on the face`);
+    for (const p of [[40, -2, 10], [40, 32, 10]]) assert.ok(!isBody(await sample(RIGHT, p)), `right: ${p} is off the box`);
+    await pickAt(RIGHT, [40, 15, 10], "face:feature-1/5");
+    await pickAt(RIGHT, [40, 25, 5], "face:feature-1/5");
+
+    // Home brings back the view every other check's positions assume.
+    await clickView("home");
+    await pickAt(HOME, [20, 15, 20], "face:feature-1/1");
+
+    // Fit with the top face selected frames that face from the current
+    // (home) direction: a sphere at (20, 15, 20) with r = √(40² + 30²)/2
+    // = 25, nearer than the body's √2900/2 ≈ 26.93, so the face fills more.
+    const TOP_FACE = { ...HOME, centre: [20, 15, 20], radius: 25 };
+    const tc = screenPoint(box, [20, 15, 20], HOME);
+    await page.mouse.click(tc.x, tc.y);
+    assert.equal(await selection(), "face:feature-1/1");
+    await clickView("fit");
+    await page.screenshot({ path: "e2e/view-fit-face.png" });
+    const fitted = screenPoint(box, [20, 15, 20], TOP_FACE);
+    assert.ok(Math.abs(fitted.x - (box.x + box.width / 2)) < 0.5 && Math.abs(fitted.y - (box.y + box.height / 2)) < 0.5);
+    // Points 0.5 mm in from the near and far corners, placed by the new
+    // framing (the left and right corners fall past a canvas this narrow:
+    // fit() frames the sphere to the vertical field of view only).
+    for (const p of [[20, 15, 20], [39.5, 0.5, 20], [0.5, 29.5, 20]]) assert.ok(isBody(await sample(TOP_FACE, p)), `fit: ${p} is on the face`);
+    await page.keyboard.press("Escape");
+    await page.mouse.click(fitted.x, fitted.y);
+    assert.equal(await selection(), "face:feature-1/1", "picking works in the fitted view");
+    // Nothing selected: Fit frames the whole body from home, as fit() does.
+    await page.keyboard.press("Escape");
+    await clickView("top");
+    await clickView("fit");
+    await pickAt(HOME, [20, 15, 20], "face:feature-1/1");
+    await pickAt(HOME, [20, 0, 10], "face:feature-1/2");
   });
 
   await check("editing a size rebuilds the body", async () => {
@@ -672,7 +770,7 @@ try {
     await page.click('[data-workspace="design"]');
   });
 
-  await check("desktop: focus moves top bar, toolbar, browser, properties; panel toggles hidden", async () => {
+  await check("desktop: focus moves top bar, toolbar, browser, View buttons, properties; panel toggles hidden", async () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
@@ -684,10 +782,11 @@ try {
     const regions = [];
     for (let i = 0; i < 120 && regions.at(-1) !== "properties"; i++) {
       await page.keyboard.press("Tab");
-      const region = await page.evaluate(() => document.activeElement?.closest("#topbar, #toolbar, #browser, #properties")?.id ?? "other");
+      const region = await page.evaluate(() => document.activeElement?.closest("#topbar, #toolbar, #browser, #view-controls, #properties")?.id ?? "other");
       if (region !== regions.at(-1)) regions.push(region);
     }
-    assert.deepEqual(regions, ["topbar", "toolbar", "browser", "properties"]);
+    // The View buttons sit over the viewport, between the browser and properties.
+    assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "properties"]);
     await page.screenshot({ path: "e2e/design-1280.png" });
   });
 

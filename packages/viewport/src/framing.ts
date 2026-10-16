@@ -1,4 +1,4 @@
-import type { Framing } from "@fission/core";
+import type { DisplayMesh, Framing } from "@fission/core";
 
 export type { Framing };
 
@@ -16,4 +16,35 @@ export function needsRefit(last: Framing | null, now: Framing): boolean {
   if (last === null) return true;
   const shift = Math.hypot(...now.centre.map((c, i) => c - last.centre[i]));
   return shift + now.radius > FIT_SLACK * last.radius || now.radius < 0.1 * last.radius;
+}
+
+/**
+ * Sphere around the selected faces' triangles and edges' segments of a
+ * display mesh: the centre of their bounding box and half its diagonal, as
+ * the viewer frames a whole body. Radius 0 when nothing listed is in the mesh.
+ */
+export function selectionFraming(
+  mesh: Pick<DisplayMesh, "positions" | "indices" | "triangle_faces" | "edge_lines" | "edge_line_edges">,
+  faces: readonly number[],
+  edges: readonly number[],
+): Framing {
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  const add = (points: readonly number[], i: number) => {
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], points[3 * i + k]);
+      hi[k] = Math.max(hi[k], points[3 * i + k]);
+    }
+  };
+  const faceSet = new Set(faces);
+  mesh.triangle_faces.forEach((face, t) => {
+    if (faceSet.has(face)) for (let j = 0; j < 3; j++) add(mesh.positions, mesh.indices[3 * t + j]);
+  });
+  const edgeSet = new Set(edges);
+  mesh.edge_line_edges.forEach((edge, s) => {
+    if (edgeSet.has(edge)) [2 * s, 2 * s + 1].forEach((i) => add(mesh.edge_lines, i));
+  });
+  if (!(lo[0] <= hi[0])) return { centre: [0, 0, 0], radius: 0 };
+  const centre = lo.map((l, k) => (l + hi[k]) / 2) as [number, number, number];
+  return { centre, radius: Math.hypot(...hi.map((h, k) => h - lo[k])) / 2 };
 }

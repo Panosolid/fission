@@ -53,6 +53,8 @@ export interface SharedViewport {
   fit(): Framing | null;
   /** Turns the camera to a standard view framing the current body; returns what it framed (null if none). */
   setView(name: ViewName): Framing | null;
+  /** Frames the selection (as last shown) from the current direction; null, camera untouched, when nothing is selected. */
+  fitSelection(): Framing | null;
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
   setOverlay(overlay: AnalysisOverlay): void;
   clearOverlay(id: string): void;

@@ -88,6 +88,7 @@ function testContext(): WorkspaceContext {
     bodyFraming: () => ({ centre: [0, 0, 0], radius: 0 }),
     fit: () => null,
     setView: () => null,
+    fitSelection: () => null,
     setOverlay() {},
     clearOverlay() {},
     showSelection(h) {

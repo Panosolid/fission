@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { edgeOfSegment, faceOfTriangle, isClick, segmentsNear, unhidden } from "./picking.ts";
 import { viewBasis, type ViewName } from "./views.ts";
+import { selectionFraming } from "./framing.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -255,24 +256,52 @@ export class Viewer implements SharedViewport {
   setView(name: ViewName): Framing | null {
     const framing = this.bodyFraming();
     if (!(framing.radius > 0)) return null;
-    // Spend any orbit still easing out (damping) first, so the camera does
-    // not drift away from the new framing over the next frames.
+    const { position, target, up } = viewBasis(name, framing, this.camera.fov);
+    this.place(position, target, up);
+    return framing;
+  }
+
+  /**
+   * Frames what is selected (faces and edges; a selected body is the whole
+   * body) from the current direction; returns what it framed, or null when
+   * nothing is selected, leaving the camera alone.
+   */
+  fitSelection(): Framing | null {
+    const { body, faces, edges } = this.highlight;
+    if (!this.mesh) return null;
+    const framing = faces.length || edges.length ? selectionFraming(this.mesh, faces, edges) : body ? this.bodyFraming() : null;
+    if (!framing || !(framing.radius > 0)) return null;
+    this.spendDamping();
+    const towardCamera = this.camera.position.clone().sub(this.controls.target).normalize();
+    const dist = framing.radius / Math.sin((this.camera.fov * Math.PI) / 360);
+    const target = new THREE.Vector3(...framing.centre);
+    const position = target.clone().addScaledVector(towardCamera, dist);
+    // The camera's current screen-up keeps the roll when looking straight down.
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    this.place(position.toArray(), framing.centre, up.toArray());
+    return framing;
+  }
+
+  /** Spends any orbit still easing out (damping), so the camera does not drift from a new framing over the next frames. */
+  private spendDamping() {
     this.controls.enableDamping = false;
     this.controls.update();
     this.controls.enableDamping = true;
-    const { position, target, up } = viewBasis(name, framing, this.camera.fov);
+  }
+
+  private place(position: readonly number[], target: readonly number[], up: readonly number[]) {
+    this.spendDamping();
     // The orbit stays about Z (camera.up); straight down, the view's own up
     // picks the camera's roll: a nudge of 1e-6 of the distance against it.
     const offset = new THREE.Vector3(...position).sub(new THREE.Vector3(...target));
     const dist = offset.length();
     if (offset.clone().cross(this.camera.up).lengthSq() === 0) offset.addScaledVector(new THREE.Vector3(...up), -1e-6 * dist);
-    this.controls.target.set(...target);
+    this.controls.target.set(target[0], target[1], target[2]);
     this.camera.position.copy(this.controls.target).add(offset);
     this.camera.near = dist / 1000;
     this.camera.far = dist * 100;
     this.camera.updateProjectionMatrix();
     this.controls.update();
-    return framing;
   }
 
   private resize() {
