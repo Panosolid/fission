@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRegistry, DependencyGraph, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, DependencyGraph, DownstreamRegistry, emptyProject, historyNotBuilt, RepresentationRegistry, createSelection, NO_HIGHLIGHT, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -86,6 +86,15 @@ test("placeholders register no actions; a working workspace's verbs are its own"
   assert.deepEqual(design.byWorkspace("design").map((a) => a.id), ["design.download-stl"]);
 });
 
+// Downstream chips (X4b): no workspace makes anything from the design yet,
+// so none registers a summary and Design's panel shows no Downstream
+// section. Slice's "Print: time · weight" (P2) will be the first.
+test("no workspace registers a downstream summary yet", () => {
+  const registry = new DownstreamRegistry();
+  for (const p of plugins) p.registerDownstream?.(registry);
+  assert.equal(registry.size, 0);
+});
+
 // Mounting into the layout slots (step 16a): every plugin fills the slots
 // it uses and leaves all three empty on hide, so the next workspace starts
 // clean. A real DOM (happy-dom) stands in for the browser.
@@ -98,6 +107,9 @@ const leftovers = (slots: Slots) => (["toolbar", "browser", "properties"] as con
 
 /** The last highlight each test viewport was asked to draw. */
 const shownHighlights = new WeakMap<SharedViewport, ViewportHighlight>();
+
+/** The workspaces each test context was asked to open, in order. */
+const opened = new WeakMap<WorkspaceContext, string[]>();
 
 /** How many times each test context was told the project changed. */
 const changes = new WeakMap<WorkspaceContext, number>();
@@ -135,6 +147,11 @@ function testContext(): WorkspaceContext {
     viewport,
     representations: new RepresentationRegistry(),
     actions: new ActionRegistry(),
+    downstream: new DownstreamRegistry(),
+    openWorkspace(id) {
+      opened.set(this, [...(opened.get(this) ?? []), id]);
+    },
+    workspaceTitle: (id) => id[0].toUpperCase() + id.slice(1),
   };
 }
 
@@ -344,4 +361,60 @@ test("the slot check can fail: a workspace that leaves its toolbar filled is cau
   const ctx = testContext();
   ctx.toolbar.innerHTML = "<button>Box</button>";
   assert.deepEqual(leftovers(ctx), ["toolbar"]);
+});
+
+// Downstream chips (X4b): Design's properties panel shows a chip for each
+// summary another workspace registers, its state read from the graph each
+// time Design changes the graph, and a click opens that workspace. With
+// none registered the whole section is hidden.
+test("Design shows registered downstream summaries as chips, redrawn on every edit, and a click opens their workspace", async () => {
+  let ctx = testContext();
+  const section = () => ctx.properties.querySelector("#downstream") as HTMLElement;
+  const chips = () => [...ctx.properties.querySelectorAll<HTMLElement>(".downstream-chip")].map((c) => `${c.dataset.chip} ${c.dataset.state} ${c.querySelector(".chip-value")!.textContent}`);
+  const design = plugins.find((p) => p.id === "design")!;
+
+  // Nothing registered: no section, no chips.
+  let hide = design.mount(ctx);
+  await settle();
+  assert.equal(section().hidden, true);
+  assert.deepEqual(chips(), []);
+  hide();
+
+  // A new project (a fresh context), with three fake Slice summaries. The graph after Design mounts (graph.ts):
+  // feature-1 → design.part-view → slice.print (expensive), and
+  // slice.material standing alone (cheap); slice.gone's node is never added.
+  // Mounting syncs a new document, so everything downstream of feature-1 is
+  // marked out of date: print is "needs-rerun" and keeps its last value;
+  // material is unmarked and has a value, so "fresh"; gone is "missing" and
+  // shows a dash, never its value.
+  ctx = testContext();
+  ctx.graph.set({ id: "design.part-view", label: "part", workspace: "design", cost: "cheap" });
+  ctx.graph.set({ id: "slice.print", label: "print", workspace: "slice", cost: "expensive" }, ["design.part-view"]);
+  ctx.graph.set({ id: "slice.material", label: "material", workspace: "slice", cost: "cheap" });
+  let grams = "38 g";
+  const source = (name: string, node: string, value: () => string) => ({ id: `slice.${name}`, workspace: "slice" as const, label: name, node, value, preview: () => `${name} preview` });
+  ctx.downstream.register(source("print", "slice.print", () => "2 h 14 m · 38 g"));
+  ctx.downstream.register(source("material", "slice.material", () => grams));
+  ctx.downstream.register(source("gone", "slice.not-there", () => "old"));
+  hide = design.mount(ctx);
+  await settle();
+  assert.equal(section().hidden, false);
+  assert.deepEqual(chips(), ["slice.print needs-rerun 2 h 14 m · 38 g", "slice.material fresh 38 g", "slice.gone missing –"]);
+  assert.match(ctx.properties.querySelector<HTMLElement>("[data-chip='slice.print']")!.title, /print preview\nOut of date: rerun it in Slice\.\nClick to open Slice\./);
+
+  // Redrawn on the next edit: the new value shows, and print, made fresh
+  // by Slice, is marked out of date again by the edit (it reads the part).
+  grams = "41 g";
+  ctx.graph.markFresh("slice.print");
+  const width = ctx.properties.querySelector<HTMLInputElement>("#width")!;
+  width.value = "50";
+  width.dispatchEvent(new ctx.properties.ownerDocument.defaultView!.Event("input"));
+  await settle();
+  assert.deepEqual(chips(), ["slice.print needs-rerun 2 h 14 m · 38 g", "slice.material fresh 41 g", "slice.gone missing –"]);
+
+  // A click asks the shell to open Slice.
+  ctx.properties.querySelector<HTMLElement>("[data-chip='slice.material']")!.click();
+  assert.deepEqual(opened.get(ctx), ["slice"]);
+  hide();
+  assert.equal(ctx.properties.childNodes.length, 0);
 });

@@ -6,7 +6,7 @@
 // beside the first, in slots of its own, with its own camera on the same
 // scene and the same project and selection.
 import "@fission/ui/theme.css";
-import { ActionRegistry, DependencyGraph, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, historyNotBuilt, KernelClient, createSelection, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
@@ -43,6 +43,10 @@ for (const w of workspaces) w.registerRepresentations?.(representations, kernel)
 // The one action registry: the verbs each workspace offers for a selection.
 const actions = new ActionRegistry();
 for (const w of workspaces) w.registerActions?.(actions);
+// The one downstream registry: what each workspace makes from the design (Design shows them as chips).
+const downstream = new DownstreamRegistry();
+for (const w of workspaces) w.registerDownstream?.(downstream);
+const workspaceTitle = (id: WorkspaceId) => workspaces.find((w) => w.id === id)?.title ?? id;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 // The one viewer (one scene); each workspace on screen sees it through a
@@ -62,6 +66,9 @@ const ctx: WorkspaceContext = {
   viewport: pane(viewer.main),
   representations,
   actions,
+  downstream,
+  openWorkspace: (id) => openFrom("main", id),
+  workspaceTitle,
 };
 
 // The View group: the shell owns each pane's view buttons, over its
@@ -164,7 +171,20 @@ function splitCtx(viewport: SharedViewport): WorkspaceContext {
     viewport,
     representations: ctx.representations,
     actions: ctx.actions,
+    downstream: ctx.downstream,
+    openWorkspace: (id) => openFrom("split", id),
+    workspaceTitle,
   };
+}
+/**
+ * A workspace asked to open `id` (a downstream chip's click): with a split
+ * open it goes in the other pane, beside the one that asked; otherwise it
+ * replaces what is shown. Already on screen: nothing changes.
+ */
+function openFrom(asker: "main" | "split", id: WorkspaceId) {
+  if (id === current || id === split?.id) return;
+  if (split && asker === "main") mountSplit(id);
+  else show(id);
 }
 function fillSplitChoice() {
   const select = $<HTMLSelectElement>("split-choice");
