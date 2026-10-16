@@ -50,6 +50,91 @@ impl Edge {
     pub fn tangent_at(&self, s: f64) -> DVec3 {
         self.curve.tangent(self.t0 + (self.t1 - self.t0) * s)
     }
+
+    /// Axis-aligned box containing the edge (its ends and, for an arc, the
+    /// furthest points it passes through).
+    pub fn bounds(&self) -> (DVec3, DVec3) {
+        let (a, b) = (self.curve.eval(self.t0), self.curve.eval(self.t1));
+        let (mut lo, mut hi) = (a.min(b), a.max(b));
+        self.widen_by_curve(&mut lo, &mut hi);
+        (lo, hi)
+    }
+
+    /// Widens a box that already holds the edge's ends to hold all of it.
+    fn widen_by_curve(&self, lo: &mut DVec3, hi: &mut DVec3) {
+        if let Curve::Circle { center, axis, x_dir, radius } = self.curve {
+            if self.t1 - self.t0 >= std::f64::consts::TAU - crate::tolerance::ANGULAR {
+                // A circle's extent along a world axis k is
+                // r·√(1 − axis_k²), which for a unit axis equals
+                // r·√(sum of the other two components squared). The
+                // second form keeps its digits when the axis is within
+                // ~1e-8 of k, where 1 − axis_k² rounds to 0.
+                let half = DVec3::new(axis.y.hypot(axis.z), axis.z.hypot(axis.x), axis.x.hypot(axis.y)) * radius;
+                *lo = lo.min(center - half);
+                *hi = hi.max(center + half);
+                return;
+            }
+            // An arc: its ends are in already. Along axis k the point is
+            // c_k + r(x_k cos t + y_k sin t) = c_k + r·A_k cos(t − α_k),
+            // A_k = hypot(x_k, y_k) (= the circle's half extent, without
+            // cancellation), α_k = atan2(y_k, x_k): the most at t = α_k,
+            // the least at α_k + π. Each of those the arc passes through
+            // widens the box along axis k only (the point's other
+            // coordinates are inside the box already: they lie between the
+            // arc's ends' or are covered by another axis's extreme).
+            let y_dir = axis.cross(x_dir);
+            for k in 0..3 {
+                let (xk, yk) = (x_dir[k], y_dir[k]);
+                let reach = radius * xk.hypot(yk);
+                let peak = yk.atan2(xk);
+                for (t, sign) in [(peak, 1.0), (peak + std::f64::consts::PI, -1.0)] {
+                    if (t - self.t0).rem_euclid(std::f64::consts::TAU) <= self.t1 - self.t0 {
+                        let extreme = center[k] + sign * reach;
+                        lo[k] = lo[k].min(extreme);
+                        hi[k] = hi[k].max(extreme);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The edge's point nearest `p`: its parameter, and which end it is
+    /// if it is an end (`Some(false)` the start, `Some(true)` the end).
+    /// A line's nearest point is the foot of the perpendicular, clamped
+    /// to the edge. A circle's is at p's angle round it (distance to the
+    /// circle grows steadily with the angle away from there, either way
+    /// round), so an arc's is that point if the arc reaches it, else the
+    /// nearer end. A whole circle has no ends.
+    pub fn closest(&self, p: DVec3) -> (f64, Option<bool>) {
+        let t = self.curve.closest_param(p);
+        match self.curve {
+            Curve::Line { .. } => {
+                if t <= self.t0 {
+                    (self.t0, Some(false))
+                } else if t >= self.t1 {
+                    (self.t1, Some(true))
+                } else {
+                    (t, None)
+                }
+            }
+            Curve::Circle { .. } => {
+                let span = self.t1 - self.t0;
+                let s = self.t0 + (t - self.t0).rem_euclid(std::f64::consts::TAU);
+                if self.is_closed() && span >= std::f64::consts::TAU - crate::tolerance::ANGULAR || s <= self.t1 {
+                    (s, None)
+                } else if self.curve.eval(self.t0).distance(p) <= self.curve.eval(self.t1).distance(p) {
+                    (self.t0, Some(false))
+                } else {
+                    (self.t1, Some(true))
+                }
+            }
+        }
+    }
+
+    /// Distance from `p` to the edge (not the whole curve).
+    pub fn distance(&self, p: DVec3) -> f64 {
+        self.curve.eval(self.closest(p).0).distance(p)
+    }
 }
 
 /// One use of an edge by a loop.
@@ -155,40 +240,7 @@ impl Body {
             add(&mut lo, &mut hi, v.point, DVec3::ZERO);
         }
         for e in &self.edges {
-            if let Curve::Circle { center, axis, x_dir, radius } = e.curve {
-                if e.t1 - e.t0 >= std::f64::consts::TAU - crate::tolerance::ANGULAR {
-                    // A circle's extent along a world axis k is
-                    // r·√(1 − axis_k²), which for a unit axis equals
-                    // r·√(sum of the other two components squared). The
-                    // second form keeps its digits when the axis is within
-                    // ~1e-8 of k, where 1 − axis_k² rounds to 0.
-                    let half = DVec3::new(axis.y.hypot(axis.z), axis.z.hypot(axis.x), axis.x.hypot(axis.y)) * radius;
-                    add(&mut lo, &mut hi, center, half);
-                    continue;
-                }
-                // An arc: its ends are vertices, already in. Along axis k
-                // the point is c_k + r(x_k cos t + y_k sin t) =
-                // c_k + r·A_k cos(t − α_k), A_k = hypot(x_k, y_k) (= the
-                // circle's half extent, without cancellation), α_k =
-                // atan2(y_k, x_k): the most at t = α_k, the least at α_k + π.
-                // Each of those the arc passes through widens the box along
-                // axis k only (the point's other coordinates are inside
-                // the box already: they lie between the arc's ends' or are
-                // covered by another axis's extreme).
-                let y_dir = axis.cross(x_dir);
-                for k in 0..3 {
-                    let (xk, yk) = (x_dir[k], y_dir[k]);
-                    let reach = radius * xk.hypot(yk);
-                    let peak = yk.atan2(xk);
-                    for (t, sign) in [(peak, 1.0), (peak + std::f64::consts::PI, -1.0)] {
-                        if (t - e.t0).rem_euclid(std::f64::consts::TAU) <= e.t1 - e.t0 {
-                            let extreme = center[k] + sign * reach;
-                            lo[k] = lo[k].min(extreme);
-                            hi[k] = hi[k].max(extreme);
-                        }
-                    }
-                }
-            }
+            e.widen_by_curve(&mut lo, &mut hi);
         }
         for f in &self.faces {
             if let Surface::Sphere { center, radius, .. } = f.surface {

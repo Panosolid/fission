@@ -41,6 +41,28 @@ pub fn hand_cube() -> Body {
     b
 }
 
+/// Two bodies as one, each its own shell (the second's vertices, edges and
+/// faces numbered after the first's). For self-intersection tests: two
+/// solids that overlap or touch make one invalid body.
+pub fn two_shells(a: &Body, b: &Body) -> Body {
+    let mut out = a.clone();
+    let (nv, ne, nf) = (a.vertices.len(), a.edges.len(), a.faces.len());
+    out.vertices.extend(b.vertices.iter().cloned());
+    out.edges.extend(b.edges.iter().cloned().map(|mut e| {
+        e.start += nv;
+        e.end += nv;
+        e
+    }));
+    out.faces.extend(b.faces.iter().cloned().map(|mut f| {
+        for c in f.loops.iter_mut().flat_map(|l| l.coedges.iter_mut()) {
+            c.edge += ne;
+        }
+        f
+    }));
+    out.shells.extend(b.shells.iter().map(|s| Shell { faces: s.faces.iter().map(|f| f + nf).collect() }));
+    out
+}
+
 fn circle(center: DVec3, radius: f64) -> Curve {
     Curve::Circle { center, axis: DVec3::Z, x_dir: DVec3::X, radius }
 }

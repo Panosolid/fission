@@ -42,6 +42,12 @@ pub enum ValidationError {
     MeshNotClosed { problems: usize },
     /// A shell encloses negative volume: its normals point inward.
     InsideOut { shell: usize, volume: f64 },
+    /// Two edges meet (or come within LINEAR) away from a shared vertex.
+    EdgesMeet { a: EdgeId, b: EdgeId, point: DVec3 },
+    /// An edge meets a face it doesn't bound, away from a shared vertex.
+    EdgeMeetsFace { edge: EdgeId, face: FaceId, point: DVec3 },
+    /// Two faces cross (or touch) inside both.
+    FacesMeet { a: FaceId, b: FaceId, point: DVec3 },
 }
 
 impl fmt::Display for ValidationError {
@@ -74,6 +80,9 @@ impl fmt::Display for ValidationError {
             Tessellation { face, message } => write!(f, "face {face} could not be tessellated: {message}"),
             MeshNotClosed { problems } => write!(f, "mesh has {problems} open or flipped edges"),
             InsideOut { shell, volume } => write!(f, "shell {shell} encloses {volume:e} mm³ (normals point inward)"),
+            EdgesMeet { a, b, point } => write!(f, "edges {a} and {b} meet at {point} away from a shared vertex"),
+            EdgeMeetsFace { edge, face, point } => write!(f, "edge {edge} meets face {face} at {point}"),
+            FacesMeet { a, b, point } => write!(f, "faces {a} and {b} cross at {point}"),
         }
     }
 }
@@ -87,7 +96,9 @@ impl ValidationError {
             | EdgeSameDirection { edge }
             | VertexOffEdge { edge, .. }
             | EdgeOffFace { edge, .. }
-            | ZeroLengthEdge { edge } => vec![edge],
+            | ZeroLengthEdge { edge }
+            | EdgeMeetsFace { edge, .. } => vec![edge],
+            EdgesMeet { a, b, .. } => vec![a, b],
             _ => vec![],
         }
     }
@@ -97,6 +108,15 @@ impl ValidationError {
         match *self {
             ValidationError::VertexOffEdge { vertex, .. } => vec![vertex],
             _ => vec![],
+        }
+    }
+
+    /// The point where parts meet, for the self-intersection errors.
+    pub fn point(&self) -> Option<DVec3> {
+        use ValidationError::*;
+        match *self {
+            EdgesMeet { point, .. } | EdgeMeetsFace { point, .. } | FacesMeet { point, .. } => Some(point),
+            _ => None,
         }
     }
 
@@ -112,7 +132,9 @@ impl ValidationError {
             | ZeroAreaFace { face }
             | FaceOrientation { face }
             | LoopOrientation { face, .. }
-            | Tessellation { face, .. } => vec![face],
+            | Tessellation { face, .. }
+            | EdgeMeetsFace { face, .. } => vec![face],
+            FacesMeet { a, b, .. } => vec![a, b],
             _ => vec![],
         }
     }
@@ -133,6 +155,11 @@ pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
     if errs.is_empty() {
         // The mesh checks assume sound topology, so they run last.
         check_mesh(body, &mut errs);
+    }
+    if errs.is_empty() {
+        // Assumes sound geometry too (edges on their faces, loops the
+        // right way round), and is the costliest.
+        crate::self_intersect::check(body, &mut errs);
     }
     if errs.is_empty() { Ok(()) } else { Err(errs) }
 }
@@ -639,6 +666,9 @@ mod tests {
             (Tessellation { face: 2, message: "boom".into() }, vec!["face 2", "boom"]),
             (MeshNotClosed { problems: 4 }, vec!["4 open"]),
             (InsideOut { shell: 0, volume: -1.0 }, vec!["shell 0", "-1e0", "inward"]),
+            (EdgesMeet { a: 2, b: 13, point: DVec3::new(1.0, 0.5, 2.0) }, vec!["edges 2 and 13", "[1, 0.5, 2]"]),
+            (EdgeMeetsFace { edge: 6, face: 10, point: DVec3::new(0.5, 1.0, 1.0) }, vec!["edge 6", "face 10", "[0.5, 1, 1]"]),
+            (FacesMeet { a: 1, b: 7, point: DVec3::new(0.5, 0.25, 1.0) }, vec!["faces 1 and 7", "[0.5, 0.25, 1]", "cross"]),
         ];
         for (err, words) in cases {
             let msg = err.to_string();

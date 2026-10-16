@@ -3,8 +3,8 @@
 //! be seen rather than imagined.
 //!
 //! In red: faces and edges a `validate` error names, vertices off their
-//! edges, every face of an inside-out shell, and the display mesh's open or
-//! flipped edges. The page draws with a plain 2D canvas and loads nothing,
+//! edges, points where the body meets itself, every face of an inside-out
+//! shell, and the display mesh's open or flipped edges. The page draws with a plain 2D canvas and loads nothing,
 //! so it opens offline, straight from a downloaded nightly result. It works
 //! relative to the middle of the scene in doubles, so a body 100 km out is
 //! drawn as sharply as one at the origin.
@@ -125,6 +125,10 @@ fn body_scene(label: &str, body: &Body) -> (String, Option<Mesh>) {
         if let Some(vx) = body.vertices.get(v) {
             bad_vertices.extend(vx.point.to_array());
         }
+    }
+    // Where parts of the body meet each other (self-intersections).
+    for p in errors.iter().filter_map(ValidationError::point) {
+        bad_vertices.extend(p.to_array());
     }
     let messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
     // A body with dangling references can't be tessellated or even sampled
@@ -494,6 +498,27 @@ mod tests {
         let stl = std::fs::read_to_string(out.join("after.stl")).unwrap();
         assert_eq!(stl.matches("facet normal").count(), 12);
         assert!(out.join("before.stl").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_self_intersection_is_marked_where_it_happens() {
+        // Two unit cubes, the second moved by (½, ½, ½): six edges pass
+        // through faces (see self_intersect's overlapping_cubes_by_hand), at
+        // points with coordinates {1, 1, ½} or {½, ½, 1}. Each meeting is a
+        // red dot, and its edge and face are marked.
+        let b = crate::fixtures::two_shells(&hand_cube(), &hand_cube().transformed(&crate::geom::Transform::translation(DVec3::splat(0.5))));
+        let dir = temp_dir("meet");
+        let scene = scene_of(&dump(&dir, "x", &[("cubes", &b)], "").unwrap());
+        let dots = numbers(&scene[0]["badVertices"]);
+        assert_eq!(dots.len(), 6 * 3);
+        for p in dots.chunks(3) {
+            let mut c = p.to_vec();
+            c.sort_by(f64::total_cmp);
+            assert!(c == [0.5, 1.0, 1.0] || c == [0.5, 0.5, 1.0], "{p:?}");
+        }
+        assert_eq!(numbers(&scene[0]["badEdges"]).len(), 6);
+        assert_eq!(numbers(&scene[0]["badFaces"]).len(), 6);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -6,6 +6,7 @@
 
 pub mod accurate;
 pub mod geom;
+pub mod intersect;
 pub mod mass;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod debug_dump;
@@ -13,6 +14,7 @@ pub mod display;
 pub mod mesh;
 pub mod ops;
 pub mod placed;
+pub mod self_intersect;
 pub mod stl;
 pub mod tessellate;
 pub mod tolerance;
