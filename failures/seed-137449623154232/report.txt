@@ -1,0 +1,16 @@
+Stateful kernel test: 2012 cases over 1 seed(s) ["0x7d027bf66e38"] in 281.0s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1176 / 90      →  92.9%   302.1ms  slowest 486.2µs
+  add cylinder     1078 / 107     →  91.0%     24.9s  slowest 54.6ms
+  add extrude       633 / 624     →  50.4%     12.5s  slowest 176.6ms
+  add sphere       1175 / 120     →  90.7%     83.4s  slowest 172.5ms
+  move             2338 / 204     →  92.0%     31.0s  slowest 90.7ms
+  rotate           2307 / 117     →  95.2%     30.0s  slowest 88.4ms
+  ~extreme input      86 / 347     →  19.9%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 82.5, d: 30.0, h: 87.0 }, axis: [0.0, 0.0, -1.0], angle: 3.141592653589793, at: [-16.0, 10.487882337710182, 22.0] }
+  slowest add cylinder: Add { shape: Cylinder { r: 993555.9789924761, h: 6270.178724661329 }, axis: [5e-324, 0.8677724058717312, 0.4469972645369127], angle: 2.5737297191158204, at: [-518.5238234152857, 3.0, 16.000011] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-8.0, 16.5], [2268.2133790775624, 16.5], [2268.2133790775624, 775.2385263591875], [-8.0, 775.2385263591875]], bulges: [] }, holes: [Circle { c: [371.36926317959376, 395.86926317959376], r: 379.36816317959375 }, Circle { c: [1130.1066895387812, 395.86926317959376], r: 379.36816317959375 }, Circle { c: [1888.8441158979685, 395.86926317959376], r: 379.36816317959375 }], dist: 92.000011, expect: Some(true) }, axis: [0.7866312197920668, -0.9075375503488885, -0.07603297362382964], angle: 4.569092239531443, at: [824.7620051658698, 17.0, 7.499991] }
+  slowest add sphere: Add { shape: Sphere { r: 1923.0555822442375 }, axis: [1.0, 1.0, 0.0], angle: 1.5707963267948966, at: [93.65944518245225, 12.0, -18.0] }
+  slowest move: Move { target: 0, by: [-824.7620051658698, -824.7620051658698, 0.5] }
+  slowest rotate: Rotate { target: 0, pivot: [87.8740446249207, -868.7859896041933, -21074.30944786292], axis: [0.0, 0.0, -1.0], angle: -7.058020099780056 }

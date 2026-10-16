@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2012 cases over 1 seed(s) ["0x52a91ee9246e"] in 276.4s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1136 / 111     →  91.1%   292.8ms  slowest 534.7µs
+  add cylinder     1143 / 84      →  93.2%     26.2s  slowest 55.1ms
+  add extrude       644 / 614     →  51.2%     10.2s  slowest 151.6ms
+  add sphere       1178 / 102     →  92.0%     82.4s  slowest 177.0ms
+  move             2334 / 193     →  92.4%     28.5s  slowest 76.2ms
+  rotate           2414 / 135     →  94.7%     30.8s  slowest 73.0ms
+  ~extreme input      72 / 337     →  17.6%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 74.5, d: 38725.21588775138, h: 190985.8483080999 }, axis: [-0.5162467211240908, -0.025062969409634445, 0.9626756192689049], angle: 8.392994605969264, at: [-997.6642499304784, 461.2388275982412, 0.007050862060736709] }
+  slowest add cylinder: Add { shape: Cylinder { r: 38655.14952701242, h: 107.0 }, axis: [1.0, 1.0, 1.0], angle: 4.7591444170151025, at: [-2.5, -481.6222628129286, 3090250.876662149] }
+  slowest add extrude: Add { shape: Extrude { outer: Circle { c: [-4202.7641183598835, 15.5], r: 20216.461383260965 }, holes: [Circle { c: [15584.824929224778, 15.5], r: 414.8723356763045 }], dist: 83.5, expect: Some(true) }, axis: [0.8955760344441552, -0.9303308795176997, 0.5620549449427102], angle: 6.283185307179586, at: [17.0, 23.43692119270729, 7.5] }
+  slowest add sphere: Add { shape: Sphere { r: 702.2230594503304 }, axis: [0.0, 3.0, 4.0], angle: 5.12925869786925, at: [-11630.270549210663, 282.39031308483004, 4.0] }
+  slowest move: Move { target: 1, by: [17.0, -20199.461383260965, -40409.48585632922] }
+  slowest rotate: Rotate { target: 0, pivot: [-10.000002, -2930.1415531970547, 5860.2831173941095], axis: [0.0, 3.0, 4.0], angle: 6.283185307179586 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 276.38s
+

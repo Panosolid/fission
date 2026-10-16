@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2012 cases over 1 seed(s) ["0xadc88f2ff57b"] in 275.4s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1158 / 108     →  91.5%   300.4ms  slowest 387.1µs
+  add cylinder     1122 / 117     →  90.6%     26.9s  slowest 56.8ms
+  add extrude       617 / 642     →  49.0%     10.3s  slowest 156.1ms
+  add sphere       1149 / 92      →  92.6%     81.2s  slowest 161.2ms
+  move             2231 / 166     →  93.1%     28.1s  slowest 78.3ms
+  rotate           2371 / 131     →  94.8%     30.8s  slowest 78.7ms
+  ~extreme input      80 / 315     →  20.3%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 1.262931832485292, d: 7.5, h: 26.5 }, axis: [0.10122272032602332, 0.625500788834074, 0.28597325893805864], angle: 0.0, at: [-573.5130497050615, 5.0, 20.0] }
+  slowest add cylinder: Add { shape: Cylinder { r: 264.8074671113269, h: 0.001 }, axis: [-0.6943170499111149, 0.40992911057204645, -0.9659437048297334], angle: 5.422389504647839, at: [-111.34940588727147, 43.57370913295675, 149.1689961517233] }
+  slowest add extrude: Add { shape: Extrude { outer: Circle { c: [-11.0, 31671.647364972414], r: 262739.17328257824 }, holes: [Circle { c: [5.599699149851034, 31671.647364972414], r: 262722.55983404414 }], dist: 55.5, expect: Some(true) }, axis: [0.5467069817636038, 0.8314496223265498, -0.9365603032655255], angle: 3.141592652489793, at: [-324.80366281827565, -0.777440908586796, -205093.78826418554] }
+  slowest add sphere: Add { shape: Sphere { r: 1559.6140553185387 }, axis: [0.0, 0.0, -1.0], angle: -1e18, at: [-14.0, -14.5, -2.5] }
+  slowest move: Move { target: 1, by: [66.87753791106127, -6.5, -5.0] }
+  slowest rotate: Rotate { target: 1, pivot: [6.5, -66.87753791106127, -7.5], axis: [-1.1000000000000001e-9, 0.0, 1.0], angle: 3.141592652689793 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 275.41s
+

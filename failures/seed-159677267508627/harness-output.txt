@@ -1,0 +1,23 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2012 cases over 1 seed(s) ["0x9139c2cefd93"] in 284.4s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box          1131 / 95      →  92.3%   294.6ms  slowest 333.8µs
+  add cylinder     1166 / 91      →  92.8%     27.1s  slowest 55.7ms
+  add extrude       641 / 587     →  52.2%     12.5s  slowest 149.6ms
+  add sphere       1169 / 96      →  92.4%     84.3s  slowest 179.3ms
+  move             2279 / 202     →  91.9%     28.7s  slowest 77.8ms
+  rotate           2403 / 123     →  95.1%     29.4s  slowest 73.4ms
+  ~extreme input      81 / 299     →  21.3%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 848.8647164744584, d: 0.029508755850982955, h: 7.0 }, axis: [-0.20343408700908205, -0.011491876050255936, 0.7514521729376524], angle: 6.283185307179586, at: [64.5, 753.1547983177853, -15.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 123653.5709690673, h: 78.0 }, axis: [9.000000000000001e-10, 0.0, 1.0], angle: 0.0, at: [-392.1914907025833, -4.5, 66.69252506719988] }
+  slowest add extrude: Add { shape: Extrude { outer: Circle { c: [552.3998160670418, -6.5], r: 32515.875380691636 }, holes: [Circle { c: [581.8998160670418, -6.5], r: 32486.374280691634 }], dist: 0.004697604559416521, expect: Some(true) }, axis: [1.1000000000000001e-9, 0.0, 1.0], angle: -4.71238898038469, at: [-434.3998070670419, -8.457429514962593, 8.0] }
+  slowest add sphere: Add { shape: Sphere { r: 64755.28196263663 }, axis: [1.0, 1.0, 0.0], angle: -6.283185307179586, at: [54.64039068401805, 9.5, -6.0] }
+  slowest move: Move { target: 1, by: [0.002173785428713521, -270.50369242907567, 794.5221569202978] }
+  slowest rotate: Rotate { target: 2, pivot: [-6856438.436150735, -3.9800529383934267, 4.5], axis: [-0.09534357659543914, -0.0953302679797972, 0.8631487884038737], angle: 3.5284098115773506 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 284.44s
+
