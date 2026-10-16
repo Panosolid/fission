@@ -40,6 +40,7 @@ The owner is a student learning the maths behind every algorithm. Correctness be
 ## Commands
 
 - Tier 1 (after every change): `cd kernel && cargo clippy --all-targets && cargo test <module>`
+- Before pushing kernel changes, also build for the browser: `cd kernel && cargo build --target wasm32-unknown-unknown` (code gated with `#[cfg(not(target_arch = "wasm32"))]`, like `debug_dump`, must not be called from code that is built there). CI uses the latest stable Rust, whose clippy may have lints the local toolchain lacks: `rustup update stable` first.
 - All kernel tests: `cd kernel && cargo test` (must show 0 failed, 0 ignored)
 - Mutation testing: `cd kernel && cargo mutants -f src/<file>.rs`
 - Install (repo root, npm workspaces): `npm install`

@@ -119,7 +119,7 @@ pub fn profile_from_input(p: ProfileIn) -> Result<ops::extrude::Profile, String>
             if !corners.len().is_multiple_of(2) {
                 return Err("profile coordinates must come in x, y pairs".to_string());
             }
-            let corners = corners.chunks_exact(2).map(|p| glam::DVec2::new(p[0], p[1])).collect();
+            let corners = corners.as_chunks::<2>().0.iter().map(|&[x, y]| glam::DVec2::new(x, y)).collect();
             Ok(Boundary::Path { corners, bulges })
         }
         BoundaryIn::Circle { center, radius } => Ok(Boundary::Circle { center: center.into(), radius }),

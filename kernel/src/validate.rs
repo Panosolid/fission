@@ -172,8 +172,12 @@ pub fn checked(body: Body) -> Result<Body, Vec<ValidationError>> {
         Err(errs) => {
             if cfg!(debug_assertions) {
                 let list: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                // WebAssembly has no files, and no debug_dump module.
+                #[cfg(not(target_arch = "wasm32"))]
                 let dump = crate::debug_dump::dump_invalid(&body, &list.join("\n"))
                     .map_or_else(|| "none written".to_string(), |p| p.display().to_string());
+                #[cfg(target_arch = "wasm32")]
+                let dump = "none written (WebAssembly has no files)";
                 panic!("kernel produced an invalid body:\n  {}\nfailure dump: {dump}", list.join("\n  "));
             }
             Err(errs)

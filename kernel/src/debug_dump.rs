@@ -55,11 +55,9 @@ pub fn dump(
 /// The dump `checked` writes for an invalid body: into
 /// `kernel/target/failure-dumps/invalid-body-<hash>/`, named after the body
 /// and its errors so the same failure is written once. None after
-/// MAX_AUTOMATIC_DUMPS, on WebAssembly (no files), or if writing fails.
+/// MAX_AUTOMATIC_DUMPS, or if writing fails. (Not built for WebAssembly,
+/// which has no files.)
 pub fn dump_invalid(body: &Body, errors: &str) -> Option<PathBuf> {
-    if cfg!(target_arch = "wasm32") {
-        return None;
-    }
     static WRITTEN: AtomicUsize = AtomicUsize::new(0);
     dump_invalid_in(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("target/failure-dumps"),
