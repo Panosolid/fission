@@ -1,0 +1,2 @@
+/* Files dragged over the app (X6): the shell puts .file-drop on the workspace while they are over it. */
+.file-drop { outline: 3px dashed #4aa8ff; outline-offset: -3px; }

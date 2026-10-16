@@ -25,7 +25,7 @@ Each folder with its own CLAUDE.md (kernel/, packages/, workspaces/, apps/) has 
 - `workspaces/`: the ten workspaces (Design real, the rest placeholders). `apps/fission`: the app shell and browser tests.
 - `docs/`: `progress/` (one progress file per workstream, see below), `roadmap.md` (the full roadmap), `integration.md`, `integration-map.md` (every link between workspaces), `ai.md`, `project-format.md`, `community.md`.
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust (and `oracle/compare.py`, the OpenCascade oracle).
-- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing", results on the `test-results` branch; see kernel/CLAUDE.md).
+- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing", results on the `test-results` branch; see kernel/CLAUDE.md), `auto-merge.yml` (merges `claude/` pull requests into `main` once green and up to date with it; rules in `.github/scripts/automerge.py`).
 - Generated, never committed: `kernel/target/`, `kernel/endless-results/`, `kernel/mutants.out*/`, `packages/core/src/kernel/wasm/`, `apps/fission/dist/`, `node_modules/`.
 
 ## Workstreams and where progress lives
@@ -84,6 +84,9 @@ After a run, report briefly: PASS/FAIL per tier; any metric that moved from base
 - Commit messages: a first line naming the step and feature (e.g. "Step 7: box primitive in the viewer"), then what changed and how it was verified.
 - Commit as the owner's GitHub account (each new container: `git config user.name benpy28` and `git config user.email 333175357+benpy28@users.noreply.github.com`), and keep the Co-Authored-By: Claude line in every commit message.
 - Never commit generated files (listed under Repository layout).
+- Pull requests from `claude/` branches merge into `main` by themselves (`auto-merge.yml`, owner's decision) once every check on the head passed and the branch contains the current `main`; it updates a branch that is behind and tests it again. Open a pull request as a draft, or add the `hold` label, while it is not ready to go live; a stacked pull request merges after the one under it.
+- Keep pull requests mergeable without the owner: merge `main` into the branch (a merge commit, never a rebase) and rerun the affected tests right before marking a pull request ready, and again on every merge-conflict notice. Auto-merge brings a green branch up to date by itself when git can; a conflict is the thread's to resolve.
+- Avoid the files every feature edits: a feature's styles go in `src/styles/<feature>.css` (packages/ui or a workspace), every selector starting with `.<feature>`, loaded by the app without a list; never add a feature's styles to `packages/ui/src/theme.css`, which holds only the base layout (the Image workspace's styles still in it move to their own file the next time that workspace changes).
 
 ## Saving usage
 
