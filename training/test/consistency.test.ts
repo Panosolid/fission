@@ -5,13 +5,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DESIGN_COMMANDS } from "@fission/design";
-import { matches } from "@fission/testing";
+import { commandsMatch } from "@fission/testing";
 import type { Command } from "@fission/core";
 import { DESIGN_RECIPES, DESIGN_RULES, generate, type Example, type Recipe } from "../src/index.ts";
 import { fakeKernel } from "./fakes.ts";
 import { read } from "./reader.ts";
 
-const same = (a: Command[], b: Command[]) => a.length === b.length && matches(a, b) && matches(b, a);
+const same = (a: Command[], b: Command[]) => a.length === b.length && commandsMatch(a, b) && commandsMatch(b, a);
 
 /** Examples whose words read as something else, with what they read as. */
 function disagreements(examples: readonly Example[]): string[] {

@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import type { AIProvider } from "@fission/ai";
 import { parseCommand } from "@fission/core";
 import { DESIGN_COMMANDS } from "@fission/design";
-import { EVAL_CASES, matches, runEval, successRates } from "../src/ai-eval.ts";
+import { EVAL_CASES, HELD_OUT_CASES, matches, runEval, successRates } from "../src/ai-eval.ts";
 
 test("every ready case's expected answer is itself a valid command", () => {
-  for (const c of EVAL_CASES.filter((c) => !c.waitsFor))
+  for (const c of [...EVAL_CASES, ...HELD_OUT_CASES].filter((c) => !c.waitsFor))
     for (const e of c.expected) {
       // Fill parameters the case doesn't care about with a valid length.
       const full = { depth: 1, height: 1, ...e };
@@ -15,12 +15,29 @@ test("every ready case's expected answer is itself a valid command", () => {
   assert.ok(EVAL_CASES.some((c) => c.waitsFor), "the hole case from the spec is listed, waiting for its command");
 });
 
-test("matching looks only at the expected parameters, in order", () => {
+test("matching judges the part the answer leaves, on the expected parameters only", () => {
   const box = { op: "set_part", shape: "box", width: 40, depth: 30, height: 20 };
-  assert.equal(matches([box], [{ op: "set_part", width: 40 }]), true);
-  assert.equal(matches([box], [{ op: "set_part", width: 40.1 }]), false);
-  assert.equal(matches([box], [{ width: 40 }, { width: 40 }]), false);
-  assert.equal(matches([], []), true);
+  assert.equal(matches([], [box], [{ op: "set_part", width: 40 }]), true);
+  assert.equal(matches([], [box], [{ op: "set_part", width: 40.1 }]), false);
+  assert.equal(matches([], [], []), true);
+  assert.equal(matches([box], [], [{ op: "set_part", width: 40 }]), false, "no answer is not an answer, even when the part already fits");
+});
+
+test("a right command followed by a wrong one fails: the part ends up wrong", () => {
+  // Worked by hand: set_part replaces the sizes it names, so [width 50, then width 40] leaves width 40.
+  const setup = [{ op: "set_part", shape: "box", width: 40, depth: 30, height: 20 }];
+  const right = { op: "set_part", shape: "box", width: 50, depth: 30, height: 20 };
+  assert.equal(matches(setup, [right], [right]), true);
+  assert.equal(matches(setup, [right, setup[0]], [right]), false);
+  assert.equal(matches(setup, [setup[0], right], [right]), true, "the last word counts");
+});
+
+test("a size left out keeps the current one, as Design's run does", () => {
+  // "Make it 10 mm wider" on 40 × 30 × 20, answered with only shape and width: depth 30 and height 20 stay.
+  const setup = [{ op: "set_part", shape: "box", width: 40, depth: 30, height: 20 }];
+  assert.equal(matches(setup, [{ op: "set_part", shape: "box", width: 50 }], [{ op: "set_part", shape: "box", width: 50, depth: 30, height: 20 }]), true);
+  // On a new part there is nothing to keep, so a left-out depth is missing, not 30.
+  assert.equal(matches([], [{ op: "set_part", shape: "box", width: 40, height: 20 }], [{ op: "set_part", shape: "box", width: 40, depth: 30, height: 20 }]), false);
 });
 
 test("the suite scores a provider per task type", async () => {
@@ -38,4 +55,62 @@ test("the suite scores a provider per task type", async () => {
   assert.equal(results.length, 12);
   assert.deepEqual(results.filter((r) => r.passed).map((r) => r.id), ["box-by-sizes", "box-in-cm"]);
   assert.ok(results.every((r) => r.attempts === 1));
+});
+
+test("the held-out cases are new: no id or sentence shared with the original cases", () => {
+  const ids = new Set(EVAL_CASES.map((c) => c.id));
+  const prompts = new Set(EVAL_CASES.map((c) => c.prompt.toLowerCase()));
+  for (const c of HELD_OUT_CASES) {
+    assert.ok(!ids.has(c.id) && !prompts.has(c.prompt.toLowerCase()), c.id);
+    assert.ok(c.id.startsWith("held-"), `${c.id}: held-out ids start with "held-" so a report can't mix them up`);
+  }
+  assert.equal(new Set(HELD_OUT_CASES.map((c) => c.id)).size, HELD_OUT_CASES.length, "ids are unique");
+});
+
+test("the held-out cases catch the first run's mistakes", () => {
+  const byId = (id: string) => HELD_OUT_CASES.find((c) => c.id === id)!;
+  // Radius 9 read as the diameter gives width 9; right is 2 × 9 = 18.
+  assert.equal(matches([], [{ op: "set_part", shape: "cylinder", width: 9, depth: 1, height: 40 }], byId("held-cylinder-radius").expected), false);
+  assert.equal(matches([], [{ op: "set_part", shape: "cylinder", width: 18, depth: 1, height: 40 }], byId("held-cylinder-radius").expected), true);
+  // The opposite mistake: a diameter doubled as if it were a radius (80 instead of 40).
+  assert.equal(matches([], [{ op: "set_part", shape: "cylinder", width: 80, depth: 1, height: 10 }], byId("held-cylinder-diameter").expected), false);
+  // A cube made as a cylinder.
+  assert.equal(matches([], [{ op: "set_part", shape: "cylinder", width: 18, depth: 18, height: 18 }], byId("held-cube-sides").expected), false);
+  // Centimetres left unconverted (5 instead of 50), and inches (2 instead of 50.8).
+  assert.equal(matches([], [{ op: "set_part", shape: "sphere", width: 5, depth: 1, height: 1 }], byId("held-sphere-cm").expected), false);
+  assert.equal(matches([], [{ op: "set_part", shape: "box", width: 2, depth: 1, height: 1 }], byId("held-box-inches").expected), false);
+});
+
+test("the suite scores a provider on the held-out cases", async () => {
+  // A stand-in provider that always answers "cylinder, width 18, height 40".
+  const provider: AIProvider = {
+    kind: "ollama",
+    structuredOutput: true,
+    check: async () => ({ ok: true }),
+    complete: async () => JSON.stringify({ commands: [{ op: "set_part", shape: "cylinder", width: 18, depth: 30, height: 40 }] }),
+  };
+  const results = await runEval(provider, HELD_OUT_CASES, DESIGN_COMMANDS);
+  // Worked by hand: only "held-cylinder-radius" expects a cylinder 18 wide and 40 tall, so create 1 of 8
+  // and edit 0 of 6.
+  assert.equal(results.length, 14);
+  assert.deepEqual(successRates(results), { create: 1 / 8, "edit-parameter": 0 });
+  assert.deepEqual(results.filter((r) => r.passed).map((r) => r.id), ["held-cylinder-radius"]);
+});
+
+test("the evaluation asks with Design's own command wording, as the panel does", async () => {
+  const systems: string[] = [];
+  const provider: AIProvider = {
+    kind: "ollama",
+    structuredOutput: true,
+    check: async () => ({ ok: true }),
+    complete: async (r) => {
+      systems.push(r.system);
+      return JSON.stringify({ commands: [] });
+    },
+  };
+  await runEval(provider, HELD_OUT_CASES.slice(0, 1), DESIGN_COMMANDS.filter((c) => c.op === "set_part"));
+  // Design's set_part says width is the diameter for cylinders and spheres; the model only learns it from the prompt.
+  assert.match(systems[0], /^ {2}width: width, or diameter for a cylinder or sphere \(millimetres, more than 0\)$/m);
+  assert.match(systems[0], /^ {2}depth: depth; leave it out for a cylinder or sphere, or to keep the current depth \(millimetres, more than 0; optional\)$/m);
+  assert.doesNotMatch(systems[0], /export/i, "only the offered command is described");
 });

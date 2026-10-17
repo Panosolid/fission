@@ -105,7 +105,7 @@ test("seeded random: accept then undo, or reject, always leaves the part exactly
 });
 
 test("the prompt names the part as its commands and asks to keep unmentioned sizes", () => {
-  const p = systemPrompt([{ op: "set_part", shape: "box", width: 40, depth: 30, height: 20 }]);
+  const p = systemPrompt([{ op: "set_part", shape: "box", width: 40, depth: 30, height: 20 }], []);
   assert.match(p, /The part now is made by these commands: \[\{"op":"set_part","shape":"box","width":40,"depth":30,"height":20\}\]/);
   assert.match(p, /Keep every size the user doesn't mention/);
 });

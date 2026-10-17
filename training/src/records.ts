@@ -13,13 +13,14 @@ export interface ChatRecord {
   messages: [{ role: "system"; content: string }, { role: "user"; content: string }, { role: "assistant"; content: string }];
 }
 
-export function toRecord(e: Example): ChatRecord {
+/** `specs`: the commands offered, which the system prompt describes (AI4), as the panel's does. */
+export function toRecord(e: Example, specs: readonly CommandSpec[]): ChatRecord {
   return {
     id: e.id,
     task: e.task,
     recipe: e.recipe,
     messages: [
-      { role: "system", content: systemPrompt(e.setup) },
+      { role: "system", content: systemPrompt(e.setup, specs) },
       { role: "user", content: e.prompt },
       { role: "assistant", content: JSON.stringify({ commands: e.commands }) },
     ],
@@ -57,8 +58,8 @@ const tally = (xs: readonly string[]) => Object.fromEntries([...new Set(xs)].sor
 /** The files a run writes: train.jsonl, validation.jsonl and manifest.json. */
 export function dataset(examples: readonly Example[], o: { specs: readonly CommandSpec[]; seed: bigint; drafts: number; dropped: Record<string, number>; validationPercent?: number }): Dataset {
   const percent = o.validationPercent ?? 10;
-  const train = examples.filter((e) => !isValidation(e, percent)).map(toRecord);
-  const validation = examples.filter((e) => isValidation(e, percent)).map(toRecord);
+  const train = examples.filter((e) => !isValidation(e, percent)).map((e) => toRecord(e, o.specs));
+  const validation = examples.filter((e) => isValidation(e, percent)).map((e) => toRecord(e, o.specs));
   return {
     train: jsonl(train),
     validation: jsonl(validation),

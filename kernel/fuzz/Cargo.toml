@@ -1,0 +1,37 @@
+[package]
+name = "fission-kernel-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+glam = "0.29"
+fission-kernel = { path = ".." }
+
+# Keep the fuzz crate out of any parent workspace.
+[workspace]
+
+[[bin]]
+name = "extrude"
+path = "fuzz_targets/extrude.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sketch"
+path = "fuzz_targets/sketch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "placed"
+path = "fuzz_targets/placed.rs"
+test = false
+doc = false
+bench = false

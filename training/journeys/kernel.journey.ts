@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DESIGN_COMMANDS, buildSpec, specFor } from "@fission/design";
-import { EVAL_CASES } from "@fission/testing";
+import { EVAL_CASES, HELD_OUT_CASES } from "@fission/testing";
 import { nodeKernel } from "../../packages/testing/src/node-kernel.ts";
 import { checkDraft, generate, RECIPES, RULES, type Draft } from "../src/index.ts";
 
@@ -21,7 +21,7 @@ function volumeOf(shape: string, w: number, d: number, h: number): number | null
 }
 
 test("1,000 examples on the real kernel: each builds the part its sizes give", async () => {
-  const g = await generate({ seed: SEED, count: 1_000, specs: DESIGN_COMMANDS, rules: RULES, recipes: RECIPES, kernel, heldOut: EVAL_CASES.map((c) => c.prompt) });
+  const g = await generate({ seed: SEED, count: 1_000, specs: DESIGN_COMMANDS, rules: RULES, recipes: RECIPES, kernel, heldOut: [...EVAL_CASES, ...HELD_OUT_CASES].map((c) => c.prompt) });
   assert.ok(g.ok);
   assert.equal(g.examples.length, 1_000);
   assert.deepEqual(g.conflicts, []);
