@@ -1,6 +1,6 @@
 name: Fuzzing
 
-# Fuzzing the file readers on GitHub's computers (free for public repos):
+# Fuzzing on GitHub's computers (free for public repos): the file readers,
 # the STL reader (kernel/tests/fuzz_stl.rs) and the project loader
 # (packages/testing/src/project-fuzz.ts), each broken files by the thousand
 # checked against a simple model, a fresh seed every round of 2,000 inputs.
@@ -9,12 +9,14 @@ name: Fuzzing
 # steps against the sessions' own model), then up to 20,000 of the extrudes
 # they built compared with exact values and OpenCascade
 # (prototypes/oracle/sketch_extrude.py; a disagreement is a failure folder
-# with oracle-disagreements.txt).
+# with oracle-disagreements.txt). And the kernel's entry points (extrude,
+# sketch outline, moves and turns) with coverage-guided fuzzing
+# (kernel/fuzz/, cargo-fuzz on nightly Rust).
 #
 # Nightly at 23:10 UTC (7:10am Perth), after the random testing run
 # (nightly.yml, 15:00 to 22:35 UTC, collected by about 22:50) so the two
 # never compete for runners or push to test-results at once; 45 minutes a
-# reader, so results are in by about 8am Perth. "Run workflow" on the
+# reader or kernel target, so results are in by about 8am Perth. "Run workflow" on the
 # Actions tab tests any branch for `minutes`.
 #
 # A final job adds the rounds to the test-results branch
@@ -138,8 +140,38 @@ jobs:
             ${{ runner.temp }}/fuzz/seed-*/
           if-no-files-found: ignore
 
+  kernel:
+    # Coverage-guided fuzzing (libFuzzer via cargo-fuzz) of the kernel's
+    # entry points: kernel/fuzz/checks.rs, one job per target. Starts from
+    # the committed seeds (kernel/fuzz/seeds/), so each night continues
+    # from code the fuzzer already reaches instead of from nothing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [extrude, sketch, placed]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel/fuzz
+      - run: cargo install cargo-fuzz --locked
+      - name: Fuzz until the time is up
+        working-directory: kernel
+        env:
+          MINUTES: ${{ inputs.minutes || '45' }}
+        run: fuzz/run.sh ${{ matrix.target }} $(( MINUTES * 60 )) "$RUNNER_TEMP/fuzz"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-kernel-${{ matrix.target }}
+          path: ${{ runner.temp }}/fuzz/
+          if-no-files-found: ignore
+
   collect:
-    needs: [stl, project, sessions]
+    needs: [stl, project, sessions, kernel]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
