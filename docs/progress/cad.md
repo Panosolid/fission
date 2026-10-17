@@ -17,3 +17,6 @@ Notes from step 21 for later steps:
 Notes from step 22 for later steps:
 - A circle together with any other curve is "the sketch makes n separate loops" until regions (26). The circle tool keeps only the centre as a point; the click on the circle sets the radius (√(dx² + dy²) with Math.sqrt, not Math.hypot, which V8 rounds a unit off for (10, 30)).
 - The viewport draws a circle as `CIRCLE_SEGMENTS` = 64 straight segments (`circleSegments`, drawing only; the sketch and the kernel keep the exact circle), so its `sketchLines` count is 64 per circle.
+
+Notes from the many-holes speed fix (2026-10-17):
+- The worst legal extrude (100 m plate, 1,996 holes at the 256-chord cap, ~2,000,000 triangles) took 45 s natively, now ~8 s: one validation and one tessellation per make_* call (`ops::*_meshed`), bulk-loaded triangulation, and no per-face scans of every triangle. `tests/worst_case.rs` holds it to a 25 s budget. Most of what is left is triangulating the two caps; fewer points would need a coarser display chord for big parts, the owner's call (tolerance).

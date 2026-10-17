@@ -42,6 +42,12 @@ pub(crate) fn check_length(name: &str, value: f64) -> Result<(), KernelError> {
     Ok(())
 }
 
-pub(crate) fn finish(body: crate::topology::Body) -> Result<crate::topology::Body, KernelError> {
-    crate::validate::checked(body).map_err(KernelError::InvalidResult)
+/// The checked body with the display mesh its validation built (see
+/// `validate::checked_meshed`). Each operation also has a `_meshed` form
+/// that hands this mesh on, so the app doesn't tessellate the body again.
+pub(crate) fn finish(body: crate::topology::Body) -> Result<Meshed, KernelError> {
+    crate::validate::checked_meshed(body).map_err(KernelError::InvalidResult)
 }
+
+/// A checked body and its display mesh.
+pub type Meshed = (crate::topology::Body, crate::mesh::Mesh);

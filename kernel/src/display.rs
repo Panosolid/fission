@@ -30,12 +30,17 @@ pub fn display_mesh(body: &Body, mesh: &Mesh) -> DisplayMesh {
         edge_lines: Vec::new(),
         edge_line_edges: Vec::new(),
     };
-    for face in 0..body.faces.len() {
+    // Each face's triangles in mesh order, gathered in one pass: scanning
+    // every triangle once per face took 10 s for 2,000 faces and 2,000,000
+    // triangles.
+    let mut by_face: Vec<Vec<usize>> = vec![Vec::new(); body.faces.len()];
+    for (t, &face) in mesh.triangle_face.iter().enumerate() {
+        by_face[face].push(t);
+    }
+    for (face, tris) in by_face.iter().enumerate() {
         let mut remap = std::collections::HashMap::new();
-        for (t, tri) in mesh.triangles.iter().enumerate() {
-            if mesh.triangle_face[t] != face {
-                continue;
-            }
+        for &t in tris {
+            let tri = &mesh.triangles[t];
             for &i in tri {
                 let next = (out.positions.len() / 3) as u32;
                 let id = *remap.entry(i).or_insert_with(|| {
@@ -168,5 +173,53 @@ mod tests {
         }
         // Both circles are drawn, with the same number of chords.
         assert!(used[0] > 2 && used[0] == used[1], "{used:?}");
+    }
+    #[test]
+    fn display_mesh_matches_a_face_by_face_scan() {
+        // Self-consistency: gathering each face's triangles in one pass must
+        // give exactly what scanning every triangle once per face gave (the
+        // old way, kept here as the reference): same vertex order, normals,
+        // indices and labels, so the viewer sees no change.
+        let reference = |body: &Body, mesh: &Mesh| {
+            let (mut positions, mut normals, mut indices, mut triangle_faces) = (vec![], vec![], vec![], vec![]);
+            for face in 0..body.faces.len() {
+                let mut remap = std::collections::HashMap::new();
+                for (t, tri) in mesh.triangles.iter().enumerate() {
+                    if mesh.triangle_face[t] != face {
+                        continue;
+                    }
+                    for &i in tri {
+                        let next = (positions.len() / 3) as u32;
+                        let id = *remap.entry(i).or_insert_with(|| {
+                            let p = mesh.positions[i as usize];
+                            let n = body.face_normal_at(face, p);
+                            positions.extend([p.x as f32, p.y as f32, p.z as f32]);
+                            normals.extend([n.x as f32, n.y as f32, n.z as f32]);
+                            next
+                        });
+                        indices.push(id);
+                    }
+                    triangle_faces.push(face as u32);
+                }
+            }
+            (positions, normals, indices, triangle_faces)
+        };
+        let square = |x: f64, y: f64, h: f64| vec![glam::DVec2::new(x, y), glam::DVec2::new(x, y + h), glam::DVec2::new(x + h, y + h), glam::DVec2::new(x + h, y)];
+        let plate = crate::ops::extrude::extrude(
+            &crate::ops::extrude::Profile {
+                outer: crate::ops::extrude::Boundary::polygon(vec![glam::DVec2::ZERO, glam::DVec2::new(9.0, 0.0), glam::DVec2::new(9.0, 9.0), glam::DVec2::new(0.0, 9.0)]),
+                holes: vec![
+                    crate::ops::extrude::Boundary::Circle { center: glam::DVec2::new(2.0, 2.0), radius: 1.0 },
+                    crate::ops::extrude::Boundary::polygon(square(5.0, 5.0, 2.0)),
+                ],
+            },
+            1.5,
+        )
+        .unwrap();
+        for body in [plate, hand_cube(), hand_cylinder(2.0, 3.0), crate::ops::primitives::make_sphere(1.0).unwrap()] {
+            let mesh = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+            let d = display_mesh(&body, &mesh);
+            assert_eq!((d.positions, d.normals, d.indices, d.triangle_faces), reference(&body, &mesh));
+        }
     }
 }

@@ -7,6 +7,7 @@
 //! for FaceOrientation at exactly 0 (`a_zero_area_outer_loop_is_not_called_inside_out`).
 
 use crate::geom::{Curve, Surface};
+use crate::mesh::Mesh;
 use crate::tessellate::{tessellate, TessOptions};
 use crate::tolerance;
 use crate::topology::{Body, EdgeId, Face, FaceId, Loop};
@@ -147,6 +148,13 @@ impl ValidationError {
 
 /// Runs every check and returns all problems found.
 pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
+    validate_meshed(body).map(|_| ())
+}
+
+/// `validate`, also handing back the display mesh its mesh checks built
+/// (`tessellate(body, &TessOptions::DISPLAY)`, the mesh the viewer and STL
+/// export use), so callers don't tessellate the same body again.
+pub fn validate_meshed(body: &Body) -> Result<Mesh, Vec<ValidationError>> {
     let mut errs = Vec::new();
     check_references(body, &mut errs);
     if !errs.is_empty() {
@@ -157,23 +165,29 @@ pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
     check_edge_uses(body, &mut errs);
     check_shells(body, &mut errs);
     check_geometry(body, &mut errs);
-    if errs.is_empty() {
-        // The mesh checks assume sound topology, so they run last.
-        check_mesh(body, &mut errs);
-    }
+    // The mesh checks assume sound topology, so they run last.
+    let mesh = if errs.is_empty() { check_mesh(body, &mut errs) } else { None };
     if errs.is_empty() {
         // Assumes sound geometry too (edges on their faces, loops the
         // right way round), and is the costliest.
         crate::self_intersect::check(body, &mut errs);
     }
-    if errs.is_empty() { Ok(()) } else { Err(errs) }
+    match mesh {
+        Some(mesh) if errs.is_empty() => Ok(mesh),
+        _ => Err(errs),
+    }
 }
 
 /// Validates the result of a kernel operation. In debug and test builds an
 /// invalid body is a bug, so this panics; in release it returns the errors.
 pub fn checked(body: Body) -> Result<Body, Vec<ValidationError>> {
-    match validate(&body) {
-        Ok(()) => Ok(body),
+    checked_meshed(body).map(|(body, _)| body)
+}
+
+/// `checked`, also handing back the body's display mesh (`validate_meshed`).
+pub fn checked_meshed(body: Body) -> Result<(Body, Mesh), Vec<ValidationError>> {
+    match validate_meshed(&body) {
+        Ok(mesh) => Ok((body, mesh)),
         Err(errs) => {
             if cfg!(debug_assertions) {
                 let list: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
@@ -307,12 +321,13 @@ fn check_geometry(body: &Body, errs: &mut Vec<ValidationError>) {
     }
 }
 
-fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) {
+/// The mesh checks; returns the mesh when tessellation succeeded.
+fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) -> Option<Mesh> {
     let mesh = match tessellate(body, &TessOptions::DISPLAY) {
         Ok(m) => m,
         Err(e) => {
             errs.push(ValidationError::Tessellation { face: e.face, message: e.message });
-            return;
+            return None;
         }
     };
     if let Err(problems) = mesh.check_closed() {
@@ -324,22 +339,37 @@ fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) {
     // each mesh step a→b along the loop is an edge a→b of one of the face's
     // triangles. (Which triangles are inside is decided by crossings, not by
     // loop direction, so a loop run backwards still meshes; this catches it.)
-    let mut directed: std::collections::HashSet<(usize, u32, u32)> = std::collections::HashSet::new();
-    for (t, tri) in mesh.triangles.iter().enumerate() {
-        for k in 0..3 {
-            directed.insert((mesh.triangle_face[t], tri[k], tri[(k + 1) % 3]));
+    // The triangle edges leaving each mesh vertex, as (face, end), grouped by
+    // vertex (counting sort): a hash set of every edge took ~1 s for a
+    // 2,000,000-triangle mesh. Each lookup scans one vertex's few edges.
+    let mut first = vec![0usize; mesh.positions.len() + 1];
+    for tri in &mesh.triangles {
+        for &a in tri {
+            first[a as usize + 1] += 1;
         }
     }
+    for i in 1..first.len() {
+        first[i] += first[i - 1];
+    }
+    let mut filled = first.clone();
+    let mut leaving = vec![(0usize, 0u32); first[first.len() - 1]];
+    for (t, tri) in mesh.triangles.iter().enumerate() {
+        for k in 0..3 {
+            let a = tri[k] as usize;
+            leaving[filled[a]] = (mesh.triangle_face[t], tri[(k + 1) % 3]);
+            filled[a] += 1;
+        }
+    }
+    let has_step = |fi: FaceId, a: u32, b: u32| leaving[first[a as usize]..first[a as usize + 1]].contains(&(fi, b));
     for (fi, f) in body.faces.iter().enumerate() {
         for (li, l) in f.loops.iter().enumerate() {
             let right_way = l.coedges.iter().all(|c| {
                 let poly = &mesh.edge_polylines[c.edge];
-                let steps: Vec<(u32, u32)> = if c.reversed {
-                    poly.windows(2).map(|w| (w[1], w[0])).collect()
+                if c.reversed {
+                    poly.windows(2).all(|w| has_step(fi, w[1], w[0]))
                 } else {
-                    poly.windows(2).map(|w| (w[0], w[1])).collect()
-                };
-                steps.iter().all(|&(a, b)| directed.contains(&(fi, a, b)))
+                    poly.windows(2).all(|w| has_step(fi, w[0], w[1]))
+                }
             });
             if !right_way {
                 errs.push(ValidationError::LoopOrientation { face: fi, loop_index: li });
@@ -347,11 +377,16 @@ fn check_mesh(body: &Body, errs: &mut Vec<ValidationError>) {
         }
     }
     for (si, s) in body.shells.iter().enumerate() {
-        let volume = mesh.signed_volume_of(|t| s.faces.contains(&mesh.triangle_face[t]));
+        // Membership by face index, not a search of the shell's face list
+        // per triangle (2,000 faces × 2,000,000 triangles).
+        let mut in_shell = vec![false; body.faces.len()];
+        s.faces.iter().for_each(|&f| in_shell[f] = true);
+        let volume = mesh.signed_volume_of(|t| in_shell[mesh.triangle_face[t]]);
         if volume <= 0.0 {
             errs.push(ValidationError::InsideOut { shell: si, volume });
         }
     }
+    Some(mesh)
 }
 
 /// Signed area of a loop on a planar face, positive when it runs
@@ -786,5 +821,38 @@ mod tests {
         assert_eq!((e.edges(), e.faces(), e.point()), (vec![6], vec![10], Some(p)));
         let e = ValidationError::FacesMeet { a: 1, b: 7, point: p };
         assert_eq!((e.edges(), e.faces(), e.point()), (vec![], vec![1, 7], Some(p)));
+    }
+    #[test]
+    fn validate_meshed_hands_back_the_display_mesh() {
+        // The mesh the app shows comes from validation now, so it must be
+        // exactly what tessellating for display gives; an invalid body gives
+        // only its errors.
+        for body in [hand_cube(), crate::fixtures::hand_tube(1.0, 2.0, 3.0, 0.4), crate::ops::primitives::make_sphere(2.0).unwrap()] {
+            assert_eq!(validate_meshed(&body).unwrap(), tessellate(&body, &TessOptions::DISPLAY).unwrap());
+        }
+        let mut b = hand_cube();
+        b.vertices[7].point.z += 0.5;
+        assert_eq!(validate_meshed(&b).unwrap_err(), validate(&b).unwrap_err());
+    }
+
+    #[test]
+    fn each_shell_s_volume_counts_only_its_own_faces() {
+        // A 3 mm cube (27 mm³) and, apart from it, a unit cube turned inside
+        // out (−1 mm³) as two shells of one body: only shell 1 is inside out,
+        // with exactly −1 mm³. Counting every face for every shell would give
+        // 26 mm³ for both and miss it.
+        let big = hand_cube().transformed(&crate::geom::Transform::uniform_scale(3.0));
+        let mut small = hand_cube().transformed(&crate::geom::Transform::translation(DVec3::new(10.0, 0.0, 0.0)));
+        for f in &mut small.faces {
+            f.sense = !f.sense;
+            for l in &mut f.loops {
+                l.coedges.reverse();
+                l.coedges.iter_mut().for_each(|c| c.reversed = !c.reversed);
+            }
+        }
+        match validate(&crate::fixtures::two_shells(&big, &small)).unwrap_err().as_slice() {
+            [ValidationError::InsideOut { shell: 1, volume }] => assert!(tolerance::eq(*volume, -1.0), "{volume}"),
+            other => panic!("{other:?}"),
+        }
     }
 }

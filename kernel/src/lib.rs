@@ -84,15 +84,23 @@ pub struct BodyView {
     pub errors: Vec<String>,
 }
 
+/// The view of any body, validating it first (its `errors` list what is
+/// wrong). Validation tessellates the body anyway, so its mesh is reused.
 pub fn view_body(body: &Body) -> Result<BodyView, String> {
-    let mesh = tessellate(body, &TessOptions::DISPLAY).map_err(|e| format!("face {}: {}", e.face, e.message))?;
+    match validate::validate_meshed(body) {
+        Ok(mesh) => Ok(view_parts(body, &mesh, vec![])),
+        Err(errs) => {
+            let mesh = tessellate(body, &TessOptions::DISPLAY).map_err(|e| format!("face {}: {}", e.face, e.message))?;
+            Ok(view_parts(body, &mesh, errs.iter().map(|e| e.to_string()).collect()))
+        }
+    }
+}
+
+/// The view of a body with its display mesh and validation errors.
+fn view_parts(body: &Body, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
     let exact = mass::mass_properties(body);
-    let errors = match validate::validate(body) {
-        Ok(()) => vec![],
-        Err(errs) => errs.iter().map(|e| e.to_string()).collect(),
-    };
-    Ok(BodyView {
-        mesh: display::display_mesh(body, &mesh),
+    BodyView {
+        mesh: display::display_mesh(body, mesh),
         volume: exact.volume,
         area: exact.area,
         vertices: body.vertices.len(),
@@ -101,7 +109,7 @@ pub fn view_body(body: &Body) -> Result<BodyView, String> {
         face_types: body.faces.iter().map(|f| surface_type(&f.surface)).collect(),
         edge_types: body.edges.iter().map(|e| curve_type(&e.curve)).collect(),
         errors,
-    })
+    }
 }
 
 /// What the app's properties panel calls a face's surface.
@@ -276,11 +284,17 @@ pub enum BodySpec {
 /// Builds the body a spec describes (with the same checks as the make_*
 /// functions).
 pub fn build(spec: BodySpec) -> Result<Body, String> {
+    build_meshed(spec).map(|(body, _)| body)
+}
+
+/// `build`, also handing back the display mesh the operation's validation
+/// made (`ops::finish`).
+pub fn build_meshed(spec: BodySpec) -> Result<ops::Meshed, String> {
     let made = match spec {
-        BodySpec::Box { width, depth, height } => ops::primitives::make_box(width, depth, height),
-        BodySpec::Cylinder { radius, height } => ops::primitives::make_cylinder(radius, height),
-        BodySpec::Sphere { radius } => ops::primitives::make_sphere(radius),
-        BodySpec::Extrude { profile, distance } => ops::extrude::extrude(&profile_from_input(profile)?, distance),
+        BodySpec::Box { width, depth, height } => ops::primitives::make_box_meshed(width, depth, height),
+        BodySpec::Cylinder { radius, height } => ops::primitives::make_cylinder_meshed(radius, height),
+        BodySpec::Sphere { radius } => ops::primitives::make_sphere_meshed(radius),
+        BodySpec::Extrude { profile, distance } => ops::extrude::extrude_meshed(&profile_from_input(profile)?, distance),
     };
     made.map_err(|e| e.to_string())
 }
@@ -288,8 +302,11 @@ pub fn build(spec: BodySpec) -> Result<Body, String> {
 /// What the make_* functions give the app: the view of the body a spec
 /// describes, or the kernel's reason it can't be built (the same message
 /// either way round: a bad profile's, an operation's, or tessellation's).
+/// Validated and tessellated once, by the operation: the body passed
+/// `checked`, so it has no errors to list.
 pub fn view_of(spec: BodySpec) -> Result<BodyView, String> {
-    view_body(&build(spec)?)
+    let (body, mesh) = build_meshed(spec)?;
+    Ok(view_parts(&body, &mesh, vec![]))
 }
 
 /// An STL file for the app to download.
@@ -307,8 +324,7 @@ pub struct StlFile {
 /// The body as a binary STL, from its display mesh (the same triangles the
 /// viewer shows), with `name` in the file's header.
 pub fn stl_of(spec: BodySpec, name: &str) -> Result<StlFile, String> {
-    let body = build(spec)?;
-    let mesh = tessellate(&body, &TessOptions::DISPLAY).map_err(|e| format!("face {}: {}", e.face, e.message))?;
+    let (_, mesh) = build_meshed(spec)?;
     let out = stl::export(&mesh, name);
     Ok(StlFile { bytes: out.bytes, rounding: out.rounding, warning: out.warning })
 }
@@ -418,6 +434,60 @@ mod tests {
         assert!(view_of(BodySpec::Box { width: 1.0, depth: -1.0, height: 1.0 }).err().unwrap().contains("must be"));
         let odd = view_of(BodySpec::Extrude { profile: l(vec![0.0; 5]), distance: 1.0 }).err().unwrap();
         assert_eq!(odd, "profile coordinates must come in x, y pairs");
+    }
+
+    #[test]
+    fn the_app_s_calls_tessellate_a_body_once() {
+        // Regression (a 1,996-hole plate took 45 s natively): make_extrude
+        // validated the body in the operation, then tessellated it for the
+        // view and validated it again (another tessellation), and STL export
+        // rebuilt and retessellated it. Now the operation's own validation
+        // mesh is the one shown and exported.
+        let count = |f: &dyn Fn()| {
+            tessellate::TESSELLATIONS.with(|n| n.set(0));
+            f();
+            tessellate::TESSELLATIONS.with(|n| n.get())
+        };
+        let plate = || BodySpec::Extrude {
+            profile: ProfileIn {
+                outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 10.0, 0.0, 10.0, 10.0, 0.0, 10.0], bulges: vec![] },
+                holes: vec![BoundaryIn::Circle { center: [5.0, 5.0], radius: 2.0 }],
+            },
+            distance: 3.0,
+        };
+        assert_eq!(count(&|| drop(view_of(plate()).unwrap())), 1);
+        assert_eq!(count(&|| drop(stl_of(plate(), "plate").unwrap())), 1);
+        let body = build(plate()).unwrap();
+        assert_eq!(count(&|| drop(view_body(&body).unwrap())), 1);
+        // A body that fails before the mesh checks is tessellated once, to show it.
+        let mut broken = body.clone();
+        broken.vertices[0].point.z += 0.5;
+        assert_eq!(count(&|| assert!(!view_body(&broken).unwrap().errors.is_empty())), 1);
+    }
+
+    #[test]
+    fn view_of_shows_what_validating_the_body_again_would() {
+        // Skipping the second validation changes nothing the app sees: the
+        // view of a spec is the view of its body validated afresh, field for
+        // field (compared as the JSON the app receives).
+        let json = |v: BodyView| serde_json::to_string(&v).unwrap();
+        let specs = || {
+            vec![
+                BodySpec::Box { width: 10.0, depth: 20.0, height: 30.0 },
+                BodySpec::Cylinder { radius: 1.0, height: 2.0 },
+                BodySpec::Sphere { radius: 3.0 },
+                BodySpec::Extrude {
+                    profile: ProfileIn {
+                        outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 9.0, 0.0, 9.0, 9.0, 0.0, 9.0], bulges: vec![0.0, 0.3, 0.0, 0.0] },
+                        holes: vec![BoundaryIn::Circle { center: [3.0, 3.0], radius: 1.0 }],
+                    },
+                    distance: 2.0,
+                },
+            ]
+        };
+        for (a, b) in specs().into_iter().zip(specs()) {
+            assert_eq!(json(view_of(a).unwrap()), json(view_body(&build(b).unwrap()).unwrap()));
+        }
     }
 
     #[test]
