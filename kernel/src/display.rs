@@ -30,9 +30,9 @@ pub fn display_mesh(body: &Body, mesh: &Mesh) -> DisplayMesh {
         edge_lines: Vec::new(),
         edge_line_edges: Vec::new(),
     };
-    // Each face's triangles in mesh order, gathered in one pass: scanning
-    // every triangle once per face took 10 s for 2,000 faces and 2,000,000
-    // triangles.
+    // Triangles grouped by face, each face's in mesh order: one pass over
+    // the mesh rather than one per face (which was faces × triangles, ~2e9
+    // steps and seconds for a 2,000-arc outline).
     let mut by_face: Vec<Vec<usize>> = vec![Vec::new(); body.faces.len()];
     for (t, &face) in mesh.triangle_face.iter().enumerate() {
         by_face[face].push(t);
@@ -174,52 +174,77 @@ mod tests {
         // Both circles are drawn, with the same number of chords.
         assert!(used[0] > 2 && used[0] == used[1], "{used:?}");
     }
-    #[test]
-    fn display_mesh_matches_a_face_by_face_scan() {
-        // Self-consistency: gathering each face's triangles in one pass must
-        // give exactly what scanning every triangle once per face gave (the
-        // old way, kept here as the reference): same vertex order, normals,
-        // indices and labels, so the viewer sees no change.
-        let reference = |body: &Body, mesh: &Mesh| {
-            let (mut positions, mut normals, mut indices, mut triangle_faces) = (vec![], vec![], vec![], vec![]);
-            for face in 0..body.faces.len() {
-                let mut remap = std::collections::HashMap::new();
-                for (t, tri) in mesh.triangles.iter().enumerate() {
-                    if mesh.triangle_face[t] != face {
-                        continue;
-                    }
-                    for &i in tri {
-                        let next = (positions.len() / 3) as u32;
-                        let id = *remap.entry(i).or_insert_with(|| {
-                            let p = mesh.positions[i as usize];
-                            let n = body.face_normal_at(face, p);
-                            positions.extend([p.x as f32, p.y as f32, p.z as f32]);
-                            normals.extend([n.x as f32, n.y as f32, n.z as f32]);
-                            next
-                        });
-                        indices.push(id);
-                    }
-                    triangle_faces.push(face as u32);
+
+    /// The display mesh as first written: for each face, a scan of every
+    /// triangle. Kept as the reference the grouped version must match.
+    fn per_face_scan(body: &Body, mesh: &Mesh) -> (Vec<f32>, Vec<f32>, Vec<u32>, Vec<u32>) {
+        let (mut positions, mut normals, mut indices, mut faces) = (vec![], vec![], vec![], vec![]);
+        for face in 0..body.faces.len() {
+            let mut remap = std::collections::HashMap::new();
+            for (t, tri) in mesh.triangles.iter().enumerate() {
+                if mesh.triangle_face[t] != face {
+                    continue;
                 }
+                for &i in tri {
+                    let next = (positions.len() / 3) as u32;
+                    let id = *remap.entry(i).or_insert_with(|| {
+                        let p = mesh.positions[i as usize];
+                        let n = body.face_normal_at(face, p);
+                        positions.extend([p.x as f32, p.y as f32, p.z as f32]);
+                        normals.extend([n.x as f32, n.y as f32, n.z as f32]);
+                        next
+                    });
+                    indices.push(id);
+                }
+                faces.push(face as u32);
             }
-            (positions, normals, indices, triangle_faces)
-        };
-        let square = |x: f64, y: f64, h: f64| vec![glam::DVec2::new(x, y), glam::DVec2::new(x, y + h), glam::DVec2::new(x + h, y + h), glam::DVec2::new(x + h, y)];
-        let plate = crate::ops::extrude::extrude(
-            &crate::ops::extrude::Profile {
-                outer: crate::ops::extrude::Boundary::polygon(vec![glam::DVec2::ZERO, glam::DVec2::new(9.0, 0.0), glam::DVec2::new(9.0, 9.0), glam::DVec2::new(0.0, 9.0)]),
-                holes: vec![
-                    crate::ops::extrude::Boundary::Circle { center: glam::DVec2::new(2.0, 2.0), radius: 1.0 },
-                    crate::ops::extrude::Boundary::polygon(square(5.0, 5.0, 2.0)),
-                ],
-            },
-            1.5,
-        )
-        .unwrap();
-        for body in [plate, hand_cube(), hand_cylinder(2.0, 3.0), crate::ops::primitives::make_sphere(1.0).unwrap()] {
-            let mesh = tessellate(&body, &TessOptions::DISPLAY).unwrap();
-            let d = display_mesh(&body, &mesh);
-            assert_eq!((d.positions, d.normals, d.indices, d.triangle_faces), reference(&body, &mesh));
         }
+        (positions, normals, indices, faces)
+    }
+
+    #[test]
+    fn grouping_by_face_matches_a_scan_per_face() {
+        // A self-consistency check (two code paths agreeing), bit for bit,
+        // on bodies whose meshes interleave faces: a box, a cylinder, and an
+        // extruded outline with arcs and a round hole.
+        use crate::ops::extrude::{extrude, Boundary, Profile};
+        let d = Profile {
+            outer: Boundary::Path { corners: vec![glam::DVec2::new(0.0, 0.0), glam::DVec2::new(4.0, 0.0), glam::DVec2::new(4.0, 3.0), glam::DVec2::new(0.0, 3.0)], bulges: vec![0.0, 0.5, 0.0, -0.3] },
+            holes: vec![Boundary::Circle { center: glam::DVec2::new(2.0, 1.5), radius: 0.5 }],
+        };
+        for b in [make_box(2.0, 3.0, 4.0).unwrap(), hand_cylinder(2.0, 5.0), extrude(&d, 1.5).unwrap()] {
+            let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+            let got = display_mesh(&b, &m);
+            assert_eq!((got.positions, got.normals, got.indices, got.triangle_faces), per_face_scan(&b, &m));
+        }
+    }
+
+    #[test]
+    fn many_faces_and_triangles_cost_one_pass() {
+        // Regression (white-box hunt): display_mesh scanned every triangle
+        // once per face, faces × triangles steps: 4.5 s (release build) for
+        // a 2,000-arc outline's 2,002 faces and 960,000 triangles. Here a
+        // 2,000-corner prism (2,002 faces) gets a made-up mesh of 1,001,000
+        // triangles, 500 per face over the face's own corners: the old scan
+        // takes ~2·10⁹ steps (seconds); one pass takes about a million hash
+        // lookups (well under a tenth of a second). The bound leaves ten
+        // times that for a slow machine.
+        use crate::ops::extrude::{extrude, Profile};
+        let n = 2000;
+        let corners = (0..n).map(|i| glam::DVec2::from_angle(std::f64::consts::TAU * i as f64 / n as f64) * 100.0).collect();
+        let b = extrude(&Profile::polygon(corners, vec![]), 1.0).unwrap();
+        let mut m = Mesh { positions: b.vertices.iter().map(|v| v.point).collect(), ..Mesh::default() };
+        for (f, face) in b.faces.iter().enumerate() {
+            let vs: Vec<u32> = face.loops[0].coedges.iter().map(|c| b.edges[c.edge].start as u32).collect();
+            for k in 0..500 {
+                m.triangles.push([vs[0], vs[1 + k % (vs.len() - 2)], vs[2 + k % (vs.len() - 2)]]);
+                m.triangle_face.push(f);
+            }
+        }
+        let start = std::time::Instant::now();
+        let d = display_mesh(&b, &m);
+        let took = start.elapsed();
+        assert_eq!(d.triangle_faces.len(), 500 * b.faces.len());
+        assert!(took.as_secs_f64() < 1.0, "display_mesh took {took:?}");
     }
 }

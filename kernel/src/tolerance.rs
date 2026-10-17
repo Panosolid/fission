@@ -172,6 +172,32 @@ pub fn orient3d(a: DVec3, b: DVec3, c: DVec3, d: DVec3) -> f64 {
     robust::orient3d(c3(a), c3(b), c3(c), c3(d))
 }
 
+/// Twice the signed area of the closed polygon through `corners` (the
+/// shoelace sum Σ xᵢyᵢ₊₁ − xᵢ₊₁yᵢ), positive when they run
+/// counter-clockwise. Every product and sum is kept exactly
+/// (`accurate::Exact`), so the sign is exact, and exactly 0 only for a
+/// polygon whose area is exactly 0; the value is within a few ulps.
+/// Nothing is shifted to a nearer origin first: that subtraction would
+/// round, and it isn't needed when nothing else does.
+pub fn twice_area(corners: &[DVec2]) -> f64 {
+    shoelace(corners).value()
+}
+
+/// The exact sign of `twice_area`: 1, −1 or 0.
+pub fn area_sign(corners: &[DVec2]) -> i8 {
+    shoelace(corners).sign()
+}
+
+fn shoelace(corners: &[DVec2]) -> crate::accurate::Exact {
+    let mut sum = crate::accurate::Exact::default();
+    for (i, &p) in corners.iter().enumerate() {
+        let q = corners[(i + 1) % corners.len()];
+        sum.add_product(p.x, q.y);
+        sum.add_product(-q.x, p.y);
+    }
+    sum
+}
+
 fn c2(p: DVec2) -> robust::Coord<f64> {
     robust::Coord { x: p.x, y: p.y }
 }
@@ -337,5 +363,144 @@ mod tests {
         assert!(orient3d(a, b, c, DVec3::new(0.3, 0.3, -1.0)) > 0.0, "below the plane is positive");
         assert!(orient3d(a, b, c, DVec3::new(0.3, 0.3, 1.0)) < 0.0, "above the plane is negative");
         assert!(orient3d(a, b, c, DVec3::new(7.0, -2.0, 0.0)) == 0.0, "coplanar is exactly zero");
+    }
+
+    /// The shoelace sum as the kernel took it before `twice_area`: plain
+    /// doubles, each corner taken relative to the first.
+    fn float_twice_area(c: &[DVec2]) -> f64 {
+        let o = c[0];
+        (0..c.len()).map(|i| (c[i] - o).perp_dot(c[(i + 1) % c.len()] - o)).sum()
+    }
+
+    #[test]
+    fn a_sliver_plain_doubles_turn_the_wrong_way_by_hand() {
+        // Corners o = (0, 0), A = (1 + t, 1), B = (1, 1 − t), C = (0, t²/2)
+        // with t = 2⁻³⁰. Shoelace terms: o×A = 0, C×o = 0,
+        // A×B = (1 + t)(1 − t) − 1·1 = −t², B×C = 1·t²/2 − (1 − t)·0 = t²/2.
+        // Twice the area is −t² + t²/2 = −t²/2 = −2⁻⁶¹: clockwise.
+        // In doubles (1 + t)(1 − t) = 1 − 2⁻⁶⁰ rounds to 1 (the gap below 1
+        // is 2⁻⁵³), so A×B comes out 0 and the sum is +2⁻⁶¹: the loop reads
+        // as counter-clockwise, the wrong way round.
+        let t = (2f64).powi(-30);
+        let c = [DVec2::ZERO, DVec2::new(1.0 + t, 1.0), DVec2::new(1.0, 1.0 - t), DVec2::new(0.0, t * t / 2.0)];
+        assert_eq!(float_twice_area(&c), (2f64).powi(-61)); // the failure
+        assert_eq!(twice_area(&c), -(2f64).powi(-61));
+        assert_eq!(area_sign(&c), -1);
+        // Walked the other way it is counter-clockwise, +2⁻⁶¹ exactly.
+        let mut r = c;
+        r.reverse();
+        assert_eq!((twice_area(&r), area_sign(&r)), ((2f64).powi(-61), 1));
+        // Starting from another corner changes nothing (a closed sum).
+        r.rotate_left(1);
+        assert_eq!(twice_area(&r), (2f64).powi(-61));
+    }
+
+    #[test]
+    fn areas_by_hand() {
+        let p = |x: f64, y: f64| DVec2::new(x, y);
+        // A 2 × 3 rectangle with a corner at (10, 20), counter-clockwise:
+        // twice the area is 2·6 = 12.
+        let rect = [p(10.0, 20.0), p(12.0, 20.0), p(12.0, 23.0), p(10.0, 23.0)];
+        assert_eq!((twice_area(&rect), area_sign(&rect)), (12.0, 1));
+        // The L of corners (0,0) (2,0) (2,1) (1,1) (1,2) (0,2): a 2 × 2
+        // square less the unit square at (1,1), area 3, so 6.
+        let l = [p(0.0, 0.0), p(2.0, 0.0), p(2.0, 1.0), p(1.0, 1.0), p(1.0, 2.0), p(0.0, 2.0)];
+        assert_eq!(twice_area(&l), 6.0);
+        // A figure eight (0,0) (1,1) (1,0) (0,1): two triangles of area 1/4
+        // turning opposite ways, so exactly 0, and the sign says so.
+        let eight = [p(0.0, 0.0), p(1.0, 1.0), p(1.0, 0.0), p(0.0, 1.0)];
+        assert_eq!((twice_area(&eight), area_sign(&eight)), (0.0, 0));
+        // Collinear corners, and fewer than three: no area.
+        assert_eq!(area_sign(&[p(0.5, 0.5), p(12.0, 12.0), p(24.0, 24.0)]), 0);
+        assert_eq!((area_sign(&[p(3.0, 4.0)]), area_sign(&[])), (0, 0));
+        // 100 km out (x = y = 1e8), a right triangle with legs 2⁻¹⁰ mm
+        // (~1 µm) and 2⁻²⁶ mm (~15 nm, the spacing of doubles there, so
+        // every coordinate is exact): twice the area is the product of the
+        // legs, 2⁻³⁶, while the shoelace products are ~1e16 and cancel.
+        let (b, h) = ((2f64).powi(-10), (2f64).powi(-26));
+        let far = [p(1e8, 1e8), p(1e8 + b, 1e8), p(1e8, 1e8 + h)];
+        assert_eq!(twice_area(&far), (2f64).powi(-36));
+        assert_eq!(area_sign(&[far[0], far[2], far[1]]), -1);
+    }
+
+    /// splitmix64: a small seeded generator, so every run sees the same cases.
+    fn splitmix(state: &mut u64) -> u64 {
+        *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = *state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+
+    #[test]
+    fn area_sign_agrees_with_exact_integer_arithmetic() {
+        // Model: every coordinate is m·2^e for a random 53-bit m and e from
+        // −60 to −55 (so all 53 bits are used, and points mix magnitudes 32×
+        // apart, where differences round), then scaled by 2³⁰ to lie 4 km
+        // to 270 km out. Unscaled, each is k·2⁻⁶⁰ for an integer k < 2⁵⁸,
+        // so twice the area is 2⁻¹²⁰·Σ (kxᵢ·kyᵢ₊₁ − kxᵢ₊₁·kyᵢ) (times
+        // 2⁶⁰ once scaled), and that integer sum fits an i128 exactly
+        // (products < 2¹¹⁶, at most 16 corners). Two thirds of the polygons
+        // are near-degenerate on purpose: corners on a line, rounded to
+        // the nearest double (a tiny area left over from ~2¹¹⁰ terms), or
+        // exactly on a line through the origin (area exactly 0).
+        let seed = 0x5eed_a5ea_u64;
+        let mut s = seed;
+        let (mut float_wrong, mut float_flipped, mut zero) = (0, 0, 0);
+        let scale = (2f64).powi(30);
+        for case in 0..30_000 {
+            let mut r = |m: u64| splitmix(&mut s) % m;
+            let coord = |r: &mut dyn FnMut(u64) -> u64| {
+                let m = ((1u64 << 52) | r(1 << 52)) as f64;
+                let x = m * (2f64).powi(-60 + r(6) as i32);
+                if r(2) == 0 { x } else { -x }
+            };
+            let n = 3 + r(14) as usize;
+            let c: Vec<DVec2> = match case % 3 {
+                0 => (0..n).map(|_| DVec2::new(coord(&mut r), coord(&mut r))).collect(),
+                1 => {
+                    // y = a + b·x in doubles, then onto the model's grid:
+                    // each corner within 2⁻⁶⁰ of the line (|b| < 1 and
+                    // |a| < 2⁻⁴ keep y inside the model's range).
+                    let (a, b) = (coord(&mut r) / 4.0, coord(&mut r) * 2.0);
+                    let grid = |y: f64| (y * (2f64).powi(60)).round() * (2f64).powi(-60);
+                    (0..n).map(|_| { let x = coord(&mut r); DVec2::new(x, grid(a + b * x)) }).collect()
+                }
+                _ => {
+                    // Multiples of one direction by powers of two: exactly
+                    // collinear with the origin, which is a corner too.
+                    // (d on a 2⁻⁵⁵ grid, so d/2⁴ stays on the model's.)
+                    let on = |x: f64| (x * (2f64).powi(55)).round() * (2f64).powi(-55);
+                    let d = DVec2::new(on(coord(&mut r)), on(coord(&mut r))) / 2.0;
+                    let mut c: Vec<DVec2> = (0..n - 1).map(|_| d * (2f64).powi(-(r(5) as i32)) * if r(2) == 0 { 1.0 } else { -1.0 }).collect();
+                    c.push(DVec2::ZERO);
+                    c
+                }
+            };
+            let k = |x: f64| {
+                let v = x * (2f64).powi(60);
+                assert!(v.fract() == 0.0 && v.abs() < (2f64).powi(58), "{x}");
+                v as i128
+            };
+            let ks: Vec<[i128; 2]> = c.iter().map(|p| [k(p.x), k(p.y)]).collect();
+            let model: i128 = (0..n).map(|i| {
+                let (a, b) = (ks[i], ks[(i + 1) % n]);
+                a[0] * b[1] - b[0] * a[1]
+            }).sum();
+            let c: Vec<DVec2> = c.iter().map(|&p| p * scale).collect();
+            let want = model.signum() as i8;
+            assert_eq!(area_sign(&c), want, "seed {seed:#x}, case {case}: {c:?}");
+            let exact = model as f64 * (2f64).powi(-120) * scale * scale; // one rounding
+            let got = twice_area(&c);
+            assert!((got - exact).abs() <= 4.0 * f64::EPSILON * exact.abs(), "seed {seed:#x}, case {case}: {got} vs {exact}");
+            let plain = float_twice_area(&c);
+            float_wrong += (plain.partial_cmp(&0.0).map(|o| o as i8) != Some(want)) as usize;
+            float_flipped += (plain * f64::from(want) < 0.0) as usize;
+            zero += (model == 0) as usize;
+        }
+        // The cases have teeth: plain doubles misjudge a good share of
+        // them, hundreds the opposite way round, and thousands are exactly 0.
+        println!("plain doubles wrong in {float_wrong} of 30000 ({float_flipped} the opposite way); {zero} exactly 0");
+        assert!(float_wrong > 1000 && float_flipped > 100 && zero > 1000, "{float_wrong} wrong, {float_flipped} flipped, {zero} zero");
     }
 }

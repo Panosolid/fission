@@ -13,8 +13,7 @@
 //!
 //! Mutation testing (`cargo mutants -f src/ops/profile.rs`) leaves these
 //! survivors, all equivalent (no input can tell them apart):
-//! - `sweep > 0.0` vs `>= 0.0` (Seg::spans, counter_clockwise, the arc's
-//!   side in winding): an arc's sweep is never 0 (a zero bulge is a line).
+//! - `sweep > 0.0` vs `>= 0.0` (Seg::spans, the arc's side in winding): an arc's sweep is never 0 (a zero bulge is a line).
 //! - `* s` vs `/ s` where s is ±1: Seg::tangents (the sweep's sign) and
 //!   half_turn (the arc's side of its chord, ±1 from the sweep's sign).
 //! - `<` vs `<=` in winding, at ties that put the point on the loop:
@@ -24,26 +23,13 @@
 //!   the other side the side test fails first).
 //! - `<` vs `<=` in doubles_back: a dot product of 0 means perpendicular
 //!   unit tangents, whose cross product is ±1, never within ANGULAR.
-//! - counter_clockwise: any lowest point of a loop gives the right answer
-//!   (the region lies above it, so the loop runs left to right there: an
-//!   end of a level bottom edge turns left, a point inside one goes
-//!   straight on, rightwards, and an arc's bottom runs its arc's way).
-//!   Hence `<` vs `<=` in "lower" (a tie is one point found twice: a
-//!   corner that is also an arc's bottom); `turn != 0` vs `== 0` for two
-//!   straight pieces (the lowest, then leftmost, corner always turns: a
-//!   neighbour in line with it would be lower or further left; and the
-//!   tangent test that then decides agrees); `turn > 0` vs `>= 0` (never
-//!   0 there); `|turn| > ANGULAR` vs `>=` (at a lowest corner that nearly
-//!   straight, the turn and the direction of travel both say
-//!   counter-clockwise exactly when it is); `turn > 0.0` vs `>=` (past
-//!   ANGULAR, never 0); and `t_out.x > 0.0` vs `>=` (with a turn within
-//!   ANGULAR, a vertical tangent at a lowest point would take the loop
-//!   lower beside it, so t_out.x is near ±1).
+//! - `>` vs `>=` in counter_clockwise: a checked loop's area is never 0
+//!   (it is at least about its span × MIN_FEATURE / 2).
 //! - probe's `c + X·r` vs `c − X·r`: by the time holes are placed every
 //!   piece is clear of every other, so any point of a hole's circle
 //!   decides whether it is inside a loop.
 use super::KernelError;
-use crate::tolerance::{segments_touch, side, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
+use crate::tolerance::{segments_touch, side, twice_area, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
 use std::f64::consts::{PI, TAU};
 
@@ -342,18 +328,19 @@ pub fn clearance(s: &Seg, t: &Seg, shared: &[DVec2]) -> f64 {
 }
 
 /// Area enclosed by a loop, positive counter-clockwise: the shoelace sum
-/// over its corners (relative to the first, to keep digits far from the
-/// origin) plus, for each arc, the circular segment between it and its
-/// chord, (r²/2)(sweep − sin sweep).
+/// over its corners plus, for each arc, the circular segment between it
+/// and its chord, (r²/2)(sweep − sin sweep). The shoelace part is exact
+/// (`tolerance::twice_area`, rounded once at the end), so a loop of
+/// straight pieces has an exactly signed area, whatever cancels; the
+/// pieces of a loop meet exactly (`check_profile` builds them from shared
+/// corners), so its corners are the pieces' starts.
 pub fn signed_area(segs: &[Seg]) -> f64 {
-    let o = segs.iter().find_map(|s| s.ends().first().copied()).unwrap_or(DVec2::ZERO);
-    let mut twice = 0.0;
+    let corners: Vec<DVec2> = segs.iter().filter_map(|s| s.ends().first().copied()).collect();
+    let mut twice = twice_area(&corners);
     for s in segs {
         match *s {
-            Seg::Line { a, b } => twice += (a - o).perp_dot(b - o),
-            Seg::Arc { a, b, radius, sweep, .. } => {
-                twice += (a - o).perp_dot(b - o) + radius * radius * (sweep - sweep.sin());
-            }
+            Seg::Line { .. } => {}
+            Seg::Arc { radius, sweep, .. } => twice += radius * radius * (sweep - sweep.sin()),
             Seg::Circle { radius, ccw, .. } => {
                 let full = radius * radius * TAU;
                 twice += if ccw { full } else { -full };
@@ -434,50 +421,23 @@ fn half_turn(side: i8) -> f64 {
     PI * f64::from(side)
 }
 
-/// Whether a loop runs counter-clockwise. At the loop's lowest point the
-/// region lies above, so the loop runs left to right there: at a corner,
-/// the turn decides (exactly, for two straight pieces); along a curve or a
-/// straight-through corner, the direction of travel.
+/// Whether a loop runs counter-clockwise: whether its signed area is
+/// positive. The area is a sum over the whole loop, so it can't be swayed
+/// by what happens within tolerance of one corner. (A local test, such as
+/// the turn at the lowest corner, can: where two pieces nearly double back
+/// they may cross again within LINEAR of the corner, which counts as
+/// meeting there, and the turn then reads that twist instead of the loop;
+/// `near_cusp_corners_keep_the_loop_the_right_way_round`, issue #75.) For
+/// a checked loop the sign is safe: pieces stay MIN_FEATURE apart away
+/// from shared corners, so a loop spanning L encloses about L·MIN_FEATURE/2
+/// at least (500 mm² at 1 km). The corners' part of the area is exact, so
+/// a loop of straight pieces gets the sign exactly right; arcs add their
+/// segments, each rounded within ~1e-16 of its own size, and segments of
+/// pieces that don't cross don't overlap, so they total at most ~L²: a
+/// rounding of ~L²·1e-16 (1e-4 mm² at 1 km), wherever the loop is
+/// (`orientation_of_slivers`, `exact_sign_of_a_straight_sliver`).
 fn counter_clockwise(segs: &[Seg]) -> bool {
-    if let [Seg::Circle { ccw, .. }] = segs {
-        return *ccw;
-    }
-    // Lowest point: a corner, or an arc's bottom.
-    let mut best: Option<(DVec2, usize, bool)> = None; // (point, piece, is the start corner of piece)
-    // Lower, or as low and further left.
-    let lower = |p: DVec2, q: DVec2| (p.y, p.x) < (q.y, q.x);
-    for (i, s) in segs.iter().enumerate() {
-        let a = s.ends()[0];
-        if best.is_none_or(|(q, _, _)| lower(a, q)) {
-            best = Some((a, i, true));
-        }
-        if let Seg::Arc { center, radius, .. } = *s {
-            let bottom = center - DVec2::Y * radius;
-            if s.spans(-TAU / 4.0) && best.is_none_or(|(q, _, _)| lower(bottom, q)) {
-                best = Some((bottom, i, false));
-            }
-        }
-    }
-    let (_, i, corner) = best.expect("a path has corners");
-    let s = &segs[i];
-    if !corner {
-        let Seg::Arc { sweep, .. } = *s else { unreachable!() };
-        return sweep > 0.0;
-    }
-    let prev = &segs[(i + segs.len() - 1) % segs.len()];
-    if let (Seg::Line { a: p0, .. }, Seg::Line { a: p1, b: p2 }) = (*prev, *s) {
-        let turn = side(p0, p1, p2);
-        if turn != 0 {
-            return turn > 0;
-        }
-    }
-    let (t_in, t_out) = (prev.tangents().1, s.tangents().0);
-    let turn = t_in.perp_dot(t_out);
-    if turn.abs() > ANGULAR {
-        turn > 0.0
-    } else {
-        t_out.x > 0.0
-    }
+    signed_area(segs) > 0.0
 }
 
 fn reversed(segs: &[Seg]) -> Vec<Seg> {
@@ -500,6 +460,7 @@ fn reversed(segs: &[Seg]) -> Vec<Seg> {
 ///   within MAX_COORD, and one bulge per corner (or none), all finite;
 /// - circle and arc radii are within [MIN_FEATURE, MAX_SIZE]; arcs and
 ///   circles stay within MAX_COORD; the outer loop spans at most MAX_SIZE;
+/// - a loop of two corners has them at least MIN_FEATURE apart;
 /// - no corner where the outline doubles back on itself (a cusp);
 /// - any two pieces, in any loops, are at least MIN_FEATURE apart, apart
 ///   from where they meet at a shared corner; this also rules out crossings,
@@ -569,6 +530,24 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
     let (lo, hi) = loops[0].iter().map(bounds).fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
     if (hi - lo).max_element() > MAX_SIZE {
         return bad(format!("profile spans {:e} mm; the limit is {MAX_SIZE:e} mm", (hi - lo).max_element()));
+    }
+    // A loop of two corners: both its pieces end at both corners, so the
+    // clearance check below, which ignores where pieces meet, never measures
+    // how far apart the corners are. Closer than MIN_FEATURE, a straight
+    // piece is shorter than a feature may be (under LINEAR, too short to be
+    // an edge at all) or two arcs pinch to a neck. A loop of three or more
+    // corners needs no such rule: the pieces either side of a short one are
+    // then no further apart than its length, which the clearance check does
+    // measure.
+    for (k, segs) in loops.iter().enumerate() {
+        if let [s, _] = segs.as_slice() {
+            let gap = s.ends()[0].distance(s.ends()[1]);
+            if gap < MIN_FEATURE {
+                return bad(format!(
+                    "profile loop {k} has its two corners {gap:e} mm apart; features must be at least {MIN_FEATURE} mm"
+                ));
+            }
+        }
     }
     // Cusps: arriving at a corner and leaving straight back the way it came.
     for (k, segs) in loops.iter().enumerate() {
@@ -931,6 +910,46 @@ mod tests {
         assert!(check_profile(&bowl(-0.5)).is_ok());
         assert!(refused(bowl(-1.0)).contains("doubles back"));
         assert!(refused(bowl(-1.5)).contains("apart"));
+    }
+
+    /// The bulge of an arc of radius `r` on a chord `c`, the long way round:
+    /// from r = c(1 + β²)/(4β), β² − (4r/c)·β + 1 = 0, whose larger root is
+    /// β = (k + √(k² − 4))/2 with k = 4r/c (the smaller, 1/β, is the short
+    /// way round the same circle).
+    fn long_way(r: f64, c: f64) -> f64 {
+        let k = 4.0 * r / c;
+        (k + (k * k - 4.0).sqrt()) / 2.0
+    }
+
+    #[test]
+    fn two_corners_closer_than_min_feature_are_refused() {
+        // Regression (white-box hunt): a loop of two corners c apart, the
+        // long way round a circle of radius 1 and the straight line back
+        // (a "D" with a flat c long). Both pieces end at both corners, so
+        // the clearance check, which ignores where pieces meet, never
+        // measured c: a 0.5 µm flat was accepted, and below LINEAR the
+        // extrude built a body with a too-short edge and panicked.
+        // The flat is a straight piece, so it must be MIN_FEATURE long:
+        // c = 1.1 × and exactly MIN_FEATURE are legal, 0.9 × is not.
+        let d = |c: f64| Profile { outer: path(&[(0.0, 0.0), (c, 0.0)], &[-long_way(1.0, c), 0.0]), holes: vec![] };
+        for (c, legal) in [(1.1 * MIN_FEATURE, true), (MIN_FEATURE, true), (0.9 * MIN_FEATURE, false), (5e-6, false), (1e-150, false)] {
+            match check_profile(&d(c)) {
+                Ok(_) => assert!(legal, "a flat {c:e} mm long was accepted"),
+                Err(KernelError::InvalidInput(m)) => {
+                    assert!(!legal, "a flat {c:e} mm long was refused: {m}");
+                    assert!(m.contains("two corners"), "{m}");
+                }
+                Err(e) => panic!("{e:?}"),
+            }
+        }
+        // Two arcs instead (two circles of radius 1 meeting through a gap
+        // c wide: a figure of eight whose neck is c), and the D as a hole.
+        let eight = |c: f64| Profile { outer: path(&[(0.0, 0.0), (c, 0.0)], &[-long_way(1.0, c), -long_way(1.0, c)]), holes: vec![] };
+        let hole = |c: f64| Profile { outer: Boundary::polygon(square(-5.0, -5.0, 10.0)), holes: vec![d(c).outer] };
+        for make in [&eight as &dyn Fn(f64) -> Profile, &hole] {
+            assert!(check_profile(&make(1.1 * MIN_FEATURE)).is_ok());
+            assert!(refused(make(0.9 * MIN_FEATURE)).contains("two corners"));
+        }
     }
 
     #[test]
@@ -1334,6 +1353,63 @@ mod tests {
             ("triangle", pieces(&[(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (5.0, 5.0)], &[]), vec![((5.0, 1.0), 1), ((5.0, -1.0), 0)]),
             ("circle", vec![Seg::Circle { center: p(1.0, 2.0), radius: 3.0, ccw: true }], vec![((1.0, 4.9), 1), ((1.0, 5.1), 0)]),
         ]
+    }
+
+    #[test]
+    fn orientation_of_slivers() {
+        // The area sign at the edge of the range, where its rounding is
+        // largest and the area smallest (counter_clockwise's comment).
+        // Listed counter-clockwise, check_profile keeps the outer loop as
+        // given; listed clockwise, it reverses it.
+        let o = p(MAX_COORD - MAX_SIZE, MAX_COORD - 1001.0);
+        // A 1 km sliver triangle 100 km out, its short side 1.1·MIN_FEATURE:
+        // area = base·height/2 = 1e6 · 1.1e-3 / 2 = 550 mm².
+        let w = 1.1 * MIN_FEATURE;
+        let tri = vec![o, o + p(MAX_SIZE, 0.0), o + p(MAX_SIZE, w)];
+        // A comb along the same kilometre, also 100 km out: a strip
+        // 2·MIN_FEATURE high with 490 teeth (1,963 corners, near the limit)
+        // of width half the pitch p = 1e6/490 and height 1000, so the area
+        // is 1e6 · 2e-3 + 490 · (p/2) · 1000 = 2000 + 1e6 · 1000 / 2 = 500,002,000.
+        let teeth = 490;
+        let pitch = MAX_SIZE / teeth as f64;
+        let base = 2.0 * MIN_FEATURE;
+        let mut comb = vec![o + p(MAX_SIZE, 0.0), o + p(MAX_SIZE, base)];
+        for i in (0..teeth).rev() {
+            let x = i as f64 * pitch;
+            comb.extend([o + p(x + pitch / 2.0, base), o + p(x + pitch / 2.0, base + 1000.0), o + p(x, base + 1000.0)]);
+            if i > 0 {
+                comb.push(o + p(x, base));
+            }
+        }
+        comb.push(o);
+        assert!(comb.len() <= MAX_PROFILE_CORNERS);
+        for (name, corners, area) in [("sliver", tri, 550.0), ("comb", comb, 500_002_000.0)] {
+            let loops = ok(Profile::polygon(corners.clone(), vec![]));
+            // Rounding: about n·(L² + L·MAX_COORD)·1e-16, under 0.03 mm².
+            assert!((signed_area(&loops[0]) - area).abs() < 0.03, "{name}: {}", signed_area(&loops[0]));
+            assert_eq!(loops[0][0].ends()[0], corners[0], "{name} kept as given");
+            let mut back = corners.clone();
+            back.reverse();
+            let loops = ok(Profile::polygon(back, vec![]));
+            assert!((signed_area(&loops[0]) - area).abs() < 0.03, "{name} reversed: {}", signed_area(&loops[0]));
+        }
+    }
+
+    #[test]
+    fn exact_sign_of_a_straight_sliver() {
+        // The sliver of tolerance::tests, as pieces: corners o = (0, 0),
+        // A = (1 + t, 1), B = (1, 1 − t), C = (0, t²/2), t = 2⁻³⁰; twice its
+        // area is (1 + t)(1 − t) − 1 + t²/2 = −t²/2, so the area is
+        // −t²/4 = −2⁻⁶²: clockwise. (Far too small for a checked profile;
+        // this is signed_area alone.) Plain doubles, as signed_area used to
+        // add it, round (1 + t)(1 − t) to 1 and get +2⁻⁶², counter-clockwise.
+        let t = (2f64).powi(-30);
+        let c = [p(0.0, 0.0), p(1.0 + t, 1.0), p(1.0, 1.0 - t), p(0.0, t * t / 2.0)];
+        let segs: Vec<Seg> = (0..4).map(|i| Seg::Line { a: c[i], b: c[(i + 1) % 4] }).collect();
+        assert_eq!(signed_area(&segs), -(2f64).powi(-62));
+        assert!(!counter_clockwise(&segs));
+        assert_eq!(signed_area(&reversed(&segs)), (2f64).powi(-62));
+        assert!(counter_clockwise(&reversed(&segs)));
     }
 
     #[test]

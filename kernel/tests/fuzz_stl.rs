@@ -26,6 +26,7 @@
 //! workflow (`.github/workflows/fuzz.yml`). A failing input saved in
 //! `tests/regressions/fuzz-stl/` is replayed forever by
 //! `saved_fuzz_inputs_still_pass`.
+use fission_kernel::ops::KernelError;
 use fission_kernel::ops::extrude::extrude;
 use fission_kernel::ops::primitives::{make_box, make_cylinder, make_sphere};
 use fission_kernel::ops::profile::{Boundary, Profile};
@@ -119,11 +120,21 @@ fn starting_files(rng: &mut Rng) -> Vec<(Vec<u8>, bool)> {
             1 => make_cylinder(size(rng), size(rng)),
             2 => make_sphere(size(rng)),
             _ => {
-                let n = 3 + rng.below(6);
-                let r = size(rng);
-                let corners = (0..n).map(|i| DVec2::from_angle(std::f64::consts::TAU * i as f64 / n as f64) * r).collect();
-                let bulges = (0..n).map(|_| if rng.chance(0.5) { 0.0 } else { rng.unit() * 0.5 }).collect();
-                extrude(&Profile { outer: Boundary::Path { corners, bulges }, holes: vec![] }, size(rng))
+                // A small polygon with arcs can bring two pieces closer than
+                // MIN_FEATURE; the kernel refuses that cleanly, so draw again.
+                let mut tries = 0;
+                loop {
+                    let n = 3 + rng.below(6);
+                    let r = size(rng);
+                    let corners = (0..n).map(|i| DVec2::from_angle(std::f64::consts::TAU * i as f64 / n as f64) * r).collect();
+                    let bulges = (0..n).map(|_| if rng.chance(0.5) { 0.0 } else { rng.unit() * 0.5 }).collect();
+                    let body = extrude(&Profile { outer: Boundary::Path { corners, bulges }, holes: vec![] }, size(rng));
+                    tries += 1;
+                    match body {
+                        Err(KernelError::InvalidInput(_)) if tries < 100 => continue,
+                        other => break other,
+                    }
+                }
             }
         };
         let body = body.expect("a valid starting body");
@@ -573,4 +584,17 @@ fn the_checks_can_fail() {
     let small = shrink(b.clone(), true, "an unbroken export of a closed body is not closed after reading");
     assert!(small.len() <= 134);
     assert!(check(&small, true).is_some());
+}
+
+#[test]
+fn a_starting_profile_the_kernel_refuses_is_drawn_again() {
+    // Regression: in a long run (2026-10-17) this round's random extrude
+    // profile, an octagon with arcs, had two of its pieces 0.0006 mm apart.
+    // The kernel rightly refused it (features must be at least 0.001 mm),
+    // but the fuzzer took any refusal as a crash of its own and stopped
+    // the whole run. A refused profile is drawn again instead.
+    let files = starting_files(&mut Rng(12801071508937853357));
+    // Four closed bodies (box, cylinder, sphere, extrusion) and two soups.
+    assert_eq!(files.iter().filter(|f| f.1).count(), 4);
+    assert_eq!(files.len(), 6);
 }
