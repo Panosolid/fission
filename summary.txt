@@ -1,10 +1,10 @@
-Fission random testing, all runs so far (updated 2026-10-17 00:09 UTC)
+Fission random testing, all runs so far (updated 2026-10-17 02:38 UTC)
 
-hours of testing:                 147.4
-rounds:                           2127
-random operation chains:          4254000
+hours of testing:                 151.5
+rounds:                           2188
+random operation chains:          4376000
 rounds where the harness failed:  261
-bodies compared with OpenCascade: 8110823
+bodies compared with OpenCascade: 8360531
 OpenCascade disagreements:        335
 last problem found:               2026-10-16 22:27:31 (seed 231257289251944, commit 810d41c on main)
 
@@ -15,8 +15,18 @@ failure-dumps/*/index.html is a 3D view with the problem in red.
 The commit and branch columns of log.csv (and commit.txt in each
 failures folder) say which code a round tested.
 
-Latest mutation run (whole kernel, lib tests), 2026-10-16 22:38 UTC, commit 810d41c on main:
+Latest mutation run (whole kernel, lib tests), 2026-10-17 02:38 UTC, commit 0ad1851 on claude/project-thread-alnv50:
   shards finished: 4 of 4
-  caught 2348, missed 144, timed out 58, unviable 80
-  survivors not in the previous complete run: 0
+  caught 2411, missed 1, timed out 64, unviable 82
+  survivors not in the previous complete run: 1
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
+
+Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
+  tested commit 0ad1851 on claude/project-thread-alnv50, 2026-10-17 02:38 UTC (https://github.com/benpy28/fission/actions/runs/38988561605)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.95 s (baseline 1.23 s)
+  PENDING Box to laser panels: waits for Laser (L1–L3), X13
+  PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
+  PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
+  PENDING Photo to lithophane: waits for Image (G2), Slice (P2)
+  PENDING Part to simulation and back: waits for Simulate (S3), parameters (34, I18)
+journeys/flags.txt lists every FLAG line so far.

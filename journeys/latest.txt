@@ -1,0 +1,7 @@
+tested commit 0ad1851 on claude/project-thread-alnv50, 2026-10-17 02:38 UTC (https://github.com/benpy28/fission/actions/runs/38988561605)
+OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.95 s (baseline 1.23 s)
+PENDING Box to laser panels: waits for Laser (L1–L3), X13
+PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
+PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
+PENDING Photo to lithophane: waits for Image (G2), Slice (P2)
+PENDING Part to simulation and back: waits for Simulate (S3), parameters (34, I18)
