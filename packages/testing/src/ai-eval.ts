@@ -140,7 +140,7 @@ export async function runEval(provider: AIProvider, cases: readonly EvalCase[], 
   const results: EvalResult[] = [];
   for (const c of cases) {
     if (c.waitsFor) continue;
-    const system = systemPrompt(c.setup);
+    const system = systemPrompt(c.setup, specs);
     const answer = await askForCommands(provider, { system, messages: [{ role: "user", content: c.prompt }] }, specs);
     const passed = answer.ok && matches(answer.commands, c.expected);
     results.push({ id: c.id, taskType: c.taskType, passed, attempts: answer.ok ? answer.attempts : 0, detail: answer.ok ? JSON.stringify(answer.commands) : answer.error });

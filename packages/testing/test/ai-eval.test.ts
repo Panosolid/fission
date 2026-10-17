@@ -79,3 +79,20 @@ test("the suite scores a provider on the held-out cases", async () => {
   assert.deepEqual(successRates(results), { create: 1 / 8, "edit-parameter": 0 });
   assert.deepEqual(results.filter((r) => r.passed).map((r) => r.id), ["held-cylinder-radius"]);
 });
+
+test("the evaluation asks with Design's own command wording, as the panel does", async () => {
+  const systems: string[] = [];
+  const provider: AIProvider = {
+    kind: "ollama",
+    structuredOutput: true,
+    check: async () => ({ ok: true }),
+    complete: async (r) => {
+      systems.push(r.system);
+      return JSON.stringify({ commands: [] });
+    },
+  };
+  await runEval(provider, HELD_OUT_CASES.slice(0, 1), DESIGN_COMMANDS.filter((c) => c.op === "set_part"));
+  // Design's set_part says width is the diameter for cylinders and spheres; the model only learns it from the prompt.
+  assert.match(systems[0], /^ {2}width: width, or diameter for a cylinder or sphere \(millimetres\)$/m);
+  assert.doesNotMatch(systems[0], /export/i, "only the offered command is described");
+});
