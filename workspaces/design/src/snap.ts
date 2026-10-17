@@ -57,7 +57,7 @@ export type Snap =
 
 const same = (a: SketchXY, b: SketchXY) => a[0] === b[0] && a[1] === b[1];
 
-/** The tool's own clicks so far (a chain's last point, a first corner, a centre, an arc's start and end); none before them. A kind it does not know has none. */
+/** The tool's own clicks so far (a chain's last point, a first corner, a centre, an arc's start and end, a tangent arc's start); none before them. A kind it does not know has none. */
 function ownClicks(sketch: Sketch, tool: SketchTool): SketchXY[] {
   if (tool.kind === "line") {
     if (tool.from === null) return [];
@@ -66,6 +66,10 @@ function ownClicks(sketch: Sketch, tool: SketchTool): SketchXY[] {
     return p ? [[p.x, p.y]] : [];
   }
   if (tool.kind === "arc") return [tool.start, tool.end].filter((p) => p !== null);
+  if (tool.kind === "tangent") {
+    const p = sketch.points.find((x) => x.id === tool.from);
+    return p ? [[p.x, p.y]] : [];
+  }
   const at = tool.kind === "rectangle" ? tool.corner : tool.kind === "circle" ? tool.centre : null;
   return at ? [at] : [];
 }
