@@ -36,12 +36,13 @@ export type SketchXY = readonly [number, number];
  * A sketch as the viewport draws it (step 21c): its lines in its plane's
  * frame (x along `xAxis`, y along normal × xAxis), drawn over the body.
  * The sketch being edited also has its grid (spacing in mm), its points
- * and the rubber-band line from the chain's last point to the pointer.
+ * and what the tool would draw at the pointer (the line tool's rubber
+ * band, a rectangle's four sides), empty when it would draw nothing.
  */
 export interface SketchDrawing {
   plane: Plane;
   lines: readonly (readonly [SketchXY, SketchXY])[];
-  editing?: { grid: number; points: readonly SketchXY[]; preview: readonly [SketchXY, SketchXY] | null };
+  editing?: { grid: number; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[] };
 }
 
 /** An origin plane drawn small at the origin to be picked (Create sketch); one not offered is drawn faint and can't be clicked. */

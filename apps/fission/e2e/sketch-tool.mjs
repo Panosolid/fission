@@ -5,7 +5,11 @@
 // point; Ctrl+Z undoes one drawn line and you stay in the sketch; the grid
 // size is typeable and a bad one is refused with the kernel's reason;
 // Escape ends a chain; Finish sketch leaves it drawn. The same at 375 px
-// wide with taps. Screenshots at 1280 and 375 px go to E2E_SHOTS when set.
+// wide with taps. The rectangle tool (step 22a): R or its button, two
+// corners make four lines as one undo step, a corner on the first one's
+// row draws nothing and says why, Escape drops the first corner, L goes
+// back to lines; extruded it is a box of the hand-worked volume; the same
+// at 375 px. Screenshots at 1280 and 375 px go to E2E_SHOTS when set.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -62,7 +66,7 @@ const undoTitle = (page) => page.evaluate(() => document.getElementById("undo").
 const until = (page, fn, arg, what) =>
   page.waitForFunction(fn, arg, { timeout: 5000 }).catch(async () => assert.fail(`${what}: timed out`));
 /** Waits until the edited sketch shows these points (the kernel snaps each click first). */
-const points = (page, want) => until(page, (w) => document.querySelector("#viewport").dataset.sketchPoints === w, want, `points ${want}`);
+const points = async (page, want) => until(page, (w) => document.querySelector("#viewport").dataset.sketchPoints === w, want, `points ${want} (shown: ${await data(page, "sketchPoints")})`);
 /** Waits until the status starts with `prefix` (the rest is the kernel's reason). */
 const statusStarts = (page, prefix) => until(page, (w) => document.querySelector("#sketch-status")?.textContent.startsWith(w), prefix, `status "${prefix}…"`);
 const status = (page, want) => until(page, (w) => document.querySelector("#sketch-status")?.textContent === w, want, `status "${want}"`);
@@ -198,6 +202,90 @@ try {
     if (shots) await page.screenshot({ path: `${shots}/sketch-draw-375.png`, fullPage: true });
     await page.tap("#undo");
     await statusStarts(page, "2 lines, not closed: ");
+    await page.context().close();
+  });
+
+  await check("the rectangle tool: R, two corners make four lines as one undo step, a corner on the row says why, Escape, L, extruded 10 mm is 12,000 mm³", async () => {
+    const page = await fresh();
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    assert.equal(await page.getAttribute("#sketch-tool-line", "aria-pressed"), "true", "Line is the tool a sketch starts with");
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("r");
+    assert.equal(await page.getAttribute("#sketch-tool-rectangle", "aria-pressed"), "true", "R chose Rectangle");
+    assert.equal(await page.getAttribute("#sketch-tool-line", "aria-pressed"), "false");
+    assert.match(await page.textContent("#sketch-help"), /^Click one corner, then the opposite corner/);
+    // Pressed looks pressed (sketch.css, the toolbar's pressed colours), the other not.
+    const fill = (id) => page.evaluate((i) => getComputedStyle(document.getElementById(i)).backgroundColor, id);
+    assert.deepEqual([await fill("sketch-tool-rectangle"), await fill("sketch-tool-line")], ["rgb(35, 56, 79)", "rgb(38, 42, 49)"]);
+    // Corner (0, 0), then the pointer at (38, 31) snaps to (40, 30): the preview is the four sides.
+    await at(page, [1.5, -2], TOP);
+    await points(page, "0,0");
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const hover = screenPoint(box, [38, 31, 0], TOP);
+    await page.mouse.move(hover.x, hover.y);
+    await until(page, () => document.querySelector("#viewport").dataset.sketchPreview === "0,0 40,0 | 40,0 40,30 | 40,30 0,30 | 0,30 0,0", null, "the rectangle's preview");
+    // A second corner on the first one's row: nothing drawn, and the reason under the grid.
+    await at(page, [30, 2], TOP);
+    await until(page, () => !document.querySelector("#sketch-grid-error").hidden, null, "the row note");
+    assert.match(await page.textContent("#sketch-grid-error"), /^A rectangle needs a width and a height/);
+    assert.equal(await data(page, "sketchLines"), "0");
+    await at(page, [41, 29], TOP);
+    await status(page, "4 lines, a closed outline.");
+    assert.equal(await page.isHidden("#sketch-grid-error"), true, "the note goes once a rectangle is drawn");
+    await points(page, "0,0 40,0 40,30 0,30");
+    assert.equal(await undoTitle(page), "Undo Draw rectangle (Ctrl+Z)");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-rectangle-1280.png` });
+    // One Ctrl+Z takes the whole rectangle back, staying in the sketch with the rectangle tool.
+    await page.keyboard.press("Control+z");
+    await status(page, "No lines yet.");
+    assert.equal(await page.getAttribute("#sketch-tool-rectangle", "aria-pressed"), "true", "still the rectangle tool after Undo");
+    await page.keyboard.press("Control+Shift+z");
+    await status(page, "4 lines, a closed outline.");
+    await page.keyboard.press("Control+z");
+    await status(page, "No lines yet.");
+    // Two clicks after the Undo draw a rectangle again: the tool really is still Rectangle, not only its button.
+    await at(page, [1.5, -2], TOP);
+    await at(page, [41, 29], TOP);
+    await status(page, "4 lines, a closed outline.");
+    // Escape drops a first corner: the next click is a first corner again.
+    await at(page, [20, 40], TOP);
+    await points(page, "0,0 40,0 40,30 0,30 20,40");
+    await page.keyboard.press("Escape");
+    await points(page, "0,0 40,0 40,30 0,30");
+    assert.equal(await data(page, "sketchPreview"), "");
+    // L goes back to lines; typing r in the grid box doesn't switch tools.
+    await page.keyboard.press("l");
+    assert.equal(await page.getAttribute("#sketch-tool-line", "aria-pressed"), "true", "L chose Line");
+    await page.focus("#sketch-grid");
+    await page.keyboard.press("r");
+    assert.equal(await page.getAttribute("#sketch-tool-line", "aria-pressed"), "true", "a key typed in a field is the field's");
+    // Extruded 10 mm: 40 · 30 · 10 = 12,000 mm³.
+    await page.click("#sketch-extrude");
+    await until(page, () => document.querySelector("#extrude-ok")?.disabled === false, null, "Extrude's OK on");
+    await page.fill("#extrude-distance", "10");
+    await page.click("#extrude-ok");
+    await until(page, () => document.querySelector("#volume")?.textContent === "12,000 mm³", null, "12,000 mm³");
+    // Outside a sketch R does nothing to Design.
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("r");
+    assert.equal(await page.isVisible("#sketch-panel"), false);
+    await page.context().close();
+  });
+
+  await check("the rectangle tool at 375 px with taps: the tool buttons fit and are 44 px, two taps make a closed rectangle", async () => {
+    const page = await fresh(375, true);
+    await page.tap("#create-sketch");
+    await page.tap("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.tap("#sketch-tool-rectangle");
+    const button = await page.locator("#sketch-tool-rectangle").boundingBox();
+    assert.ok(button.height >= 44, `Rectangle is ${button.height} px tall, at least 44 to tap`);
+    for (const p of [[0, 0], [30, 20]]) await at(page, p, TOP, true);
+    await status(page, "4 lines, a closed outline.");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-rectangle-375.png`, fullPage: true });
     await page.context().close();
   });
 
