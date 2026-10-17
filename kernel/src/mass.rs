@@ -227,11 +227,6 @@ fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
     }
 }
 
-/// Temporary: a planted surviving mutant for the sharded CI check (no test calls it).
-pub fn planted_survivor(x: f64) -> f64 {
-    x * 2.0
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
