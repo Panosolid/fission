@@ -1,5 +1,5 @@
 // The Design workspace: the CAD, and the source of truth for all geometry.
-// Until the sketcher (steps 21–31) it builds primitives and ready-made
+// Until the sketcher (steps 21–33) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
@@ -74,7 +74,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   extrude.type = "button";
   extrude.id = "extrude";
   extrude.textContent = "Extrude";
-  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 32).";
+  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 24).";
   extrude.addEventListener("click", onExtrude);
   sketch.append(sketchName, create, extrude);
   slot.append(sketch);
@@ -125,7 +125,7 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
  * Fills the browser slot with the document's tree: groups fold (native
  * details/summary). A row for selectable geometry (Body 1, a profile) is a button
  * that selects it (Shift adds or takes out); the others are plain rows
- * until features (step 32) and origin planes (step 21) can be selected.
+ * until features (step 24) and origin planes (step 21) can be selected.
  * Rebuilt on every edit; folding is kept by id.
  */
 function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void) {

@@ -1,4 +1,4 @@
-// Seeded random timeline sessions (steps 32-33): the harness that checks a
+// Seeded random timeline sessions (steps 24-25): the harness that checks a
 // timeline implementation (the "subject") against the model in
 // timeline-model.ts, step by step.
 //
@@ -19,8 +19,8 @@
 //   when the model still has it, and to nothing when it doesn't, never to
 //   another face;
 // - saving and opening changes neither the rebuild nor the saved text.
-// Until step 32b the only subject is the model itself (`modelSubject`),
-// with bugs planted through `faults` to show each check can fail; 32d plugs
+// Until step 24b the only subject is the model itself (`modelSubject`),
+// with bugs planted through `faults` to show each check can fail; 24d plugs
 // in Design's real timeline on the real kernel.
 
 import { seeded, type SeededRandom } from "./index.ts";

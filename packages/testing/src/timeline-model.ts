@@ -1,4 +1,4 @@
-// A simple model of Design's timeline (steps 32-33), written apart from
+// A simple model of Design's timeline (steps 24-25), written apart from
 // Design's code, for the seeded random timeline sessions to check the real
 // rebuild against (docs/progress/cad.md, "Timeline test plan").
 //
@@ -74,7 +74,7 @@ export interface ModelDoc {
 }
 
 /**
- * The proposed naming scheme (decided for good at 32b): a face is named by
+ * The proposed naming scheme (decided for good at 24b): a face is named by
  * the feature that made it, its role in that feature and, for a face swept
  * from a sketch curve, that curve's id. An extrude's caps are "start" (on
  * the sketch plane) and "end"; a box's faces are named by their outward

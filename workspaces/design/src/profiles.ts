@@ -1,4 +1,4 @@
-// Ready-made outlines for the extrude demo, until the sketcher (steps 21–31)
+// Ready-made outlines for the extrude demo, until the sketcher (steps 21–33)
 // lets people draw their own. Each fits a width × depth rectangle with one
 // corner at the origin, in the form the kernel takes (ProfileIn in
 // kernel/src/lib.rs): loops of corners [x0, y0, x1, y1, …] with one bulge

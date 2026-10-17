@@ -5,7 +5,7 @@
 // the sketch rebuilds the solid (a live link), and a sketch that no longer
 // closes makes the build fail with the kernel's reason.
 //
-// Until the timeline (step 32) the part is one body, so extruding a sketch
+// Until the timeline (step 24) the part is one body, so extruding a sketch
 // replaces the part's solid feature, as one undo step that says so.
 
 import type { BodySpec, Feature, KernelCalls } from "@fission/core";
@@ -38,7 +38,7 @@ export function extrudeSketch(doc: DesignDocument, sketchId: string, distance: n
   const feature: Feature = {
     id,
     intent: { type: "extrude", parameters: { sketch: sketchId, distance }, summary: summary(label, distance) },
-    // "Extrude 1": the one solid feature until step 32 numbers them by position.
+    // "Extrude 1": the one solid feature until step 24 numbers them by position.
     provenance: { self: { workspace: "design", id, label: "Extrude 1" }, from: [{ workspace: "design", id: sketchId, label }] },
     dependsOn: [sketchId],
     suppressed: false,
@@ -68,7 +68,7 @@ export async function featureSpec(kernel: KernelCalls, doc: DesignDocument, feat
   const { sketch, distance } = feature.intent.parameters;
   const item = doc.timeline.features.find((f) => f.id === sketch && isSketchItem(f));
   if (!item) throw new Error(`${feature.intent.summary}: its sketch ${shown(sketch)} is missing`);
-  // The kernel extrudes along +Z: a sketch on XZ or YZ needs placing, which comes with sketches on other planes (step 24).
+  // The kernel extrudes along +Z: a sketch on XZ or YZ needs placing, which comes with sketches on other planes (step 26).
   if (item.intent.parameters.plane !== "XY")
     throw new Error(`${feature.intent.summary}: ${item.provenance.self.label} is on the ${shown(item.intent.parameters.plane)} plane, and only sketches on the XY plane can be extruded so far`);
   if (typeof distance !== "number") throw new Error(`${feature.intent.summary}: distance must be a number`);

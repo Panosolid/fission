@@ -1,6 +1,6 @@
 // Design's browser panel, read from the Design document (document.ts):
 // the timeline's items in build order, the sketches and profiles, the
-// bodies they make, and the origin's planes and axes. A pure function of the document, so step 32's
+// bodies they make, and the origin's planes and axes. A pure function of the document, so step 24's
 // longer timeline only adds rows here.
 
 import { profileLabel, type DesignDocument } from "./document.ts";

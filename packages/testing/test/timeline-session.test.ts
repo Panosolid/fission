@@ -2,7 +2,7 @@
 // on the model run as a subject pass and reach every kind of outcome, the
 // same seed gives the same session, the comparer's tolerance is checked at
 // 0.9× and 1.1×, and every check is shown failing: each planted bug in
-// MODEL_FAULTS is caught by the check meant for it. Step 32d runs the same
+// MODEL_FAULTS is caught by the check meant for it. Step 24d runs the same
 // sessions on Design's real timeline (journeys/timeline.journey.ts).
 //
 // Longer runs: FISSION_SEED (decimal) picks one seed, FISSION_TIMELINE_STEPS

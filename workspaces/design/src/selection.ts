@@ -60,7 +60,7 @@ export function selectionRows(items: readonly GeometryReference[], featureId: st
 }
 
 /**
- * What survives a rebuild (17e). Until topological naming (step 32) a face
+ * What survives a rebuild (17e). Until topological naming (step 24) a face
  * or edge is only its kernel index, so it is kept when the rebuilt body
  * still has that index with the same surface or curve type, on a body with
  * the same numbers of vertices, edges and faces as `before` (a resize keeps
