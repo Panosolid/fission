@@ -102,15 +102,22 @@ struct Chord {
     edge: usize,
     /// Interval k of the edge: between params[edge][k] and [k + 1].
     k: usize,
+    /// For a chord of an arc, the arc's centre in uv.
+    center: Option<DVec2>,
 }
 
 /// Splits chords of curved edges until no two chords of any planar face's
-/// boundary touch except where they share an end point. A chord sags inside
-/// its arc by up to the chord tolerance, so where a wall is thinner than
-/// that the chords of one side would cut through the other. Each split
-/// quarters the sag, so this stops once chords sag less than the gap.
-/// Chords of straight edges can't be split: if two of them touch, the face
-/// itself crosses itself and that is an error.
+/// boundary touch except where they share an end point, and no chord's
+/// circular segment (the sliver between it and its arc) holds any other
+/// boundary. A chord sags inside its arc by up to the chord tolerance, so
+/// where a wall is thinner than that the chords of one side would cut
+/// through the other. A chord can also pass another boundary without
+/// touching it: a corner between the chord and its arc ends up on the
+/// wrong side, and the meshed loop turns inside out (a shallow arc of huge
+/// radius gets one chord, and the corner beside it is only 1e-5 above it).
+/// Each split quarters the sag, so this stops once chords sag less than
+/// the gap. Chords of straight edges can't be split: if two of them touch,
+/// the face itself crosses itself and that is an error.
 fn conform_planar_faces(body: &Body, params: &mut [Vec<f64>]) -> Result<(), TessError> {
     let snap = |p: DVec2| {
         let s = |x: f64| if x.abs() < tolerance::SNAP_TO_ZERO { 0.0 } else { x };
@@ -132,6 +139,10 @@ fn conform_planar_faces(body: &Body, params: &mut [Vec<f64>]) -> Result<(), Tess
                         k if k == ps.len() - 1 => BoundaryPoint::Vertex(e.end),
                         k => BoundaryPoint::OnEdge(c.edge, k),
                     };
+                    let center = match e.curve {
+                        Curve::Circle { center, .. } => Some(snap(face.surface.project(center))),
+                        Curve::Line { .. } => None,
+                    };
                     let uv = |k: usize| {
                         let p = match k {
                             0 => body.vertices[e.start].point,
@@ -141,7 +152,7 @@ fn conform_planar_faces(body: &Body, params: &mut [Vec<f64>]) -> Result<(), Tess
                         snap(face.surface.project(p))
                     };
                     for k in 0..ps.len() - 1 {
-                        chords.push(Chord { a: uv(k), b: uv(k + 1), ends: [id(k), id(k + 1)], edge: c.edge, k });
+                        chords.push(Chord { a: uv(k), b: uv(k + 1), ends: [id(k), id(k + 1)], edge: c.edge, k, center });
                     }
                 }
             }
@@ -151,6 +162,14 @@ fn conform_planar_faces(body: &Body, params: &mut [Vec<f64>]) -> Result<(), Tess
                     return Err(TessError { face: fi, message: "face boundary crosses itself".into() });
                 }
                 for c in [s, t].into_iter().filter(|c| curved(c)) {
+                    split.push((c.edge, c.k));
+                }
+            }
+            // The owner of the segment is curved; the intruder, if curved
+            // too, is split as well, so a chord passing through the sliver
+            // (in and out across the arc) stops reaching it sooner.
+            for (s, t) in sagging_pairs(&chords) {
+                for c in [s, t].into_iter().filter(|c| c.center.is_some()) {
                     split.push((c.edge, c.k));
                 }
             }
@@ -228,6 +247,82 @@ fn touching_pairs(chords: &[Chord]) -> Vec<(&Chord, &Chord)> {
             };
             if touches {
                 out.push((s, t));
+            }
+        }
+        active.push(i);
+    }
+    out
+}
+
+/// Whether chord `t` reaches into the circular segment of chord `s`: the
+/// open region between `s` and its arc, which is the part of the arc's
+/// disc on the far side of `s` from the centre (every chord spans at most
+/// a third of a turn, so its arc is the minor one). An end `t` shares with
+/// `s` doesn't count; a `t` sharing an end can only reach in with its
+/// other end, since it can't cross the arc (straight: the face would cross
+/// itself, which the profile rules refuse; curved: its own chord crosses
+/// `s`, or its arc enters `t`'s own segment the other way round).
+/// Inside the disc is tested with the power of the point,
+/// |x − c|² − |a − c|² = |x − a|² + 2(x − a)·(a − c), which stays accurate
+/// for centres far beyond the chord.
+fn reaches_into(s: &Chord, t: &Chord) -> bool {
+    let Some(c) = s.center else { return false };
+    let arc = -tolerance::side(s.a, s.b, c);
+    let power = |x: DVec2| (x - s.a).length_squared() + 2.0 * (x - s.a).dot(s.a - c);
+    let inside = |x: DVec2| tolerance::side(s.a, s.b, x) == arc && power(x) < 0.0;
+    let shared = t.ends.map(|e| s.ends.contains(&e));
+    if (!shared[0] && inside(t.a)) || (!shared[1] && inside(t.b)) {
+        return true;
+    }
+    if shared[0] || shared[1] {
+        return false;
+    }
+    // Both ends outside: t can still pass through, in and out across the
+    // arc. The part of t inside the disc solves power(a + λd) < 0, a
+    // quadratic |d|²λ² + 2λ·d·(t.a − c) + power(t.a); that part can't cross
+    // s without touching it, so its middle tells which side it is on.
+    let d = t.b - t.a;
+    let (qa, h) = (d.length_squared(), d.dot(t.a - c));
+    let disc = h * h - qa * power(t.a);
+    if disc <= 0.0 {
+        return false;
+    }
+    let root = disc.sqrt();
+    let (lo, hi) = (((-h - root) / qa).max(0.0), ((-h + root) / qa).min(1.0));
+    lo < hi && tolerance::side(s.a, s.b, t.a + d * (0.5 * (lo + hi))) == arc
+}
+
+/// Pairs (s, t) where chord t reaches into chord s's circular segment.
+/// Sweeps along u like `touching_pairs`, each chord's box grown by twice
+/// its sag (the segment lies within its sag of the chord).
+fn sagging_pairs(chords: &[Chord]) -> Vec<(&Chord, &Chord)> {
+    let boxes: Vec<(DVec2, DVec2)> = chords
+        .iter()
+        .map(|s| {
+            let grow = s.center.map_or(0.0, |c| {
+                let r = (s.a - c).length();
+                2.0 * (r - (0.5 * (s.a + s.b) - c).length()).max(0.0)
+            });
+            (s.a.min(s.b) - DVec2::splat(grow), s.a.max(s.b) + DVec2::splat(grow))
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..chords.len()).collect();
+    order.sort_by(|&i, &j| boxes[i].0.x.total_cmp(&boxes[j].0.x));
+    let mut active: Vec<usize> = Vec::new();
+    let mut out = Vec::new();
+    for &i in &order {
+        let (lo, hi) = boxes[i];
+        active.retain(|&j| boxes[j].1.x >= lo.x);
+        for &j in &active {
+            if boxes[j].1.y < lo.y || boxes[j].0.y > hi.y {
+                continue;
+            }
+            let (s, t) = (&chords[i], &chords[j]);
+            if reaches_into(s, t) {
+                out.push((s, t));
+            }
+            if reaches_into(t, s) {
+                out.push((t, s));
             }
         }
         active.push(i);
@@ -1117,7 +1212,7 @@ mod tests {
     /// A chord between two points with distinct vertex ids.
     fn chord(a: (f64, f64), b: (f64, f64), ends: [usize; 2]) -> Chord {
         let ends = ends.map(BoundaryPoint::Vertex);
-        Chord { a: DVec2::new(a.0, a.1), b: DVec2::new(b.0, b.1), ends, edge: 0, k: 0 }
+        Chord { a: DVec2::new(a.0, a.1), b: DVec2::new(b.0, b.1), ends, edge: 0, k: 0, center: None }
     }
 
     #[test]

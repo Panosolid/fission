@@ -114,8 +114,8 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
 mod tests {
     use super::*;
     use crate::tessellate::{tessellate, TessOptions};
-    use crate::tolerance::{eq, points_eq, rel_eq, FP_REL, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
-    use std::f64::consts::PI;
+    use crate::tolerance::{eq, points_eq, rel_eq, FP_REL, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
+    use std::f64::consts::{PI, TAU};
 
     fn v(p: &[(f64, f64)]) -> Vec<DVec2> {
         p.iter().map(|&(x, y)| DVec2::new(x, y)).collect()
@@ -394,5 +394,203 @@ mod tests {
         let outer = v(&[(0.0, 0.0), (3.0, 0.0), (0.0, 4.0)]).into_iter().map(|p| p + o).collect();
         let m = tessellate(&extrude(&Profile::polygon(outer, vec![]), 2.0).unwrap(), &TessOptions::DISPLAY).unwrap();
         assert!(rel_eq(m.signed_volume(), 12.0, FP_REL), "{}", m.signed_volume());
+    }
+
+    /// Chords on each arc edge of `b` (both caps' copies), from the display mesh.
+    fn arc_chords(b: &Body, m: &crate::mesh::Mesh) -> Vec<usize> {
+        let arcs = b.edges.iter().enumerate().filter(|(_, e)| matches!(e.curve, Curve::Circle { .. }));
+        arcs.map(|(i, _)| m.edge_polylines[i].len() - 1).collect()
+    }
+
+    #[test]
+    fn a_corner_under_a_shallow_arc_keeps_the_cap_right_side_out() {
+        // Regression (crash hunt fuzzing): before the fix the cap meshed
+        // inside out and `finish` panicked ("mesh has N open or flipped
+        // edges"). Arc from A (743.75, 0) to B (0, 0) with bulge 0.0009
+        // turns θ = 4·atan(0.0009) ≈ 0.0036 rad on a radius of
+        // 743.75 / (2 sin(θ/2)) ≈ 206.6 km, so it gets one chord (each may
+        // turn up to 2π/256 ≈ 0.0245 rad there). Turning counter-clockwise
+        // while heading −x it bows to +y, by the sagitta s = (L/2)·bulge =
+        // 371.875 · 0.0009 = 0.3346875. Corner C (275, 1e-5) is 1e-5 above
+        // the chord y = 0 but 0.3347 − 96.875²/(2r) ≈ 0.312 below the arc,
+        // so the one-chord loop A, B, C runs clockwise. One split puts M,
+        // the arc's middle (371.875, s), into the loop; chord B–M is at
+        // y = s·275/371.875 ≈ 0.2475 over C, so C is outside both halves'
+        // slivers and nothing more splits: 2 chords. The meshed cap is
+        // triangle A M B less triangle A B C: ½·743.75·(s − 1e-5).
+        let p = Profile { outer: path(&[(743.75, 0.0), (0.0, 0.0), (275.0, 1e-5)], &[0.0009, 0.0, 0.0]), holes: vec![] };
+        let b = extrude(&p, 10.0).unwrap();
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        assert_eq!(arc_chords(&b, &m), vec![2, 2]);
+        let s = 371.875 * 0.0009;
+        let v = 0.5 * 743.75 * (s - 1e-5) * 10.0;
+        // The middle point is on the arc to rounding, far inside LINEAR.
+        assert!((m.signed_volume() - v).abs() <= 0.5 * 743.75 * LINEAR * 10.0, "{} vs {v}", m.signed_volume());
+    }
+
+    #[test]
+    fn three_shallow_arcs_round_a_thin_wedge_mesh_closed() {
+        // Regression, the crash hunt's second case: three arcs of huge
+        // radius, each meshed as one chord at first, with the corner
+        // (441.875, 48.125) between the third chord and its arc. The mesh
+        // drops at most each arc's whole sliver, about (2/3)·chord·sagitta
+        // (sagitta = half chord × |bulge|), so it lies within that of the
+        // exact volume.
+        let corners = [(441.875, -0.4375), (441.875, 48.125), (441.8827, 441.882)];
+        let bulges = [0.0009, -0.0001, 0.0009];
+        let d = 0.063126;
+        let b = extrude(&Profile { outer: path(&corners, &bulges), holes: vec![] }, d).unwrap();
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        let slivers: f64 = (0..3)
+            .map(|i| {
+                let l = v(&[corners[i]])[0].distance(v(&[corners[(i + 1) % 3]])[0]);
+                2.0 / 3.0 * l * (0.5 * l * bulges[i].abs()) * d
+            })
+            .sum();
+        let exact = crate::mass::mass_properties(&b).volume;
+        assert!(m.signed_volume() > 0.0 && (m.signed_volume() - exact).abs() <= slivers, "{} vs {exact} ± {slivers}", m.signed_volume());
+    }
+
+    #[test]
+    fn a_sketch_outline_with_a_corner_under_its_arc_meshes_closed() {
+        // Regression, the crash hunt's third case, the outline a sketch gave
+        // (`sketch_outline`): the third corner is (−624.1, 1e-297), which
+        // the cap's uv snaps to y = 0, and the two arcs after it (both of
+        // radius c(1 + β²)/(4β) ≈ 78.75 m, turning 0.0056 and 0.0135 rad,
+        // under the 0.0245 rad step) start with one chord each. Bound as in the
+        // test above: within each arc's whole sliver of the exact volume.
+        let corners = [(-625.0, -624.0), (-624.0, -61.5), (-624.1, 1e-297), (-623.0, 437.5)];
+        let bulges = [0.0, 0.0, 0.001388890599666272, 0.003369808984516978];
+        let b = extrude(&Profile { outer: path(&corners, &bulges), holes: vec![] }, 1.0).unwrap();
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        let slivers: f64 = (0..4)
+            .map(|i| {
+                let l = v(&[corners[i]])[0].distance(v(&[corners[(i + 1) % 4]])[0]);
+                2.0 / 3.0 * l * (0.5 * l * bulges[i].abs())
+            })
+            .sum();
+        let exact = crate::mass::mass_properties(&b).volume;
+        assert!(m.signed_volume() > 0.0 && (m.signed_volume() - exact).abs() <= slivers, "{} vs {exact} ± {slivers}", m.signed_volume());
+    }
+
+    #[test]
+    fn a_hole_in_the_sliver_under_a_shallow_arc_is_meshed_as_a_hole() {
+        // The 743.75 × 10 plate whose top, A (743.75, 0) to B (0, 0), is the
+        // arc of the test above (sagitta s = 0.3346875 at x = 371.875), with
+        // a triangular hole (360, 0.3), (380, 0.3), (371.875, 0.32) wholly
+        // between the arc's first chord (y = 0) and the arc (0.0147 below
+        // its top): with one chord the hole sits outside the meshed outline.
+        // One split puts M (371.875, s) in; the halves pass over the hole
+        // (B–M is at y = s·360/371.875 ≈ 0.324 over (360, 0.3), and both
+        // meet at M, 0.0147 over the apex), so 2 chords. Meshed area: the
+        // rectangle, triangle A M B, less the hole: 7437.5 + ½·743.75·s −
+        // ½·20·0.02.
+        let hole = Boundary::polygon(v(&[(360.0, 0.3), (380.0, 0.3), (371.875, 0.32)]));
+        let outer = path(&[(743.75, 0.0), (0.0, 0.0), (0.0, -10.0), (743.75, -10.0)], &[0.0009, 0.0, 0.0, 0.0]);
+        let b = extrude(&Profile { outer, holes: vec![hole] }, 2.0).unwrap();
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        assert_eq!(arc_chords(&b, &m), vec![2, 2]);
+        let s = 371.875 * 0.0009;
+        let v = (7437.5 + 0.5 * 743.75 * s - 0.2) * 2.0;
+        assert!((m.signed_volume() - v).abs() <= 0.5 * 743.75 * LINEAR * 2.0, "{} vs {v}", m.signed_volume());
+    }
+
+    #[test]
+    fn a_chord_passing_through_another_arcs_sliver_is_split() {
+        // The plate [0, 743.75] × [−50, 0] whose top, A (743.75, 0) to B
+        // (0, 0), bows down by s₁ = 371.875·0.0009 (bulge −0.0009: heading
+        // −x it turns clockwise), over a hole [10, 733.75] × [−20, −0.3]
+        // whose top bows down by s₂ = 0.08 (bulge −0.08/361.875, radius
+        // 361.875²/(2·0.08) ≈ 818 m, inside the 1 km limit). Both arcs start
+        // with one chord. The hole's chord y = −0.3 crosses the outer
+        // arc, which is below −0.3 for 4x(L − x)/L² > 0.3/s₁ ≈ 0.896, i.e.
+        // x within 371.875·√(1 − 0.896) ≈ ±120 of the middle, while its ends
+        // (10, −0.3) are outside the outer sliver (the arc is at −0.0178
+        // there) and no chord crosses another: only the in-and-out test
+        // sees it, and both chords split. Then the hole's half chord from
+        // (10, −0.3) to (371.875, −0.38) is under the outer arc throughout:
+        // the gap, arc minus line, is least where their slopes match,
+        // 4s₁(L − 2x)/L² = 0.08/361.875, at x ≈ 326.2, where the arc is at
+        // −0.3297 and the line at −0.3699. So 2 chords each. The hole's arc
+        // stays 0.045 below the outer one at the middle, a legal wall.
+        // Meshed area: 743.75·50 − ½·743.75·s₁ − (723.75·19.7 − ½·723.75·s₂).
+        let s2 = 0.08;
+        let hole = path(&[(10.0, -0.3), (10.0, -20.0), (733.75, -20.0), (733.75, -0.3)], &[0.0, 0.0, 0.0, -s2 / 361.875]);
+        let outer = path(&[(743.75, 0.0), (0.0, 0.0), (0.0, -50.0), (743.75, -50.0)], &[-0.0009, 0.0, 0.0, 0.0]);
+        let b = extrude(&Profile { outer, holes: vec![hole] }, 3.0).unwrap();
+        let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.check_closed(), Ok(()));
+        assert_eq!(arc_chords(&b, &m), vec![2, 2, 2, 2]);
+        let s1 = 371.875 * 0.0009;
+        let v = (743.75 * 50.0 - 0.5 * 743.75 * s1 - (723.75 * 19.7 - 0.5 * 723.75 * s2)) * 3.0;
+        assert!((m.signed_volume() - v).abs() <= 743.75 * LINEAR * 3.0, "{} vs {v}", m.signed_volume());
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 400,
+            failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::Direct("tests/regressions/extrude-shallow-arcs.txt"))),
+            ..ProptestConfig::default()
+        })]
+
+        /// Against a simple model: an arc from A (L, 0) to B (0, 0) with a
+        /// small bulge, so it starts as one chord along y = 0 bowing to +y by
+        /// s = (L/2)·bulge, its height over the chord at x being
+        /// √(r² − (x − L/2)²) − (r − s) with r = ((L/2)² + s²)/(2s). Then
+        /// either a corner C at fraction f along it and g of that height
+        /// (g < 0: below the chord; 0 < g < 1: in the sliver, the crash
+        /// case), or a plate under it with a small triangular hole in the
+        /// sliver. All of it turned and moved, so no chord is axis-aligned.
+        /// The profile rules may refuse it; if not, the mesh must be closed
+        /// and right side out, and since the arc bows outwards the mesh
+        /// only loses some of its sliver: exact − sliver ≤ mesh ≤ exact,
+        /// the sliver being under 0.7·L·s (a parabola's is (2/3)·L·s and a
+        /// circle's exceeds it by a factor 1 + O(θ²), θ < 0.03 here).
+        #[test]
+        fn a_boundary_in_a_shallow_arcs_sliver_meshes_right_side_out(
+            len in 10.0..1000.0f64,
+            bulge in 1e-5..0.005f64,
+            f in 0.05..0.95f64,
+            g in -1.0..0.98f64,
+            with_hole in any::<bool>(),
+            turn in 0.0..TAU,
+            shift in (-1e4..1e4f64, -1e4..1e4f64),
+            d in 0.01..100.0f64,
+        ) {
+            let half = 0.5 * len;
+            let s = half * bulge;
+            let r = (half * half + s * s) / (2.0 * s);
+            let height = |x: f64| (r * r - (x - half) * (x - half)).sqrt() - (r - s);
+            let (sin, cos) = turn.sin_cos();
+            let place = |x: f64, y: f64| (x * cos - y * sin + shift.0, x * sin + y * cos + shift.1);
+            let x = f * len;
+            let profile = if with_hole {
+                let w = 0.05 * len * f.min(1.0 - f);
+                let base = 0.3 * height(x - w).min(height(x + w));
+                let hole = path(&[place(x - w, base), place(x + w, base), place(x, g.abs() * height(x))], &[]);
+                let outer = path(&[place(len, 0.0), place(0.0, 0.0), place(0.0, -0.1 * len), place(len, -0.1 * len)], &[bulge, 0.0, 0.0, 0.0]);
+                Profile { outer, holes: vec![hole] }
+            } else {
+                Profile { outer: path(&[place(len, 0.0), place(0.0, 0.0), place(x, g * height(x))], &[bulge, 0.0, 0.0]), holes: vec![] }
+            };
+            match extrude(&profile, d) {
+                Err(KernelError::InvalidInput(_)) => {}
+                Err(e) => prop_assert!(false, "{e:?} for {profile:?}"),
+                Ok(b) => {
+                    let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
+                    prop_assert_eq!(m.check_closed(), Ok(()));
+                    let exact = crate::mass::mass_properties(&b).volume;
+                    let slack = 4.0 * len * LINEAR * d;
+                    let mesh = m.signed_volume();
+                    prop_assert!(mesh <= exact + slack && mesh >= exact - 0.7 * len * s * d - slack, "mesh {mesh} vs exact {exact} for {profile:?}");
+                }
+            }
+        }
     }
 }
