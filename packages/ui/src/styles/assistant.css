@@ -1,0 +1,19 @@
+/* The AI assistant panel (AI2): the ask box, the preview of a change with
+   Accept and Reject, the first-send confirmation for a remote provider, and
+   the settings. The panel's place in the layout is in theme.css (#assistant). */
+.assistant label { display: block; margin: 8px 0 4px; color: #b5bbc4; font-size: 13px; }
+.assistant textarea, .assistant input, .assistant select { box-sizing: border-box; width: 100%; padding: 6px 8px; margin-top: 4px; background: #15171b; color: #e6e8eb; border: 1px solid #353a43; border-radius: 4px; font: inherit; }
+.assistant textarea { resize: vertical; }
+.assistant [hidden] { display: none; }
+.assistant .ai-ask button { margin-top: 6px; }
+.assistant .ai-note { color: #8a919c; font-size: 13px; }
+.assistant .ai-error { color: #ff8a80; font-size: 13px; }
+.assistant .ai-rules { font-size: 13px; color: #8a919c; }
+.assistant .ai-preview, .assistant .ai-consent { margin: 10px 0; padding: 10px; border: 1px solid #4aa8ff; border-radius: 4px; background: #182330; }
+.assistant .ai-preview table { border-collapse: collapse; margin: 6px 0; }
+.assistant .ai-preview th { text-align: left; padding-right: 10px; font-weight: normal; color: #b5bbc4; }
+.assistant .ai-preview td { padding: 2px 4px; font-variant-numeric: tabular-nums; }
+.assistant .ai-label { margin: 0; font-weight: 600; }
+.assistant pre { max-height: 200px; overflow: auto; font-size: 12px; background: #15171b; padding: 6px; white-space: pre-wrap; word-break: break-word; }
+.assistant .ai-key button { margin: 6px 6px 0 0; }
+.assistant .ai-settings { margin-top: 16px; border-top: 1px solid #2a2e35; }

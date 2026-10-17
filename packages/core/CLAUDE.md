@@ -21,7 +21,7 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
   - `links.ts`.
   - `ownership.ts`: one owner per linked value: `proposeEdit`, `acceptProposal`/`rejectProposal`, `setOwnedValue`, `transferOwnership` (its `label` names the undo step the hand-over is stored in).
   - `overlay.ts`.
-  - `workspace.ts`: the public Workspace API; `mount` returns a `MountedWorkspace` (`sleep`, `wake`, `unmount`: workspaces stay warm, X7).
+  - `workspace.ts`: the public Workspace API; `mount` returns a `MountedWorkspace` (`sleep`, `wake`, `unmount`: workspaces stay warm, X7; `run`: does one of its commands as its own buttons would, how the AI assistant applies an accepted change, AI2).
   - `shortcuts.ts`: the one shortcut table (X7b): `ShortcutTable` (the shell's `SHELL_SHORTCUTS` and each plugin's `shortcuts`), `parseChord`/`chordOf`/`chordLabel`, `lookup` (pane in use, other pane, shell), `clashes` (same key or id in one scope, a workspace key the shell uses, `BROWSER_RESERVED`), `help` (the list's order). Workspaces run theirs in `MountedWorkspace.shortcut`.
   - `session.ts`: `createSelection`, the one selection; `historyNotBuilt`, a history that throws, for tests of workspaces that never undo.
   - `history.ts`: `createHistory`, the one undo/redo history of whole-project snapshots (labels, merge keys, limit, `reset` on open; step 20a; `amend` takes a default filled in while mounting into the present, 20b; `step(label, run)` makes many changes one labelled step, all or nothing, and `restoring()` tells a mount it is an undo's, 20c). `WorkspaceContext.projectChanged(label, mergeKey)` records a step.

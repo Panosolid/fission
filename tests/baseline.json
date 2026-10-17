@@ -1,7 +1,96 @@
 {
-  "about": "Known-good metrics (root CLAUDE.md, Metrics and baselines). Update a value only when the owner confirms the change is intended.",
+  "about": "Known-good speed and memory (root CLAUDE.md, Metrics and baselines), checked on every pull request by .github/scripts/baseline.py (ci.yml, job baseline). Metric names are <kernel|app>.<operation>.<kind>; the kind picks the margin. Update the values only when the owner confirms a change is intended: python3 .github/scripts/baseline.py --update. Values are from GitHub's ubuntu-latest runners. The same file holds the magic-moment journeys (journeys_about, journeys).",
   "journeys_about": "Magic-moment journeys (X8, packages/testing/src/magic.ts): the most clicks and the slowest of 5 walks in Chromium on GitHub's ubuntu-latest runners, confirmed by the owner on 2026-10-16. apps/fission/e2e/journeys.mjs fails on any extra click (every run) and, nightly (JOURNEY_NIGHTLY=1), on a slowest walk more than 15% over.",
   "journeys": {
-    "Design: shape to STL": { "clicks": 3, "slowestMs": 700 }
+    "Design: shape to STL": {
+      "clicks": 3,
+      "slowestMs": 700
+    }
+  },
+  "margins": {
+    "instructions": {
+      "fail": 15,
+      "floor": 10000,
+      "why": "callgrind's count of instructions executed: the same on every run to about 0.05%, so any real slowdown shows; 15% is the project's performance margin"
+    },
+    "peak_bytes": {
+      "fail": 15,
+      "floor": 1024,
+      "why": "most extra heap at once, from a counting allocator: exact, so 15% catches real growth"
+    },
+    "allocations": {
+      "fail": 15,
+      "floor": 10,
+      "why": "number of allocations: exact"
+    },
+    "retained_bytes": {
+      "fail": 15,
+      "floor": 65536,
+      "why": "JavaScript heap a result keeps after a full GC; the floor absorbs the engine's own few kilobytes of noise"
+    },
+    "wasm_bytes": {
+      "fail": 15,
+      "floor": 65536,
+      "why": "the kernel's WebAssembly memory high-water mark, in 64 KiB pages; one page of slack"
+    },
+    "relative_time": {
+      "flag": 15,
+      "fail": 100,
+      "why": "time divided by a fixed JavaScript workload's in the same process; still varies by about 15% between runs and machines, so past 15% it only warns, and only twice as slow fails"
+    }
+  },
+  "metrics": {
+    "app.history_200_edits.relative_time": 0.0355,
+    "app.history_200_edits.retained_bytes": 112672,
+    "app.kernel_extrude_star.relative_time": 0.0263,
+    "app.kernel_extrude_star.retained_bytes": 35616,
+    "app.kernel_memory.wasm_bytes": 4390912,
+    "app.kernel_sphere.relative_time": 0.4964,
+    "app.kernel_sphere.retained_bytes": 1451256,
+    "app.kernel_stl_sphere.relative_time": 0.2394,
+    "app.kernel_stl_sphere.retained_bytes": 968,
+    "app.project_open.relative_time": 0.0361,
+    "app.project_open.retained_bytes": 523928,
+    "app.project_save.relative_time": 0.06,
+    "app.project_save.retained_bytes": 546632,
+    "kernel.extrude_arcs_200.allocations": 67430,
+    "kernel.extrude_arcs_200.instructions": 206460565,
+    "kernel.extrude_arcs_200.peak_bytes": 783768,
+    "kernel.extrude_star_24.allocations": 4327,
+    "kernel.extrude_star_24.instructions": 14805992,
+    "kernel.extrude_star_24.peak_bytes": 98584,
+    "kernel.make_box.allocations": 507,
+    "kernel.make_box.instructions": 604659,
+    "kernel.make_box.peak_bytes": 7680,
+    "kernel.make_cylinder.allocations": 1227,
+    "kernel.make_cylinder.instructions": 18131454,
+    "kernel.make_cylinder.peak_bytes": 63000,
+    "kernel.make_sphere.allocations": 182,
+    "kernel.make_sphere.instructions": 77768365,
+    "kernel.make_sphere.peak_bytes": 2197344,
+    "kernel.mass_star_24.allocations": 1,
+    "kernel.mass_star_24.instructions": 55987,
+    "kernel.mass_star_24.peak_bytes": 16,
+    "kernel.rotate_cylinder.allocations": 25,
+    "kernel.rotate_cylinder.instructions": 9161,
+    "kernel.rotate_cylinder.peak_bytes": 1712,
+    "kernel.stl_export_sphere.allocations": 3,
+    "kernel.stl_export_sphere.instructions": 8267740,
+    "kernel.stl_export_sphere.peak_bytes": 616140,
+    "kernel.stl_of_box.allocations": 712,
+    "kernel.stl_of_box.instructions": 896195,
+    "kernel.stl_of_box.peak_bytes": 7680,
+    "kernel.stl_read_sphere.allocations": 54,
+    "kernel.stl_read_sphere.instructions": 29788575,
+    "kernel.stl_read_sphere.peak_bytes": 1559168,
+    "kernel.tessellate_sphere.allocations": 112,
+    "kernel.tessellate_sphere.instructions": 16836717,
+    "kernel.tessellate_sphere.peak_bytes": 529856,
+    "kernel.tessellate_star_24.allocations": 1860,
+    "kernel.tessellate_star_24.instructions": 9258914,
+    "kernel.tessellate_star_24.peak_bytes": 40880,
+    "kernel.validate_star_24.allocations": 3516,
+    "kernel.validate_star_24.instructions": 14039199,
+    "kernel.validate_star_24.peak_bytes": 72096
   }
 }

@@ -25,7 +25,7 @@ Each folder with its own CLAUDE.md (kernel/, packages/, workspaces/, apps/) has 
 - `workspaces/`: the ten workspaces (Design real, the rest placeholders). `apps/fission`: the app shell and browser tests.
 - `docs/`: `progress/` (one progress file per workstream, see below), `roadmap.md` (the full roadmap), `integration.md`, `integration-map.md` (every link between workspaces), `ai.md`, `project-format.md`, `community.md`.
 - `prototypes/`: Python sketches of the maths, used to try algorithms before writing Rust (and `oracle/compare.py`, the OpenCascade oracle).
-- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing", results on the `test-results` branch; see kernel/CLAUDE.md), `auto-merge.yml` (merges `claude/` pull requests into `main` once green and up to date with it; rules in `.github/scripts/automerge.py`).
+- `.github/workflows/`: `ci.yml` (kernel tests, app build), `pages.yml` (deploys `main` to GitHub Pages), `nightly.yml` ("Random testing", results on the `test-results` branch; see kernel/CLAUDE.md), `fuzz.yml` ("Fuzzing" the STL reader and the project loader nightly at 23:10 UTC, after random testing; results in `fuzz/` on `test-results`, issues like random testing), `auto-merge.yml` (merges `claude/` pull requests into `main` once green and up to date with it; rules in `.github/scripts/automerge.py`).
 - Generated, never committed: `kernel/target/`, `kernel/endless-results/`, `kernel/mutants.out*/`, `packages/core/src/kernel/wasm/`, `apps/fission/dist/`, `node_modules/`.
 
 ## Workstreams and where progress lives
@@ -35,6 +35,7 @@ Several threads run at once, one per workstream. So they never edit the same lin
 - `integration.md`: the integration experience steps (X…) and the I, A and other cross-workspace items.
 - `booleans.md`: the boolean design review B0 and the boolean steps.
 - `image.md`: the Image workspace (G…).
+- `ai.md`: the AI assistant (AI1…, and the A items in `docs/roadmap.md`).
 - A new workstream (Render, Vector, Layout…) gets a new file here the day it starts, added to this list in its own small PR.
 
 Rules:

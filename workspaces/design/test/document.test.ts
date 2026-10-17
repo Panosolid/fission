@@ -175,3 +175,12 @@ test("Design data the panel can't show is refused when the file is opened, each 
   assert.throws(extrude((d) => ((d.profiles[0] as { kind: string }).kind = "hexagon")), /profile profile-1 has an unknown kind hexagon/);
   assert.throws(extrude((d) => ((d.profiles[0] as { width: unknown }).width = null)), /profile profile-1: width and depth must be numbers/);
 });
+
+test("a profile that is not an object is refused with Design's own message (found by fuzzing)", () => {
+  // Before: profiles [null] reached `x.id` and the file was refused with
+  // "Cannot read properties of null (reading 'id')".
+  const doc = partDocument("slot", 40, 30, 20) as unknown as { profiles: unknown[] };
+  for (const bad of [null, 3, "profile-1", []])
+    assert.throws(() => readDesignDocument({ ...doc, profiles: [bad, ...doc.profiles] }), /^Error: Design profile 1 is not an object$/);
+  assert.throws(() => readDesignDocument({ ...doc, profiles: [...doc.profiles, null] }), /^Error: Design profile 2 is not an object$/);
+});
