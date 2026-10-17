@@ -29,7 +29,7 @@
 //!   piece is clear of every other, so any point of a hole's circle
 //!   decides whether it is inside a loop.
 use super::KernelError;
-use crate::tolerance::{segments_touch, side, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
+use crate::tolerance::{segments_touch, side, twice_area, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
 use std::f64::consts::{PI, TAU};
 
@@ -328,18 +328,19 @@ pub fn clearance(s: &Seg, t: &Seg, shared: &[DVec2]) -> f64 {
 }
 
 /// Area enclosed by a loop, positive counter-clockwise: the shoelace sum
-/// over its corners (relative to the first, to keep digits far from the
-/// origin) plus, for each arc, the circular segment between it and its
-/// chord, (r²/2)(sweep − sin sweep).
+/// over its corners plus, for each arc, the circular segment between it
+/// and its chord, (r²/2)(sweep − sin sweep). The shoelace part is exact
+/// (`tolerance::twice_area`, rounded once at the end), so a loop of
+/// straight pieces has an exactly signed area, whatever cancels; the
+/// pieces of a loop meet exactly (`check_profile` builds them from shared
+/// corners), so its corners are the pieces' starts.
 pub fn signed_area(segs: &[Seg]) -> f64 {
-    let o = segs.iter().find_map(|s| s.ends().first().copied()).unwrap_or(DVec2::ZERO);
-    let mut twice = 0.0;
+    let corners: Vec<DVec2> = segs.iter().filter_map(|s| s.ends().first().copied()).collect();
+    let mut twice = twice_area(&corners);
     for s in segs {
         match *s {
-            Seg::Line { a, b } => twice += (a - o).perp_dot(b - o),
-            Seg::Arc { a, b, radius, sweep, .. } => {
-                twice += (a - o).perp_dot(b - o) + radius * radius * (sweep - sweep.sin());
-            }
+            Seg::Line { .. } => {}
+            Seg::Arc { radius, sweep, .. } => twice += radius * radius * (sweep - sweep.sin()),
             Seg::Circle { radius, ccw, .. } => {
                 let full = radius * radius * TAU;
                 twice += if ccw { full } else { -full };
@@ -429,9 +430,12 @@ fn half_turn(side: i8) -> f64 {
 /// `near_cusp_corners_keep_the_loop_the_right_way_round`, issue #75.) For
 /// a checked loop the sign is safe: pieces stay MIN_FEATURE apart away
 /// from shared corners, so a loop spanning L encloses about L·MIN_FEATURE/2
-/// at least (500 mm² at 1 km), while the sum's rounding, with every term
-/// taken from the first corner, is about n·(L² + L·MAX_COORD)·1e-16 (0.02
-/// mm² for 2,000 corners at 1 km, 100 km out; `orientation_of_slivers`).
+/// at least (500 mm² at 1 km). The corners' part of the area is exact, so
+/// a loop of straight pieces gets the sign exactly right; arcs add their
+/// segments, each rounded within ~1e-16 of its own size, and segments of
+/// pieces that don't cross don't overlap, so they total at most ~L²: a
+/// rounding of ~L²·1e-16 (1e-4 mm² at 1 km), wherever the loop is
+/// (`orientation_of_slivers`, `exact_sign_of_a_straight_sliver`).
 fn counter_clockwise(segs: &[Seg]) -> bool {
     signed_area(segs) > 0.0
 }
@@ -1330,6 +1334,23 @@ mod tests {
             let loops = ok(Profile::polygon(back, vec![]));
             assert!((signed_area(&loops[0]) - area).abs() < 0.03, "{name} reversed: {}", signed_area(&loops[0]));
         }
+    }
+
+    #[test]
+    fn exact_sign_of_a_straight_sliver() {
+        // The sliver of tolerance::tests, as pieces: corners o = (0, 0),
+        // A = (1 + t, 1), B = (1, 1 − t), C = (0, t²/2), t = 2⁻³⁰; twice its
+        // area is (1 + t)(1 − t) − 1 + t²/2 = −t²/2, so the area is
+        // −t²/4 = −2⁻⁶²: clockwise. (Far too small for a checked profile;
+        // this is signed_area alone.) Plain doubles, as signed_area used to
+        // add it, round (1 + t)(1 − t) to 1 and get +2⁻⁶², counter-clockwise.
+        let t = (2f64).powi(-30);
+        let c = [p(0.0, 0.0), p(1.0 + t, 1.0), p(1.0, 1.0 - t), p(0.0, t * t / 2.0)];
+        let segs: Vec<Seg> = (0..4).map(|i| Seg::Line { a: c[i], b: c[(i + 1) % 4] }).collect();
+        assert_eq!(signed_area(&segs), -(2f64).powi(-62));
+        assert!(!counter_clockwise(&segs));
+        assert_eq!(signed_area(&reversed(&segs)), (2f64).powi(-62));
+        assert!(counter_clockwise(&reversed(&segs)));
     }
 
     #[test]
