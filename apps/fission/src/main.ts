@@ -110,34 +110,10 @@ function restoreSnapshot(text: string) {
   autosave?.changed();
 }
 
-// The View group: the shell owns each pane's view buttons, over its
-// viewport's corner. Fit frames the selection when there is one (from the
-// current direction), else the whole body from home.
-function viewControls(viewport: SharedViewport): HTMLElement {
-  const group = document.createElement("div");
-  group.className = "view-controls";
-  group.setAttribute("role", "toolbar");
-  group.setAttribute("aria-label", "View");
-  const views = [
-    ["home", "Home", "Three-quarter view of the whole body"],
-    ["top", "Top", "Look down on the body"],
-    ["front", "Front", "Look at the body from the front"],
-    ["right", "Right", "Look at the body from the right"],
-  ] as const;
-  for (const [name, label, title] of views) {
-    const b = Object.assign(document.createElement("button"), { type: "button", textContent: label, title });
-    b.dataset.view = name;
-    b.addEventListener("click", () => viewport.setView(name));
-    group.append(b);
-  }
-  const fit = Object.assign(document.createElement("button"), { type: "button", textContent: "Fit", title: "Frame the selection, or the whole body when nothing is selected" });
-  fit.dataset.view = "fit";
-  fit.addEventListener("click", () => viewport.fitSelection() ?? viewport.fit());
-  group.append(fit);
-  viewport.element.append(group);
-  return group;
-}
-viewControls(ctx.viewport).id = "view-controls";
+// The View group (SF3a): each view builds its own navigation bar
+// (packages/viewport nav-bar.ts); the main one gets the id the e2e tests
+// and the phone layout use.
+$("viewport").querySelector<HTMLElement>(".view-controls")!.id = "view-controls";
 
 // What is selected, read by the e2e test (17d draws it on screen).
 ctx.selection.onChange((items) => (document.body.dataset.selection = items.map((r) => r.id).join(" ")));
@@ -191,7 +167,8 @@ function useGraph(graph: DependencyGraph, notes: ChangeNotes) {
 }
 useGraph(ctx.graph, ctx.changeNotes);
 // For the browser test only (?test-hooks): the graph and notes, so it can
-// stand in a result in another workspace before any workspace makes one.
+// stand in a result in another workspace before any workspace makes one;
+// the main view's camera, to check navigation (SF3a).
 if (new URLSearchParams(location.search).has("test-hooks"))
   Object.assign(window, {
     fissionTest: {
@@ -201,6 +178,7 @@ if (new URLSearchParams(location.search).has("test-hooks"))
       get notes() {
         return ctx.changeNotes;
       },
+      camera: () => viewer.main.cameraPose(),
     },
   });
 
@@ -364,7 +342,6 @@ function mountSplitPane(id: WorkspaceId) {
     $("workspace").dataset.split = "on";
     const view = viewer.addView($("split-viewport"));
     const viewport = pane(view);
-    viewControls(viewport);
     // The new view framed the body at home before the grid had settled its
     // size; frame it again once it has (the view's own resize runs first,
     // as its observer was registered first).
@@ -387,7 +364,6 @@ function closeSplit() {
   if (!split) return;
   activePane = "main";
   pool.forgetPane("split"); // its viewport goes
-  $("split-viewport").querySelector(".view-controls")?.remove();
   viewer.removeView(split.view);
   split = null;
   $("split").hidden = true;
