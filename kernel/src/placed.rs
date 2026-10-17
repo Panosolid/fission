@@ -32,6 +32,12 @@ impl Placed {
     /// 1e8-sized rotation (rounding ~1e-8) and changed the mesh's volume
     /// by area × that (stateful seed2057fadf92b1).
     pub fn new(body: Body) -> Placed {
+        Placed::recentred(body)
+    }
+
+    /// `new`'s work, under a name `cargo mutants` mutates (it skips every
+    /// function named `new`).
+    fn recentred(body: Body) -> Placed {
         let (lo, hi) = body.bounds();
         let centre = (lo + hi) * 0.5;
         if centre.is_finite() && centre.abs().max_element() > (hi - lo).max_element() {

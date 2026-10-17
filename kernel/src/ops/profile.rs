@@ -13,27 +13,38 @@
 //!
 //! Mutation testing (`cargo mutants -f src/ops/profile.rs`) leaves these
 //! survivors, all equivalent (no input can tell them apart):
-//! - `> 0.0` vs `>= 0.0` on an arc's sweep (spans, counter_clockwise): a
+//! - `sweep > 0.0` vs `>= 0.0` (Seg::spans, counter_clockwise): an arc's
 //!   sweep is never 0 (a zero bulge is a line).
-//! - `* s` vs `/ s` where s is ±1: tangents (sweep sign), winding
-//!   (TAU·signum, PI·side), signed_area (TAU·±1).
-//! - `>` vs `>=` (or `<` vs `<=`) at an exact tie that can't be built or
-//!   doesn't change the answer: LINEAR·1e-3 for "the same centre";
-//!   distances > LINEAR from shared corners and roots; a point exactly on
-//!   a circle, or at an arc's end, in winding (it would be on the loop,
-//!   which callers rule out); dot < 0 at a cusp (perpendicular tangents aren't a cusp); the
-//!   turn tests in counter_clockwise (nonzero there, and t_out.x is ±1 at
-//!   a straight-through lowest point).
-//! - Tie-breaks for "lowest point" (`<` vs `<=`, `==`, `>` on x): any
-//!   lowest point of a loop gives the right answer: an end of a level
-//!   bottom edge turns left (counter-clockwise loops), a point inside one
-//!   goes straight on, rightwards.
-//! - `turn != 0` vs `== 0` for two straight pieces at the lowest corner:
-//!   the leftmost lowest corner of a straight-edged loop always turns, so
-//!   it is never 0 there, and the tangent test that follows agrees.
-//! - Any point on a whole circle does as its probe (`c + X·r` vs `c − X·r`
-//!   in critical_points and check_profile), and adding candidates of a
-//!   concentric circle (`&&` vs `||`) can't lower a minimum already found.
+//! - `* s` vs `/ s` where s is ±1: Seg::tangents (the sweep's sign) and
+//!   half_turn (the arc's side of its chord). That side is 0 only when the
+//!   arc's middle rounds onto its chord (a sagitta below rounding), and
+//!   then a point on the chord between its ends is on the loop, which
+//!   winding's callers rule out.
+//! - `<` vs `<=` in winding, at ties that put the point on the loop:
+//!   (a − p)·(b − p) is 0, for p on the chord's line, only at an end; and
+//!   a distance from the centre equal to the radius, on the arc's side of
+//!   its chord (anywhere, for a whole circle), is on the piece itself (on
+//!   the other side the side test fails first).
+//! - `<` vs `<=` in doubles_back: a dot product of 0 means perpendicular
+//!   unit tangents, whose cross product is ±1, never within ANGULAR.
+//! - counter_clockwise: any lowest point of a loop gives the right answer
+//!   (the region lies above it, so the loop runs left to right there: an
+//!   end of a level bottom edge turns left, a point inside one goes
+//!   straight on, rightwards, and an arc's bottom runs its arc's way).
+//!   Hence `<` vs `<=` in "lower" (a tie is one point found twice: a
+//!   corner that is also an arc's bottom); `turn != 0` vs `== 0` for two
+//!   straight pieces (the lowest, then leftmost, corner always turns: a
+//!   neighbour in line with it would be lower or further left; and the
+//!   tangent test that then decides agrees); `turn > 0` vs `>= 0` (never
+//!   0 there); `|turn| > ANGULAR` vs `>=` (at a lowest corner that nearly
+//!   straight, the turn and the direction of travel both say
+//!   counter-clockwise exactly when it is); `turn > 0.0` vs `>=` (past
+//!   ANGULAR, never 0); and `t_out.x > 0.0` vs `>=` (with a turn within
+//!   ANGULAR, a vertical tangent at a lowest point would take the loop
+//!   lower beside it, so t_out.x is near ±1).
+//! - probe's `c + X·r` vs `c − X·r`: by the time holes are placed every
+//!   piece is clear of every other, so any point of a hole's circle
+//!   decides whether it is inside a loop.
 use super::KernelError;
 use crate::tolerance::{segments_touch, side, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
@@ -236,8 +247,8 @@ fn crossing(s: &Seg, t: &Seg, shared: &[DVec2]) -> bool {
         (Seg::Line { a, b }, other) | (other, Seg::Line { a, b }) => {
             let (c, r) = other.circle().expect("not a line");
             match shared {
-                // (`> LINEAR` versus `>= LINEAR` below differ only when the
-                // other root is exactly 1 nm away: not a case anyone can build.)
+                // (Another meeting within LINEAR of P, inclusive, is P
+                // itself: `ties_at_linear_from_a_shared_corner`.)
                 // Sharing an end P (on both): the line meets the circle again
                 // at distance −2u·(P − c) from P along the line's direction
                 // u, the other root of |P + s u − c|² = r² besides s = 0.
@@ -346,7 +357,10 @@ pub fn signed_area(segs: &[Seg]) -> f64 {
             Seg::Arc { a, b, radius, sweep, .. } => {
                 twice += (a - o).perp_dot(b - o) + radius * radius * (sweep - sweep.sin());
             }
-            Seg::Circle { radius, ccw, .. } => twice += radius * radius * TAU * if ccw { 1.0 } else { -1.0 },
+            Seg::Circle { radius, ccw, .. } => {
+                let full = radius * radius * TAU;
+                twice += if ccw { full } else { -full };
+            }
         }
     }
     twice / 2.0
@@ -398,12 +412,12 @@ fn winding(segs: &[Seg], p: DVec2) -> i64 {
                 if p_side == 0 && (a - p).dot(b - p) < 0.0 {
                     // From a (behind p) round to b (ahead): through the left
                     // is clockwise, through the right counter-clockwise.
-                    total -= PI * f64::from(arc_side);
+                    total -= half_turn(arc_side);
                 } else {
                     total += angle(a, b);
                     // Between arc and chord: inside the circle, on its side.
                     if p.distance(center) < radius && p_side == arc_side {
-                        total += TAU * sweep.signum();
+                        total += sweep.signum() * TAU;
                     }
                 }
             }
@@ -417,6 +431,11 @@ fn winding(segs: &[Seg], p: DVec2) -> i64 {
     (total / TAU).round() as i64
 }
 
+/// Half a turn counter-clockwise for `side` 1, clockwise for −1.
+fn half_turn(side: i8) -> f64 {
+    PI * f64::from(side)
+}
+
 /// Whether a loop runs counter-clockwise. At the loop's lowest point the
 /// region lies above, so the loop runs left to right there: at a corner,
 /// the turn decides (exactly, for two straight pieces); along a curve or a
@@ -427,7 +446,8 @@ fn counter_clockwise(segs: &[Seg]) -> bool {
     }
     // Lowest point: a corner, or an arc's bottom.
     let mut best: Option<(DVec2, usize, bool)> = None; // (point, piece, is the start corner of piece)
-    let lower = |p: DVec2, q: DVec2| p.y < q.y || (p.y == q.y && p.x < q.x);
+    // Lower, or as low and further left.
+    let lower = |p: DVec2, q: DVec2| (p.y, p.x) < (q.y, q.x);
     for (i, s) in segs.iter().enumerate() {
         let a = s.ends()[0];
         if best.is_none_or(|(q, _, _)| lower(a, q)) {
@@ -560,7 +580,7 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
                 continue;
             }
             let (t_in, t_out) = (s.tangents().1, t.tangents().0);
-            if t_in.dot(t_out) < 0.0 && t_in.perp_dot(t_out).abs() <= ANGULAR {
+            if doubles_back(t_in, t_out) {
                 return bad(format!("profile loop {k} doubles back on itself at {}", s.ends()[1]));
             }
         }
@@ -593,10 +613,6 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
     }
     // No crossings and everything clear, so each hole is wholly inside or
     // outside each other loop: one point of it decides.
-    let probe = |segs: &[Seg]| match segs[0] {
-        Seg::Circle { center, radius, .. } => center + DVec2::X * radius,
-        s => s.ends()[0],
-    };
     for h in 1..loops.len() {
         let p = probe(&loops[h]);
         if winding(&loops[0], p) == 0 {
@@ -613,10 +629,24 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
         .collect())
 }
 
+/// Whether a corner arriving along unit tangent `t_in` and leaving along
+/// `t_out` turns straight back (a cusp).
+fn doubles_back(t_in: DVec2, t_out: DVec2) -> bool {
+    t_in.dot(t_out) < 0.0 && t_in.perp_dot(t_out).abs() <= ANGULAR
+}
+
+/// A point on a loop: its first corner, or a circle's point along +X.
+fn probe(segs: &[Seg]) -> DVec2 {
+    match segs[0] {
+        Seg::Circle { center, radius, .. } => center + DVec2::X * radius,
+        s => s.ends()[0],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tolerance::eq;
+    use crate::tolerance::{eq, rel_eq, FP_REL};
     use std::f64::consts::{FRAC_PI_2, PI};
 
     fn p(x: f64, y: f64) -> DVec2 {
@@ -997,6 +1027,99 @@ mod tests {
     }
 
     #[test]
+    fn centres_count_as_one_up_to_a_thousandth_of_linear() {
+        // Whole circles r = 1 about the origin and r = 0.5 about (−k·t, 0),
+        // t = LINEAR·1e-3 = 1e-8 mm, the "same centre" limit. The true gap
+        // is narrowest on the −x side, where the small circle leans:
+        // 1 − (0.5 + k·t) = 0.5 − k·t. Up to and including the limit (k =
+        // 0.9, 1) the centres count as one and the gap is read at each
+        // circle's +x point: the big one's (1, 0) is 1 + k·t from the small
+        // centre, so 0.5 + k·t outside the small circle; the small one's
+        // (0.5 − k·t, 0) is 0.5 + k·t inside the big one. That reading is
+        // 2k·t ≤ 2e-8 mm high, 500 × below LINEAR. Past the limit (k = 1.1)
+        // each circle's point facing the other's centre gives the true
+        // 0.5 − k·t. The readings differ by 4e-8 of 0.5: FP_REL tells them
+        // apart.
+        let t = LINEAR * 1e-3;
+        // The tie at k = 1 is exact: the offset's length is t itself.
+        assert_eq!(DVec2::new(-t, 0.0).length(), t);
+        let big = Seg::Circle { center: DVec2::ZERO, radius: 1.0, ccw: true };
+        for (k, want) in [(0.9, 0.5 + 0.9 * t), (1.0, 0.5 + t), (1.1, 0.5 - 1.1 * t)] {
+            let small = Seg::Circle { center: p(-k * t, 0.0), radius: 0.5, ccw: true };
+            for (s, u) in [(&big, &small), (&small, &big)] {
+                let got = clearance(s, u, &[]);
+                assert!(rel_eq(got, want, FP_REL), "{k}×: {got} vs {want}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_nearly_concentric_arc_is_measured_only_where_it_is() {
+        // The left half of the unit circle, (0, 1) → (0, −1) counter-
+        // clockwise through (−1, 0), and a whole circle r = 0.5 about (δ,
+        // 0), δ = LINEAR·1e-3 / 2: centres close enough to count as one. A
+        // point of the arc at angle θ is √(1 − 2δ cos θ + δ²) from that
+        // centre, and cos θ ≤ 0 on the arc, so its ends are nearest: gap
+        // √(1 + δ²) − 0.5 = 0.5 (δ² = 2.5e-17 is below rounding). The big
+        // circle's +x point (1, 0) is only 1 − δ − 0.5 from the small one,
+        // but it isn't on the arc and mustn't count (δ/0.5 = 1e-8 >
+        // FP_REL).
+        let d = LINEAR * 1e-3 / 2.0;
+        let arc = Seg::from_bulge(p(0.0, 1.0), p(0.0, -1.0), 1.0).unwrap();
+        let ring = Seg::Circle { center: p(d, 0.0), radius: 0.5, ccw: true };
+        for (s, t) in [(&arc, &ring), (&ring, &arc)] {
+            let got = clearance(s, t, &[]);
+            assert!(rel_eq(got, 0.5, FP_REL), "{got}");
+        }
+    }
+
+    #[test]
+    fn ties_at_linear_from_a_shared_corner() {
+        // Two pieces sharing a corner P meet again k·LINEAR from it: within
+        // LINEAR, inclusive, that is P itself (as for `clearance`, whose
+        // near_shared is ≤ LINEAR), so they don't cross; at 1.1 × LINEAR
+        // they do. Exact placements only (a turned copy can't keep the
+        // tie), so `crossing` directly, both ways round. Points a hair (h²/8
+        // or less) off their circles don't matter: these tests use angles.
+        for (k, expect) in [(0.9, false), (1.0, false), (1.1, true)] {
+            let h = k * LINEAR;
+            // Two counter-clockwise arcs of the unit circle sharing P = (0,
+            // −1): s is the tiny one from Q = (−h, −1) to P; t runs from P
+            // almost all the way round, ending LINEAR/2 short of P, so it
+            // passes over Q. They overlap from Q to P, h long, and only Q
+            // (an end of s, on t) shows it. |Q − P| = |(−h, 0)| = h exactly.
+            let (q, pp) = (p(-h, -1.0), p(0.0, -1.0));
+            assert_eq!(q.distance(pp), h);
+            let s = Seg::Arc { a: q, b: pp, center: DVec2::ZERO, radius: 1.0, sweep: pp.to_angle() - q.to_angle() };
+            let short = LINEAR / 2.0;
+            let t = Seg::Arc { a: pp, b: dir(-FRAC_PI_2 - short), center: DVec2::ZERO, radius: 1.0, sweep: TAU - short };
+            assert_eq!(crossing(&s, &t, &[pp]), expect, "two arcs of one circle, {k}×");
+            assert_eq!(crossing(&t, &s, &[pp]), expect, "two arcs of one circle, the other way round, {k}×");
+            // A line from P = (−h/2, −1) along u = (1, 0), the unit circle's
+            // tangent at its bottom, and the arc from P counter-clockwise
+            // round the bottom. The circle meets the line again after s =
+            // −2u·(P − c) = −2·(−h/2) = h, at (h/2, −1), on the arc.
+            let pp = p(-h / 2.0, -1.0);
+            let line = Seg::Line { a: pp, b: p(1.0, -1.0) };
+            let end = 1.0 - FRAC_PI_2;
+            let arc = Seg::Arc { a: pp, b: dir(end), center: DVec2::ZERO, radius: pp.length(), sweep: end - pp.to_angle() };
+            assert_eq!(crossing(&line, &arc, &[pp]), expect, "a line and an arc, {k}×");
+            assert_eq!(crossing(&arc, &line, &[pp]), expect, "an arc and a line, {k}×");
+            // Circles of equal radius about (0, 0) and (2, 0), both through
+            // P = (1, h/2): they meet again at P mirrored in the line of
+            // centres, (1, −h/2), h from P. s runs up the first circle
+            // through its angle 0 to P; t leaves P counter-clockwise on the
+            // second, through its angle π. Both pass (1, −h/2).
+            let pp = p(1.0, h / 2.0);
+            let (c2, r) = (p(2.0, 0.0), pp.length());
+            let s = Seg::Arc { a: dir(-0.5) * r, b: pp, center: DVec2::ZERO, radius: r, sweep: pp.to_angle() + 0.5 };
+            let t = Seg::Arc { a: pp, b: c2 + dir(PI + 0.5) * r, center: c2, radius: r, sweep: PI + 0.5 - (pp - c2).to_angle() };
+            assert_eq!(crossing(&s, &t, &[pp]), expect, "two circles, {k}×");
+            assert_eq!(crossing(&t, &s, &[pp]), expect, "two circles, the other way round, {k}×");
+        }
+    }
+
+    #[test]
     fn a_line_crossing_an_arc_once_by_hand() {
         // The upper unit half circle, and short vertical segments on x = 0
         // that reach its top (0, 1) from inside or outside: each crosses
@@ -1078,8 +1201,8 @@ mod tests {
         // Nearly concentric (centres 9e-4 apart, under a micrometre) yet
         // crossing: radii 5 and 5.0005 meet where x = (8.1e-7 + 25 −
         // 25.00500025)/1.8e-3 = −2.7774, y = ±√(25 − 2.7774²) = ±4.158
-        // (about ±123.7° on both). Only "the same centre" below 1e-9 may be
-        // treated as concentric.
+        // (about ±123.7° on both). Only "the same centre" (within
+        // LINEAR·1e-3 = 1e-8) may be treated as concentric.
         let near = |r: f64, cx: f64, from: f64, to: f64| {
             let (a, b) = (from.to_radians(), to.to_radians());
             Seg::Arc { a: p(cx, 0.0) + dir(a) * r, b: p(cx, 0.0) + dir(b) * r, center: p(cx, 0.0), radius: r, sweep: b - a }
