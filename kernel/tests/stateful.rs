@@ -1295,15 +1295,21 @@ fn face_model(shape: &Shape) -> Result<Vec<(FaceRole, f64, DVec3)>, String> {
         Shape::Extrude { ref outer, ref holes, dist, .. } => {
             let d = dist.0;
             let rings: Vec<Vec<Piece>> = std::iter::once(outer).chain(holes).map(Ring::pieces).collect();
-            // Signed area and first moment of each ring, made positive.
+            // Signed area and first moment of each ring, made positive,
+            // about the outer ring's first point (Sterbenz: corners near
+            // it subtract exactly).
+            let about = match rings[0][0] {
+                Piece::Line { a, .. } | Piece::Arc { a, .. } => a,
+                Piece::Circle { c, .. } => c,
+            };
             let (mut area, mut moment) = (0.0, DVec2::ZERO);
             for (k, pieces) in rings.iter().enumerate() {
-                let (a, m) = ring_moment(pieces);
+                let (a, m) = ring_moment(pieces, about);
                 let sign = if (a > 0.0) == (k == 0) { 1.0 } else { -1.0 };
                 area += sign * a;
                 moment += m * sign;
             }
-            let c = moment / area;
+            let c = about + moment / area;
             let mut faces = vec![named(FaceRole::Start, area, (c.x, c.y, 0.0)), named(FaceRole::End, area, (c.x, c.y, d))];
             let side = |boundary, piece, p: &Piece| {
                 let (a, c) = side_of(p);
@@ -1345,13 +1351,14 @@ fn face_model(shape: &Shape) -> Result<Vec<(FaceRole, f64, DVec3)>, String> {
     })
 }
 
-/// A ring's signed area and first moment ∬ x dA (positive when it runs
-/// counter-clockwise): the fan of triangles from its first point, each
+/// A ring's signed area and first moment ∬ (x − about) dA (positive when
+/// it runs counter-clockwise), about a point near the ring so a frame far
+/// out keeps its digits (seedab2989180676): the fan of triangles from its first point, each
 /// (o, a, b) with area ½ (a − o) × (b − o) at (o + a + b)/3, plus each
 /// arc's segment beyond its chord, counted positive when the arc turns
 /// counter-clockwise (it then bows out to the right of its chord, out of
 /// a counter-clockwise ring).
-fn ring_moment(pieces: &[Piece]) -> (f64, DVec2) {
+fn ring_moment(pieces: &[Piece], about: DVec2) -> (f64, DVec2) {
     let o = match pieces[0] {
         Piece::Line { a, .. } | Piece::Arc { a, .. } => a,
         Piece::Circle { c, .. } => c,
@@ -1362,7 +1369,7 @@ fn ring_moment(pieces: &[Piece]) -> (f64, DVec2) {
             Piece::Line { a, b } | Piece::Arc { a, b, .. } => {
                 let t = 0.5 * (a - o).perp_dot(b - o);
                 area += t;
-                moment += (o + a + b) * (t / 3.0);
+                moment += ((o - about) + (a - about) + (b - about)) * (t / 3.0);
             }
             Piece::Circle { .. } => {}
         }
@@ -1373,9 +1380,9 @@ fn ring_moment(pieces: &[Piece]) -> (f64, DVec2) {
                 let (s, co) = ((phi / 2.0).sin(), (phi / 2.0).cos());
                 let towards = DVec2::new(mid.x * co - mid.y * s, mid.x * s + mid.y * co) / mid.length();
                 let f = phi.abs();
-                (r * r * (f - f.sin()) / 2.0 * phi.signum(), c + towards * (4.0 * r * (f / 2.0).sin().powi(3) / (3.0 * (f - f.sin()))))
+                (r * r * (f - f.sin()) / 2.0 * phi.signum(), (c - about) + towards * (4.0 * r * (f / 2.0).sin().powi(3) / (3.0 * (f - f.sin()))))
             }
-            Piece::Circle { c, r } => (PI * r * r, c),
+            Piece::Circle { c, r } => (PI * r * r, c - about),
         };
         area += segment.0;
         moment += segment.1 * segment.0;
@@ -2302,6 +2309,40 @@ fn arc_pieces_by_hand() {
     // 605.0000000228 (3.8e-11 of it too large).
     let Piece::Arc { r, .. } = Piece::new(DVec2::new(0.5, 0.0), DVec2::new(0.5, 0.0022), 1.1e6) else { panic!() };
     assert!((r - (605.0 + 5e-10)).abs() <= 605.0 * 4.0 * f64::EPSILON, "{r}");
+}
+
+#[test]
+fn a_thin_frame_far_out_by_hand() {
+    // Regression (seedab2989180676, random testing): a 20.5 × 12 frame
+    // 1.1 µm wide, 100 km out. Outer x 0..20.5, y −99999999..−99999987;
+    // hole x 0.0011..20.4989, y −99999998.9989..−99999987.0011. Both
+    // rectangles are symmetric about x = 20.5/2 = 10.25 and
+    // y = (−99999999 − 99999987)/2 = −99999993, so the frame between them
+    // is too: its caps' centroids are (10.25, −99999993) at z = 0 and 6.
+    // Its area is 20.5 × 12 − 20.4978 × 11.9978 = 0.07122... mm², and
+    // weighting each ring's first moment about the world origin made two
+    // ~2.4e10 numbers cancel to ~7e6, leaving ~4e-6 of rounding over that
+    // area: the model put the centroid 5.7e-5 mm off.
+    let shape = Shape::Extrude {
+        outer: Ring::straight(vec![DVec2::new(0.0, -99999999.0), DVec2::new(20.5, -99999999.0), DVec2::new(20.5, -99999987.0), DVec2::new(0.0, -99999987.0)]),
+        holes: vec![Ring::straight(vec![
+            DVec2::new(0.0011, -99999998.9989),
+            DVec2::new(0.0011, -99999987.0011),
+            DVec2::new(20.4989, -99999987.0011),
+            DVec2::new(20.4989, -99999998.9989),
+        ])],
+        dist: Num(6.0),
+        expect: None,
+        sketch: None,
+    };
+    let model = face_model(&shape).unwrap();
+    // Each coordinate rounds to a few units in the last place of 1e8.
+    let slack = tolerance::rounding_slack(1e8);
+    for (role, z) in [(FaceRole::Start, 0.0), (FaceRole::End, 6.0)] {
+        let &(_, _, c) = model.iter().find(|m| m.0 == role).unwrap();
+        let off = c.distance(DVec3::new(10.25, -99999993.0, z));
+        assert!(off <= slack, "{role:?} centroid {c} is {off:e} off");
+    }
 }
 
 fn strip_with_bulges(pts: &[(f64, f64)], bulges: &[f64], dist: f64) -> Shape {
