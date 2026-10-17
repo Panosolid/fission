@@ -158,15 +158,28 @@ fn conform_planar_faces(body: &Body, params: &mut [Vec<f64>]) -> Result<(), Tess
         if split.is_empty() {
             return Ok(());
         }
-        split.sort_unstable_by(|x, y| y.cmp(x)); // high k first, so earlier indices stay valid
+        split.sort_unstable();
         split.dedup();
-        for (e, k) in split {
-            let (lo, hi) = (params[e][k], params[e][k + 1]);
-            let mid = 0.5 * (lo + hi);
-            if !(lo < mid && mid < hi) {
-                return Err(TessError { face: 0, message: "boundary curves touch: chords can't be split further".into() });
+        // Each edge's list is rebuilt once per pass (O(n)); inserting the
+        // midpoints one at a time cost O(n) each, ~10¹² steps near the budget.
+        let mut i = 0;
+        while i < split.len() {
+            let e = split[i].0;
+            let old = std::mem::take(&mut params[e]);
+            let mut new = Vec::with_capacity(old.len() + split.len() - i);
+            for (k, &t) in old.iter().enumerate() {
+                new.push(t);
+                if i < split.len() && split[i] == (e, k) {
+                    let (lo, hi) = (t, old[k + 1]);
+                    let mid = 0.5 * (lo + hi);
+                    if !(lo < mid && mid < hi) {
+                        return Err(TessError { face: 0, message: "boundary curves touch: chords can't be split further".into() });
+                    }
+                    new.push(mid);
+                    i += 1;
+                }
             }
-            params[e].insert(k + 1, mid);
+            params[e] = new;
         }
         if params.iter().map(Vec::len).sum::<usize>() > MAX_MESH_POINTS {
             return Err(TessError { face: 0, message: format!("more than {MAX_MESH_POINTS} mesh points needed") });
@@ -1158,6 +1171,24 @@ mod tests {
     /// (r = 1 at max angle 0.2: ceil(2π / 0.2) = 32 chords.)
     fn plate_area() -> f64 {
         16.0 - 16.0 * (PI / 16.0).sin()
+    }
+
+    #[test]
+    fn a_hole_touching_its_outline_fails_in_bounded_time() {
+        // Regression (found closing mutation survivors): the rim of radius 1
+        // round (0, 1) touches the plate's bottom edge y = 0 at (0, 0). Rim
+        // points within ~1e-8 rad of the touch round onto y = 0 (1 − cos θ
+        // rounds to 0 below θ ≈ 1.05e-8, since 1 − cos θ ≈ θ²/2 < 2⁻⁵⁴ ≈
+        // 5.6e-17 there), so their chords keep touching the edge however often
+        // they are split and the point count grows to the budget. Each split
+        // was a Vec::insert, O(n) apiece, so near the budget a pass cost
+        // ~10¹² steps and this ran for hours. A face can't touch itself in
+        // a valid body, so the answer is an error; it must come back
+        // promptly (the whole pass is now O(n)).
+        let t = std::time::Instant::now();
+        let r = tessellate(&plate_with_hole(DVec3::Y, 2.0 * DVec3::Y), &TessOptions::DISPLAY);
+        assert!(r.is_err(), "a hole touching its outline was meshed");
+        assert!(t.elapsed().as_secs() < 120, "took {:?}", t.elapsed());
     }
 
     #[test]
