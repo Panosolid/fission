@@ -4,7 +4,10 @@
 // near one point's row and another's column it closes a corner, and near
 // an endpoint it lands on it and ends the chain. The same at 375 px wide
 // with taps (no hover, the tap itself snaps). Screenshots at 1280 and
-// 375 px go to E2E_SHOTS when set. Run with `npm run e2e` (after `npm run build`).
+// 375 px go to E2E_SHOTS when set. And a click still being snapped when the
+// tool changes (L, R, C or Escape) is dropped, never given to the new tool:
+// the kernel's replies are slowed so the key lands while it works. Run with
+// `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { chromium } from "playwright";
@@ -21,6 +24,15 @@ async function fresh(width = 1280, touch = false) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
+  // window.kernelDelay (ms) holds back every snap_to_grid request, so a key can be pressed while a click is snapped.
+  await page.addInitScript(() => {
+    const send = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (message, ...rest) {
+      const wait = window.kernelDelay ?? 0;
+      if (wait > 0 && message?.op === "snap_to_grid") return void setTimeout(() => send.call(this, message, ...rest), wait);
+      return send.call(this, message, ...rest);
+    };
+  });
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
@@ -157,6 +169,39 @@ try {
     assert.equal(await data(page, "sketchLines"), "2");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
     if (shots) await page.screenshot({ path: `${shots}/snap-375.png`, fullPage: true });
+    await page.context().close();
+  });
+
+  await check("a click still being snapped when the tool changes is dropped: C then L, R then Escape (regression)", async () => {
+    const page = await fresh();
+    await startSketch(page);
+    // Circle: the centre at (0, 0), then the click on the circle at (20, 0) is still with the kernel when L is pressed.
+    await page.keyboard.press("c");
+    await at(page, [0, 0]);
+    await points(page, "0,0");
+    await page.evaluate(() => (window.kernelDelay = 400));
+    await at(page, [20, 0]);
+    await page.keyboard.press("l");
+    await page.waitForTimeout(800);
+    assert.equal(await data(page, "sketchPoints"), "", "L dropped the centre, and the late click starts nothing");
+    assert.equal(await data(page, "sketchLines"), "0");
+    await page.evaluate(() => (window.kernelDelay = 0));
+    // The line tool starts clean: two clicks draw one line from the first, not from (20, 0).
+    await at(page, [10, 10]);
+    await at(page, [30, 10]);
+    await points(page, "10,10 30,10");
+    assert.equal(await data(page, "sketchLines"), "1");
+    // Rectangle: a first corner, then the opposite corner still with the kernel when Escape is pressed.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("r");
+    await at(page, [40, 0]);
+    await points(page, "10,10 30,10 40,0");
+    await page.evaluate(() => (window.kernelDelay = 400));
+    await at(page, [20, -10]);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(800);
+    assert.equal(await data(page, "sketchPoints"), "10,10 30,10", "Escape dropped the corner, and the late click is no new corner");
+    assert.equal(await data(page, "sketchLines"), "1", "no rectangle");
     await page.context().close();
   });
 

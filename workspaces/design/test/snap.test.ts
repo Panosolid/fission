@@ -91,7 +91,7 @@ test("hand-worked: a column from one point and a row from another meet, closing 
 });
 
 test("lined up with one point's column and row both is that point, by its own name", () => {
-  const targets: SnapTargets = { points: [{ at: [0, 0], kind: "endpoint" }], columns: [[0, 0]], rows: [[0, 0]], own: null };
+  const targets: SnapTargets = { points: [{ at: [0, 0], kind: "endpoint" }], columns: [[0, 0]], rows: [[0, 0]], own: [] };
   // (8, 8) is √128 ≈ 11.3 from (0, 0), out of the 10 mm reach, but 8 off its column and its row.
   assert.deepEqual(snapPointer([8, 8], [10, 10], targets, 1), { kind: "endpoint", at: [0, 0] });
 });
@@ -99,24 +99,24 @@ test("lined up with one point's column and row both is that point, by its own na
 test("the reach's boundary: 0.9 × SNAP_PIXELS snaps, 1.1 × does not, for points, columns and rows", () => {
   const pixel = 0.25; // reach 2.5 mm
   const reach = SNAP_PIXELS * pixel;
-  const point: SnapTargets = { points: [{ at: [0, 0], kind: "endpoint" }], columns: [], rows: [], own: null };
+  const point: SnapTargets = { points: [{ at: [0, 0], kind: "endpoint" }], columns: [], rows: [], own: [] };
   // Along (0.6, 0.8), a unit direction (0.36 + 0.64 = 1): the pointer is 0.9 and 1.1 reaches from the point.
   assert.equal(snapPointer([0.6 * 0.9 * reach, 0.8 * 0.9 * reach], [5, 5], point, pixel).kind, "endpoint");
   assert.equal(snapPointer([0.6 * 1.1 * reach, 0.8 * 1.1 * reach], [5, 5], point, pixel).kind, "grid");
-  const column: SnapTargets = { points: [], columns: [[0, 0]], rows: [], own: null };
+  const column: SnapTargets = { points: [], columns: [[0, 0]], rows: [], own: [] };
   assert.equal(snapPointer([0.9 * reach, 40], [5, 40], column, pixel).kind, "aligned");
   assert.equal(snapPointer([1.1 * reach, 40], [5, 40], column, pixel).kind, "grid");
-  const row: SnapTargets = { points: [], columns: [], rows: [[0, 0]], own: null };
+  const row: SnapTargets = { points: [], columns: [], rows: [[0, 0]], own: [] };
   assert.equal(snapPointer([40, -0.9 * reach], [40, 0], row, pixel).kind, "aligned");
   assert.equal(snapPointer([40, -1.1 * reach], [40, 0], row, pixel).kind, "grid");
 });
 
 test("exactly at the reach still snaps, to a point, a column and a row", () => {
   // Pixel 0.5: reach 5 mm. (3, 4) from the point is √25 = 5 exactly; 5 off the column and the row exactly.
-  const point: SnapTargets = { points: [{ at: [0, 0], kind: "endpoint" }], columns: [], rows: [], own: null };
+  const point: SnapTargets = { points: [{ at: [0, 0], kind: "endpoint" }], columns: [], rows: [], own: [] };
   assert.equal(snapPointer([3, 4], [10, 10], point, 0.5).kind, "endpoint");
-  assert.equal(snapPointer([5, 40], [10, 40], { points: [], columns: [[0, 0]], rows: [], own: null }, 0.5).kind, "aligned");
-  assert.equal(snapPointer([40, 5], [40, 10], { points: [], columns: [], rows: [[0, 0]], own: null }, 0.5).kind, "aligned");
+  assert.equal(snapPointer([5, 40], [10, 40], { points: [], columns: [[0, 0]], rows: [], own: [] }, 0.5).kind, "aligned");
+  assert.equal(snapPointer([40, 5], [40, 10], { points: [], columns: [], rows: [[0, 0]], own: [] }, 0.5).kind, "aligned");
 });
 
 test("an unknown or nonsense pixel size snaps to the grid only", () => {
@@ -161,6 +161,19 @@ test("the circle lines its radius up with its centre (a level radius), and never
   const circle: CircleTool = { kind: "circle", sketch, centre: [0, 50] };
   assert.deepEqual(snapOnSketch(doc, circle, [25, 51.2], [30, 50], 0.5), { kind: "aligned", at: [30, 50], column: null, row: [0, 50] });
   assert.deepEqual(snapOnSketch(doc, circle, [0.3, 50.3], [0, 50], 0.5), { kind: "grid", at: [0, 50] });
+});
+
+test("the arc tool never snaps onto its own start or end, and lines up with them", () => {
+  const { doc, sketch } = oneLine();
+  const arc: SketchTool = { kind: "arc", sketch, start: [0, 50], end: [40, 50] };
+  const targets = snapTargets(sketchOf(doc, sketch), arc);
+  assert.deepEqual(targets.own, [[0, 50], [40, 50]]);
+  // Reach 5 mm. (0.3, 50.2) is on the start: a third point there draws nothing, so the grid's (0, 50) unnamed.
+  assert.deepEqual(snapOnSketch(doc, arc, [0.3, 50.2], [0, 50], 0.5), { kind: "grid", at: [0, 50] });
+  // (40.6, 70) is 0.6 off the end's column: vertical from (40, 50), y the grid's 70.
+  assert.deepEqual(snapOnSketch(doc, arc, [40.6, 70], [40, 70], 0.5), { kind: "aligned", at: [40, 70], column: [40, 50], row: null });
+  // Before its end, the start alone is its own: the end lines up level with it, (25, 50.8) → (30, 50) on grid x.
+  assert.deepEqual(snapOnSketch(doc, { kind: "arc", sketch, start: [0, 50], end: null }, [25, 50.8], [30, 50], 0.5), { kind: "aligned", at: [30, 50], column: null, row: [0, 50] });
 });
 
 test("a click where the snap landed shares the point: a midpoint snap makes a point, an endpoint snap back on it ends the chain", () => {
@@ -255,13 +268,13 @@ function rng(seed: number) {
  * The model: what the pointer snaps to, worked from the drawn curves
  * (sketchCurves' coordinates) rather than the sketch's point list. Every
  * line end and arc end is an endpoint, every circle or arc centre that is
- * no end a centre, every line's middle a midpoint; the tool's own first
+ * no end a centre, every line's middle a midpoint; the tool's own
  * click is no target. Nearest within reach wins, an endpoint or centre
  * before a midpoint at the same place. Else the nearest column and row
- * within reach (the own click's included, the rectangle's corner's column
- * and row not), else the grid; lined up onto the own click is the grid.
+ * within reach (the own clicks included, the rectangle's corner's column
+ * and row not), else the grid; lined up onto an own click is the grid.
  */
-function model(sketch: Sketch, own: SketchXY | null, rectangle: boolean, raw: SketchXY, grid: SketchXY, reach: number): { kind: string; at: SketchXY } {
+function model(sketch: Sketch, owns: SketchXY[], rectangle: boolean, raw: SketchXY, grid: SketchXY, reach: number): { kind: string; at: SketchXY } {
   const c = sketchCurves(sketch);
   const key = (p: SketchXY) => `${p[0]},${p[1]}`;
   const ends = new Map<string, SketchXY>();
@@ -271,17 +284,19 @@ function model(sketch: Sketch, own: SketchXY | null, rectangle: boolean, raw: Sk
   for (const x of [...c.circles.map((k) => k.centre), ...c.arcs.map((a) => a.centre)]) if (!ends.has(key(x))) centres.set(key(x), x);
   const mids = c.lines.map((l): SketchXY => [(l.a[0] + l.b[0]) / 2, (l.a[1] + l.b[1]) / 2]);
   const rank = { endpoint: 0, centre: 0, midpoint: 1 } as const;
-  const all = [...[...ends.values()].map((at) => ({ at, kind: "endpoint" as const })), ...[...centres.values()].map((at) => ({ at, kind: "centre" as const })), ...mids.map((at) => ({ at, kind: "midpoint" as const }))].filter((t) => !own || key(t.at) !== key(own));
+  const all = [...[...ends.values()].map((at) => ({ at, kind: "endpoint" as const })), ...[...centres.values()].map((at) => ({ at, kind: "centre" as const })), ...mids.map((at) => ({ at, kind: "midpoint" as const }))].filter((t) => !owns.some((o) => key(o) === key(t.at)));
   const d = (p: SketchXY) => Math.sqrt((p[0] - raw[0]) ** 2 + (p[1] - raw[1]) ** 2);
   const within = all.filter((t) => d(t.at) <= reach).sort((a, b) => d(a.at) - d(b.at) || rank[a.kind] - rank[b.kind]);
   if (within.length) return { kind: within[0].kind, at: within[0].at };
-  const refs = [...ends.values(), ...centres.values(), ...(own && !ends.has(key(own)) && !centres.has(key(own)) ? [own] : [])];
+  const extra = new Map(owns.filter((o) => !ends.has(key(o)) && !centres.has(key(o))).map((o) => [key(o), o]));
+  const refs = [...ends.values(), ...centres.values(), ...extra.values()];
+  const own = rectangle ? owns[0] : undefined;
   const pick = (axis: 0 | 1) =>
     refs.filter((r) => !(rectangle && own && r[axis] === own[axis]) && Math.abs(r[axis] - raw[axis]) <= reach).sort((a, b) => Math.abs(a[axis] - raw[axis]) - Math.abs(b[axis] - raw[axis]))[0] ?? null;
   const [col, row] = [pick(0), pick(1)];
   if (!col && !row) return { kind: "grid", at: grid };
   const at: SketchXY = [col ? col[0] : grid[0], row ? row[1] : grid[1]];
-  if (own && key(at) === key(own)) return { kind: "grid", at: grid };
+  if (owns.some((o) => key(o) === key(at))) return { kind: "grid", at: grid };
   const on = all.filter((t) => key(t.at) === key(at)).sort((a, b) => rank[a.kind] - rank[b.kind])[0];
   return on ? { kind: on.kind, at: on.at } : { kind: "aligned", at };
 }
@@ -290,7 +305,7 @@ test("seeded random sketches, tools and pointers: the snap matches the model, an
   const kinds = { endpoint: 0, midpoint: 0, centre: 0, aligned: 0, grid: 0 } as Record<string, number>;
   for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
     const random = rng(seed);
-    const lattice = () => Math.round((random() * 40 - 20) * 2) / 2; // half-mm steps, so points and middles coincide often
+    const lattice = () => Math.round((random() * 40 - 20) * 2) / 2 + 0; // half-mm steps, so points and middles coincide often (+ 0: no −0)
     for (let round = 0; round < 60; round++) {
       let { doc, sketch } = blank();
       const n = 1 + Math.floor(random() * 6);
@@ -310,9 +325,14 @@ test("seeded random sketches, tools and pointers: the snap matches the model, an
       const s = sketchOf(doc, sketch);
       const pts = s.points;
       const roll = random();
-      const own: SketchXY | null = random() < 0.3 ? null : pts.length && random() < 0.5 ? (([p]) => [p.x, p.y] as SketchXY)([pts[Math.floor(random() * pts.length)]]) : [lattice(), lattice()];
+      // A first click: none, on a point the sketch has, or anywhere on the half-mm lattice; an arc may have a second.
+      const click = (): SketchXY | null => (random() < 0.3 ? null : pts.length && random() < 0.5 ? (([p]) => [p.x, p.y] as SketchXY)([pts[Math.floor(random() * pts.length)]]) : [lattice(), lattice()]);
+      const own = click();
       const ownId = own ? pointAt(s, own) : null;
-      const tool: SketchTool = roll < 0.5 ? line(sketch, own ? (ownId ?? own) : null) : roll < 0.75 ? { kind: "rectangle", sketch, corner: own } : { kind: "circle", sketch, centre: own };
+      const second = own ? click() : null;
+      const tool: SketchTool =
+        roll < 0.4 ? line(sketch, own ? (ownId ?? own) : null) : roll < 0.6 ? { kind: "rectangle", sketch, corner: own } : roll < 0.8 ? { kind: "circle", sketch, centre: own } : { kind: "arc", sketch, start: own, end: second };
+      const owns = [own, tool.kind === "arc" ? second : null].filter((p) => p !== null);
       const pixel = 0.02 + random() * 0.5;
       const reach = SNAP_PIXELS * pixel;
       for (let p = 0; p < 20; p++) {
@@ -321,7 +341,7 @@ test("seeded random sketches, tools and pointers: the snap matches the model, an
         const raw: SketchXY = near ? [near.x + (random() * 3 - 1.5) * reach, near.y + (random() * 3 - 1.5) * reach] : [random() * 50 - 25, random() * 50 - 25];
         const grid: SketchXY = [Math.round(raw[0] / 5) * 5 + 0, Math.round(raw[1] / 5) * 5 + 0];
         const got = snapOnSketch(doc, tool, raw, grid, pixel);
-        const want = model(s, own, tool.kind === "rectangle", raw, grid, reach);
+        const want = model(s, owns, tool.kind === "rectangle", raw, grid, reach);
         const where = `seed ${seed} round ${round} pointer ${p}: ${JSON.stringify({ raw, own, tool: tool.kind, pixel })}`;
         assert.equal(got.kind, want.kind, where);
         assert.deepEqual(got.at, want.at, where);
@@ -345,7 +365,7 @@ test("seeded random sketches, tools and pointers: the snap matches the model, an
 
 test("startTool's fresh tools have no own click: everything is a target", () => {
   const { doc, sketch } = oneLine();
-  for (const kind of ["line", "rectangle", "circle"] as const) {
+  for (const kind of ["line", "rectangle", "circle", "arc"] as const) {
     const t = snapTargets(sketchOf(doc, sketch), startTool(kind, sketch));
     assert.equal(t.points.length, 3, `${kind}: two ends and a midpoint`);
     assert.equal(t.columns.length, 2);

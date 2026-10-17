@@ -476,6 +476,8 @@ try {
     // The bottom side, then T: the arc leaves from the chain's last point, (40, 0).
     await page.keyboard.press("l");
     for (const p of [[0, 0], [40, 0]]) await at(page, p, TOP);
+    // Each key waits for the click before it to land: a click still being snapped when the tool changes is dropped.
+    await points(page, "0,0 40,0");
     await page.mouse.move(0, 0);
     await page.keyboard.press("t");
     // Straight on along the line: no turn, a note, nothing drawn.
@@ -496,6 +498,7 @@ try {
     await page.mouse.move(0, 0);
     await page.keyboard.press("l");
     await at(page, [0, 20], TOP);
+    await points(page, "0,0 40,0 40,20 40,10 0,20");
     await page.mouse.move(0, 0);
     await page.keyboard.press("t");
     await at(page, [0, 0], TOP);
@@ -519,33 +522,6 @@ try {
     await page.context().close();
   });
 
-  await check("regression: a key pressed while a click still waits on the kernel's snap applies after that click, not before", async () => {
-    // Found in 23c: the click's late result put back the tool it started
-    // with, so T pressed straight after a click was lost and the next click
-    // drew a line. Click and key are sent in one task here, so the kernel's
-    // reply always comes after the key.
-    const page = await fresh();
-    await page.click("#create-sketch");
-    await page.click("#sketch-plane-XY");
-    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
-    await at(page, [0, 0], TOP);
-    await points(page, "0,0");
-    const box = await page.locator("#viewport canvas").boundingBox();
-    const p = screenPoint(box, [40, 0, 0], TOP);
-    await page.evaluate(({ x, y }) => {
-      const canvas = document.querySelector("#viewport canvas");
-      const pointer = { clientX: x, clientY: y, pointerId: 1, isPrimary: true, button: 0, bubbles: true };
-      canvas.dispatchEvent(new PointerEvent("pointerdown", pointer));
-      canvas.dispatchEvent(new PointerEvent("pointerup", pointer));
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "t", code: "KeyT", bubbles: true }));
-    }, p);
-    await points(page, "0,0 40,0");
-    await until(page, () => document.querySelector("#sketch-tool-tangent").getAttribute("aria-pressed") === "true", null, "T chose Tangent arc");
-    await at(page, [40, 20], TOP);
-    await statusStarts(page, "1 line and 1 arc, not closed: ");
-    await page.context().close();
-  });
-
   await check("the tangent arc tool at 375 px with taps: five tool buttons fit and are 44 px, a line then a tangent arc", async () => {
     const page = await fresh(375, true);
     await page.tap("#create-sketch");
@@ -557,6 +533,7 @@ try {
       assert.ok(b.x >= 0 && b.x + b.width <= 375, `${id} fits across the screen`);
     }
     for (const p of [[0, 0], [40, 0]]) await at(page, p, TOP, true);
+    await points(page, "0,0 40,0");
     await page.tap("#sketch-tool-tangent");
     await at(page, [40, 20], TOP, true);
     await statusStarts(page, "1 line and 1 arc, not closed: ");

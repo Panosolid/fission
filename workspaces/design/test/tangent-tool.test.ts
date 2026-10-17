@@ -211,7 +211,7 @@ test("the preview: nothing before the start, the arc to the pointer, the line wh
   assert.deepEqual(d.editing?.preview, arcSegments({ start: [10, 0], end: [20, 10], centre: [10, 10] }));
   assert.equal(d.editing?.points.length, 2, "the line's two ends, no extra point");
   const targets = snapTargets(one.doc.sketches[0], one.tool);
-  assert.deepEqual(targets.own, [10, 0]);
+  assert.deepEqual(targets.own, [[10, 0]]);
   assert.ok(!targets.points.some((p) => p.at[0] === 10 && p.at[1] === 0), "a click on the start draws nothing, so it is not offered");
   // A start that is no longer a free end (after an undo, say) is no start: the next click is a first click again.
   const corner = drawLine(one.doc, one.doc.sketches[0].id, idAt(one.doc, [10, 0])!, [10, 10]).doc;

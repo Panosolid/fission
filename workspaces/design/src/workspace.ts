@@ -363,6 +363,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     tool: (kind) => chooseTool(kind),
   });
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
+  /** Counts tool changes (a tool chosen, Escape, the sketch entered again): a click the kernel was still snapping across one is dropped. */
+  let toolChanges = 0;
 
   /** Draws every sketch, the edited one with its grid, points and preview. */
   function drawSketches() {
@@ -416,6 +418,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const doc = designDoc();
     if (!editingSketch || !doc.sketches.some((s) => s.id === editingSketch!.id)) return void (editingSketch = null);
     mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null, snap: null };
+    toolChanges++;
     sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, editingSketch.tool);
     drawSketches();
     void showOutline();
@@ -423,16 +426,14 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
 
   /** Line, Rectangle, Circle, Arc or Tangent arc (the panel's buttons, or L, R, C, A and T): what was part way through is dropped, as Escape would, except that a line chain and a tangent arc carry on from each other's last point (`switchTool`). */
   function chooseTool(kind: ToolKind) {
-    // After any click still waiting on the kernel's snap: that click came first, so the switch applies to what it left.
-    clicks = clicks.then(() => {
-      if (mode.kind !== "edit" || !editingSketch) return;
-      editingSketch.tool = kind;
-      mode.tool = switchTool(designDoc(), mode.tool, kind);
-      mode.snap = null;
-      sketchBox.showTool(kind);
-      sketchBox.showError("");
-      drawSketches();
-    });
+    if (mode.kind !== "edit" || !editingSketch) return;
+    editingSketch.tool = kind;
+    mode.tool = switchTool(designDoc(), mode.tool, kind);
+    mode.snap = null;
+    toolChanges++;
+    sketchBox.showTool(kind);
+    sketchBox.showError("");
+    drawSketches();
   }
 
   /** Cancel or Finish sketch: back to modelling; the sketch stays as drawn. */
@@ -579,6 +580,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       return;
     }
     if (!at) return;
+    const changes = toolChanges;
     clicks = clicks.then(async () => {
       if (mode.kind !== "edit") return;
       let grid: SketchXY;
@@ -587,7 +589,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       } catch (e) {
         return sketchBox.showError(e instanceof Error ? e.message : String(e));
       }
-      if (mode.kind !== "edit") return;
+      // The tool changed while the kernel snapped (L, R, C or Escape): the click was for the old tool, so it is dropped.
+      if (mode.kind !== "edit" || toolChanges !== changes) return;
       // The click lands where the hover showed it would: on the grid, or on the point or line-up snap.ts finds.
       const snapped = snapOnSketch(designDoc(), mode.tool, at, grid, pointer.pixel).at;
       const done = clickAt(designDoc(), mode.tool, snapped);
@@ -657,14 +660,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
-        // Like a tool switch, after any click still waiting on the kernel.
-        clicks = clicks.then(() => {
-          if (mode.kind !== "edit") return;
-          mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
-          mode.snap = null;
-          sketchBox.showError("");
-          drawSketches();
-        });
+        mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
+        mode.snap = null;
+        toolChanges++;
+        sketchBox.showError("");
+        drawSketches();
         return true;
       }
       // L, R, C, A and T choose the line, rectangle, circle, arc and tangent arc tools while a sketch is edited; otherwise the key does what it would.
