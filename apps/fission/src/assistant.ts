@@ -6,8 +6,9 @@
 // nothing. A remote provider is shown exactly what it will be sent before
 // the first request to it. Opening the panel for the first time picks an
 // AI that runs on this computer if one is found (AI6); options that can't
-// run here are greyed out with the reason, and Ollama is listed only while
-// it is running. Models are chosen from a list (what Ollama has, what the
+// run here are greyed out with the reason. Ollama is looked for only when
+// the user asks (Look for Ollama), never on its own, and is listed only
+// once it has answered. Models are chosen from a list (what Ollama has, what the
 // API key's provider offers), with a typed name as the fallback.
 
 import {
@@ -144,7 +145,7 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
         ${PROVIDERS.map((p) => `<option value="${p.kind}">${escape(p.title)}</option>`).join("")}
       </select></label>
       <p id="ai-found" class="ai-note"></p>
-      <button id="ai-detect" type="button">Look again</button>
+      <button id="ai-detect" type="button">Look for Ollama</button>
       <label data-for="api-key">Whose API <select id="ai-vendor"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="other">Another (OpenAI-compatible)</option></select></label>
       <label data-for="ollama other">Address <input id="ai-endpoint" type="url" spellcheck="false"></label>
       <div data-for="in-browser ollama api-key" class="ai-model">
@@ -179,6 +180,8 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
   let found: Detected[] | null = null;
   let looking = false;
   let picked = false;
+  /** Whether the user asked to look for Ollama (its reason is shown only then). */
+  let ollamaAsked = false;
   /** The models the current settings can choose from, and the settings (less the model) they were listed for. */
   let models: string[] = [];
   let modelsFor = "";
@@ -234,14 +237,14 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
       const title = PROVIDERS.find((p) => p.kind === kind)?.title ?? "Off";
       option.textContent = cant && kind !== "ollama" ? `${title} (can't run here)` : title;
     }
-    const cannot = (found ?? []).filter((f) => !f.ok && f.kind !== "ollama");
+    const cannot = (found ?? []).filter((f) => !f.ok && (f.kind !== "ollama" || ollamaAsked));
     $("ai-found").textContent = looking
       ? "Looking for an AI that runs on this computer…"
       : !found
         ? ""
         : [
             picked && s ? `Chose ${PROVIDERS.find((p) => p.kind === s.kind)!.title} for you: it runs on this computer. You can change it here.` : "",
-            !s && !pickLocal(found) ? "No AI that runs on this computer was found. In your browser needs WebGPU (a recent Chrome or Edge); Ollama is listed once it is running; or use your own API key." : "",
+            !s && !pickLocal(found) ? "No AI that runs on this computer was found. In your browser needs WebGPU (a recent Chrome or Edge); if you run Ollama, Look for Ollama; or use your own API key." : "",
             ...cannot.map((f) => `${PROVIDERS.find((p) => p.kind === f.kind)!.title} can't run here: ${f.reason}`),
           ]
             .filter(Boolean)
@@ -378,18 +381,22 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
 
   /**
    * Looks for what can run on this computer (the browser's built-in model,
-   * WebGPU for the in-browser one, Ollama at its usual address; nothing
-   * leaves the machine), and the first time, with nothing ever chosen,
-   * picks the first local one found.
+   * WebGPU for the in-browser one; Ollama at its usual address only when
+   * the user asked or already uses it; nothing leaves the machine), and the
+   * first time, with nothing ever chosen, picks the first local one found.
    */
   async function lookAround() {
     if (looking) return;
     looking = true;
     render();
+    const withOllama = ollamaAsked || settings?.kind === "ollama";
     try {
-      found = await detectProviders();
+      const kinds = PROVIDERS.map((p) => p.kind).filter((k) => k !== "ollama" || withOllama);
+      const now = await detectProviders({}, kinds);
+      // Ollama's last answer is kept when it wasn't asked this time.
+      found = [...now, ...(found ?? []).filter((f) => !kinds.includes(f.kind))];
     } catch {
-      found = [];
+      found = found ?? [];
     }
     looking = false;
     const choice = pickLocal(found);
@@ -401,6 +408,7 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
     await refreshModels();
   }
   $("ai-detect").addEventListener("click", () => {
+    ollamaAsked = true;
     modelsFor = "";
     void lookAround();
   });

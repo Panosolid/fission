@@ -8,7 +8,8 @@
 // machine. Volumes are worked out by hand from V = width · depth · height.
 // AI6: opening the panel picks an AI that runs on this computer (the
 // browser's built-in model first, then a running Ollama), greys out what
-// can't run, lists Ollama only while it answers, recognises a pasted key
+// can't run, asks Ollama nothing until the user looks for it and lists it
+// only once it answers, recognises a pasted key
 // and lists the models it can use. WebGPU is taken away in every page so
 // the in-browser model is never found, whatever the machine running this.
 // Run with `npm run e2e` (after `npm run build`).
@@ -52,9 +53,11 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
   });
   const asked = [];
   const listed = [];
+  const ollamaHits = [];
   const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "content-type": "application/json" };
   await context.route("http://localhost:11434/**", async (route) => {
     const req = route.request();
+    ollamaHits.push(req.url());
     if (!ollama) return route.abort("connectionrefused");
     if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
     if (req.url().endsWith("/api/tags")) return route.fulfill({ headers: cors, body: JSON.stringify({ models: [{ name: "qwen2.5:1.5b" }] }) });
@@ -85,7 +88,7 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
   await page.goto(url + "#design");
   await volume(page, "24,000 mm³"); // the default box: 40 · 30 · 20
   if (open) await page.click("#assistant-toggle");
-  return { page, asked, listed, builtInAsked };
+  return { page, asked, listed, builtInAsked, ollamaHits };
 }
 const looked = (page) => page.waitForFunction(() => !/Looking/.test(document.querySelector("#ai-found").textContent) && document.querySelector("#ai-found").textContent !== "");
 /** Pastes `text` into the key box the way a real paste arrives (an input event of type insertFromPaste). */
@@ -108,8 +111,10 @@ async function volume(page, text) {
 }
 const undoTitle = (page) => page.getAttribute("#undo", "title");
 const setPart = (shape, width, depth, height) => JSON.stringify({ commands: [{ op: "set_part", shape, width, depth, height }] });
-/** Ollama is found running when the panel opens, and chosen with the model it has. */
+/** Look for Ollama: it is found running and, with nothing chosen yet, chosen with the model it has. */
 async function useOllama(page) {
+  await looked(page);
+  await page.click("#ai-detect");
   await page.waitForFunction(() => document.querySelector("#assistant-toggle").textContent === "AI Ollama");
   await page.waitForFunction(() => document.querySelector("#ai-model-pick").value === "qwen2.5:1.5b");
 }
@@ -130,11 +135,14 @@ async function check(name, fn) {
 }
 
 try {
-  await check("off until the panel is opened; opening it picks the running Ollama and the model it has, asking the model nothing", async () => {
-    const { page, asked } = await fresh([], { open: false });
+  await check("opening the panel asks Ollama nothing; Look for Ollama finds it and picks it with the model it has, asking the model nothing", async () => {
+    const { page, asked, ollamaHits } = await fresh([], { open: false });
     try {
       assert.equal(await page.textContent("#assistant-toggle"), "AI off", "nothing is looked for before the panel opens");
       await page.click("#assistant-toggle");
+      await looked(page);
+      assert.deepEqual(ollamaHits, [], "no request to an address on this computer until the user asks");
+      assert.equal(await page.$eval('#ai-provider option[value="ollama"]', (o) => o.hidden), true);
       await useOllama(page);
       await looked(page);
       assert.match(await page.textContent("#ai-found"), /Chose Ollama on your computer for you/);
@@ -336,17 +344,21 @@ try {
     }
   });
 
-  await check("nothing local found: stays off and says what would work; Ollama isn't listed; the API key still is", async () => {
-    const { page, asked } = await fresh([], { ollama: false });
+  await check("nothing local found: stays off and says what would work; Ollama isn't listed even when looked for; the API key still is", async () => {
+    const { page, asked, ollamaHits } = await fresh([], { ollama: false });
     try {
       await looked(page);
+      assert.equal(ollamaHits.length, 0);
+      assert.doesNotMatch(await page.textContent("#ai-found"), /OLLAMA_ORIGINS/, "no Ollama set-up talk until the user looks for it");
+      await page.click("#ai-detect");
+      await page.waitForFunction(() => /OLLAMA_ORIGINS/.test(document.querySelector("#ai-found").textContent));
+      assert.equal(ollamaHits.length, 1);
       assert.equal(await page.textContent("#assistant-toggle"), "AI off");
       assert.equal(await page.isDisabled("#ai-ask-button"), true);
       assert.match(await page.textContent("#ai-ask-note"), /Choose a provider/);
       assert.match(await page.textContent("#ai-found"), /No AI that runs on this computer was found/);
       assert.equal(await page.$eval('#ai-provider option[value="ollama"]', (o) => o.hidden && o.disabled), true, "Ollama is listed only while it runs");
       assert.equal(await page.$eval('#ai-provider option[value="api-key"]', (o) => o.disabled || o.hidden), false);
-      assert.doesNotMatch(await page.textContent("#ai-found"), /OLLAMA_ORIGINS/, "no Ollama set-up talk when it isn't there");
       assert.equal(asked.length, 0);
     } finally {
       await page.close();
@@ -380,8 +392,9 @@ try {
       await volume(page, "24,000 mm³");
       await page.click("#assistant-toggle");
       await looked(page);
-      assert.equal(await page.textContent("#assistant-toggle"), "AI off");
-      assert.equal(await page.$eval('#ai-provider option[value="ollama"]', (o) => o.hidden), false, "Ollama is still offered, just not chosen");
+      await page.click("#ai-detect");
+      await page.waitForFunction(() => document.querySelector('#ai-provider option[value="ollama"]').hidden === false);
+      assert.equal(await page.textContent("#assistant-toggle"), "AI off", "Ollama is offered, not chosen");
     } finally {
       await page.close();
     }

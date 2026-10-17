@@ -160,11 +160,15 @@ export interface Detected {
  * WebGPU and its power for the default in-browser model, Ollama at its
  * usual address, the browser's built-in model. An API key always can (the
  * key is asked for when it is chosen). The checks run together, so the
- * slowest one (Ollama's time limit) sets how long it takes.
+ * slowest one (Ollama's time limit) sets how long it takes. `kinds` limits
+ * which are looked at: the panel leaves Ollama out until the user asks,
+ * because asking an address on this computer from a web page logs an error
+ * when nothing listens there and can make the browser ask the user for
+ * local network access.
  */
-export async function detectProviders(deps: ProviderDeps = {}): Promise<Detected[]> {
+export async function detectProviders(deps: ProviderDeps = {}, kinds: readonly AIProviderKind[] = PROVIDERS.map((p) => p.kind)): Promise<Detected[]> {
   return Promise.all(
-    PROVIDERS.map(async (p): Promise<Detected> => {
+    PROVIDERS.filter((p) => kinds.includes(p.kind)).map(async (p): Promise<Detected> => {
       if (p.kind === "api-key") return { kind: p.kind, ok: true };
       const r =
         p.kind === "ollama"
@@ -186,7 +190,8 @@ async function ollamaAnswers(fetch: Fetch): Promise<{ ok: true } | { ok: false; 
 /**
  * The order local providers are picked in when the user hasn't chosen:
  * the browser's built-in model first (nothing to download), then Ollama
- * (found running, so set up on purpose), then the in-browser model (a
+ * (found running when the user looked for it, so set up on purpose), then
+ * the in-browser model (a
  * download, confirmed with its size before it starts). An API key is never
  * picked for the user: it costs them money.
  */

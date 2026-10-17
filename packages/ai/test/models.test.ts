@@ -154,3 +154,13 @@ test("detectProviders runs the checks together: a slow Ollama doesn't hold up th
   assert.deepEqual(found.map((x) => [x.kind, x.ok]), [["in-browser", false], ["ollama", false], ["api-key", true], ["browser-built-in", true]]);
   assert.equal(pickLocal(found), "browser-built-in");
 });
+
+test("detectProviders asks Ollama nothing when it is left out (the panel's first look)", async () => {
+  const { fetch, calls } = fakeServer(() => ({ json: { models: [] } }));
+  const builtIn = { availability: async () => "available" as const, create: async () => ({}) as never };
+  const found = await detectProviders({ fetch, gpu: undefined, builtIn, loadWebLLM: async () => ({ prebuiltAppConfig: { model_list: [] }, CreateMLCEngine: async () => ({}) as never }) }, ["in-browser", "api-key", "browser-built-in"]);
+  assert.deepEqual(found.map((x) => x.kind), ["in-browser", "api-key", "browser-built-in"]);
+  assert.equal(calls.length, 0, "no request to an address on this computer");
+  assert.deepEqual((await detectProviders({ fetch, gpu: undefined, builtIn: undefined }, ["ollama"])).map((x) => [x.kind, x.ok]), [["ollama", true]]);
+  assert.equal(calls.length, 1);
+});
