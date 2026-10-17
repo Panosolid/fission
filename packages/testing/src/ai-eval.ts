@@ -77,6 +77,45 @@ export const EVAL_CASES: readonly EvalCase[] = [
   },
 ];
 
+// AI4: the held-out set. Written before the prompt was changed and never
+// used while writing it, so a better score here means the prompt got
+// better at the job, not at these particular sentences. It covers the same
+// kinds of mistake the first run found (radius, cube, units) in new words,
+// plus answers that must stay as they are (a diameter is not doubled).
+// Never edit these to match a prompt; add new held-out cases instead.
+const BOX: Command = { op: "set_part", shape: "box", width: 40, depth: 30, height: 20 };
+const CYLINDER: Command = { op: "set_part", shape: "cylinder", width: 25, depth: 30, height: 60 };
+export const HELD_OUT_CASES: readonly EvalCase[] = [
+  // Radius 9 → diameter (width) 18.
+  { id: "held-cylinder-radius", taskType: "create", prompt: "A cylinder with a radius of 9 mm and a height of 40 mm.", setup: [], expected: [{ op: "set_part", shape: "cylinder", width: 18, height: 40 }] },
+  // Already a diameter: stays 40, not 80.
+  { id: "held-cylinder-diameter", taskType: "create", prompt: "A cylinder 40 mm in diameter and 10 mm high.", setup: [], expected: [{ op: "set_part", shape: "cylinder", width: 40, height: 10 }] },
+  // "Across" is the diameter: 5 cm = 50 mm.
+  { id: "held-sphere-cm", taskType: "create", prompt: "A sphere 5 cm across.", setup: [], expected: [{ op: "set_part", shape: "sphere", width: 50 }] },
+  // A cube is a box with three equal sides: 18, 18, 18.
+  { id: "held-cube-sides", taskType: "create", prompt: "Make a cube, 18 mm on each side.", setup: [], expected: [{ op: "set_part", shape: "box", width: 18, depth: 18, height: 18 }] },
+  // 3 cm = 30 mm on every side.
+  { id: "held-cube-cm", taskType: "create", prompt: "I want a cube with 3 cm sides.", setup: [], expected: [{ op: "set_part", shape: "box", width: 30, depth: 30, height: 30 }] },
+  // 1 inch = 25.4 mm exactly, so 2 in = 50.8 mm.
+  { id: "held-box-inches", taskType: "create", prompt: "A box 2 inches wide, 1 inch deep and 1 inch tall.", setup: [], expected: [{ op: "set_part", shape: "box", width: 50.8, depth: 25.4, height: 25.4 }] },
+  // 0.5 m = 500 mm.
+  { id: "held-box-metres", taskType: "create", prompt: "A box 0.5 m wide, 200 mm deep and 100 mm tall.", setup: [], expected: [{ op: "set_part", shape: "box", width: 500, depth: 200, height: 100 }] },
+  // Radius 1.5 cm = 15 mm → diameter 30 mm.
+  { id: "held-ball-radius-cm", taskType: "create", prompt: "A ball, radius 1.5 cm.", setup: [], expected: [{ op: "set_part", shape: "sphere", width: 30 }] },
+  // New radius 20 → width 40; the height 60 is kept.
+  { id: "held-set-radius", taskType: "edit-parameter", prompt: "Make the radius 20 mm.", setup: [CYLINDER], expected: [{ op: "set_part", shape: "cylinder", width: 40, height: 60 }] },
+  // 2 cm = 20 mm, so the height 20 becomes 40.
+  { id: "held-taller-cm", taskType: "edit-parameter", prompt: "Make it 2 cm taller.", setup: [BOX], expected: [{ op: "set_part", shape: "box", width: 40, depth: 30, height: 40 }] },
+  // The sphere's width 30 is its diameter, so radius 15; double → 30, diameter 60.
+  { id: "held-double-radius", taskType: "edit-parameter", prompt: "Double its radius.", setup: [{ op: "set_part", shape: "sphere", width: 30, depth: 30, height: 30 }], expected: [{ op: "set_part", shape: "sphere", width: 60 }] },
+  // 40 / 2 = 20.
+  { id: "held-half-width", taskType: "edit-parameter", prompt: "Make it half as wide.", setup: [BOX], expected: [{ op: "set_part", shape: "box", width: 20, depth: 30, height: 20 }] },
+  // "Across" is already the diameter: 50; the height 60 is kept.
+  { id: "held-across-edit", taskType: "edit-parameter", prompt: "Make it 50 mm across.", setup: [CYLINDER], expected: [{ op: "set_part", shape: "cylinder", width: 50, height: 60 }] },
+  // Diameter 30 → width 30; the box's height 20 is kept.
+  { id: "held-box-to-cylinder", taskType: "edit-parameter", prompt: "Change it to a cylinder 30 mm in diameter.", setup: [BOX], expected: [{ op: "set_part", shape: "cylinder", width: 30, height: 20 }] },
+];
+
 const same = (a: unknown, b: unknown) =>
   typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b)) : a === b;
 
