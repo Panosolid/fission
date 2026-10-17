@@ -17,7 +17,7 @@
 // a regression file so it replays forever.
 // Run with `npm run e2e` (after `npm run build`); E2E_BROWSER picks the browser.
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { preview } from "vite";
 import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-view.mjs";
@@ -27,7 +27,8 @@ const server = await preview({ preview: { port: 4190, strictPort: true }, logLev
 const url = "http://localhost:4190/";
 const browser = await launch();
 const SHAPES = Number(process.env.E2E_SESSION_SHAPES || 50);
-const saved = readdirSync(new URL("./regressions/", import.meta.url)).filter((f) => /^sketch-session-.*\.json$/.test(f));
+const regressions = new URL("./regressions/", import.meta.url);
+const saved = (existsSync(regressions) ? readdirSync(regressions) : []).filter((f) => /^sketch-session-.*\.json$/.test(f));
 const SEEDS = process.env.FISSION_SEED
   ? [Number(process.env.FISSION_SEED)]
   : [...(browserName === "chromium" ? [1, 2] : [1]), ...saved.map((f) => JSON.parse(readFileSync(new URL(`./regressions/${f}`, import.meta.url), "utf8")).seed)];
