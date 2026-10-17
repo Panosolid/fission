@@ -1,7 +1,7 @@
 // What happens to commands once the AI has proposed them. Every AI action
 // is PREVIEWED first; the user accepts or rejects it. Accepted, it lands in
 // the normal undo history as ONE labelled step ("AI: added 5 mm hole");
-// rejected, the project is exactly as it was. Until the timeline (step 32)
+// rejected, the project is exactly as it was. Until the timeline (step 24)
 // the preview is a diff of parameters (what each command would change,
 // before and after); ghosted geometry and highlights come with stable ids.
 

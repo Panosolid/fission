@@ -242,7 +242,7 @@ test("hand-worked: a circle of radius 5 extruded 2 mm is πr²h = 50π mm³, and
   // A line beside it: its loose end is what to fix first, in the kernel's words.
   const withLine = drawLine(part, s.id, [20, 0], [30, 0]);
   await assert.rejects(build(withLine.doc), /^Error: Sketch 1 has no closed outline: the end at \(20, 0\) is not joined to another line or arc$/);
-  // A closed rectangle beside it: until regions (step 26) that is two loops.
+  // A closed rectangle beside it: until regions (step 28) that is two loops.
   const withSquare = drawRectangle(part, s.id, [20, 0], [30, 10]);
   await assert.rejects(build(withSquare.doc), /^Error: Sketch 1 has no closed outline: the sketch makes 2 separate loops; for now a sketch makes one outline$/);
   // Two circles likewise; deleting the line closes the sketch again.
@@ -279,7 +279,7 @@ test("hand-worked: the circle tool's two clicks, snapped to a 1 mm grid, extrude
   near(body.volume, 1000 * Math.PI, "volume");
   near(body.area, 400 * Math.PI, "area");
   assert.deepEqual([body.vertices, body.edges, body.faces, body.errors], [2, 2, 3, []]);
-  // A circle drawn round a rectangle's corner shares the point, and the sketch is then two loops (until regions, 26).
+  // A circle drawn round a rectangle's corner shares the point, and the sketch is then two loops (until regions, 28).
   let rect = { doc: s.doc, tool: startTool("rectangle", s.id) };
   for (const p of [[0, 0], [40, 30]] as const) rect = clickAt(rect.doc, rect.tool, p);
   let round = { doc: rect.doc, tool: startTool("circle", s.id) };

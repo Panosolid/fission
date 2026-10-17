@@ -78,7 +78,7 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
       for (const p of ORIGIN_PLANES) {
         const b = button(p.label, `sketch-plane-${p.id}`, () => on.pickPlane(p.id));
         b.disabled = !p.offered;
-        if (!p.offered) b.title = "Sketching on the front and side planes, and on flat faces, comes with step 24.";
+        if (!p.offered) b.title = "Sketching on the front and side planes, and on flat faces, comes with step 26.";
         planes.append(b);
       }
       box.replaceChildren(
