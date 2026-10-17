@@ -9,7 +9,7 @@
 //   http on this computer). Not every one supports schemas, so its answers
 //   are validated and retried instead (structuredOutput false).
 
-import { ANSWER_TIMEOUT_MS, requestJson, type Fetch } from "./http.ts";
+import { ANSWER_TIMEOUT_MS, CHECK_TIMEOUT_MS, requestJson, type Fetch } from "./http.ts";
 import type { ApiKeyStore } from "./keys.ts";
 import type { AIProvider, AIRequest, ApiVendor } from "./providers.ts";
 
@@ -31,7 +31,7 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
  * Only https, or http to this computer, so a key never crosses the network
  * unencrypted.
  */
-export function otherEndpoint(endpoint: string | undefined): { origin: string; chatUrl: string } {
+export function otherEndpoint(endpoint: string | undefined): { origin: string; chatUrl: string; modelsUrl: string } {
   if (!endpoint?.trim()) throw new Error("give the provider's address, such as https://example.com/v1");
   let url: URL;
   try {
@@ -41,12 +41,62 @@ export function otherEndpoint(endpoint: string | undefined): { origin: string; c
   }
   if (url.protocol !== "https:" && !(url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname))) throw new Error("an API key is only sent over https (or to this computer), so the address must start with https://");
   if (url.username || url.password) throw new Error("the address can't contain a user name or password");
-  return { origin: url.origin, chatUrl: `${url.href.replace(/\/+$/, "")}/chat/completions` };
+  const base = url.href.replace(/\/+$/, "");
+  return { origin: url.origin, chatUrl: `${base}/chat/completions`, modelsUrl: `${base}/models` };
 }
 
 /** The origin a vendor's requests (and so its key) go to. */
 export function apiOrigin(vendor: ApiVendor, endpoint?: string): string {
   return vendor === "other" ? otherEndpoint(endpoint).origin : VENDOR_ORIGINS[vendor];
+}
+
+/**
+ * Whose key this is, from the start that only that provider uses:
+ * Anthropic's "sk-ant-", OpenAI's project and service-account keys
+ * "sk-proj-" and "sk-svcacct-". A bare "sk-" is not enough: other
+ * providers use it too, and guessing wrong would send the key to the
+ * wrong company. Null when it can't be told.
+ */
+export function vendorFromKey(key: string): Exclude<ApiVendor, "other"> | null {
+  const k = key.trim();
+  if (k.startsWith("sk-ant-")) return "anthropic";
+  if (k.startsWith("sk-proj-") || k.startsWith("sk-svcacct-")) return "openai";
+  return null;
+}
+
+/** The headers that carry the key: Anthropic's own, a bearer token for the rest. */
+function keyHeaders(vendor: ApiVendor, secret: string): Record<string, string> {
+  return vendor === "anthropic"
+    ? { "x-api-key": secret, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }
+    : { authorization: `Bearer ${secret}` };
+}
+
+/** OpenAI's list has models that can't chat (embeddings, speech, images, moderation, old completions); they are left out. */
+const NOT_CHAT = /embed|whisper|tts|dall-e|gpt-image|moderation|davinci|babbage|transcribe|realtime|audio|search|computer-use|sora/;
+/** A model name goes into a request body: printable, no spaces, not absurdly long. */
+const MODEL_NAME = /^[\x21-\x7e]{1,200}$/;
+
+/**
+ * The models this key can use, asked of the provider the key belongs to
+ * (and only it): Anthropic's GET /v1/models (newest first, as it lists
+ * them), OpenAI's GET /v1/models (chat models only, sorted), or an
+ * OpenAI-compatible address's /models (as listed). Nothing but the key is
+ * sent. Throws in plain words when it can't (no key, refused, empty).
+ */
+export async function listHostedModels(o: { vendor?: ApiVendor; endpoint?: string; keys: ApiKeyStore; fetch: Fetch; timeoutMs?: number }): Promise<string[]> {
+  const vendor = o.vendor ?? "anthropic";
+  if (!["anthropic", "openai", "other"].includes(vendor)) throw new Error(`unknown API provider "${vendor}"`);
+  const target = vendor === "other" ? otherEndpoint(o.endpoint) : { origin: VENDOR_ORIGINS[vendor], modelsUrl: `${VENDOR_ORIGINS[vendor]}/v1/models${vendor === "anthropic" ? "?limit=1000" : ""}` };
+  const who = vendor === "anthropic" ? "Anthropic's API" : vendor === "openai" ? "OpenAI's API" : target.origin;
+  const secret = o.keys.get(target.origin);
+  if (!secret) throw new Error(`no API key is saved for ${who}`);
+  const reply = await requestJson({ fetch: o.fetch, url: target.modelsUrl, headers: keyHeaders(vendor, secret), timeoutMs: o.timeoutMs ?? CHECK_TIMEOUT_MS * 5, who, secret });
+  const data = (reply as { data?: unknown }).data;
+  if (!Array.isArray(data)) throw new Error(`${who} sent a model list with no models in it`);
+  let ids = [...new Set(data.map((m) => (m as { id?: unknown } | null)?.id).filter((id): id is string => typeof id === "string" && MODEL_NAME.test(id)))];
+  if (vendor === "openai") ids = ids.filter((id) => !NOT_CHAT.test(id)).sort();
+  if (ids.length === 0) throw new Error(`${who} lists no models this key can use`);
+  return ids;
 }
 
 const TOOL = "answer";
@@ -105,10 +155,7 @@ export function hostedProvider(o: { vendor?: ApiVendor; model?: string; endpoint
       const secret = key();
       if (!secret) throw new Error(`no API key is saved for ${who}`);
       if (model === "") throw new Error("no model is chosen");
-      const headers: Record<string, string> =
-        vendor === "anthropic"
-          ? { "x-api-key": secret, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" }
-          : { authorization: `Bearer ${secret}` };
+      const headers = keyHeaders(vendor, secret);
       const body = vendor === "anthropic" ? anthropicBody(model, request) : openaiBody(model, vendor === "other" ? { ...request, jsonSchema: undefined } : request);
       const reply = await requestJson({ fetch: o.fetch, url: target.chatUrl, headers, body, timeoutMs: o.timeoutMs ?? ANSWER_TIMEOUT_MS, who, secret });
       try {
