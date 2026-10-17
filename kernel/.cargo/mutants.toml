@@ -42,9 +42,7 @@ exclude_re = [
   '^src/ops/profile\.rs:\d+:\d+: replace < with <= in winding$', # each tie puts the point on the loop, which callers rule out
   '^src/ops/profile\.rs:\d+:\d+: replace > with >= in winding$', # the arc's side from its sweep's sign: a sweep is never 0
   '^src/ops/profile\.rs:\d+:\d+: replace < with <= in doubles_back$', # dot 0 means perpendicular unit tangents, cross ±1, never within ANGULAR
-  '^src/ops/profile\.rs:\d+:\d+: replace < with <= in counter_clockwise$', # a tie is one point found twice; any lowest point gives the answer
-  '^src/ops/profile\.rs:\d+:\d+: replace != with == in counter_clockwise$', # the lowest-leftmost straight corner always turns
-  '^src/ops/profile\.rs:\d+:\d+: replace > with >= in counter_clockwise$', # sweep or turn never 0 there; an ANGULAR tie gives the same answer; t_out.x never 0
+  '^src/ops/profile\.rs:\d+:\d+: replace > with >= in counter_clockwise$', # a checked loop's area is never 0 (at least ~span·MIN_FEATURE/2)
   '^src/ops/profile\.rs:\d+:\d+: replace \+ with - in probe$', # any point of a hole's circle decides
   '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$', # at exactly 0.1 both forms are within FP_REL; the mutant's series is the more accurate one
   '^src/ops/extrude\.rs:\d+:\d+: replace > with >= in extrude$', # an arc's sweep is never 0
