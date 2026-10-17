@@ -1,16 +1,16 @@
 // The one place Design turns "this body / face / edge" into a reference.
 //
-// PLACEHOLDER IDS until topological naming (step 32): a face or edge is
+// PLACEHOLDER IDS until topological naming (step 24): a face or edge is
 // named by the feature that built the body and the kernel's index of that
 // face or edge, e.g. "face:feature-1/3". Kernel indices are not stable: an
 // edit that changes the topology can renumber them, so these ids may point
-// at a different face after such an edit (17e checks and warns). Step 32
+// at a different face after such an edit (17e checks and warns). Step 24
 // replaces this function's body; nothing else builds ids.
 
 import type { GeometryReference, OutlineReference, StableId } from "@fission/core";
 
 /** Says what every id from `designReference` is, for tests and the properties panel. */
-export const PLACEHOLDER_ID_NOTE = "Placeholder id (feature and kernel index) until topological naming, step 32";
+export const PLACEHOLDER_ID_NOTE = "Placeholder id (feature and kernel index) until topological naming, step 24";
 
 /**
  * The reference for a body (`index` left out) or for the face or edge with

@@ -21,5 +21,5 @@ Later and optional, the maker links (G2): they sit underneath the photo editor a
   - Tests: hand-worked cases (a square traces to exactly 4 lines, a circle to arcs within the tolerance), the traced area matching the pixel area, seeded random blobs against a simple model, deliberate breaks, the 0.9×/1.1× tolerance boundary, and the tracer in the nightly fuzzing; added to the stateful harness the day it lands.
 - [ ] G2c. A raster engraving in Laser (row 15): waits for Laser L1, which declares `accepts: ["image"]` and does the dithering; Image needs nothing more.
 - [ ] G2d. A texture in Render (row 16): waits for Render R1.
-- [ ] G2e. A lithophane (row 17): a Design "relief from image" mesh-body feature, CAD step 32 and X16; Image needs nothing more.
+- [ ] G2e. A lithophane (row 17): a Design "relief from image" mesh-body feature, CAD step 24 and X16; Image needs nothing more.
 - [ ] G2f. A Design sketch from a traced image: after G2b and step 21.

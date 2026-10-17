@@ -37,7 +37,7 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 | 14 | Image → Vector | trace a photo or scan to paths | Image in, Outline out (trace converter; classic algorithm first, A4 model optional) | none; the image is untouched | expensive | G1 + V1 |
 | 15 | Image → Laser | raster engraving | Image with mm per pixel; Laser does the dithering | none | cheap | G1 + L1 |
 | 16 | Image → Render | textures and material maps | Image | none | cheap | G1 + R1 |
-| 17 | Image → Design | a lithophane or relief from brightness | Image in, a Design feature builds a mesh body (decisions 3 and 4) | none | cheap | G2 + 32 |
+| 17 | Image → Design | a lithophane or relief from brightness | Image in, a Design feature builds a mesh body (decisions 3 and 4) | none | cheap | G2 + 24 |
 | 18 | Image → Layout | photos on a page | Image | none | cheap | G1 + Y1 |
 | 19 | Render → Layout and Image | a rendered picture | Image (marked out of date when the scene changes) | none | expensive | R2 + Y2 / G1 |
 | 20 | Design → Layout | a design view or a drawing view; parameters as text fields | Outline for drawings (77–79), Image for shaded views, Data for parameters | none | cheap | Y2 + 77 for drawings |
@@ -57,7 +57,7 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 | # | What | Who reads it | Ready at |
 |---|---|---|---|
 | 26 | One selection (stable ids) | all | done (17) |
-| 27 | One undo history; an edit in one workspace undoes from any | all | 20, timeline edits at 32 |
+| 27 | One undo history; an edit in one workspace undoes from any | all | 20, timeline edits at 24 |
 | 28 | Units | all | done |
 | 29 | One materials library: appearance (Render), mechanical (Simulate), print settings (Slice), power and speed (Laser), stock and feeds (Manufacture) | all making workspaces | I3 with 62 |
 | 30 | Parameters: Design parameters used anywhere (kerf, thickness, board size, wall thickness in a sweep) | all | 34 + I18 |
