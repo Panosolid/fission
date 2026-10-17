@@ -15,7 +15,7 @@
 // Two clicks are at the same point only when their snapped coordinates are
 // equal: the kernel gives bit-identical grid nodes for the same node, so a
 // click back on the chain's first point closes it. Snapping to points off
-// the grid comes with the sketch constraints (27).
+// the grid comes with the sketch constraints (29).
 
 import type { Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchArcCurve, SketchLineCurve, SketchPlane } from "./document.ts";
@@ -93,7 +93,7 @@ function pendingClicks(tool: SketchTool): SketchXY[] {
 /** The grid a new sketch starts with (mm), as Design's grid in the viewport. */
 export const DEFAULT_GRID = 10;
 
-/** The origin planes the Create sketch prompt draws; only the ground plane until step 24 brings the other two and flat faces. */
+/** The origin planes the Create sketch prompt draws; only the ground plane until step 26 brings the other two and flat faces. */
 export const ORIGIN_PLANES: readonly { id: SketchPlane; offered: boolean; label: string }[] = [
   { id: "XY", offered: true, label: "Ground plane (XY)" },
   { id: "XZ", offered: false, label: "Front plane (XZ)" },

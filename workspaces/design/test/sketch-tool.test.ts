@@ -91,7 +91,7 @@ test("the drawings: the edited sketch with its grid, points and preview; the oth
   assert.deepEqual(sketchDrawings(doc, null).map((d) => d.editing), [undefined, undefined], "nothing edited");
 });
 
-test("the plane prompt offers only the ground plane until step 24, and each plane is looked at straight down", () => {
+test("the plane prompt offers only the ground plane until step 26, and each plane is looked at straight down", () => {
   assert.deepEqual(ORIGIN_PLANES.filter((p) => p.offered).map((p) => p.id), ["XY"]);
   assert.deepEqual(originPlanes().map((p) => [p.id, p.offered]), [["XY", true], ["XZ", false], ["YZ", false]]);
   // Straight down means the camera on the normal's side: XY's normal +Z is the top

@@ -1,6 +1,6 @@
 // Step 21d: extruding a sketch (docs/document-model.md, sections 3 and 6).
 // The extrude is a new feature after its sketch, depending on it, and until
-// step 32 it replaces the part's one solid feature. Volumes on the real
+// step 24 it replaces the part's one solid feature. Volumes on the real
 // kernel are in packages/testing/journeys/extrude-sketch.journey.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -46,7 +46,7 @@ test("hand-worked: extruding Sketch 1 replaces the part with a new feature after
   const made = extrudeSketch(doc, sketch, 10);
   assert.equal(made.id, "feature-11");
   assert.equal(made.doc.nextId, 12);
-  // The box is gone (one body until step 32); the extrude comes after its sketch.
+  // The box is gone (one body until step 24); the extrude comes after its sketch.
   assert.deepEqual(made.doc.timeline.features.map((f) => f.id), ["sketch-2", "feature-11"]);
   assert.deepEqual(lastFeature(made.doc), {
     id: "feature-11",
@@ -141,7 +141,7 @@ test("featureSpec refuses an open sketch with the kernel's reason, and a sketch 
   const made = extrudeSketch(doc, sketch, 10).doc;
   const { kernel } = fakeKernel({ open: "the line end at (0, 0) is not joined to another line" });
   await assert.rejects(featureSpec(kernel, made, lastFeature(made)), /^Error: Sketch 1 has no closed outline: the line end at \(0, 0\) is not joined to another line$/);
-  // On XZ the outline would need turning upright, which comes with step 24: refused, never built flat.
+  // On XZ the outline would need turning upright, which comes with step 26: refused, never built flat.
   const upright = structuredClone(made);
   upright.timeline.features[0].intent.parameters.plane = "XZ";
   await assert.rejects(featureSpec(kernel, upright, lastFeature(upright)), /Sketch 1 is on the XZ plane, and only sketches on the XY plane can be extruded so far/);

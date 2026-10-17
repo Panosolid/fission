@@ -35,7 +35,7 @@
 //! - `sketch_outline`: the one closed outline the lines, circles and arcs
 //!   make, or why they make none. A sketch of exactly one circle and
 //!   nothing else is that circle's outline (`Boundary::Circle`). A circle
-//!   together with anything else is several loops until regions (step 26),
+//!   together with anything else is several loops until regions (step 28),
 //!   after the other curves' own loose ends and branches, which are
 //!   reported first. Lines and arcs are pieces with two ends each (lines
 //!   first, then arcs, in the order given). Two ends are joined when they
@@ -51,7 +51,7 @@
 //!   so a closed sketch is exactly a profile the extrude accepts (a lone
 //!   circle goes through the same check). Several
 //!   separate loops, and loops inside loops, wait for profile detection
-//!   (step 26); until then they are reported, not guessed at.
+//!   (step 28); until then they are reported, not guessed at.
 //!
 //! Cost: joining ends sorts them by x and compares each with the ends
 //! less than LINEAR further along, so it is O(n log n) for spread-out
@@ -665,7 +665,7 @@ mod tests {
         assert_eq!(open(&lines), Open::SeveralLoops { loops: 2 });
         lines.extend(ring(&[(9.0, 0.0), (8.0, 1.0), (8.0, 0.0)]));
         assert_eq!(open(&lines), Open::SeveralLoops { loops: 3 });
-        // A square inside a square is also two loops until step 26.
+        // A square inside a square is also two loops until step 28.
         let mut nested = ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
         nested.extend(ring(&[(2.0, 2.0), (2.0, 8.0), (8.0, 8.0), (8.0, 2.0)]));
         assert_eq!(open(&nested), Open::SeveralLoops { loops: 2 });
@@ -766,7 +766,7 @@ mod tests {
     fn a_circle_with_anything_else_is_several_loops() {
         let square = ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
         // Two circles apart, or one inside the other (a washer, a region
-        // at step 26): each circle is a loop.
+        // at step 28): each circle is a loop.
         assert_eq!(open_with(&[], &[circle(0.0, 0.0, 1.0), circle(5.0, 0.0, 1.0)]), Open::SeveralLoops { loops: 2 });
         assert_eq!(open_with(&[], &[circle(0.0, 0.0, 5.0), circle(0.0, 0.0, 2.0)]), Open::SeveralLoops { loops: 2 });
         // A square and a circle (inside it or not): 1 + 1 loops; with a
