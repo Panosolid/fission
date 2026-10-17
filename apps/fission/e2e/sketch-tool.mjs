@@ -501,6 +501,8 @@ try {
     await page.tap("#create-sketch");
     await page.tap("#sketch-plane-XY");
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1 (Firefox clicks land on whole pixels, 0.1 mm off)
+    await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
     await page.tap("#sketch-tool-arc");
     for (const id of ["sketch-tool-line", "sketch-tool-rectangle", "sketch-tool-circle", "sketch-tool-arc"]) {
       const b = await page.locator(`#${id}`).boundingBox();
@@ -521,6 +523,8 @@ try {
     await page.click("#create-sketch");
     await page.click("#sketch-plane-XY");
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1 (Firefox clicks land on whole pixels, 0.1 mm off)
+    await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
     // A first click that is no line's or arc's end says why.
     await page.keyboard.press("t");
     assert.equal(await page.getAttribute("#sketch-tool-tangent", "aria-pressed"), "true", "T chose Tangent arc");
@@ -582,6 +586,8 @@ try {
     await page.tap("#create-sketch");
     await page.tap("#sketch-plane-XY");
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1 (Firefox clicks land on whole pixels, 0.1 mm off)
+    await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
     for (const id of ["sketch-tool-line", "sketch-tool-rectangle", "sketch-tool-circle", "sketch-tool-arc", "sketch-tool-tangent"]) {
       const b = await page.locator(`#${id}`).boundingBox();
       assert.ok(b.height >= 44, `${id} is ${b.height} px tall, at least 44 to tap`);

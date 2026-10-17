@@ -83,6 +83,9 @@ async function drawn(page, pts, tap = false) {
   if (tap) await page.tap("#sketch-plane-XY");
   else await page.click("#sketch-plane-XY");
   await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+  // On the grid: grid snap is off by default since SF1, and Firefox's clicks land on whole pixels, 0.1 mm off.
+  await page.check("#sketch-grid-snap");
+  await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
   for (const p of pts) await at(page, p, TOP, tap);
 }
 

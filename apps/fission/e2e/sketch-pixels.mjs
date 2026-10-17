@@ -150,6 +150,8 @@ try {
   await page.click("#create-sketch");
   await page.click("#sketch-plane-XY");
   await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true");
+  // The drawing is on the grid: grid snap is off by default since SF1, and Firefox's clicks land on whole pixels.
+  await page.check("#sketch-grid-snap");
   await page.mouse.move(0, 0);
   // Each tool's clicks are waited for before the next key: a key pressed while a click is still being
   // snapped would take that click (see the TC2 finding in docs/progress/cad.md).
