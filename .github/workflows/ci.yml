@@ -181,7 +181,7 @@ jobs:
           path: apps/fission/e2e/screenshots/*.*.png
           if-no-files-found: ignore
 
-  # The sketch browser tests (and the smoke test) in the other two engines
+  # The sketch browser tests (and, reported only, the smoke test) in the other two engines
   # people use: Firefox and WebKit (Safari's engine). Pixel probes run in
   # all three; golden images are Chromium's only (testing catch-up TC4).
   browsers:
@@ -210,6 +210,15 @@ jobs:
       - run: npx playwright install --with-deps ${{ matrix.browser }}
         working-directory: apps/fission
       - run: npm run e2e:engines
+        working-directory: apps/fission
+        env:
+          E2E_BROWSER: ${{ matrix.browser }}
+      # The whole-app smoke test in this engine, reported but not yet required:
+      # its first run here found engine differences (docs/progress/cad.md, TC4)
+      # that are other workstreams' to fix; this step goes required once they are.
+      - run: node e2e/smoke.mjs
+        if: always()
+        continue-on-error: true
         working-directory: apps/fission
         env:
           E2E_BROWSER: ${{ matrix.browser }}

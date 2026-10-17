@@ -90,7 +90,11 @@ async function check(name, fn) {
 try {
   await page.goto(url);
   // The panel appears once the app has looked for a stored project (19c), so wait for it to exist too.
-  await page.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "…") !== "…");
+  await page.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "…") !== "…").catch(async (e) => {
+    // Say what the page did say, so a browser that never starts (another engine in CI) can be diagnosed from the log.
+    const shown = await page.evaluate(() => ({ status: document.querySelector("#status")?.textContent, file: document.querySelector("#file-status")?.textContent, body: document.body.innerText.slice(0, 300) }));
+    throw new Error(`${e.message}\n  the page shows ${JSON.stringify(shown)}\n  console errors: ${JSON.stringify(consoleErrors)}`);
+  });
 
   await check("default 40×30×20 box shows hand-worked numbers", async () => {
     // V = 40·30·20 = 24000; A = 2(40·30 + 30·20 + 40·20) = 5200.
