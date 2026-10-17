@@ -16,7 +16,7 @@
 
 use super::profile::{check_profile, Seg};
 pub use super::profile::{Boundary, Profile};
-use super::{check_length, finish, transform::check_in_model_space, KernelError};
+use super::{check_length, finish, transform::check_in_model_space, KernelError, Meshed};
 use crate::geom::{unit, Curve, Surface};
 use crate::topology::{Body, Coedge, Loop, Shell};
 use glam::{DVec2, DVec3};
@@ -24,6 +24,11 @@ use std::f64::consts::TAU;
 
 /// Extrudes `profile` along +Z by `distance`.
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
+    extrude_meshed(profile, distance).map(|(body, _)| body)
+}
+
+/// `extrude`, also handing back the body's display mesh (`ops::finish`).
+pub fn extrude_meshed(profile: &Profile, distance: f64) -> Result<Meshed, KernelError> {
     check_length("extrude distance", distance)?;
     let loops = check_profile(profile)?;
 

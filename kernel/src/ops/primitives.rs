@@ -1,6 +1,6 @@
 //! Primitive solids.
 
-use super::{check_length, finish, KernelError};
+use super::{check_length, finish, KernelError, Meshed};
 use crate::geom::{Curve, Surface};
 use std::f64::consts::TAU;
 use crate::topology::{Body, Coedge, Loop, Shell};
@@ -10,6 +10,11 @@ use std::collections::HashMap;
 /// Axis-aligned box with one corner at the origin and the opposite corner
 /// at (width, depth, height).
 pub fn make_box(width: f64, depth: f64, height: f64) -> Result<Body, KernelError> {
+    make_box_meshed(width, depth, height).map(|(body, _)| body)
+}
+
+/// `make_box`, also handing back the body's display mesh (`ops::finish`).
+pub fn make_box_meshed(width: f64, depth: f64, height: f64) -> Result<Meshed, KernelError> {
     check_length("width", width)?;
     check_length("depth", depth)?;
     check_length("height", height)?;
@@ -54,6 +59,11 @@ pub fn make_box(width: f64, depth: f64, height: f64) -> Result<Body, KernelError
 /// Cylinder of `radius` and `height` standing on the origin along +Z: two
 /// seamless circular edges, two caps, and a side face with two loops.
 pub fn make_cylinder(radius: f64, height: f64) -> Result<Body, KernelError> {
+    make_cylinder_meshed(radius, height).map(|(body, _)| body)
+}
+
+/// `make_cylinder`, also handing back the body's display mesh (`ops::finish`).
+pub fn make_cylinder_meshed(radius: f64, height: f64) -> Result<Meshed, KernelError> {
     check_length("radius", radius)?;
     check_length("height", height)?;
     let mut b = Body::default();
@@ -85,6 +95,11 @@ pub fn make_cylinder(radius: f64, height: f64) -> Result<Body, KernelError> {
 /// equator edge (a single face with no edges couldn't satisfy Euler–Poincaré
 /// in this data structure).
 pub fn make_sphere(radius: f64) -> Result<Body, KernelError> {
+    make_sphere_meshed(radius).map(|(body, _)| body)
+}
+
+/// `make_sphere`, also handing back the body's display mesh (`ops::finish`).
+pub fn make_sphere_meshed(radius: f64) -> Result<Meshed, KernelError> {
     check_length("radius", radius)?;
     let mut b = Body::default();
     let v = b.add_vertex(DVec3::new(radius, 0.0, 0.0));
