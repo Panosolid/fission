@@ -61,8 +61,15 @@ function screenPoint(box, [px, py, pz], view) {
 
 const data = (page, key) => page.evaluate((k) => document.querySelector("#viewport").dataset[k] ?? "", key);
 const undoTitle = (page) => page.evaluate(() => document.getElementById("undo").title);
+/** What the page shows, for a timed-out wait's message (an engine difference is read from the CI log). */
+const shown = (page) =>
+  page.evaluate(() => {
+    const text = (id) => document.getElementById(id)?.textContent?.trim() ?? "(none)";
+    const grid = document.getElementById("sketch-grid");
+    return `sketch status "${text("sketch-status")}", extrude status "${text("extrude-status")}", grid "${grid ? grid.value : "(none)"}", grid error "${text("sketch-grid-error")}"`;
+  });
 const until = (page, fn, arg, what) =>
-  page.waitForFunction(fn, arg, { timeout: 5000 }).catch(async () => assert.fail(`${what}: timed out`));
+  page.waitForFunction(fn, arg, { timeout: 5000 }).catch(async () => assert.fail(`${what}: timed out; the page shows ${await shown(page)}`));
 /** Waits until the edited sketch shows these points (the kernel snaps each click first). */
 const points = async (page, want) => until(page, (w) => document.querySelector("#viewport").dataset.sketchPoints === w, want, `points ${want} (shown: ${await data(page, "sketchPoints")})`);
 /** Waits until the status starts with `prefix` (the rest is the kernel's reason). */

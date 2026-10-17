@@ -186,6 +186,7 @@ jobs:
   # all three; golden images are Chromium's only (testing catch-up TC4).
   browsers:
     name: browsers (${{ matrix.browser }})
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

@@ -9,7 +9,7 @@
     "build": "npm run kernel && tsc && vite build",
     "preview": "vite preview",
     "test": "node --test e2e/*.test.mjs",
-    "e2e:engines": "s=0; for t in undo sketch sketch-tool sketch-session sketch-pixels extrude; do node --experimental-strip-types --no-warnings e2e/$t.mjs || s=1; done; exit $s",
+    "e2e:engines": "s=0; for t in undo sketch sketch-tool sketch-session sketch-pixels extrude; do timeout 600 node --experimental-strip-types --no-warnings e2e/$t.mjs || { echo \"$t failed or ran past 10 minutes\"; s=1; }; done; exit $s",
     "e2e": "node e2e/smoke.mjs && node e2e/dump-viewer.mjs && node e2e/storage.mjs && node e2e/image.mjs && node e2e/styles.mjs && node e2e/files.mjs && node e2e/copy-svg.mjs && node e2e/switching.mjs && node e2e/shortcuts.mjs && node e2e/undo.mjs && node e2e/sketch.mjs && node e2e/sketch-tool.mjs && node --experimental-strip-types --no-warnings e2e/sketch-session.mjs && node e2e/sketch-pixels.mjs && node e2e/extrude.mjs && node e2e/assistant.mjs && node --experimental-strip-types --no-warnings e2e/journeys.mjs"
   },
   "dependencies": {

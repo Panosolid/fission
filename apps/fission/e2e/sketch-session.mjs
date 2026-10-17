@@ -23,8 +23,8 @@ import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-view.mjs";
 import { isClosed, modelOutline, openWords, shoelace } from "../../../packages/testing/src/outline-model.ts";
 
-const server = await preview({ preview: { port: 4190, strictPort: true }, logLevel: "error" });
-const url = "http://localhost:4190/";
+const server = await preview({ preview: { port: 4196, strictPort: true }, logLevel: "error" });
+const url = "http://localhost:4196/";
 const browser = await launch();
 const SHAPES = Number(process.env.E2E_SESSION_SHAPES || 50);
 const regressions = new URL("./regressions/", import.meta.url);
