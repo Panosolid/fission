@@ -20,7 +20,7 @@ import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts"
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
-import { clickAt, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -67,7 +67,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   create.type = "button";
   create.id = "create-sketch";
   create.textContent = "Create sketch";
-  create.title = "Draw lines on a plane: pick the plane, then click point to point.";
+  create.title = "Draw lines, rectangles and circles on a plane: pick the plane, then click.";
   create.addEventListener("click", onSketch);
   const extrude = document.createElement("button");
   extrude.type = "button";
@@ -418,7 +418,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     void showOutline();
   }
 
-  /** Line or Rectangle (the panel's buttons, or L and R): what was part way through is dropped, as Escape would. */
+  /** Line, Rectangle or Circle (the panel's buttons, or L, R and C): what was part way through is dropped, as Escape would. */
   function chooseTool(kind: ToolKind) {
     if (mode.kind !== "edit" || !editingSketch) return;
     editingSketch.tool = kind;
@@ -454,15 +454,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     drawSketches();
   }
 
-  /** Says whether the edited sketch's lines close into one outline, or the kernel's reason they don't. */
+  /** Says what the edited sketch holds and whether it makes one closed outline, or the kernel's reason it doesn't. */
   const outlineOf = latestOnly((curves: ReturnType<typeof sketchCurves>) => askOutline(kernel, curves));
   async function showOutline() {
     if (mode.kind !== "edit") return;
     const id = mode.tool.sketch;
     const sketch = designDoc().sketches.find((s) => s.id === id);
     if (!sketch) return;
-    if (sketch.curves.length === 0) return sketchBox.showStatus("No lines yet.");
-    const n = `${sketch.curves.length} line${sketch.curves.length === 1 ? "" : "s"}`;
+    const n = curveCount(sketch);
+    if (sketch.curves.length === 0) return sketchBox.showStatus(`${n}.`);
     try {
       const { current, value } = await outlineOf(sketchCurves(sketch));
       if (current) sketchBox.showStatus("closed" in value ? `${n}, a closed outline.` : `${n}, not closed: ${value.open}.`);
@@ -512,13 +512,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const sketch = doc.sketches.find((s) => s.id === id);
     if (!sketch) return;
     const name = sketchItem(doc, id).provenance.self.label;
-    extrudeBox.showStatus(sketch.curves.length === 0 ? `${name} has no lines yet.` : `Checking ${name}…`, false);
+    extrudeBox.showStatus(sketch.curves.length === 0 ? `${name} has nothing drawn yet.` : `Checking ${name}…`, false);
     if (sketch.curves.length === 0) return;
     try {
       const { current, value } = await extrudeOutline(sketchCurves(sketch));
       if (!current || extruding?.sketch !== id) return;
       if ("closed" in value) extrudeBox.showStatus(`${name} makes a closed outline.`, true);
-      else extrudeBox.showStatus(`${name} can't be extruded: its lines don't close (${value.open}).`, false);
+      else extrudeBox.showStatus(`${name} can't be extruded: it doesn't make one closed outline (${value.open}).`, false);
     } catch (e) {
       if (extruding?.sketch === id) extrudeBox.showStatus(`${name} can't be extruded: ${e instanceof Error ? e.message : String(e)}`, false);
     }
@@ -639,7 +639,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
-      // Escape in the sketch tool: leaves the plane prompt, or ends the line or rectangle being drawn.
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle or circle being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
@@ -648,7 +648,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         drawSketches();
         return true;
       }
-      // L and R choose the line and rectangle tools while a sketch is edited; otherwise the key does what it would.
+      // L, R and C choose the line, rectangle and circle tools while a sketch is edited; otherwise the key does what it would.
       const kind = sketchToolKey(id);
       if (kind) return mode.kind === "edit" ? (chooseTool(kind), true) : false;
       const items = ctx.selection.items;

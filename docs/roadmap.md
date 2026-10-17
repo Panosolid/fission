@@ -55,8 +55,8 @@ App shell (18: in CLAUDE.md)
 
 Sketcher (order, owner's decision 2026-10-17: 21, 22, 23, then 32 and 33, then 24 onwards; how sketches, features, the timeline and undo fit together: docs/document-model.md)
 - [x] 21. Sketch on ground plane: lines with grid snapping, saved with stable ids, the line tool, and Extrude of a closed sketch (21a–21d; docs/document-model.md, section 6)
-- [ ] 22. Rectangle and circle tools (substeps in docs/progress/cad.md)
-- [ ] 23. Arc tools (3-point, tangent)
+- [x] 22. Rectangle and circle tools: two-click rectangles as four shared-corner lines, circles saved round a point id and extruded by the kernel, the circle tool (centre, then a point on the circle; key C) (22a–22c)
+- [ ] 23. Arc tools (3-point, tangent) (substeps in docs/progress/cad.md)
 - [ ] 24. Sketch on any planar face (the sketch's plane is the face's stable id from 32, never a kernel index)
 - [ ] 25. Project/include edges into a sketch, linked to their source edges by stable id from 32
 - [ ] 26. Profile detection (closed regions, nested); an extrude names its region by the ids of the curves around it, never by an index (docs/document-model.md, section 3)

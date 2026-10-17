@@ -1,10 +1,12 @@
-// The sketch tools (line, step 21c; rectangle, step 22a): what a click on
+// The sketch tools (line, step 21c; rectangle, step 22a; circle, step 22c): what a click on
 // the sketch plane does to the document, as pure functions the workspace
 // calls with a point the kernel has already snapped to the grid
 // (snap_to_grid). Lines drawn click after click form a chain, each line
 // starting at the point the last one ended on, so the chain's corners are
 // shared point ids in the data. A rectangle is two clicks at opposite
-// corners and is four such lines.
+// corners and is four such lines. A circle is two clicks, the centre and a
+// point on the circle: the radius is the distance between them, and only
+// the centre becomes a point.
 //
 // Two clicks are at the same point only when their snapped coordinates are
 // equal: the kernel gives bit-identical grid nodes for the same node, so a
@@ -13,7 +15,7 @@
 
 import type { Plane, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchLineCurve, SketchPlane } from "./document.ts";
-import { drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchLines, type LineEnd } from "./sketch.ts";
+import { drawCircle, drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
 
 export { pointAt };
 
@@ -31,22 +33,37 @@ export interface RectangleTool {
   corner: SketchXY | null;
 }
 
-export type SketchTool = LineTool | RectangleTool;
+/** The circle tool on one sketch: the centre clicked, or null before it. */
+export interface CircleTool {
+  kind: "circle";
+  sketch: string;
+  centre: SketchXY | null;
+}
+
+export type SketchTool = LineTool | RectangleTool | CircleTool;
 export type ToolKind = SketchTool["kind"];
 
 /** The tools the sketch panel offers, in its order, with their keys (the letters people already know for them). */
 export const SKETCH_TOOLS: readonly { kind: ToolKind; label: string; key: string }[] = [
   { kind: "line", label: "Line", key: "L" },
   { kind: "rectangle", label: "Rectangle", key: "R" },
+  { kind: "circle", label: "Circle", key: "C" },
 ];
 
 /** A tool of this kind on a sketch, nothing clicked yet. */
 export function startTool(kind: ToolKind, sketch: string): SketchTool {
-  return kind === "line" ? { kind, sketch, from: null } : { kind, sketch, corner: null };
+  if (kind === "line") return { kind, sketch, from: null };
+  return kind === "rectangle" ? { kind, sketch, corner: null } : { kind, sketch, centre: null };
 }
 
 /** Whether the tool is part way through (a chain going, a first corner down): what Escape ends. */
-export const toolBusy = (tool: SketchTool): boolean => (tool.kind === "line" ? tool.from !== null : tool.corner !== null);
+export const toolBusy = (tool: SketchTool): boolean => (tool.kind === "line" ? tool.from !== null : pendingClick(tool) !== null);
+
+/** The tool's first click while it is not yet a point of the sketch's own (a chain's first click, a first corner, a centre), or null. */
+function pendingClick(tool: SketchTool): SketchXY | null {
+  if (tool.kind === "line") return tool.from !== null && typeof tool.from !== "string" ? tool.from : null;
+  return tool.kind === "rectangle" ? tool.corner : tool.centre;
+}
 
 /** The grid a new sketch starts with (mm), as Design's grid in the viewport. */
 export const DEFAULT_GRID = 10;
@@ -90,6 +107,7 @@ function whereIs(sketch: Sketch, end: LineEnd): SketchXY {
  */
 export function clickAt<T extends SketchTool>(doc: DesignDocument, tool: T, at: SketchXY): { doc: DesignDocument; tool: T; drew: boolean; note?: string } {
   if (tool.kind === "rectangle") return rectangleClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
+  if (tool.kind === "circle") return circleClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   return lineClick(doc, tool as LineTool, at) as { doc: DesignDocument; tool: T; drew: boolean };
 }
 
@@ -115,8 +133,58 @@ function rectangleClick(doc: DesignDocument, tool: RectangleTool, at: SketchXY):
   return { doc: drawRectangle(doc, tool.sketch, tool.corner, at).doc, tool: { ...tool, corner: null }, drew: true };
 }
 
+/**
+ * The distance between two clicks, √(dx² + dy²). Not Math.hypot: V8's is
+ * off by a unit in the last place for (10, 30), giving 31.622776601683796
+ * for √1000 = 31.62277660168379332…; snapped clicks have dx² + dy² exact,
+ * so Math.sqrt's correctly rounded root is the nearest double to the true
+ * radius. Clicks lie within the kernel's MAX_COORD, so the squares never
+ * overflow.
+ */
+const distance = (a: SketchXY, b: SketchXY): number => Math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2);
+
+const NO_RADIUS = "A circle needs a radius: click a point on the circle away from its centre.";
+
+/**
+ * A circle's two clicks: the centre (an existing point there is shared),
+ * then a point on the circle. The radius is the distance between the two
+ * snapped clicks (`distance`); the second click is not kept as a point.
+ * A second click on the centre draws nothing and says why.
+ */
+function circleClick(doc: DesignDocument, tool: CircleTool, at: SketchXY): { doc: DesignDocument; tool: CircleTool; drew: boolean; note?: string } {
+  const sketch = sketchOf(doc, tool.sketch);
+  if (tool.centre === null) return { doc, tool: { ...tool, centre: [at[0], at[1]] }, drew: false };
+  const radius = distance(tool.centre, at);
+  if (radius === 0) return { doc, tool, drew: false, note: NO_RADIUS };
+  const centre: LineEnd = pointAt(sketch, tool.centre) ?? tool.centre;
+  return { doc: drawCircle(doc, tool.sketch, centre, radius).doc, tool: { ...tool, centre: null }, drew: true };
+}
+
 /** The undo step a tool's drawing click is recorded as. */
-export const drawStep = (tool: SketchTool): string => (tool.kind === "line" ? SKETCH_STEPS.draw : SKETCH_STEPS.rectangle);
+export const drawStep = (tool: SketchTool): string => SKETCH_STEPS[tool.kind === "line" ? "draw" : tool.kind];
+
+/**
+ * How many straight segments the viewport draws a circle with. Drawing
+ * only: the sketch keeps the exact circle (centre and radius) and the
+ * kernel extrudes that. 64 sides stray from the circle by at most
+ * r·(1 − cos(π/64)) ≈ 0.0012·r, under a pixel at any zoom that frames it.
+ */
+export const CIRCLE_SEGMENTS = 64;
+
+/**
+ * A circle as the viewport draws it: CIRCLE_SEGMENTS segments between
+ * points on it at angles 2πk/n, counter-clockwise from its east point
+ * (centre + (r, 0)); the last segment ends on the first point exactly.
+ */
+export function circleSegments(centre: SketchXY, radius: number): (readonly [SketchXY, SketchXY])[] {
+  const n = CIRCLE_SEGMENTS;
+  const at: SketchXY[] = [];
+  for (let k = 0; k < n; k++) {
+    const t = (2 * Math.PI * k) / n;
+    at.push([centre[0] + radius * Math.cos(t), centre[1] + radius * Math.sin(t)]);
+  }
+  return at.map((p, k) => [p, at[(k + 1) % n]] as const);
+}
 
 /** The rubber-band line from the chain's last point to the pointer, or null between chains or off the plane. */
 export function previewLine(doc: DesignDocument, tool: LineTool | null, pointer: SketchXY | null): readonly [SketchXY, SketchXY] | null {
@@ -126,14 +194,20 @@ export function previewLine(doc: DesignDocument, tool: LineTool | null, pointer:
 
 /**
  * What the tool would draw if clicked at the pointer: the line tool's
- * rubber band, or the rectangle's four sides from the first corner (none
- * while the pointer is on its row or column, where a click draws nothing).
+ * rubber band, the rectangle's four sides from the first corner (none
+ * while the pointer is on its row or column, where a click draws nothing),
+ * or the circle round the centre through the pointer (none on the centre).
  */
 export function previewSegments(doc: DesignDocument, tool: SketchTool | null, pointer: SketchXY | null): (readonly [SketchXY, SketchXY])[] {
   if (!tool || !pointer) return [];
   if (tool.kind === "line") {
     const line = previewLine(doc, tool, pointer);
     return line ? [line] : [];
+  }
+  if (tool.kind === "circle") {
+    const c = tool.centre;
+    const radius = c ? distance(c, pointer) : 0;
+    return c && radius > 0 ? circleSegments(c, radius) : [];
   }
   const a = tool.corner;
   if (!a || a[0] === pointer[0] || a[1] === pointer[1]) return [];
@@ -142,18 +216,19 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
 }
 
 /**
- * Every sketch as the viewport draws it: the one being edited (if any)
- * with its grid, its points (and the chain's first click, not yet a point)
- * and the preview line.
+ * Every sketch as the viewport draws it, lines then circles (each as
+ * `circleSegments`): the one being edited (if any) with its grid, its
+ * points (and a first click not yet a point) and the preview.
  */
 export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null } | null): SketchDrawing[] {
   return doc.sketches.map((s) => {
     const plane: Plane = planeOf(sketchPlaneOf(doc, s.id));
-    const lines = sketchLines(s).map((l) => [l.a, l.b] as const);
+    const curves = sketchCurves(s);
+    const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius))];
     if (editing?.tool.sketch !== s.id) return { plane, lines };
     const points: SketchXY[] = s.points.map((p) => [p.x, p.y]);
     const tool = editing.tool;
-    const pending = tool.kind === "line" ? (tool.from !== null && typeof tool.from !== "string" ? tool.from : null) : tool.corner;
+    const pending = pendingClick(tool);
     if (pending && !s.points.some((p) => p.x === pending[0] && p.y === pending[1])) points.push([pending[0], pending[1]]);
     return { plane, lines, editing: { grid: editing.grid, points, preview: previewSegments(doc, tool, editing.pointer) } };
   });
@@ -163,4 +238,12 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
 export function sketchPlaneOf(doc: DesignDocument, id: string): SketchPlane {
   const item = doc.timeline.features.find((f) => f.id === id);
   return (item?.intent.parameters.plane as SketchPlane | undefined) ?? "XY";
+}
+
+/** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", or "Nothing drawn yet" when empty. */
+export function curveCount(sketch: Sketch): string {
+  const lines = sketch.curves.filter((c) => c.kind === "line").length;
+  const circles = sketch.curves.length - lines;
+  const words = [lines ? `${lines} line${lines === 1 ? "" : "s"}` : "", circles ? `${circles} circle${circles === 1 ? "" : "s"}` : ""];
+  return words.filter(Boolean).join(" and ") || "Nothing drawn yet";
 }

@@ -1,6 +1,6 @@
 // The sketch tool's panel (step 21c), at the top of the properties: the
 // "Pick a plane" prompt of Create sketch, then while a sketch is edited its
-// name, the tools (Line, Rectangle: step 22a), how to draw, the typeable grid size, whether the lines close,
+// name, the tools (Line, Rectangle: step 22a; Circle: 22c), how to draw, the typeable grid size, whether the lines close,
 // Finish sketch and Extrude (step 21d). The workspace drives it; the panel
 // only shows what it is given and reports clicks. Styles: src/styles/sketch.css.
 
@@ -22,6 +22,7 @@ export interface SketchPanelEvents {
 export const TOOL_HELP: Record<ToolKind, string> = {
   line: "Click to place points: each click draws a line from the last one, snapped to the grid. Click the first point to close the shape. Escape ends the line.",
   rectangle: "Click one corner, then the opposite corner: four lines, snapped to the grid. Escape drops the first corner.",
+  circle: "Click the centre, then a point on the circle, both snapped to the grid. Escape drops the centre.",
 };
 
 export interface SketchPanel {
@@ -31,7 +32,7 @@ export interface SketchPanel {
   showEditing(name: string, grid: string, tool: ToolKind): void;
   /** The tool in use: its button pressed, its help shown. */
   showTool(kind: ToolKind): void;
-  /** Whether the lines make a closed outline, or why not. */
+  /** What the sketch holds and whether it makes a closed outline, or why not. */
   showStatus(text: string): void;
   /** A message under the grid size: a grid the kernel refused, or a point it could not place. Empty hides it. */
   showError(message: string): void;
