@@ -7,6 +7,8 @@ import { ViewCube } from "./viewcube.ts";
 import { lookAtFraming, selectionFraming } from "./framing.ts";
 import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
 import { pixelSize, rayOnPlane, sketchGrid, toWorld } from "./sketch-view.ts";
+import { clampZoom, cubeDragAngles, dragAction, orbitBy, dragZoomFactor, panBy, wheelFactor, zoomAt, type CameraPose, type NavMode } from "./navigation.ts";
+import { navBar } from "./nav-bar.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -62,6 +64,9 @@ export class ViewportView {
   private image: { sheet: { mesh: THREE.Mesh; texture: THREE.DataTexture; widthMm: number; heightMm: number } | null; layer: number; saved: { position: THREE.Vector3; target: THREE.Vector3; near: number; far: number } } | null = null;
 
   private host: ViewHost;
+  /** What a left-button drag does (SF3a): picked on the navigation bar. */
+  private mode: NavMode = "orbit";
+  private bar: ReturnType<typeof navBar>;
 
   constructor(host: ViewHost, container: HTMLElement) {
     this.host = host;
@@ -71,12 +76,36 @@ export class ViewportView {
     this.legend.className = "overlay-legend";
     this.legend.hidden = true;
     container.appendChild(this.legend);
-    this.cube = new ViewCube((name) => this.setView(name));
+    this.cube = new ViewCube((name) => this.setView(name), (dx, dy) => {
+      const { dTheta, dPhi } = cubeDragAngles(dx, dy);
+      this.setPose(orbitBy(this.cameraPose(), dTheta, dPhi));
+    });
     container.appendChild(this.cube.element);
+    this.bar = navBar({
+      mode: (mode) => this.setMode(mode),
+      fit: () => this.fitSelection() ?? this.fit(),
+      lookAt: () => {
+        const plane = this.host.sketchPlane();
+        if (plane) this.lookAt(plane);
+      },
+      view: (name) => this.setView(name),
+    });
+    container.appendChild(this.bar.element);
 
     this.camera.position.set(80, -100, 70);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    // Moving the camera by hand (SF3a, the owner's bindings): middle-drag pans and
+    // the wheel zooms toward the pointer (navigate(), with the maths in
+    // navigation.ts); Shift+middle-drag orbits, which OrbitControls does
+    // for its pan button with Shift held, the only middle press it gets;
+    // the right button is kept for a menu. Touch stays OrbitControls':
+    // one finger orbits (pans in Pan mode), two pinch toward the fingers.
+    this.controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
+    this.controls.mouseButtons.RIGHT = null;
+    this.controls.zoomToCursor = true;
+    this.navigate();
+    this.setMode("orbit");
 
     // A click picks; a press that moves further is the camera orbiting.
     let down: { x: number; y: number; id: number } | null = null;
@@ -121,6 +150,7 @@ export class ViewportView {
     this.resize();
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
+      this.bar.canLookAt(!this.image && this.host.sketchPlane() !== null);
       this.host.frame(this);
       this.renderer.render(this.host.scene, this.camera);
       if (!this.image) this.cube.render(this.renderer, this.camera);
@@ -142,6 +172,89 @@ export class ViewportView {
         return li;
       }),
     );
+  }
+
+  /** What a left-button drag does from now on: orbit, pan or zoom (the navigation bar's first three buttons). */
+  setMode(mode: NavMode) {
+    this.mode = mode;
+    this.element.dataset.nav = mode; // read by the e2e test
+    this.bar.showMode(mode);
+    this.applyButtons();
+  }
+
+  /** OrbitControls' share of the buttons for the mode: the left button orbits only in Orbit mode (Pan and Zoom are navigate()'s), and pans in the 2D view; one finger pans in Pan mode and in 2D. */
+  private applyButtons() {
+    const flat = this.image !== null;
+    this.controls.mouseButtons.LEFT = this.mode !== "orbit" ? null : flat ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+    this.controls.touches.ONE = this.mode === "pan" || flat ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
+  }
+
+  /** The camera as navigation.ts sees it: position, orbit target and the screen's up (also read by the e2e test). */
+  cameraPose(): CameraPose {
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    return { position: this.camera.position.toArray(), target: this.controls.target.toArray(), up: up.toArray() };
+  }
+
+  /** Moves the camera to `pose` (same direction, so OrbitControls only re-aims); `zoom` scales the near and far planes with the distance in 3D, so nothing is clipped close up. */
+  private setPose(pose: CameraPose, zoom = 1) {
+    this.camera.position.set(...pose.position);
+    this.controls.target.set(...pose.target);
+    if (zoom !== 1 && !this.image) {
+      this.camera.near *= zoom;
+      this.camera.far *= zoom;
+      this.camera.updateProjectionMatrix();
+    }
+    this.controls.update();
+  }
+
+  /** Zooms by `factor` toward the point under (clientX, clientY), within the view's allowed distances. */
+  private zoomToward(clientX: number, clientY: number, factor: number) {
+    const ndc = clientToNdc({ x: clientX, y: clientY }, this.renderer.domElement.getBoundingClientRect());
+    if (!ndc) return;
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    const f = clampZoom(distance, factor, this.controls.minDistance, this.controls.maxDistance);
+    if (f === 1 || !(f > 0)) return;
+    this.setPose(zoomAt(this.cameraPose(), [ndc.x, ndc.y], { fov: this.camera.fov, aspect: this.camera.aspect }, f), f);
+  }
+
+  /**
+   * The wheel, middle-drag, and left-drag in Pan and Zoom modes (SF3a).
+   * Listens on the view's element before the canvas hears anything
+   * (capture), so OrbitControls never sees what is handled here.
+   */
+  private navigate() {
+    const canvas = this.renderer.domElement;
+    const lens = () => ({ fov: this.camera.fov, aspect: this.camera.aspect });
+    this.element.addEventListener("wheel", (e) => {
+      if (e.target !== canvas) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // A trackpad pinch comes as a wheel turn with Ctrl held.
+      this.zoomToward(e.clientX, e.clientY, wheelFactor(e.deltaY, e.deltaMode, e.ctrlKey));
+    }, { capture: true, passive: false });
+    let drag: { id: number; action: "pan" | "zoom"; x: number; y: number; start: { x: number; y: number } } | null = null;
+    this.element.addEventListener("pointerdown", (e) => {
+      if (e.target !== canvas || e.pointerType === "touch" || drag) return;
+      const action = dragAction(e.button, e.shiftKey, this.mode);
+      if (action === null || action === "orbit") return; // orbits are OrbitControls'
+      e.preventDefault(); // no middle-button autoscroll
+      e.stopPropagation(); // neither OrbitControls nor the click picker hears it
+      canvas.setPointerCapture(e.pointerId);
+      drag = { id: e.pointerId, action, x: e.clientX, y: e.clientY, start: { x: e.clientX, y: e.clientY } };
+    }, { capture: true });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      if (drag.action === "pan") this.setPose(panBy(this.cameraPose(), dx, dy, lens(), canvas.clientHeight));
+      else this.zoomToward(drag.start.x, drag.start.y, dragZoomFactor(dy));
+    });
+    const end = (e: PointerEvent) => {
+      if (drag?.id === e.pointerId) drag = null;
+    };
+    canvas.addEventListener("pointerup", end);
+    canvas.addEventListener("pointercancel", end);
   }
 
   /** The camera's ray through a point on screen (client pixels) in the raycaster; false when the view has no size. */
@@ -375,8 +488,7 @@ export class ViewportView {
     // Top-down 2D: the left button pans instead of orbiting.
     this.controls.enableRotate = false;
     this.controls.screenSpacePanning = true;
-    this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
-    this.controls.touches.ONE = THREE.TOUCH.PAN;
+    this.applyButtons();
     this.place([0, 0, this.camera.position.distanceTo(this.controls.target)], [0, 0, 0], [0, 1, 0]); // looking straight down
   }
 
@@ -391,8 +503,7 @@ export class ViewportView {
     this.camera.layers.set(0);
     this.cube.element.hidden = false;
     this.controls.enableRotate = true;
-    this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-    this.controls.touches.ONE = THREE.TOUCH.ROTATE;
+    this.applyButtons();
     this.controls.minDistance = 0;
     this.controls.maxDistance = Infinity;
     this.spendDamping();
@@ -446,6 +557,7 @@ export class ViewportView {
     this.controls.dispose();
     this.renderer.domElement.remove();
     this.cube.element.remove();
+    this.bar.element.remove();
     this.legend.remove();
     this.renderer.dispose();
   }

@@ -335,8 +335,8 @@ try {
       assert.equal(await selection(), expected, `pick at ${p}`);
       await page.keyboard.press("Escape");
     };
-    // The group sits over the viewport, not in the workspace toolbar.
-    assert.deepEqual(await page.$$eval("#viewport #view-controls button", (bs) => bs.map((b) => b.textContent)), ["Home", "Top", "Front", "Right", "Fit"]);
+    // The group sits over the viewport, not in the workspace toolbar (the navigation bar, SF3a; e2e/navigation.mjs checks the rest).
+    assert.deepEqual(await page.$$eval("#viewport #view-controls button", (bs) => bs.map((b) => b.getAttribute("aria-label"))), ["Orbit", "Pan", "Zoom", "Fit", "Look at", "Home", "Top", "Front", "Right"]);
     assert.equal(await page.$("#toolbar #view-controls"), null);
 
     // Top: the camera looks straight down at the centre (20, 15, 10), so
@@ -474,7 +474,7 @@ try {
       assert.equal(await selection(), expected, `corner view: pick at ${p}`);
       await page.keyboard.press("Escape");
     }
-    // A press that drags on the cube turns nothing (no orbit, no view change).
+    // A press that drags on the cube orbits (SF3a; e2e/navigation.mjs checks the angle) and picks nothing.
     await settle();
     const before = await canvasImage();
     await page.mouse.move(corner.x, corner.y);
@@ -482,7 +482,8 @@ try {
     await page.mouse.move(corner.x - 40, corner.y + 30, { steps: 5 });
     await page.mouse.up();
     await settle();
-    assert.ok((await canvasImage()) === before, "a drag on the cube changes nothing");
+    assert.ok((await canvasImage()) !== before, "a drag on the cube orbits");
+    assert.equal(await selection(), "", "and picks nothing");
     await page.click("#view-controls [data-view=home]");
     await settle();
   });

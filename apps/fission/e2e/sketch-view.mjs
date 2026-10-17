@@ -167,9 +167,9 @@ try {
     assert.equal(start.major, 10 * start.minor);
     // Strength from the spacing on screen: log10(minor / pixel / 8).
     assert.ok(Math.abs(start.strength - Math.log10(start.minor / pixel / 8)) < 0.02, `strength ${start.strength}`);
-    // Zoom out a long way: the minor spacing grows by powers of ten.
+    // Zoom out a long way (four 400 px turns: e^(4 · 400 · 0.002) = ×24.5, SF3a's wheel): the minor spacing grows by powers of ten.
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    for (let i = 0; i < 12; i++) await page.mouse.wheel(0, 400);
+    for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 400);
     await settle(page);
     await shown(page, "sketchGrid", /^minor (10|100|1000|10000) /, "a coarser grid zoomed out");
     const out = await gridShown(page);
