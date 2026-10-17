@@ -47,6 +47,7 @@ use fission_kernel::placed::Placed;
 use fission_kernel::sketch;
 use fission_kernel::stl;
 use fission_kernel::face_mass::face_masses;
+use fission_kernel::geom::Curve;
 use fission_kernel::topology::{Body, FaceRole, Piece as PieceId};
 use fission_kernel::validate::validate;
 use glam::{DVec2, DVec3};
@@ -1063,6 +1064,65 @@ fn check_position(s: &Slot) -> Result<(), String> {
     Ok(())
 }
 
+/// How far face `f`'s baked corners (and circle centres) lie from where the
+/// harness's matrix puts them, worked exactly (`Exact`) so the rounding of
+/// the comparison itself doesn't hide or add any: the boundary of the face
+/// the kernel holds is at most this far from the ideal one.
+fn corner_rounding(s: &Slot, b: &Placed, baked: &Body, f: usize) -> f64 {
+    let a = s.affine.matrix3.to_cols_array_2d();
+    let t = s.affine.translation;
+    // Distance from `world` to the matrix's image of `unplaced`, exactly
+    // up to the final rounding of each component.
+    let gap = |unplaced: DVec3, world: DVec3| {
+        let mut d = DVec3::ZERO;
+        for i in 0..3 {
+            let mut e = fission_kernel::accurate::Exact::default();
+            for (j, x) in unplaced.to_array().into_iter().enumerate() {
+                e.add_product(a[j][i], x);
+            }
+            e.add(t[i]);
+            e.add(-world[i]);
+            d[i] = e.value();
+        }
+        d.length()
+    };
+    // The local body may be re-centred from the unplaced one (`Placed::new`).
+    let shift = s.start[0] - b.body.vertices[0].point;
+    let mut worst: f64 = 0.0;
+    for c in baked.faces[f].loops.iter().flat_map(|l| l.coedges.iter().copied()) {
+        let v = baked.coedge_start(c);
+        worst = worst.max(gap(s.start[v], baked.vertices[v].point));
+        if let (Curve::Circle { center: local, .. }, Curve::Circle { center: world, .. }) = (&b.body.edges[c.edge].curve, &baked.edges[c.edge].curve) {
+            worst = worst.max(gap(*local + shift, *world));
+        }
+    }
+    worst
+}
+
+/// How far face `f`'s centroid can move per unit its boundary moves: moving
+/// every boundary point by at most δ changes the area A by at most δ·P and
+/// the first moment about the centroid c, ∬ (x − c) dA, by at most
+/// δ ∮ |x − c| ds; the centroid moves by that moment change over A (to
+/// first order, as the area's own change multiplies x − c = 0 at c). So
+/// the lever is ∮ |x − c| ds / A, bounded edge by edge by its length times
+/// its farthest point from c: a line's farther end, a circle's centre
+/// distance plus radius. About 1 for a square, L / w for a long strip.
+fn face_lever(s: &Slot, b: &Placed, f: usize, area: f64) -> f64 {
+    let c = s.start_faces[f];
+    let shift = s.start[0] - b.body.vertices[0].point;
+    let body = &b.body;
+    let mut sum = 0.0;
+    for k in body.faces[f].loops.iter().flat_map(|l| l.coedges.iter().copied()) {
+        let e = &body.edges[k.edge];
+        let (p, q) = (s.start[e.start], s.start[e.end]);
+        sum += match e.curve {
+            Curve::Line { .. } => p.distance(q) * p.distance(c).max(q.distance(c)),
+            Curve::Circle { center, radius, .. } => radius * (e.t1 - e.t0).abs() * ((center + shift).distance(c) + radius),
+        };
+    }
+    sum / area
+}
+
 fn body_reach(b: &Placed) -> f64 {
     let (lo, hi) = b.bounds();
     lo.abs().max(hi.abs()).max_element()
@@ -1449,8 +1509,14 @@ fn check_face_model(shape: &Shape, body: &Body, m: &Measure) -> Result<(), Strin
 /// Allowed: the rounding `check_position` allows each corner, and
 /// MASS_PROPS_REL of the part's size for computing the centroid itself (a
 /// thin frame's cap is the difference of two large areas, so its centroid
-/// carries their rounding: ~1e-4 mm for a 61 m frame 1.1 µm wide); areas
-/// change by at most the corners' rounding times the part's perimeter.
+/// carries their rounding: ~1e-4 mm for a 61 m frame 1.1 µm wide), and the
+/// baked corners' own rounding times the face's lever (`face_lever`): far
+/// out a corner is stored only to ~1e-8 mm, which on a 1 km strip 1.1 µm
+/// wide changes one end's width by 1e-5 of it and tips the centroid ~1 mm
+/// along the strip (seed8043b8edca9: the exact centroid of the kernel's
+/// corners, worked in fractions, is 1.05 mm from the ideal one, and the
+/// kernel's answer is 0.005 mm from it). Areas change by at most the
+/// corners' rounding times the part's perimeter.
 fn check_faces(s: &Slot) -> Result<(), String> {
     let Some(b) = &s.body else { return Ok(()) };
     let baked = b.baked();
@@ -1467,8 +1533,9 @@ fn check_faces(s: &Slot) -> Result<(), String> {
         }
         let expected = s.affine.transform_point3(s.start_faces[f]);
         let off = expected.distance(w.centroid);
-        if off.is_nan() || off > delta + tolerance::MASS_PROPS_REL * size {
-            return Err(format!("face {f} ({role:?}) centroid is at {} but should be at {expected} ({off:e} off)", w.centroid));
+        let allowed = delta + tolerance::MASS_PROPS_REL * size + corner_rounding(s, b, &baked, f) * face_lever(s, b, f, l.area);
+        if off.is_nan() || off > allowed {
+            return Err(format!("face {f} ({role:?}) centroid is at {} but should be at {expected} ({off:e} off, {allowed:e} allowed)", w.centroid));
         }
         if !tolerance::measure_eq(l.area, w.area, 4.0 * size * delta + 1e-9 * l.area) {
             return Err(format!("face {f} ({role:?}) area {} became {}", l.area, w.area));
@@ -2342,6 +2409,103 @@ fn a_thin_frame_far_out_by_hand() {
         let &(_, _, c) = model.iter().find(|m| m.0 == role).unwrap();
         let off = c.distance(DVec3::new(10.25, -99999993.0, z));
         assert!(off <= slack, "{role:?} centroid {c} is {off:e} off");
+    }
+}
+
+/// A slot for `base` placed as `placed`, the harness's matrix `affine`
+/// after `steps` operations.
+fn placed_slot(base: &Body, placed: Placed, affine: glam::DAffine3, steps: u32) -> Slot {
+    let reach = body_reach(&placed).max(affine.translation.abs().max_element());
+    let start_faces = face_masses(base).iter().map(|m| m.centroid).collect();
+    Slot { body: Some(placed), shape: Shape::Box { w: Num(1.0), d: Num(1.0), h: Num(1.0) }, affine, start: base.vertices.iter().map(|v| v.point).collect(), start_faces, steps, reach }
+}
+
+fn face_with(body: &Body, role: FaceRole) -> usize {
+    body.faces.iter().position(|f| f.role == Some(role)).unwrap()
+}
+
+#[test]
+fn face_lever_by_hand() {
+    // Box 4 × 1 × 3: its Front is the 4 × 3 rectangle at y = 0, centroid
+    // (2, 0, 1.5). Every corner is √(2² + 1.5²) = 2.5 from it, so each
+    // edge counts its length times 2.5: (4 + 3 + 4 + 3) × 2.5 / 12 = 35/12.
+    let base = primitives::make_box(4.0, 1.0, 3.0).unwrap();
+    let s = placed_slot(&base, Placed::new(base.clone()), glam::DAffine3::IDENTITY, 1);
+    let b = s.body.as_ref().unwrap();
+    let f = face_with(&base, FaceRole::Front);
+    assert!(tolerance::rel_eq(face_lever(&s, b, f, 12.0), 35.0 / 12.0, tolerance::FP_REL));
+    // Cylinder r = 1: its Top is one full circle round its own centroid,
+    // length 2π, every point 0 + 1 from the centroid, over area π: 2.
+    let base = primitives::make_cylinder(1.0, 2.0).unwrap();
+    let s = placed_slot(&base, Placed::new(base.clone()), glam::DAffine3::IDENTITY, 1);
+    let b = s.body.as_ref().unwrap();
+    let f = face_with(&base, FaceRole::Top);
+    assert!(tolerance::rel_eq(face_lever(&s, b, f, PI), 2.0, tolerance::FP_REL));
+}
+
+#[test]
+fn corner_rounding_measures_the_gap() {
+    // Box 4 × 1 × 3 moved by (1, 0, 0): integers and halves, every sum
+    // exact, so the kernel's corners are exactly where the matrix puts
+    // them: no rounding on any face.
+    let base = primitives::make_box(4.0, 1.0, 3.0).unwrap();
+    let placed = transform::translate(&Placed::new(base.clone()), DVec3::X).unwrap();
+    let baked = placed.baked();
+    let s = placed_slot(&base, placed.clone(), glam::DAffine3::from_translation(DVec3::X), 2);
+    for f in 0..baked.faces.len() {
+        assert_eq!(corner_rounding(&s, &placed, &baked, f), 0.0);
+    }
+    // Broken on purpose: the harness's matrix moves by 1 + 1e-3, so every
+    // corner the kernel holds is 1e-3 short of it.
+    let s = placed_slot(&base, placed.clone(), glam::DAffine3::from_translation(DVec3::new(1.0 + 1e-3, 0.0, 0.0)), 2);
+    for f in 0..baked.faces.len() {
+        assert!(tolerance::rel_eq(corner_rounding(&s, &placed, &baked, f), 1e-3, tolerance::FP_REL));
+    }
+    // Circle centres count too: a cylinder's Top has a single corner, on
+    // its rim, and its centre is measured the same way.
+    let base = primitives::make_cylinder(1.0, 2.0).unwrap();
+    let placed = transform::translate(&Placed::new(base.clone()), DVec3::X).unwrap();
+    let baked = placed.baked();
+    let s = placed_slot(&base, placed.clone(), glam::DAffine3::from_translation(DVec3::new(1.0, 2e-3, 0.0)), 2);
+    let top = face_with(&base, FaceRole::Top);
+    assert!(tolerance::rel_eq(corner_rounding(&s, &placed, &baked, top), 2e-3, tolerance::FP_REL));
+}
+
+#[test]
+fn a_long_thin_face_far_out_is_allowed_its_rounding() {
+    // Regression (seed8043b8edca9): a box 1 km × 36 mm × 1.1 µm, turned and
+    // moved 100 km out. Its Front, 1 km long and 1.1 µm wide, is stored
+    // with corners rounded to ~1e-8 mm, which tips its centroid ~1 mm along
+    // its length: more than the rounding and size allowances alone.
+    // Built turned π about (1, 1, 0), then turned about (0, −7, 0), then
+    // moved; the harness's matrix follows the same three steps.
+    let base = primitives::make_box(999999.999999, 36.0, 0.0011).unwrap();
+    let (flip, pivot) = (DVec3::new(1.0, 1.0, 0.0), DVec3::new(0.0, -7.0, 0.0));
+    let axis = DVec3::new(0.0, 0.7231947291110354, -0.9344924436458961);
+    let (angle, by) = (9.590236344901994, DVec3::new(0.0, 99999999.0, 0.0));
+    let built = transform::rotate(&Placed::new(base.clone()), DVec3::ZERO, flip, PI).unwrap();
+    let turned = transform::rotate(&built, pivot, axis, angle).unwrap();
+    let placed = transform::translate(&turned, by).unwrap();
+    let turn = glam::DAffine3::from_translation(pivot) * rotation(axis, angle) * glam::DAffine3::from_translation(-pivot);
+    let affine = glam::DAffine3::from_translation(by) * turn * rotation(flip, PI);
+    let mut s = placed_slot(&base, placed.clone(), affine, 3);
+    check_faces(&s).unwrap();
+    let baked = placed.baked();
+    let f = face_with(&base, FaceRole::Front);
+    let centroid = face_masses(&baked)[f].centroid;
+    let (lo, hi) = baked.bounds();
+    let now = body_reach(&placed) + affine.translation.abs().max_element();
+    let without = 4.0 * tolerance::rounding_slack(now.max(s.reach)) * 4.0 + tolerance::MASS_PROPS_REL * (hi - lo).length();
+    let off = affine.transform_point3(s.start_faces[f]).distance(centroid);
+    assert!(off > without, "{off} {without}");
+    // The check's edge: an expected centroid 0.9× the allowance away
+    // passes, 1.1× fails, whichever way it is off.
+    let allowed = without + corner_rounding(&s, &placed, &baked, f) * face_lever(&s, &placed, f, face_masses(&base)[f].area);
+    for dir in [DVec3::X, DVec3::Y, DVec3::Z] {
+        for (k, pass) in [(0.9, true), (1.1, false)] {
+            s.start_faces[f] = affine.inverse().transform_point3(centroid + dir * (k * allowed));
+            assert_eq!(check_faces(&s).is_ok(), pass, "{k} × {allowed:e} along {dir}: {:?}", check_faces(&s));
+        }
     }
 }
 
