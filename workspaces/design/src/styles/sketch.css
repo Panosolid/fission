@@ -6,11 +6,6 @@
 .sketch h2 { margin-top: 0; }
 .sketch p { margin: 6px 0; }
 .sketch .sketch-planes { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-/* The tools (step 22a): the one in use looks pressed, as the toolbar's
-   pressed buttons do. ":not(#none)" lifts the rule over the base layout's
-   "#workspace button" while every selector still starts with .sketch. */
-.sketch .sketch-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
-.sketch .sketch-tools button[aria-pressed="true"]:not(#none) { background: #23384f; border-color: #4aa8ff; }
 .sketch button:disabled { opacity: 0.45; cursor: default; }
 .sketch .sketch-grid input { width: 6em; }
 .sketch .sketch-status { color: #b7c0cc; }
