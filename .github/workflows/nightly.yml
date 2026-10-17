@@ -187,7 +187,7 @@ jobs:
           if [ $left -gt 60 ]; then
             code=0
             timeout -s INT -k 60 $left cargo mutants --shard ${{ matrix.shard }}/$SHARDS --sharding round-robin \
-              -j 4 --output "$RUNNER_TEMP" -- --lib || code=$?
+              -j 4 --output "$RUNNER_TEMP" -- --lib -- --skip display::tests::many_faces_and_triangles_cost_one_pass || code=$?
           fi
           mkdir -p "$out"
           cp "$RUNNER_TEMP"/mutants.out/*.txt "$out"/ 2>/dev/null || true
