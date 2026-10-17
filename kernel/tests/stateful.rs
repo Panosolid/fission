@@ -1282,7 +1282,7 @@ fn face_model(shape: &Shape) -> Result<Vec<(FaceRole, f64, DVec3)>, String> {
             vec![
                 named(FaceRole::Bottom, PI * r * r, (0.0, 0.0, 0.0)),
                 named(FaceRole::Top, PI * r * r, (0.0, 0.0, h)),
-                named(FaceRole::Side(None), 2.0 * PI * r * h, (0.0, 0.0, h / 2.0)),
+                named(FaceRole::Wall, 2.0 * PI * r * h, (0.0, 0.0, h / 2.0)),
             ]
         }
         // Each half 2πr², its centroid r/2 from the centre (Archimedes).
@@ -1305,7 +1305,7 @@ fn face_model(shape: &Shape) -> Result<Vec<(FaceRole, f64, DVec3)>, String> {
             let mut faces = vec![named(FaceRole::Start, area, (c.x, c.y, 0.0)), named(FaceRole::End, area, (c.x, c.y, d))];
             let side = |boundary, piece, p: &Piece| {
                 let (a, c) = side_of(p);
-                (FaceRole::Side(Some(PieceId { boundary, piece })), a * d, c.extend(d / 2.0))
+                (FaceRole::Side(PieceId::at(boundary, piece)), a * d, c.extend(d / 2.0))
             };
             match sketched(shape) {
                 None => {

@@ -145,8 +145,8 @@ impl From<topology::FaceRole> for FaceRoleOut {
         match role {
             Start => only("start"),
             End => only("end"),
-            Side(None) => only("side"),
-            Side(Some(p)) => FaceRoleOut { role: "side", boundary: Some(p.boundary), piece: Some(p.piece) },
+            Wall => only("side"),
+            Side(p) => FaceRoleOut { role: "side", boundary: Some(p.boundary.into()), piece: Some(p.piece.into()) },
             Bottom => only("bottom"),
             Top => only("top"),
             Front => only("front"),

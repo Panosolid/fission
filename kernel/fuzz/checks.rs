@@ -260,7 +260,7 @@ fn check_roles(body: &Body, profile: &Profile, d: f64, view: &fission_kernel::Bo
             Boundary::Path { corners, .. } => corners.len(),
             Boundary::Circle { .. } => 1,
         };
-        want.extend((0..n).map(|piece| FaceRole::Side(Some(Piece { boundary: k, piece }))));
+        want.extend((0..n).map(|piece| FaceRole::Side(Piece::at(k, piece))));
     }
     let mut got: Vec<FaceRole> = body.faces.iter().map(|f| f.role.expect("every face has a role")).collect();
     let key = |r: &FaceRole| format!("{r:?}");

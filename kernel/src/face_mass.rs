@@ -152,7 +152,7 @@ mod tests {
     use std::f64::consts::PI;
 
     fn side(boundary: usize, piece: usize) -> FaceRole {
-        FaceRole::Side(Some(Piece { boundary, piece }))
+        FaceRole::Side(Piece::at(boundary, piece))
     }
 
     fn path(corners: &[(f64, f64)], bulges: &[f64]) -> Boundary {
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(roles(&c).len(), 3);
         expect(&c, FaceRole::Bottom, 4.0 * PI, (0.0, 0.0, 0.0));
         expect(&c, FaceRole::Top, 4.0 * PI, (0.0, 0.0, 3.0));
-        expect(&c, FaceRole::Side(None), 12.0 * PI, (0.0, 0.0, 1.5));
+        expect(&c, FaceRole::Wall, 12.0 * PI, (0.0, 0.0, 1.5));
         // Sphere r = 3: each half 2πr² = 18π; equal heights cut equal
         // areas (Archimedes), so the mean height is r/2 = 1.5.
         let s = make_sphere(3.0).unwrap();
@@ -491,7 +491,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig { cases: 64, failure_persistence: Some(Box::new(FileFailurePersistence::WithSource("regressions"))), ..ProptestConfig::default() })]
+        #![proptest_config(ProptestConfig { cases: 64, failure_persistence: Some(Box::new(FileFailurePersistence::Direct("tests/regressions/face-mass.txt"))), ..ProptestConfig::default() })]
 
         /// Random star outlines with bowed sides, either way round, some with
         /// a round hole: every face has one role, the roles are exactly the

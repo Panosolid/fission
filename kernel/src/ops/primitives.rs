@@ -84,7 +84,7 @@ pub fn make_cylinder_meshed(radius: f64, height: f64) -> Result<Meshed, KernelEr
     );
     b.add_face_as(FaceRole::Top, Surface::Plane { origin: top, normal: DVec3::Z, x_dir: DVec3::X }, true, vec![Loop { coedges: vec![fwd(top_edge)] }]);
     b.add_face_as(
-        FaceRole::Side(None),
+        FaceRole::Wall,
         Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius },
         true,
         vec![Loop { coedges: vec![fwd(bottom_edge)] }, Loop { coedges: vec![rev(top_edge)] }],

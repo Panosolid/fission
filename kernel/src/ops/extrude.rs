@@ -53,7 +53,7 @@ pub fn extrude_meshed(profile: &Profile, distance: f64) -> Result<Meshed, Kernel
     for (boundary, (segs, turned)) in loops.iter().enumerate() {
         // The side of checked piece i is named by the piece as given.
         let n = segs.len();
-        let side = |i: usize| FaceRole::Side(Some(Piece { boundary, piece: if *turned { n - 1 - i } else { i } }));
+        let side = |i: usize| FaceRole::Side(Piece::at(boundary, if *turned { n - 1 - i } else { i }));
         if let [Seg::Circle { center, radius, ccw }] = segs.as_slice() {
             // Edges run the way the loop does: about +Z when counter-clockwise.
             let axis = if *ccw { DVec3::Z } else { DVec3::NEG_Z };
