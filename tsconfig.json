@@ -19,7 +19,8 @@
   "include": [
     "packages/*/src",
     "workspaces/*/src",
-    "apps/*/src"
+    "apps/*/src",
+    "training/src"
   ],
   "exclude": [
     "packages/core/src/kernel/wasm",

@@ -1,0 +1,31 @@
+{
+  "name": "@fission/training",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "journeys": "node --experimental-strip-types --no-warnings --test journeys/*.journey.ts",
+    "generate": "node --experimental-strip-types --no-warnings scripts/generate.ts"
+  },
+  "dependencies": {
+    "@fission/ai": "*",
+    "@fission/core": "*",
+    "@fission/design": "*",
+    "@fission/testing": "*"
+  },
+  "devDependencies": {
+    "@fission/circuit": "*",
+    "@fission/image": "*",
+    "@fission/layout": "*",
+    "@fission/laser": "*",
+    "@fission/manufacture": "*",
+    "@fission/render": "*",
+    "@fission/simulate": "*",
+    "@fission/slice": "*",
+    "@fission/vector": "*"
+  }
+}
