@@ -363,6 +363,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     tool: (kind) => chooseTool(kind),
   });
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
+  /** Counts tool changes (a tool chosen, Escape, the sketch entered again): a click the kernel was still snapping across one is dropped. */
+  let toolChanges = 0;
 
   /** Draws every sketch, the edited one with its grid, points and preview. */
   function drawSketches() {
@@ -416,6 +418,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const doc = designDoc();
     if (!editingSketch || !doc.sketches.some((s) => s.id === editingSketch!.id)) return void (editingSketch = null);
     mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null, snap: null };
+    toolChanges++;
     sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, editingSketch.tool);
     drawSketches();
     void showOutline();
@@ -427,6 +430,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     editingSketch.tool = kind;
     mode.tool = startTool(kind, mode.tool.sketch);
     mode.snap = null;
+    toolChanges++;
     sketchBox.showTool(kind);
     sketchBox.showError("");
     drawSketches();
@@ -576,6 +580,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       return;
     }
     if (!at) return;
+    const changes = toolChanges;
     clicks = clicks.then(async () => {
       if (mode.kind !== "edit") return;
       let grid: SketchXY;
@@ -584,7 +589,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       } catch (e) {
         return sketchBox.showError(e instanceof Error ? e.message : String(e));
       }
-      if (mode.kind !== "edit") return;
+      // The tool changed while the kernel snapped (L, R, C or Escape): the click was for the old tool, so it is dropped.
+      if (mode.kind !== "edit" || toolChanges !== changes) return;
       // The click lands where the hover showed it would: on the grid, or on the point or line-up snap.ts finds.
       const snapped = snapOnSketch(designDoc(), mode.tool, at, grid, pointer.pixel).at;
       const done = clickAt(designDoc(), mode.tool, snapped);
@@ -656,6 +662,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
         mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
         mode.snap = null;
+        toolChanges++;
         sketchBox.showError("");
         drawSketches();
         return true;
