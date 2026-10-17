@@ -16,11 +16,11 @@ import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
-import { DESIGN_SHORTCUTS, designShortcut } from "./shortcuts.ts";
+import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts";
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, SKETCH_STEPS, sketchItem, sketchLines } from "./sketch.ts";
-import { clickAt, DEFAULT_GRID, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, type LineTool } from "./sketch-tool.ts";
+import { clickAt, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -46,7 +46,7 @@ let putAwayByRestore = false;
  * re-mount Design, and you stay in the sketch (the chain in progress ends,
  * since the point it ran from may be gone). Cleared by Finish sketch.
  */
-let editingSketch: { id: string; grid: number; typed: string } | null = null;
+let editingSketch: { id: string; grid: number; typed: string; tool: ToolKind } | null = null;
 /** How many times Design has framed the part, read by the e2e test (an undo must not add one). */
 let fits = 0;
 
@@ -350,7 +350,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // The sketch tool (step 21c, docs/document-model.md section 3).
-  type Mode = { kind: "none" } | { kind: "pick" } | { kind: "edit"; tool: LineTool; grid: number; pointer: SketchXY | null };
+  type Mode = { kind: "none" } | { kind: "pick" } | { kind: "edit"; tool: SketchTool; grid: number; pointer: SketchXY | null };
   let mode: Mode = { kind: "none" };
   const sketchBox = sketchPanel(ctx.properties, {
     pickPlane: (id) => pickPlane(id),
@@ -358,6 +358,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     grid: (typed) => void setGrid(typed),
     finish: () => leaveSketch(),
     extrude: () => startExtrude(),
+    tool: (kind) => chooseTool(kind),
   });
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
 
@@ -402,19 +403,29 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const made = addSketch(designDoc(), plane);
     viewport.showPlanes([]);
     applySketchEdit(made.doc, SKETCH_STEPS.create, made.id);
-    editingSketch = { id: made.id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID) };
+    editingSketch = { id: made.id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID), tool: "line" };
     enterSketch();
     viewport.setView(PLANE_VIEWS[plane]);
   }
 
-  /** Edits the sketch named in editingSketch, the chain not started. */
+  /** Edits the sketch named in editingSketch with its tool, nothing clicked yet. */
   function enterSketch() {
     const doc = designDoc();
     if (!editingSketch || !doc.sketches.some((s) => s.id === editingSketch!.id)) return void (editingSketch = null);
-    mode = { kind: "edit", tool: { sketch: editingSketch.id, from: null }, grid: editingSketch.grid, pointer: null };
-    sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed);
+    mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null };
+    sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, editingSketch.tool);
     drawSketches();
     void showOutline();
+  }
+
+  /** Line or Rectangle (the panel's buttons, or L and R): what was part way through is dropped, as Escape would. */
+  function chooseTool(kind: ToolKind) {
+    if (mode.kind !== "edit" || !editingSketch) return;
+    editingSketch.tool = kind;
+    mode.tool = startTool(kind, mode.tool.sketch);
+    sketchBox.showTool(kind);
+    sketchBox.showError("");
+    drawSketches();
   }
 
   /** Cancel or Finish sketch: back to modelling; the sketch stays as drawn. */
@@ -568,11 +579,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         return sketchBox.showError(e instanceof Error ? e.message : String(e));
       }
       if (mode.kind !== "edit") return;
-      sketchBox.showError("");
       const done = clickAt(designDoc(), mode.tool, snapped);
+      sketchBox.showError(done.note ?? "");
       mode.tool = done.tool;
       mode.pointer = snapped;
-      if (done.drew) applySketchEdit(done.doc, SKETCH_STEPS.draw, done.tool.sketch);
+      if (done.drew) applySketchEdit(done.doc, drawStep(done.tool), done.tool.sketch);
       drawSketches();
       if (done.drew) await showOutline();
     });
@@ -628,14 +639,18 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
-      // Escape in the sketch tool: leaves the plane prompt, or ends the line being drawn.
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line or rectangle being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
-      if (id === "clear-selection" && mode.kind === "edit" && mode.tool.from !== null) {
-        mode.tool = { ...mode.tool, from: null };
+      if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
+        mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
+        sketchBox.showError("");
         drawSketches();
         return true;
       }
+      // L and R choose the line and rectangle tools while a sketch is edited; otherwise the key does what it would.
+      const kind = sketchToolKey(id);
+      if (kind) return mode.kind === "edit" ? (chooseTool(kind), true) : false;
       const items = ctx.selection.items;
       const what = designShortcut(id, items);
       if (what === "clear") ctx.selection.clear();
