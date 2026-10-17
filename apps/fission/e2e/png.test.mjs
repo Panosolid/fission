@@ -98,3 +98,11 @@ test("compareImages: different sizes differ everywhere", () => {
   const r = compareImages(solid(2, 2, [0, 0, 0, 255]), solid(3, 2, [0, 0, 0, 255]), { channel: 32, maxPixels: 100 });
   assert.deepEqual([r.ok, r.sizes], [false, "2×2 vs 3×2"]);
 });
+
+test("compareImages: pixels inside an ignored rectangle never count, those just outside do", () => {
+  // A 10 × 10 image, every pixel off; ignoring x 2–5, y 3–6 (a 4 × 4 square) leaves 100 − 16 = 84.
+  const r = compareImages(solid(10, 10, [0, 0, 0, 255]), solid(10, 10, [255, 0, 0, 255]), { channel: 32, maxPixels: 0, ignore: [{ x: 2, y: 3, width: 4, height: 4 }] });
+  assert.equal(r.differing, 84);
+  assert.deepEqual([...r.diff.data.subarray(4 * (3 * 10 + 2), 4 * (3 * 10 + 2) + 4)], [0, 0, 96, 255], "(2, 3) is ignored");
+  assert.deepEqual([...r.diff.data.subarray(4 * (3 * 10 + 6), 4 * (3 * 10 + 6) + 4)], [255, 0, 0, 255], "(6, 3) is not");
+});

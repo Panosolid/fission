@@ -13,7 +13,8 @@
 // 2. Golden images, Chromium only (other engines draw lines a little
 //    differently): the canvas while drawing and after Finish, compared
 //    with e2e/screenshots/*.png: at most MAX_PIXELS pixels may differ by
-//    more than CHANNEL in any channel. The same image moved 2 px must fail.
+//    more than CHANNEL in any channel, the view cube's corner left out (its
+//    label's text depends on the fonts). The same image moved 2 px must fail.
 //    E2E_UPDATE_SHOTS=1 rewrites the files; a failure writes the actual
 //    and a diff image (red where different) next to them as *.actual.png
 //    and *.diff.png, for CI to keep.
@@ -35,6 +36,8 @@ const BLUE = 60;
 /** Golden-image tolerance: a pixel differs past CHANNEL (of 255) in any channel; at most MAX_PIXELS may. */
 const CHANNEL = 32;
 const MAX_PIXELS = 50;
+/** The view cube, drawn into the canvas's top right corner with text from the fonts installed: left out (the smoke test checks it). */
+const IGNORE = [{ x: 760 - 120, y: 0, width: 120, height: 120 }];
 
 // The drawing, in sketch millimetres: clear of the view cube, the box's edges and each other.
 const RECT = [[10, 10], [30, 20]];
@@ -100,11 +103,19 @@ function golden(name, img) {
     return null;
   }
   const want = decodePng(readFileSync(file));
-  const result = compareImages(want, img, { channel: CHANNEL, maxPixels: MAX_PIXELS });
+  const result = compareImages(want, img, { channel: CHANNEL, maxPixels: MAX_PIXELS, ignore: IGNORE });
   if (result.ok) return null;
   writeFileSync(new URL(`${name}.actual.png`, shotsDir), encodePng(img));
+  // In CI, the actual image in the log too, so a baseline from the CI browser can be taken from it.
+  if (process.env.CI) console.log(`BEGIN ${name}.actual.png base64\n${encodePng(img).toString("base64")}\nEND ${name}.actual.png`);
   if (result.diff) writeFileSync(new URL(`${name}.diff.png`, shotsDir), encodePng(result.diff));
   return `${name}: ${result.sizes ?? `${result.differing} pixels differ by more than ${CHANNEL}`} (at most ${MAX_PIXELS}); see e2e/screenshots/${name}.actual.png and .diff.png`;
+}
+
+/** The WebGL canvas's own pixels (it keeps its drawing buffer), without the buttons and view cube over it. */
+async function canvasImage(page) {
+  const url = await page.evaluate(() => document.querySelector("#viewport canvas").toDataURL("image/png"));
+  return decodePng(Buffer.from(url.slice(url.indexOf(",") + 1), "base64"));
 }
 
 /** The image moved `dx` px to the right (the left columns repeated), for the must-fail check. */
@@ -133,6 +144,9 @@ try {
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   await page.goto(url + "#design");
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  // The canvas's size comes from the bars above it, whose height follows the fonts installed (CI's are
+  // a pixel shorter): pin them, so the canvas is 760 × 710 everywhere and the golden images line up.
+  await page.addStyleTag({ content: "#topbar, #toolbar { height: 45px !important; min-height: 0 !important; overflow: hidden; }" });
   await page.click("#create-sketch");
   await page.click("#sketch-plane-XY");
   await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true");
@@ -154,11 +168,10 @@ try {
   await segments(70);
   await page.mouse.move(0, 0);
   await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketchPreview === "");
-  const canvas = page.locator("#viewport canvas");
-  const box = await canvas.boundingBox();
+  const box = await page.locator("#viewport canvas").boundingBox();
   // Two frames, so the last drawing is on screen.
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const editing = decodePng(await canvas.screenshot());
+  const editing = await canvasImage(page);
 
   await check(`${browserName}: every line and the circle are drawn where the maths puts them, and nothing beside them`, () => {
     const misses = probe(editing, box);
@@ -176,14 +189,14 @@ try {
     });
     await check("chromium: the golden image comparison catches the canvas moved 2 px (it can fail)", () => {
       const want = decodePng(readFileSync(new URL("sketch-editing-chromium.png", shotsDir)));
-      const r = compareImages(want, moved(editing, 2), { channel: CHANNEL, maxPixels: MAX_PIXELS });
+      const r = compareImages(want, moved(editing, 2), { channel: CHANNEL, maxPixels: MAX_PIXELS, ignore: IGNORE });
       assert.ok(!r.ok && r.differing > 10 * MAX_PIXELS, `a 2 px move changed only ${r.differing} pixels`);
     });
     await page.click("#sketch-finish");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "false");
     await page.mouse.move(0, 0);
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-    const finished = decodePng(await canvas.screenshot());
+    const finished = await canvasImage(page);
     await check("chromium: the canvas after Finish sketch matches its golden image", () => {
       const why = golden("sketch-finished-chromium", finished);
       assert.equal(why, null, why);

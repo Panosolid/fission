@@ -98,15 +98,24 @@ export function encodePng({ width, height, data }) {
  * Compares two images pixel by pixel: a pixel differs when any channel
  * differs by more than `channel`. Returns how many differ, whether that is
  * within `maxPixels`, and a diff image (the expected image dimmed, differing
- * pixels red). Images of different sizes differ everywhere.
+ * pixels red). Images of different sizes differ everywhere. `ignore` lists
+ * rectangles { x, y, width, height } left out (drawn blue in the diff).
  */
-export function compareImages(expected, actual, { channel, maxPixels }) {
+export function compareImages(expected, actual, { channel, maxPixels, ignore = [] }) {
   if (expected.width !== actual.width || expected.height !== actual.height) {
     return { differing: Math.max(expected.width * expected.height, actual.width * actual.height), ok: false, sizes: `${expected.width}×${expected.height} vs ${actual.width}×${actual.height}`, diff: null };
   }
   const diff = Buffer.alloc(expected.data.length);
   let differing = 0;
+  const skipped = (i) => {
+    const [x, y] = [(i / 4) % expected.width, Math.floor(i / 4 / expected.width)];
+    return ignore.some((r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height);
+  };
   for (let i = 0; i < expected.data.length; i += 4) {
+    if (skipped(i)) {
+      diff.set([0, 0, 96, 255], i);
+      continue;
+    }
     let worst = 0;
     for (let k = 0; k < 4; k++) worst = Math.max(worst, Math.abs(expected.data[i + k] - actual.data[i + k]));
     if (worst > channel) {
