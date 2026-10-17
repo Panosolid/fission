@@ -500,6 +500,8 @@ fn reversed(segs: &[Seg]) -> Vec<Seg> {
 ///   within MAX_COORD, and one bulge per corner (or none), all finite;
 /// - circle and arc radii are within [MIN_FEATURE, MAX_SIZE]; arcs and
 ///   circles stay within MAX_COORD; the outer loop spans at most MAX_SIZE;
+/// - every piece's ends (a line's length, an arc's chord) at least
+///   MIN_FEATURE apart, as in a sketch;
 /// - no corner where the outline doubles back on itself (a cusp);
 /// - any two pieces, in any loops, are at least MIN_FEATURE apart, apart
 ///   from where they meet at a shared corner; this also rules out crossings,
@@ -542,6 +544,18 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
                 let curved = bulges.iter().any(|&x| x != 0.0);
                 if n < 2 || (n < 3 && !curved) {
                     return bad(format!("profile loop {k} has {n} corners; at least 3 are needed (2 with an arc)"));
+                }
+                // The clearance rule below can't see a piece shorter than
+                // LINEAR (its ends count as the shared corners), so length
+                // is a rule of its own, the same as for sketch lines and
+                // arc chords.
+                for i in 0..n {
+                    let gap = corners[i].distance(corners[(i + 1) % n]);
+                    if gap < MIN_FEATURE {
+                        return bad(format!(
+                            "profile loop {k}, piece {i} has its ends {gap} mm apart; they must be at least {MIN_FEATURE} mm apart"
+                        ));
+                    }
                 }
                 let mut segs = Vec::with_capacity(n);
                 for i in 0..n {
@@ -856,6 +870,38 @@ mod tests {
             let lens = Profile { outer: path(&[(-1.0, 0.0), (1.0, 0.0)], &[b, b]), holes: vec![] };
             assert_eq!(check_profile(&lens).is_ok(), legal, "lens {k}×MIN_FEATURE thick");
         }
+    }
+
+    #[test]
+    fn short_piece_boundary() {
+        // A circle of radius 10 with a gap of g at the bottom, closed by a
+        // straight piece from b = (−g/2, 0) back to a = (g/2, 0). The arc
+        // a → b goes the long way round, counter-clockwise: for radius r
+        // and chord c, r = c(1 + β²)/(4β) gives cβ² − 4rβ + c = 0, whose
+        // larger root is β = (2r + √(4r² − c²))/c (β > 1: more than a half
+        // circle). Both pieces join the same two corners, g apart (the
+        // arc's chord, the line's length); nothing else is near anything,
+        // so only a rule on piece length can refuse it.
+        let keyhole = |g: f64| {
+            let beta = (20.0 + (400.0 - g * g).sqrt()) / g;
+            Profile { outer: path(&[(g / 2.0, 0.0), (-g / 2.0, 0.0)], &[beta, 0.0]), holes: vec![] }
+        };
+        for (k, legal) in [(1.1, true), (0.9, false)] {
+            let g = k * MIN_FEATURE;
+            assert_eq!(check_profile(&keyhole(g)).is_ok(), legal, "closing piece {k}×MIN_FEATURE long");
+        }
+        assert!(refused(keyhole(0.9 * MIN_FEATURE)).contains("piece 0 has its ends"));
+        // Exactly MIN_FEATURE is allowed: the corners ±MIN_FEATURE/2 are
+        // exact, so the length is (a correctly rounded √(x²) is x).
+        assert!(check_profile(&keyhole(MIN_FEATURE)).is_ok());
+        // Fuzzing found these: pieces shorter than LINEAR, whose ends all
+        // count as the corners they share, so no clearance was measured.
+        // Every corner of a triangle at one point panicked in extrude; a
+        // triangle 5 nm across, and the keyhole with a 5 nm gap, made
+        // invalid bodies.
+        assert!(refused(Profile::polygon(vec![p(1.9375, 1.9375); 3], vec![])).contains("piece 0 has its ends 0 mm apart"));
+        assert!(refused(Profile::polygon(vec![p(0.0, 0.0), p(5e-6, 0.0), p(0.0, 5e-6)], vec![])).contains("piece 0 has its ends"));
+        assert!(refused(keyhole(5e-6)).contains("piece 0 has its ends"));
     }
 
     #[test]
