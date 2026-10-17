@@ -484,8 +484,12 @@ mod tests {
         let (lo, hi) = body.bounds();
         let o = (lo + hi) * 0.5;
         let opts = |refine| TessOptions { chord: 1.0, max_angle: MASS_PROPS_ANGLE, refine };
-        let coarse = mesh_face_moments(&tessellate(body, &opts(1)).unwrap(), body.faces.len(), o);
-        let fine = mesh_face_moments(&tessellate(body, &opts(2)).unwrap(), body.faces.len(), o);
+        // Refine 4 and 8, not 1 and 2: extrapolation leaves the h⁴ term, and
+        // a gentle arc may get only a few segments at refine 1 (the shallow
+        // concave triangle's caps missed by 2.3e-5 at 1 and 2; 4 and 8 leave
+        // 256× less).
+        let coarse = mesh_face_moments(&tessellate(body, &opts(4)).unwrap(), body.faces.len(), o);
+        let fine = mesh_face_moments(&tessellate(body, &opts(8)).unwrap(), body.faces.len(), o);
         coarse
             .iter()
             .zip(&fine)
@@ -522,6 +526,22 @@ mod tests {
             assert!(rel_eq(m.area, area, MASS_PROPS_REL), "{name} {role:?}: area {} vs extrapolated {area}", m.area);
             assert!(m.centroid.distance(centroid) <= MASS_PROPS_REL * size, "{name} {role:?}: centroid {} vs {centroid}", m.centroid);
         }
+    }
+
+    #[test]
+    fn a_shallow_concave_triangle_by_high_precision_and_meshes() {
+        // Regression: the proptest's shrunk case from CI (cc 6b7b9a00…),
+        // two sides bowed in (bulges −0.0993 and −0.00456). The cap's area
+        // and centroid by Green's theorem integrated along the true arcs at
+        // 40 digits (mpmath quad of ½∮(x dy − y dx), ½∮x² dy and −½∮y² dx):
+        // area 169.42298012699905598, centroid (1.15295290217765047,
+        // 1.34909184040958196). The exact route must hit that to FP_REL;
+        // the meshes once missed it by 2.3e-5 (just over MASS_PROPS_REL ×
+        // size), because two meshes' extrapolation was not fine enough.
+        let corners = [(18.839339085862747, 9.893918069683107), (-8.666711250113524, 4.988799064620231), (-5.000000000000004, -8.660254037844384)];
+        let b = extrude(&Profile { outer: path(&corners, &[-0.09932851419665133, 0.0, -0.004562863518878393]), holes: vec![] }, 0.5).unwrap();
+        expect(&b, FaceRole::Start, 169.42298012699906, (1.1529529021776505, 1.349091840409582, 0.0));
+        check_against_meshes("shallow concave triangle", &b);
     }
 
     /// A star polygon round the origin: corner k at angle (k + jitter)·2π/n
