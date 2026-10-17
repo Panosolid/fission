@@ -24,8 +24,11 @@ const browser = await launch();
 const errors = [];
 const shots = process.env.E2E_SHOTS;
 
+/** Every page's context, closed after its check whether it passed or not, so a failed check leaves nothing running. */
+const contexts = new Set();
 async function fresh(width = 1280, touch = false) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
+  contexts.add(context);
   const page = await context.newPage();
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
   // window.kernelDelay (ms) holds back every pointer rounding (snap_to_grid, place_freely), so a key can be pressed while the kernel rounds a hover.
@@ -33,7 +36,10 @@ async function fresh(width = 1280, touch = false) {
     const send = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (message, ...rest) {
       const wait = window.kernelDelay ?? 0;
-      if (wait > 0 && (message?.op === "snap_to_grid" || message?.op === "place_freely")) return void setTimeout(() => send.call(this, message, ...rest), wait);
+      if (wait > 0 && (message?.op === "snap_to_grid" || message?.op === "place_freely")) {
+        window.kernelHeld = (window.kernelHeld ?? 0) + 1; // requests held back so far, so a test knows the page asked
+        return void setTimeout(() => send.call(this, message, ...rest), wait);
+      }
       return send.call(this, message, ...rest);
     };
   });
@@ -42,7 +48,10 @@ async function fresh(width = 1280, touch = false) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³").catch(async (e) => {
+    const volume = await page.evaluate(() => document.querySelector("#volume")?.textContent ?? "(none)").catch(() => "(unreadable)");
+    throw new Error(`the page never showed the default box's 24,000 mm³ (volume "${volume}"): ${e.message}`);
+  });
   return page;
 }
 
@@ -106,7 +115,10 @@ let failed = 0;
 async function check(name, fn, known) {
   const expected = known && known.engines.includes(browserName);
   try {
-    await fn();
+    await fn().finally(async () => {
+      for (const c of contexts) await c.close().catch(() => {});
+      contexts.clear();
+    });
     if (expected) {
       failed++;
       console.log(`not ok - ${name}\n  passes in ${browserName}: the known bug looks fixed (${known.bug}); remove its mark`);
@@ -373,6 +385,8 @@ try {
     const box = await page.locator("#viewport canvas").boundingBox();
     const p = screenPoint(box, [-10, 10, 0], TOP);
     await page.mouse.move(p.x + 3, p.y + 3);
+    // Only once the page has asked the kernel about the hover (engines hand a pointer move on at different times).
+    await until(page, () => (window.kernelHeld ?? 0) > 0, null, "the hover sent to the kernel");
     await page.keyboard.press("Control+z");
     await until(page, () => document.getElementById("undo").title === "Undo Create sketch (Ctrl+Z)", null, "the line undone");
     await page.waitForTimeout(1000); // the hover's answer has come back by now
