@@ -1,5 +1,5 @@
 // The sketch tools (line, step 21c; rectangle, step 22a; circle, step 22c;
-// 3-point arc, step 23b): what a click on
+// 3-point arc, step 23b; tangent arc, step 23c): what a click on
 // the sketch plane does to the document, as pure functions the workspace
 // calls with a point the kernel has already snapped to the grid
 // (snap_to_grid). Lines drawn click after click form a chain, each line
@@ -8,7 +8,9 @@
 // corners and is four such lines. A circle is two clicks, the centre and a
 // point on the circle: the radius is the distance between them, and only
 // the centre becomes a point. A 3-point arc is three clicks: its two ends,
-// then a point it passes through (`arcThrough`).
+// then a point it passes through (`arcThrough`). A tangent arc is two: the
+// free end of a line or arc, then its own end (`tangentArc`); it leaves
+// along the curve it starts from, and chains like the line tool.
 //
 // Two clicks are at the same point only when their snapped coordinates are
 // equal: the kernel gives bit-identical grid nodes for the same node, so a
@@ -16,7 +18,7 @@
 // the grid comes with the sketch constraints (29).
 
 import type { Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
-import type { DesignDocument, Sketch, SketchLineCurve, SketchPlane } from "./document.ts";
+import type { DesignDocument, Sketch, SketchArcCurve, SketchLineCurve, SketchPlane } from "./document.ts";
 import { drawArc, drawCircle, drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
 
 export { pointAt };
@@ -50,7 +52,14 @@ export interface ArcTool {
   end: SketchXY | null;
 }
 
-export type SketchTool = LineTool | RectangleTool | CircleTool | ArcTool;
+/** The tangent arc tool on one sketch: the free end it starts from (a point id ending one line or arc), or null before it. */
+export interface TangentTool {
+  kind: "tangent";
+  sketch: string;
+  from: string | null;
+}
+
+export type SketchTool = LineTool | RectangleTool | CircleTool | ArcTool | TangentTool;
 export type ToolKind = SketchTool["kind"];
 
 /** The tools the sketch panel offers, in its order, with their keys (the letters people already know for them). */
@@ -59,22 +68,24 @@ export const SKETCH_TOOLS: readonly { kind: ToolKind; label: string; key: string
   { kind: "rectangle", label: "Rectangle", key: "R" },
   { kind: "circle", label: "Circle", key: "C" },
   { kind: "arc", label: "Arc", key: "A" },
+  { kind: "tangent", label: "Tangent arc", key: "T" },
 ];
 
 /** A tool of this kind on a sketch, nothing clicked yet. */
 export function startTool(kind: ToolKind, sketch: string): SketchTool {
-  if (kind === "line") return { kind, sketch, from: null };
+  if (kind === "line" || kind === "tangent") return { kind, sketch, from: null };
   if (kind === "arc") return { kind, sketch, start: null, end: null };
   return kind === "rectangle" ? { kind, sketch, corner: null } : { kind, sketch, centre: null };
 }
 
 /** Whether the tool is part way through (a chain going, a first corner down, an arc's ends): what Escape ends. */
-export const toolBusy = (tool: SketchTool): boolean => (tool.kind === "line" ? tool.from !== null : pendingClicks(tool).length > 0);
+export const toolBusy = (tool: SketchTool): boolean => (tool.kind === "line" || tool.kind === "tangent" ? tool.from !== null : pendingClicks(tool).length > 0);
 
 /** The tool's clicks while they are not yet points of the sketch's own (a chain's first click, a first corner, a centre, an arc's ends). */
 function pendingClicks(tool: SketchTool): SketchXY[] {
   if (tool.kind === "line") return tool.from !== null && typeof tool.from !== "string" ? [tool.from] : [];
   if (tool.kind === "arc") return [tool.start, tool.end].filter((p) => p !== null);
+  if (tool.kind === "tangent") return [];
   const at = tool.kind === "rectangle" ? tool.corner : tool.centre;
   return at ? [at] : [];
 }
@@ -123,6 +134,7 @@ export function clickAt<T extends SketchTool>(doc: DesignDocument, tool: T, at: 
   if (tool.kind === "rectangle") return rectangleClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "circle") return circleClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "arc") return arcClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
+  if (tool.kind === "tangent") return tangentClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   return lineClick(doc, tool as LineTool, at) as { doc: DesignDocument; tool: T; drew: boolean };
 }
 
@@ -209,17 +221,30 @@ function circleClick(doc: DesignDocument, tool: CircleTool, at: SketchXY): { doc
  */
 export function arcThrough(a: SketchXY, b: SketchXY, p: SketchXY): SketchArc | null {
   const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
-  const [vx, vy] = [p[0] - a[0], p[1] - a[1]];
-  const cross = dx * vy - dy * vx;
-  const big = Math.max(...[...a, ...b, ...p].map(Math.abs));
-  const eta = 2 * Number.EPSILON * big;
-  const bound = eta * (Math.abs(dx) + Math.abs(dy) + Math.abs(vx) + Math.abs(vy)) + 2 * eta * eta + Number.EPSILON * (Math.abs(dx * vy) + Math.abs(dy * vx));
-  if (!(Math.abs(cross) > bound)) return null;
+  const cross = bend([dx, dy], [p[0] - a[0], p[1] - a[1]], [a, b, p]);
+  if (cross === null) return null;
   const m: SketchXY = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   const k = ((p[0] - m[0]) ** 2 + (p[1] - m[1]) ** 2 - (dx * dx + dy * dy) / 4) / (2 * cross);
   const centre: [number, number] = [m[0] - dy * k, m[1] + dx * k];
   const [start, end] = cross < 0 ? [a, b] : [b, a];
   return { start: [start[0], start[1]], end: [end[0], end[1]], centre };
+}
+
+/**
+ * The cross product u × v = ux·vy − uy·vx of two differences of the
+ * points `from`, or null when it is within the rounding bound described
+ * at `arcThrough` (η = 2εM, M the largest coordinate of `from`), so it
+ * might be rounding alone: the two don't make a bend that can be told
+ * from a straight line. Shared by the 3-point arc and the tangent arc.
+ */
+function bend(u: SketchXY, v: SketchXY, from: readonly SketchXY[]): number | null {
+  const [ux, uy] = u;
+  const [vx, vy] = v;
+  const cross = ux * vy - uy * vx;
+  const big = Math.max(...from.flatMap((q) => [Math.abs(q[0]), Math.abs(q[1])]));
+  const eta = 2 * Number.EPSILON * big;
+  const bound = eta * (Math.abs(ux) + Math.abs(uy) + Math.abs(vx) + Math.abs(vy)) + 2 * eta * eta + Number.EPSILON * (Math.abs(ux * vy) + Math.abs(uy * vx));
+  return Math.abs(cross) > bound ? cross : null;
 }
 
 const SAME_ENDS = "An arc needs two ends: click its end away from its start.";
@@ -246,6 +271,122 @@ function arcClick(doc: DesignDocument, tool: ArcTool, at: SketchXY): { doc: Desi
   const share = (p: SketchXY): LineEnd => pointAt(sketch, p) ?? p;
   const drawn = drawArc(doc, tool.sketch, share(arc.start), share(arc.end), share(arc.centre));
   return { doc: drawn.doc, tool: { ...tool, start: null, end: null }, drew: true };
+}
+
+/**
+ * The direction a curve leaves its sketch point `id` along, carried on
+ * past its end: for a line a → b, b − a at b and a − b at a; for an arc
+ * (counter-clockwise round c), the radius r = end − c turned a quarter
+ * left, (−ry, rx), at its end, and r = start − c turned a quarter right,
+ * (ry, −rx), at its start. Not made a unit: only its direction is used.
+ * Null unless exactly one line or arc ends at the point (a point no line
+ * or arc ends at, a centre say, has no direction; one where two meet, a
+ * corner, has two).
+ */
+export function leaving(sketch: Sketch, id: string): SketchXY | null {
+  const ends = sketch.curves.filter((c) => c.kind !== "circle" && (c.start === id || c.end === id));
+  if (ends.length !== 1) return null;
+  const c = ends[0] as SketchLineCurve | SketchArcCurve;
+  const at = (q: string) => whereIs(sketch, q);
+  const [sx, sy] = at(c.start);
+  const [ex, ey] = at(c.end);
+  if (c.kind === "line") return c.end === id ? [ex - sx, ey - sy] : [sx - ex, sy - ey];
+  const [cx, cy] = at(c.centre);
+  return c.end === id ? [-(ey - cy), ex - cx] : [sy - cy, -(sx - cx)];
+}
+
+/**
+ * The arc from `s` leaving along `t` (`leaving`) to `e`, as the start,
+ * end and centre of a counter-clockwise arc, or null when `e` is on the
+ * line through `s` along `t` (ahead or behind) to within rounding, where
+ * no arc both leaves along `t` and reaches `e`. `along` are the points
+ * `t` was taken from, for the rounding bound (`bend`).
+ *
+ * The centre is on the normal to `t` at `s` (so the arc leaves along `t`)
+ * and as far from `e` as from `s`. With n = t⊥ = (−ty, tx) (t turned a
+ * quarter left) and w = e − s, the centre is s + n·k, and
+ * |n·k|² = |n·k − w|² gives 0 = |w|² − 2k(n·w), so
+ *   k = |w|² / (2·(n·w)) = |w|² / (2·(t × w)),
+ * since n·w = −ty·wx + tx·wy = t × w. No square root is taken. When e is
+ * on the left of the way out (t × w above 0) the arc turns left, so it
+ * runs counter-clockwise from s to e; on the right it turns clockwise,
+ * which is counter-clockwise from e to s, and the ends swap.
+ *
+ * The centre is s + n·k exactly, rounded once per coordinate, so it is
+ * on the normal at s, and on the line midway between the ends that the
+ * kernel's check_arcs asks for, to within rounding of the coordinates.
+ */
+export function tangentArc(s: SketchXY, t: SketchXY, e: SketchXY, along: readonly SketchXY[]): SketchArc | null {
+  const w: SketchXY = [e[0] - s[0], e[1] - s[1]];
+  const cross = bend(t, w, [...along, s, e]);
+  if (cross === null) return null;
+  const k = (w[0] * w[0] + w[1] * w[1]) / (2 * cross);
+  const centre: [number, number] = [s[0] - t[1] * k, s[1] + t[0] * k];
+  const [start, end] = cross > 0 ? [s, e] : [e, s];
+  return { start: [start[0], start[1]], end: [end[0], end[1]], centre };
+}
+
+/** The points the direction `leaving(sketch, id)` was worked out from: the curve's ends, or an arc's end and centre. */
+function leavingFrom(sketch: Sketch, id: string): SketchXY[] {
+  const c = sketch.curves.find((x) => x.kind !== "circle" && (x.start === id || x.end === id)) as SketchLineCurve | SketchArcCurve;
+  return (c.kind === "line" ? [c.start, c.end] : [id, c.centre]).map((q) => whereIs(sketch, q));
+}
+
+/** Where the tangent tool's start is and the way it leaves, or null when its start is gone or no longer one curve's free end (after an undo, say). */
+function tangentStart(sketch: Sketch, tool: TangentTool): { s: SketchXY; t: SketchXY; along: SketchXY[] } | null {
+  if (tool.from === null || !sketch.points.some((p) => p.id === tool.from)) return null;
+  const t = leaving(sketch, tool.from);
+  return t ? { s: whereIs(sketch, tool.from), t, along: leavingFrom(sketch, tool.from) } : null;
+}
+
+const NO_FREE_END = "A tangent arc starts at the end of a line or arc: click a free end (where only one line or arc ends).";
+const SAME_START = "A tangent arc needs an end: click away from its start.";
+const NO_TURN = "A tangent arc needs to turn: click off the line it leaves along (the line tool draws straight on).";
+
+/**
+ * A tangent arc's clicks: the free end of a line or arc to start from
+ * (`leaving`; snapping lands on it), then the arc's end (`tangentArc`),
+ * one undo step. The end shares a point already there, and so does the
+ * centre if one is exactly there, else each is a new point. The arc
+ * chains: ending on a new point the tool carries on from it, leaving
+ * along the arc just drawn; ending on a point the sketch already had
+ * ends the chain. A first click that is not a free end, an end on the
+ * start, or one straight ahead or behind draws nothing and says why.
+ */
+function tangentClick(doc: DesignDocument, tool: TangentTool, at: SketchXY): { doc: DesignDocument; tool: TangentTool; drew: boolean; note?: string } {
+  const sketch = sketchOf(doc, tool.sketch);
+  const start = tangentStart(sketch, tool);
+  if (!start) {
+    const there = pointAt(sketch, at);
+    if (there === null || !leaving(sketch, there)) return { doc, tool: { ...tool, from: null }, drew: false, note: NO_FREE_END };
+    return { doc, tool: { ...tool, from: there }, drew: false };
+  }
+  if (start.s[0] === at[0] && start.s[1] === at[1]) return { doc, tool, drew: false, note: SAME_START };
+  const arc = tangentArc(start.s, start.t, at, start.along);
+  if (!arc) return { doc, tool, drew: false, note: NO_TURN };
+  const there = pointAt(sketch, at);
+  const end: LineEnd = there ?? [at[0], at[1]];
+  const centre: LineEnd = pointAt(sketch, arc.centre) ?? arc.centre;
+  const left = arc.start[0] === start.s[0] && arc.start[1] === start.s[1];
+  const drawn = left ? drawArc(doc, tool.sketch, tool.from!, end, centre) : drawArc(doc, tool.sketch, end, tool.from!, centre);
+  const made = sketchOf(drawn.doc, tool.sketch).curves.find((c) => c.id === drawn.id) as SketchArcCurve;
+  const next = there ? null : left ? made.end : made.start;
+  return { doc: drawn.doc, tool: { ...tool, from: next }, drew: true };
+}
+
+/**
+ * The tool a sketch switches to (the panel's buttons, or the keys): a
+ * new one, nothing clicked, except between the line and the tangent arc,
+ * which carry on from the chain's last point, so a slot is lines and
+ * arcs drawn without clicking a corner twice. The line tool takes the
+ * tangent arc's start as where its next line starts; the tangent arc
+ * takes the line chain's last point if it is a free end (`leaving`).
+ */
+export function switchTool(doc: DesignDocument, tool: SketchTool, kind: ToolKind): SketchTool {
+  const fresh = startTool(kind, tool.sketch);
+  if (tool.kind === "tangent" && kind === "line" && tool.from !== null) return { ...fresh, from: tool.from } as LineTool;
+  if (tool.kind === "line" && kind === "tangent" && typeof tool.from === "string" && leaving(sketchOf(doc, tool.sketch), tool.from)) return { ...fresh, from: tool.from } as TangentTool;
+  return fresh;
 }
 
 /** The undo step a tool's drawing click is recorded as. */
@@ -312,7 +453,9 @@ export function previewLine(doc: DesignDocument, tool: LineTool | null, pointer:
  * the circle round the centre through the pointer (none on the centre), or
  * the arc: a line from its start to the pointer until the end is down, then
  * the arc through the pointer (the line between the ends while the pointer
- * makes no bend).
+ * makes no bend), or the tangent arc from its start to the pointer (the
+ * line to the pointer while it is straight ahead or behind, where a click
+ * draws nothing).
  */
 export function previewSegments(doc: DesignDocument, tool: SketchTool | null, pointer: SketchXY | null): (readonly [SketchXY, SketchXY])[] {
   if (!tool || !pointer) return [];
@@ -325,6 +468,12 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
     if (!tool.end) return tool.start[0] === pointer[0] && tool.start[1] === pointer[1] ? [] : [[tool.start, pointer]];
     const arc = arcThrough(tool.start, tool.end, pointer);
     return arc ? arcSegments(arc) : [[tool.start, tool.end]];
+  }
+  if (tool.kind === "tangent") {
+    const start = tangentStart(sketchOf(doc, tool.sketch), tool);
+    if (!start || (start.s[0] === pointer[0] && start.s[1] === pointer[1])) return [];
+    const arc = tangentArc(start.s, start.t, pointer, start.along);
+    return arc ? arcSegments(arc) : [[start.s, pointer]];
   }
   if (tool.kind === "circle") {
     const c = tool.centre;
