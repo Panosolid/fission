@@ -828,6 +828,10 @@ mod tests {
         let path = |n: usize| BoundaryIn::Path { corners: vec![0.0; n], bulges: vec![] };
         assert!(profile_from_input(ProfileIn { outer: path(5), holes: vec![] }).is_err());
         assert!(profile_from_input(ProfileIn { outer: path(6), holes: vec![path(3)] }).is_err());
+        // Each names its loop: the outer one is 0, hole k is k + 1.
+        let loop_of = |p: ProfileIn| profile_from_input(p).unwrap_err().inputs;
+        assert_eq!(loop_of(ProfileIn { outer: path(5), holes: vec![] }), vec![ops::Input::Loop { boundary: 0 }]);
+        assert_eq!(loop_of(ProfileIn { outer: path(6), holes: vec![path(6), path(3)] }), vec![ops::Input::Loop { boundary: 2 }]);
         // Wrong bulge counts reach the kernel's own check as a clean error.
         let p = profile_from_input(ProfileIn {
             outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0], bulges: vec![0.0] },
