@@ -122,6 +122,7 @@ try {
     assert.equal(await data(page, "planes"), "", "the planes go once one is picked");
     assert.ok(await page.isVisible('[data-node="sketches/sketch-2"]'), "the browser lists it");
     await status(page, "Nothing drawn yet.");
+    await page.check("#sketch-grid-snap"); // grid snap, off by default since SF1
     // Each click a little off a grid node lands on the node (grid 10).
     await at(page, [1.5, -2], TOP);
     await points(page, "0,0");
@@ -164,6 +165,7 @@ try {
     const page = await fresh();
     await page.click("#create-sketch");
     await page.click("#sketch-plane-XY");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
     await page.fill("#sketch-grid", "0");
     await page.press("#sketch-grid", "Enter");
@@ -211,6 +213,7 @@ try {
     const page = await fresh();
     await page.click("#create-sketch");
     await page.click("#sketch-plane-XY");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
     assert.equal(await page.getAttribute("#sketch-tool-line", "aria-pressed"), "true", "Line is the tool a sketch starts with");
     await page.mouse.move(0, 0);
@@ -295,6 +298,7 @@ try {
     const page = await fresh();
     await page.click("#create-sketch");
     await page.click("#sketch-plane-XY");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
     await page.mouse.move(0, 0);
     await page.keyboard.press("c");
@@ -379,6 +383,7 @@ try {
     const page = await fresh();
     await page.click("#create-sketch");
     await page.click("#sketch-plane-XY");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
     // The flat side first: a line (0, 0) → (40, 0), its chain ended with Escape.
     for (const p of [[0, 0], [40, 0]]) await at(page, p, TOP);

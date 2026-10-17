@@ -194,6 +194,13 @@ pub fn snap_to_grid(x: f64, y: f64, spacing: f64) -> Result<JsValue, JsError> {
     serde_wasm_bindgen::to_value(&[p.x, p.y]).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Where a click lands with grid snap off (`sketch::place_freely`): rounded to the largest power of ten no bigger than a pixel (mm), as `[x, y]`.
+#[wasm_bindgen]
+pub fn place_freely(x: f64, y: f64, pixel: f64) -> Result<JsValue, JsError> {
+    let p = sketch::place_freely(glam::DVec2::new(x, y), pixel).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_wasm_bindgen::to_value(&[p.x, p.y]).map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// A sketch line as the app sends it: `{ a: [x, y], b: [x, y] }`.
 #[derive(Debug, Deserialize)]
 pub struct LineIn {

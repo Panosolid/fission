@@ -1,8 +1,9 @@
 // The sketch tools (line, step 21c; rectangle, step 22a; circle, step 22c;
 // 3-point arc, step 23b): what a click on
 // the sketch plane does to the document, as pure functions the workspace
-// calls with a point the kernel has already snapped to the grid
-// (snap_to_grid). Lines drawn click after click form a chain, each line
+// calls with a point the kernel has already rounded (where you clicked to
+// within half a pixel, or onto the grid with grid snap on) and snap.ts
+// has snapped to nearby points. Lines drawn click after click form a chain, each line
 // starting at the point the last one ended on, so the chain's corners are
 // shared point ids in the data. A rectangle is two clicks at opposite
 // corners and is four such lines. A circle is two clicks, the centre and a
@@ -11,9 +12,10 @@
 // then a point it passes through (`arcThrough`).
 //
 // Two clicks are at the same point only when their snapped coordinates are
-// equal: the kernel gives bit-identical grid nodes for the same node, so a
-// click back on the chain's first point closes it. Snapping to points off
-// the grid comes with the sketch constraints (27).
+// equal: snap.ts puts a click near a point exactly on it, and the kernel
+// gives bit-identical nodes for the same node, so a click back on the
+// chain's first point closes it. Keeping points together after that comes
+// with the sketch constraints (27).
 
 import type { Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchLineCurve, SketchPlane } from "./document.ts";
@@ -81,6 +83,8 @@ function pendingClicks(tool: SketchTool): SketchXY[] {
 
 /** The grid a new sketch starts with (mm), as Design's grid in the viewport. */
 export const DEFAULT_GRID = 10;
+/** Whether points snap to the grid until you tick it (sketch feel SF1): off, so points go where you click, as in other CAD sketchers. */
+export const DEFAULT_GRID_SNAP = false;
 
 /** The origin planes the Create sketch prompt draws; only the ground plane until step 24 brings the other two and flat faces. */
 export const ORIGIN_PLANES: readonly { id: SketchPlane; offered: boolean; label: string }[] = [
