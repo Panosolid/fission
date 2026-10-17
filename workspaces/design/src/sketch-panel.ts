@@ -1,10 +1,10 @@
 // The sketch tool's panel (step 21c), at the top of the properties: the
 // "Pick a plane" prompt of Create sketch, then while a sketch is edited its
-// name, the tools (Line, Rectangle: step 22a; Circle: 22c; Arc: 23b; Tangent arc: 23c), how to draw, the typeable grid size and Snap to grid (SF1, off by default), Look at (SF2), whether the lines close,
+// name, how to draw with the tool in use (the tools themselves are on the sketch's toolbar since SF3b, sketch-toolbar.ts), the typeable grid size and Snap to grid (SF1, off by default), Look at (SF2), whether the lines close,
 // Finish sketch and Extrude (step 21d). The workspace drives it; the panel
 // only shows what it is given and reports clicks. Styles: src/styles/sketch.css.
 
-import { ORIGIN_PLANES, SKETCH_TOOLS, type ToolKind } from "./sketch-tool.ts";
+import { ORIGIN_PLANES, type ToolKind } from "./sketch-tool.ts";
 import type { SketchPlane } from "./document.ts";
 
 export interface SketchPanelEvents {
@@ -16,8 +16,6 @@ export interface SketchPanelEvents {
   finish(): void;
   /** Extrude this sketch (step 21d): finishes it and opens the Extrude panel. */
   extrude(): void;
-  /** A tool chosen. */
-  tool(kind: ToolKind): void;
   /** Look At: the camera square onto the sketch again (SF2). */
   lookAt(): void;
 }
@@ -39,7 +37,7 @@ export interface SketchPanel {
   showPick(): void;
   /** The sketch being edited, its grid as typed, whether points snap to it, the tool in use. */
   showEditing(name: string, grid: string, gridSnap: boolean, tool: ToolKind): void;
-  /** The tool in use: its button pressed, its help shown. */
+  /** The tool in use: its help shown. */
   showTool(kind: ToolKind): void;
   /** What the sketch holds and whether it makes a closed outline, or why not. */
   showStatus(text: string): void;
@@ -72,10 +70,8 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
   };
   let status: HTMLElement | null = null;
   let gridError: HTMLElement | null = null;
-  let tools: { kind: ToolKind; button: HTMLButtonElement }[] = [];
   let help: HTMLElement | null = null;
   const showTool = (kind: ToolKind) => {
-    for (const t of tools) t.button.setAttribute("aria-pressed", String(t.kind === kind));
     if (help) help.textContent = TOOL_HELP[kind];
   };
   return {
@@ -96,7 +92,6 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
         button("Cancel", "sketch-cancel", () => on.cancel()),
       );
       status = gridError = help = null;
-      tools = [];
       box.hidden = false;
     },
     showTool,
@@ -114,21 +109,10 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
       status = el("p", { id: "sketch-status", className: "sketch-status" });
       gridError = el("p", { id: "sketch-grid-error", className: "bad" });
       gridError.hidden = true;
-      const toolRow = el("div", { className: "sketch-tools" });
-      toolRow.setAttribute("role", "group");
-      toolRow.setAttribute("aria-label", "Tools");
-      tools = SKETCH_TOOLS.map((t) => {
-        const b = button(t.label, `sketch-tool-${t.kind}`, () => on.tool(t.kind));
-        b.title = `${t.label} (${t.key})`;
-        b.setAttribute("aria-keyshortcuts", t.key);
-        toolRow.append(b);
-        return { kind: t.kind, button: b };
-      });
       help = el("p", { className: "sketch-help", id: "sketch-help" });
       showTool(tool);
       box.replaceChildren(
         el("h2", { id: "sketch-name", textContent: name }),
-        toolRow,
         help,
         el("p", { className: "sketch-help", id: "sketch-snap-help", textContent: SNAP_HELP }),
         label,
@@ -153,7 +137,6 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
       box.hidden = true;
       box.replaceChildren();
       status = gridError = help = null;
-      tools = [];
     },
   };
 }
