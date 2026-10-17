@@ -379,14 +379,39 @@ pub enum Move {
     Rotate { pivot: DVec3, axis: DVec3, angle: f64 },
 }
 
+/// The primitive the placed fuzzer starts from, as its bytes give it.
+#[derive(Debug, Clone, Copy)]
+pub enum Primitive {
+    Box(f64, f64, f64),
+    Cylinder(f64, f64),
+    Sphere(f64),
+}
+
+impl Primitive {
+    pub fn make(self) -> Result<Body, KernelError> {
+        match self {
+            Primitive::Box(w, d, h) => primitives::make_box(w, d, h),
+            Primitive::Cylinder(r, h) => primitives::make_cylinder(r, h),
+            Primitive::Sphere(r) => primitives::make_sphere(r),
+        }
+    }
+}
+
 /// The body (box, cylinder or sphere) and the moves the placed fuzzer's
 /// bytes describe.
 pub fn placed_input(data: &[u8]) -> (Result<Body, KernelError>, Vec<Move>) {
+    let (shape, moves) = placed_shape(data);
+    (shape.make(), moves)
+}
+
+/// The same, with the primitive as given rather than built (the
+/// OpenCascade oracle rebuilds it from these numbers).
+pub fn placed_shape(data: &[u8]) -> (Primitive, Vec<Move>) {
     let mut b = Bytes::new(data);
     let made = match b.byte() % 3 {
-        0 => primitives::make_box(b.num(), b.num(), b.num()),
-        1 => primitives::make_cylinder(b.num(), b.num()),
-        _ => primitives::make_sphere(b.num()),
+        0 => Primitive::Box(b.num(), b.num(), b.num()),
+        1 => Primitive::Cylinder(b.num(), b.num()),
+        _ => Primitive::Sphere(b.num()),
     };
     let mut moves = vec![];
     while !b.empty() {
