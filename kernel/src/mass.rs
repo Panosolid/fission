@@ -55,43 +55,43 @@
 //! of travel are written s·v (not v·s) for s = ±1, so that `/` there gives
 //! s/v, which the sphere tests catch, rather than an equivalent v/s.
 
-use crate::geom::{Curve, Surface}; // shard timing test
-use crate::topology::{Body, Coedge, Face}; // shard timing test
-use glam::DVec3; // shard timing test
-use std::f64::consts::TAU; // shard timing test
+use crate::geom::{Curve, Surface};
+use crate::topology::{Body, Coedge, Face};
+use glam::DVec3;
+use std::f64::consts::TAU;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MassProps { // shard timing test
-    pub volume: f64, // shard timing test
-    pub area: f64, // shard timing test
-} // shard timing test
+pub struct MassProps {
+    pub volume: f64,
+    pub area: f64,
+}
 
 /// Exact volume and area of a valid body (to rounding).
-pub fn mass_properties(body: &Body) -> MassProps { // shard timing test
-    let (lo, hi) = body.bounds(); // shard timing test
-    about(body, (lo + hi) * 0.5) // shard timing test
-} // shard timing test
+pub fn mass_properties(body: &Body) -> MassProps {
+    let (lo, hi) = body.bounds();
+    about(body, (lo + hi) * 0.5)
+}
 
 /// The same, measured from `o`. Any point gives the same answer in exact
 /// arithmetic (the divergence theorem holds about any point); a point near
 /// the body keeps the most digits.
-fn about(body: &Body, o: DVec3) -> MassProps { // shard timing test
-    let mut volume = 0.0; // shard timing test
-    let mut area = 0.0; // shard timing test
-    for face in &body.faces { // shard timing test
-        let (v, a) = face_terms(body, face, o); // shard timing test
-        volume += v; // shard timing test
-        area += a; // shard timing test
-    } // shard timing test
-    MassProps { volume: volume / 3.0, area } // shard timing test
-} // shard timing test
+fn about(body: &Body, o: DVec3) -> MassProps {
+    let mut volume = 0.0;
+    let mut area = 0.0;
+    for face in &body.faces {
+        let (v, a) = face_terms(body, face, o);
+        volume += v;
+        area += a;
+    }
+    MassProps { volume: volume / 3.0, area }
+}
 
 /// A coedge as the curve it runs along and its parameters in the direction
 /// of travel (from `ta` to `tb`; `tb < ta` when the coedge is reversed).
-fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) { // shard timing test
-    let e = &body.edges[c.edge]; // shard timing test
-    if c.reversed { (&e.curve, e.t1, e.t0) } else { (&e.curve, e.t0, e.t1) } // shard timing test
-} // shard timing test
+fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) {
+    let e = &body.edges[c.edge];
+    if c.reversed { (&e.curve, e.t1, e.t0) } else { (&e.curve, e.t0, e.t1) }
+}
 
 /// ½ ∫ (x − o) × dx along a curve from `ta` to `tb`, between the corners
 /// `a` and `b` it joins.
@@ -110,25 +110,25 @@ fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) { // shard timing test
 /// would not close. The gap, a sliver as long as the face, times its
 /// distance from the body's centre swamped a thin far-out slot's volume
 /// (see `a_thin_slot_far_out_keeps_its_volume`).
-fn half_moment(curve: &Curve, ta: f64, tb: f64, a: DVec3, b: DVec3, o: DVec3) -> DVec3 { // shard timing test
-    let chord = 0.5 * (a - o).cross(b - o); // shard timing test
-    match *curve { // shard timing test
-        Curve::Line { .. } => chord, // shard timing test
-        Curve::Circle { axis, radius, .. } => chord + axis * (0.5 * radius * radius * theta_minus_sin(tb - ta)), // shard timing test
-    } // shard timing test
-} // shard timing test
+fn half_moment(curve: &Curve, ta: f64, tb: f64, a: DVec3, b: DVec3, o: DVec3) -> DVec3 {
+    let chord = 0.5 * (a - o).cross(b - o);
+    match *curve {
+        Curve::Line { .. } => chord,
+        Curve::Circle { axis, radius, .. } => chord + axis * (0.5 * radius * radius * theta_minus_sin(tb - ta)),
+    }
+}
 
 /// θ − sin θ without cancellation: by its series θ³/3! − θ⁵/5! + … below
 /// 0.1, to θ¹¹: the first term left out is 6θ¹⁰/13! ≈ 1e-19 of the first.
 /// (Stopping at θ⁹ left 6θ⁸/11! ≈ 1.5e-15, six ulps, at 0.1.)
-fn theta_minus_sin(t: f64) -> f64 { // shard timing test
-    if t.abs() < 0.1 { // shard timing test
-        let t2 = t * t; // shard timing test
-        t * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0 * (1.0 - t2 / 110.0)))) // shard timing test
-    } else { // shard timing test
-        t - t.sin() // shard timing test
-    } // shard timing test
-} // shard timing test
+fn theta_minus_sin(t: f64) -> f64 {
+    if t.abs() < 0.1 {
+        let t2 = t * t;
+        t * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0 * (1.0 - t2 / 110.0))))
+    } else {
+        t - t.sin()
+    }
+}
 
 /// One coedge's share of a cylinder face's integrals, angles measured from
 /// the face's point p, heights s along `axis` from the body's centre o:
@@ -138,16 +138,16 @@ fn theta_minus_sin(t: f64) -> f64 { // shard timing test
 /// tall, and the circle centres sit near o. A line on a
 /// cylinder runs along the axis (dθ = 0): nothing. A circle on it is a
 /// cross-section at one height, its angle changing by (axis·k) per t.
-fn cylinder_terms(curve: &Curve, ta: f64, tb: f64, p: DVec3, o: DVec3, center: DVec3, axis: DVec3) -> (f64, f64) { // shard timing test
-    match *curve { // shard timing test
-        Curve::Line { .. } => (0.0, 0.0), // shard timing test
-        Curve::Circle { center: cc, axis: k, .. } => { // shard timing test
-            let flat = |v: DVec3| v - axis * axis.dot(v); // shard timing test
-            let (from, at) = (flat(p - center), flat(curve.eval(ta) - center)); // shard timing test
-            let ua = axis.dot(from.cross(at)).atan2(from.dot(at)); // shard timing test
-            let ub = ua + axis.dot(k) * (tb - ta); // shard timing test
-            let s = axis.dot(cc - o); // shard timing test
-            (-s * (theta_minus_sin(ub) - theta_minus_sin(ua)), -s * (ub - ua)) // shard timing test
+fn cylinder_terms(curve: &Curve, ta: f64, tb: f64, p: DVec3, o: DVec3, center: DVec3, axis: DVec3) -> (f64, f64) {
+    match *curve {
+        Curve::Line { .. } => (0.0, 0.0),
+        Curve::Circle { center: cc, axis: k, .. } => {
+            let flat = |v: DVec3| v - axis * axis.dot(v);
+            let (from, at) = (flat(p - center), flat(curve.eval(ta) - center));
+            let ua = axis.dot(from.cross(at)).atan2(from.dot(at));
+            let ub = ua + axis.dot(k) * (tb - ta);
+            let s = axis.dot(cc - o);
+            (-s * (theta_minus_sin(ub) - theta_minus_sin(ua)), -s * (ub - ua))
         }
     }
 }
