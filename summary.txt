@@ -1,4 +1,4 @@
-Fission random testing, all runs so far (updated 2026-10-17 06:54 UTC)
+Fission random testing, all runs so far (updated 2026-10-17 06:56 UTC)
 
 hours of testing:                 207.2
 rounds:                           2960
@@ -15,18 +15,13 @@ failure-dumps/*/index.html is a 3D view with the problem in red.
 The commit and branch columns of log.csv (and commit.txt in each
 failures folder) say which code a round tested.
 
-Latest mutation run (whole kernel, lib tests), 2026-10-17 06:53 UTC, commit b91c8c5 on claude/project-thread-ox0n22:
+Latest mutation run (whole kernel, lib tests), 2026-10-17 06:56 UTC, commit 94546ff on claude/project-thread-wovq2f:
   shards finished: 0 of 4 (incomplete: survivors list not replaced)
   caught 0, missed , timed out 0, unviable 0
   survivors not in the previous complete run: 0
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 3f43073 on claude/project-thread-lgl8vp, 2026-10-17 06:54 UTC (https://github.com/benpy28/fission/actions/runs/39006630938)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.59 s (baseline 1.23 s)
-  PENDING Box to laser panels: waits for Laser (L1–L3), X13
-  PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
-  PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
-  PENDING Photo to lithophane: waits for Image (G2), Slice (P2)
-  PENDING Part to simulation and back: waits for Simulate (S3), parameters (34, I18)
+  tested commit 94546ff on claude/project-thread-wovq2f, 2026-10-17 06:56 UTC (https://github.com/benpy28/fission/actions/runs/39009775066)
+  no report: the journeys job stopped before the walk
 journeys/flags.txt lists every FLAG line so far.
