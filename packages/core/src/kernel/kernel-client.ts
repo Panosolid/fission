@@ -11,6 +11,7 @@ export interface KernelOps {
   make_extrude: { args: [profile: Outline, distance: number]; result: BodyView };
   export_stl: { args: [spec: BodySpec, name: string]; result: StlFile };
   snap_to_grid: { args: [x: number, y: number, spacing: number]; result: [number, number] };
+  place_freely: { args: [x: number, y: number, pixel: number]; result: [number, number] };
   sketch_outline: { args: [lines: SketchLine[], circles: SketchCircle[], arcs: SketchArc[]]; result: SketchOutline };
 }
 
