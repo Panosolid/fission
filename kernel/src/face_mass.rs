@@ -45,7 +45,13 @@
 //! `a_shallow_arc_of_a_huge_circle_keeps_the_caps_centroid`).
 //!
 //! `mesh_face_moments` measures the same from a mesh, the independent
-//! route the property tests and the stateful harness compare with.
+//! route the property tests compare with (the stateful harness compares
+//! with its own closed-form model instead).
+//!
+//! Mutation testing (`cargo mutants`) leaves these survivors, equivalent:
+//! - `* → /` before `axis.dot(k)` in the cylinder's swept sum: every
+//!   circle on a cylinder face is coaxial with it, so the dot is ±1 (to an
+//!   ulp), and multiplying or dividing by ±1 gives the same sum.
 
 use crate::geom::{any_perpendicular, Curve, Surface};
 use crate::mass::{face_terms, half_moment, theta_minus_sin, travel};
@@ -224,6 +230,24 @@ mod tests {
     }
 
     #[test]
+    fn a_cylinder_wall_whose_axis_origin_is_elsewhere_by_hand() {
+        // The same cylinder r = 2, h = 3, with its surface's origin slid
+        // along the axis: the surface is the same set of points, so the
+        // wall is still 12π centred half way up, (0, 0, 1.5), wherever the
+        // origin sits (the swept sum measures heights from the face's own
+        // corner, not from the origin).
+        for shift in [-7.0, 0.0, 2.5, 40.0] {
+            let mut c = make_cylinder(2.0, 3.0).unwrap();
+            for f in &mut c.faces {
+                if let Surface::Cylinder { origin, axis, .. } = &mut f.surface {
+                    *origin += *axis * shift;
+                }
+            }
+            expect(&c, FaceRole::Wall, 12.0 * PI, (0.0, 0.0, 1.5));
+        }
+    }
+
+    #[test]
     fn a_rectangle_extruded_by_hand() {
         // The timeline model's case: 40 × 30 extruded by 10. Caps 1200 at
         // (20, 15); the side of piece k is that side's length × 10, at its
@@ -399,6 +423,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_box_mesh_by_hand() {
+        // A flat face's triangles cover it exactly, so the mesh route is
+        // exact on a box. 40 × 30 × 20 from the origin, moments about
+        // o = (10, 0, 0): the top is 40 × 30 = 1200 at z = 20, centre
+        // (20, 15, 20), offset (10, 15, 20), moment 1200·(10, 15, 20) =
+        // (12000, 18000, 24000); the left (x = 0) is 30 × 20 = 600, centre
+        // (0, 15, 10), offset (−10, 15, 10), moment (−6000, 9000, 6000).
+        let b = make_box(40.0, 30.0, 20.0).unwrap();
+        let mesh = tessellate(&b, &TessOptions::default()).unwrap();
+        let m = mesh_face_moments(&mesh, b.faces.len(), DVec3::new(10.0, 0.0, 0.0));
+        assert_eq!(m.len(), 6);
+        let at = |role| m[b.faces.iter().position(|f| f.role == Some(role)).unwrap()];
+        for (role, want_area, want) in [
+            (FaceRole::Top, 1200.0, DVec3::new(12000.0, 18000.0, 24000.0)),
+            (FaceRole::Left, 600.0, DVec3::new(-6000.0, 9000.0, 6000.0)),
+        ] {
+            let (area, moment) = at(role);
+            assert!(rel_eq(area, want_area, FP_REL), "{role:?}: area {area}");
+            assert!(moment.distance(want) <= FP_REL * want.length(), "{role:?}: moment {moment} vs {want}");
+        }
+    }
+
     /// Each face's area and centroid from two meshes, extrapolated.
     fn extrapolated(body: &Body) -> Vec<(f64, DVec3)> {
         let (lo, hi) = body.bounds();
@@ -434,7 +481,9 @@ mod tests {
     fn check_against_meshes(name: &str, body: &Body) {
         let (lo, hi) = body.bounds();
         let size = (hi - lo).length();
-        for (f, (area, centroid)) in extrapolated(body).into_iter().enumerate() {
+        let meshed = extrapolated(body);
+        assert_eq!(meshed.len(), body.faces.len(), "{name}: one mesh value per face");
+        for (f, (area, centroid)) in meshed.into_iter().enumerate() {
             let m = face_mass(body, &body.faces[f]);
             let role = body.faces[f].role;
             assert!(rel_eq(m.area, area, MASS_PROPS_REL), "{name} {role:?}: area {} vs extrapolated {area}", m.area);
