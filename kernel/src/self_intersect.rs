@@ -829,6 +829,24 @@ mod tests {
     }
 
     #[test]
+    fn two_lines_crossing_away_from_their_samples_meet_where_they_cross() {
+        // a runs (0,0,0) → (3,0,0) and b runs (1,−1,0) → (1,2,0): they cross
+        // at (1, 0, 0), a third of the way along each (1/3 of a's length 3,
+        // and 1 of b's length 3). No sample at 0, ¼, ½, ¾ or 1 of either is
+        // there, so only the crossing search finds it: they are not along
+        // each other (a's middle (1.5,0,0) is ½ from b's line).
+        let mut b = Body::default();
+        let v: Vec<VertexId> = [(0.0, 0.0), (3.0, 0.0), (1.0, -1.0), (1.0, 2.0)].iter().map(|&(x, y)| b.add_vertex(DVec3::new(x, y, 0.0))).collect();
+        let (e, f) = (b.add_line(v[0], v[1]), b.add_line(v[2], v[3]));
+        assert!(!along_each_other(&b.edges[e], &b.edges[f]));
+        let p = edges_meet(&b, e, f).expect("they cross");
+        assert!(p.distance(DVec3::X) <= LINEAR, "{p}");
+        // A second line over a, end to end, is along it.
+        let h = b.add_line(v[0], v[1]);
+        assert!(along_each_other(&b.edges[e], &b.edges[h]));
+    }
+
+    #[test]
     fn a_diagonal_across_a_face_meets_it_between_its_vertices() {
         // An edge from cube vertex 0 (0, 0, 0) to vertex 3 (1, 1, 0) runs
         // across the bottom (face 0, vertices 0, 1, 2, 3), in its plane. Its
