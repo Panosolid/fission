@@ -1,10 +1,10 @@
-Fission random testing, all runs so far (updated 2026-10-16 22:38 UTC)
+Fission random testing, all runs so far (updated 2026-10-17 00:09 UTC)
 
-hours of testing:                 143.2
-rounds:                           2078
-random operation chains:          4156000
+hours of testing:                 147.4
+rounds:                           2127
+random operation chains:          4254000
 rounds where the harness failed:  261
-bodies compared with OpenCascade: 7910814
+bodies compared with OpenCascade: 8110823
 OpenCascade disagreements:        335
 last problem found:               2026-10-16 22:27:31 (seed 231257289251944, commit 810d41c on main)
 
