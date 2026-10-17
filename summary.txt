@@ -1,12 +1,12 @@
-Fission random testing, all runs so far (updated 2026-10-17 04:15 UTC)
+Fission random testing, all runs so far (updated 2026-10-17 04:52 UTC)
 
-hours of testing:                 175.0
-rounds:                           2523
-random operation chains:          5046000
+hours of testing:                 179.1
+rounds:                           2571
+random operation chains:          5142000
 rounds where the harness failed:  262
-bodies compared with OpenCascade: 9734014
-OpenCascade disagreements:        336
-last problem found:               2026-10-17 00:50:05 (seed 127170467329874, commit 11a0215 on claude/project-thread-xmlsbm)
+bodies compared with OpenCascade: 9932811
+OpenCascade disagreements:        337
+last problem found:               2026-10-17 04:10:58 (seed 188403222933631, commit 718ad81 on claude/project-thread-lp5nyg)
 
 Every round is a line in log.csv. Each round that found a problem has a
 folder in failures/ named after its seed: report.txt says what went wrong,
@@ -22,8 +22,8 @@ Latest mutation run (whole kernel, lib tests), 2026-10-17 02:38 UTC, commit 0ad1
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 11a0215 on claude/project-thread-xmlsbm, 2026-10-17 04:15 UTC (https://github.com/benpy28/fission/actions/runs/38981010278)
-  FLAG Design: shape to STL: slowest 1.29 s, baseline 0.70 s (84% over, flag above 15%)
+  tested commit 718ad81 on claude/project-thread-lp5nyg, 2026-10-17 04:52 UTC (https://github.com/benpy28/fission/actions/runs/39000262093)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.92 s (baseline 1.23 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
