@@ -304,6 +304,32 @@ mod tests {
     }
 
     #[test]
+    fn a_slot_whose_arcs_start_at_another_angle_by_hand() {
+        // The slot of `a_slot_by_hand` with each arc's parameter shifted by
+        // α: x_dir turned back by α and t0, t1 moved on by α, so
+        // x' cos(t + α) + y' sin(t + α) = x cos t + y sin t (with
+        // x' = x cos α − y sin α, y' = x sin α + y cos α) and every arc is
+        // the same set of points. The values must not move: caps
+        // 200 + 25π at (10, 5), walls 50π at 10/π beyond the centres.
+        let corners = [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)];
+        for alpha in [1.0f64, -2.5] {
+            let mut b = extrude(&Profile { outer: path(&corners, &[0.0, 1.0, 0.0, 1.0]), holes: vec![] }, 10.0).unwrap();
+            for e in &mut b.edges {
+                if let Curve::Circle { axis, x_dir, .. } = &mut e.curve {
+                    let y = axis.cross(*x_dir);
+                    *x_dir = *x_dir * alpha.cos() - y * alpha.sin();
+                    e.t0 += alpha;
+                    e.t1 += alpha;
+                }
+            }
+            expect(&b, FaceRole::Start, 200.0 + 25.0 * PI, (10.0, 5.0, 0.0));
+            expect(&b, FaceRole::End, 200.0 + 25.0 * PI, (10.0, 5.0, 10.0));
+            expect(&b, side(0, 1), 50.0 * PI, (20.0 + 10.0 / PI, 5.0, 5.0));
+            expect(&b, side(0, 3), 50.0 * PI, (-10.0 / PI, 5.0, 5.0));
+        }
+    }
+
+    #[test]
     fn a_half_disc_cap_by_hand() {
         // A half disc of radius 3: the diameter (−3, 0) → (3, 0), then a
         // half circle back over the top (bulge 1). Area πr²/2 = 4.5π,
