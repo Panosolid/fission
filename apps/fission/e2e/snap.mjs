@@ -95,6 +95,9 @@ async function at(page, [x, y], tap = false) {
 async function startSketch(page, tap = false) {
   await (tap ? page.tap("#create-sketch") : page.click("#create-sketch"));
   await (tap ? page.tap("#sketch-plane-XY") : page.click("#sketch-plane-XY"));
+  // These checks snap against the 10 mm grid: grid snap on (off by default since SF1).
+  await page.check("#sketch-grid-snap");
+  if (tap) await page.locator("#viewport canvas").scrollIntoViewIfNeeded(); // at phone width the tickbox is below the view
   await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
 }
 

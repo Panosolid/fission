@@ -216,6 +216,10 @@ async function startSketch(page) {
   await page.click("#create-sketch");
   await page.click("#sketch-plane-XY");
   await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true", null, { timeout: 5000 });
+  // Grid snap is off by default since sketch feel SF1; this session models a
+  // sketch on the grid (clicks up to 2 mm off a node land on it), so it ticks
+  // Snap to grid, as a person drawing on the grid does (it stays on until a reload).
+  if (!(await page.isChecked("#sketch-grid-snap"))) await page.check("#sketch-grid-snap");
   await page.mouse.move(0, 0);
 }
 

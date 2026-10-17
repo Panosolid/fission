@@ -99,12 +99,12 @@ def oracle_kinds(disagreements):
     return kinds
 
 
-FUZZ_TARGETS = {"STL reader fuzzing": "STL reader", "Project loader fuzzing": "project loader"}
+FUZZ_TARGETS = {"STL reader fuzzing": "STL reader", "Project loader fuzzing": "project loader", "Sketch-extrude sessions": "sketch-extrude sessions"}
 
 
 def fuzz_kinds(report):
     """Kinds in a fuzzer's fuzz-report.txt (kernel/tests/fuzz_stl.rs,
-    packages/testing/src/project-fuzz.ts): a first line naming the target,
+    packages/testing/src/project-fuzz.ts, packages/testing/fuzz/sketch-extrude.ts): a first line naming the target,
     then one 'failure: <kind> | <case and input>' line per kind, each
     already one example; numbers are taken out as for the harness."""
     lines = report.splitlines()

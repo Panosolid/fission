@@ -156,6 +156,45 @@ mod tests {
     }
 
     #[test]
+    fn near_cusp_corners_keep_the_loop_the_right_way_round() {
+        // Issue #75 (random testing, seed 127170467329874). Corners (0,0),
+        // (0,2), (1,2), (1,0); bulges −1, 0, −1, 1.1e6. Pieces: a clockwise
+        // half circle about (0,1) out to (−1,1), the top line, a clockwise
+        // half circle about (1,1) out to (2,1), then from (1,0) back to
+        // (0,0) the long way round a circle of r = c(1 + β²)/(4β) =
+        // (1 + 1.21e12)/4.4e6 = 275000.0000002 mm about (0.5, 275000),
+        // counter-clockwise through σ = 4·atan(1.1e6) = 2π − 3.64e-6.
+        // So the loop is a 550 m disc running counter-clockwise with a
+        // notch of 2 + π mm² (a 1 × 2 rectangle and two half discs of r = 1)
+        // cut into its bottom. At (0,0) the big arc arrives heading
+        // (1, −1.8e-6) and the half circle leaves heading (−1, 0): a turn
+        // 1.8e-6 rad short of a reversal, clockwise. The two pieces cross
+        // again about 2·1.8e-6/(1 − 1/r) = 3.6 nm from the corner, inside
+        // LINEAR, so they count as meeting there; that tiny twist is all
+        // the local turn sees, and reading the loop's direction from it
+        // built the solid inside out.
+        // Area = r²(σ − sin σ)/2 − (2 + π), the big arc's segment minus the
+        // notch; volume = area · 0.5.
+        let corners = v(&[(0.0, 0.0), (0.0, 2.0), (1.0, 2.0), (1.0, 0.0)]);
+        let bulges = vec![-1.0, 0.0, -1.0, 1.1e6];
+        let beta: f64 = 1.1e6;
+        let r = (1.0 + beta * beta) / (4.0 * beta);
+        let sigma = 4.0 * beta.atan();
+        let area = r * r * (sigma - sigma.sin()) / 2.0 - (2.0 + PI);
+        let mut back_corners = corners.clone();
+        back_corners.reverse();
+        // Run backwards, piece i (from corner i to i + 1 of the reversed
+        // list) is forward piece n − 2 − i (mod n) run back: its bulge negated.
+        let back_bulges = vec![1.0, 0.0, 1.0, -1.1e6];
+        for (c, bl) in [(corners, bulges), (back_corners, back_bulges)] {
+            let p = Profile { outer: Boundary::Path { corners: c, bulges: bl }, holes: vec![] };
+            let b = extrude(&p, 0.5).unwrap();
+            let m = crate::mass::mass_properties(&b);
+            assert!(rel_eq(m.volume, area * 0.5, FP_REL), "{} vs {}", m.volume, area * 0.5);
+        }
+    }
+
+    #[test]
     fn bad_profiles_are_clean_errors() {
         let ok_outer = square(0.0, 0.0, 10.0);
         let cases: Vec<(&str, Profile)> = vec![
