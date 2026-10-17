@@ -21,6 +21,18 @@ jobs:
         working-directory: kernel
       - run: cargo test
         working-directory: kernel
+      # Same answer everywhere: every saved fuzz input gives the same bits
+      # natively and in the browser's WebAssembly (kernel/fuzz/same-answer/);
+      # then the same check with a planted one-bit change must fail.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: fuzz/same-answer/check.sh
+        working-directory: kernel
+      - run: |
+          out=$(SAME_ANSWER_BREAK=1 fuzz/same-answer/check.sh) && { echo "the planted break was not caught"; exit 1; }
+          echo "$out" | grep "differ in: volume"
+        working-directory: kernel
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

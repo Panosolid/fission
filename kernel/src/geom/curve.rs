@@ -1,3 +1,4 @@
+use crate::fmath;
 use super::Transform;
 use glam::DVec3;
 use std::f64::consts::TAU;
@@ -18,7 +19,7 @@ impl Curve {
             Curve::Line { origin, dir } => origin + dir * t,
             Curve::Circle { center, axis, x_dir, radius } => {
                 let y_dir = axis.cross(x_dir);
-                center + (x_dir * t.cos() + y_dir * t.sin()) * radius
+                center + (x_dir * fmath::cos(t) + y_dir * fmath::sin(t)) * radius
             }
         }
     }
@@ -29,7 +30,7 @@ impl Curve {
             Curve::Line { dir, .. } => dir,
             Curve::Circle { axis, x_dir, radius, .. } => {
                 let y_dir = axis.cross(x_dir);
-                (y_dir * t.cos() - x_dir * t.sin()) * radius
+                (y_dir * fmath::cos(t) - x_dir * fmath::sin(t)) * radius
             }
         }
     }
@@ -45,7 +46,7 @@ impl Curve {
             Curve::Circle { center, axis, x_dir, .. } => {
                 let d = p - center;
                 let y_dir = axis.cross(x_dir);
-                d.dot(y_dir).atan2(d.dot(x_dir)).rem_euclid(TAU)
+                fmath::atan2(d.dot(y_dir), d.dot(x_dir)).rem_euclid(TAU)
             }
         }
     }

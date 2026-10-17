@@ -59,6 +59,7 @@
 //!   at half a turn (d within an ulp of ±π), where both ways round are the
 //!   short way to within that ulp, and the two answers are as right.
 
+use crate::fmath;
 use crate::geom::{Curve, Surface};
 use crate::intersect::{closed_meetings, curve_curve, curve_surface};
 use crate::tolerance::{ANGULAR, LINEAR};
@@ -361,7 +362,7 @@ pub(crate) fn classify(body: &Body, fi: FaceId, q: DVec3) -> Where {
 /// the next one leaving, turning counter-clockwise (about n) from the
 /// leaving edge round to the arriving one. None if v is on no loop of fi.
 fn corner_contains(body: &Body, fi: FaceId, v: VertexId, n: DVec3, dir: DVec3) -> Option<bool> {
-    let angle = |from: DVec3, x: DVec3| n.dot(from.cross(x)).atan2(from.dot(x)).rem_euclid(TAU);
+    let angle = |from: DVec3, x: DVec3| fmath::atan2(n.dot(from.cross(x)), from.dot(x)).rem_euclid(TAU);
     let mut seen = false;
     for l in &body.faces[fi].loops {
         for (k, cin) in l.coedges.iter().enumerate() {
@@ -429,7 +430,7 @@ fn along_surface(surface: &Surface, p: DVec3, q: DVec3) -> DVec3 {
         Surface::Cylinder { axis, x_dir, radius, .. } => {
             let (up, uq) = (surface.project(p), surface.project(q));
             let turn = short_turn(up.x, uq.x);
-            let round = (x_dir * -up.x.sin() + axis.cross(x_dir) * up.x.cos()) * radius;
+            let round = (x_dir * -fmath::sin(up.x) + axis.cross(x_dir) * fmath::cos(up.x)) * radius;
             round * turn + axis * (uq.y - up.y)
         }
     }
@@ -745,7 +746,7 @@ mod tests {
         // is π/2 from them: either way outside. Height 3: outside, above the
         // top arc. Angle π/2 at height 2 − 0.9·LINEAR: boundary.
         let b = hand_half_cylinder(1.0, 2.0);
-        let at = |angle: f64, h: f64| classify(&b, 3, DVec3::new(angle.cos(), angle.sin(), h));
+        let at = |angle: f64, h: f64| classify(&b, 3, DVec3::new(fmath::cos(angle), fmath::sin(angle), h));
         assert_eq!(at(FRAC_PI_2, 1.0), Where::Inside);
         assert_eq!(at(-FRAC_PI_2, 1.0), Where::Outside);
         assert_eq!(at(FRAC_PI_2, 3.0), Where::Outside);
@@ -787,7 +788,7 @@ mod tests {
         assert_eq!(classify(&b, face, DVec3::new(-r, r, r)), Where::Outside);
         let s = 3.0 / 2f64.sqrt();
         assert_eq!(classify(&b, face, DVec3::new(s, s, 0.0)), Where::Boundary);
-        let near = |lon: f64, lat: f64| DVec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()) * 3.0;
+        let near = |lon: f64, lat: f64| DVec3::new(fmath::cos(lat) * fmath::cos(lon), fmath::cos(lat) * fmath::sin(lon), fmath::sin(lat)) * 3.0;
         assert_eq!(classify(&b, face, near(1e-3, 1e-3)), Where::Inside);
         assert_eq!(classify(&b, face, near(-1e-3, 1e-3)), Where::Outside);
     }
@@ -882,14 +883,14 @@ mod tests {
         // (−sin π/3, cos π/3, 0) = (−√3/2, ½, 0), and 0.7 up: (−√3/2, ½, 0.7).
         let o = DVec3::new(1.0, 2.0, 3.0);
         let rod = Surface::Cylinder { origin: o, axis: DVec3::Z, x_dir: DVec3::X, radius: 2.5 };
-        let at = |a: f64, h: f64| o + DVec3::new(2.5 * a.cos(), 2.5 * a.sin(), h);
+        let at = |a: f64, h: f64| o + DVec3::new(2.5 * fmath::cos(a), 2.5 * fmath::sin(a), h);
         let a = PI / 3.0;
         let got = along_surface(&rod, at(a, 1.0), at(a + 0.4, 1.7));
         assert!(got.distance(DVec3::new(-(3f64.sqrt()) / 2.0, 0.5, 0.7)) <= LINEAR, "{got}");
         // Across angle 0: from angle 0.2 to 2π − 0.2 the short way is −0.4,
         // 1 back round: −(−sin 0.2, cos 0.2, 0), at the same height.
         let got = along_surface(&rod, at(0.2, 1.0), at(TAU - 0.2, 1.0));
-        assert!(got.distance(DVec3::new(0.2f64.sin(), -(0.2f64.cos()), 0.0)) <= LINEAR, "{got}");
+        assert!(got.distance(DVec3::new(fmath::sin(0.2f64), -(fmath::cos(0.2f64)), 0.0)) <= LINEAR, "{got}");
     }
 
     /// A rigid motion off the origin and turned about a skew axis: the
@@ -911,7 +912,7 @@ mod tests {
         // (θ = −0.1, h = −0.1, nearest the corner at (2.5, 0, 0)): outside.
         let r = 2.5;
         let b = hand_half_cylinder(r, 3.0).transformed(&tf);
-        let at = |angle: f64, h: f64| classify(&b, 3, tf.point(DVec3::new(r * angle.cos(), r * angle.sin(), h)));
+        let at = |angle: f64, h: f64| classify(&b, 3, tf.point(DVec3::new(r * fmath::cos(angle), r * fmath::sin(angle), h)));
         assert_eq!(at(FRAC_PI_2, 1.5), Where::Inside);
         assert_eq!(at(-FRAC_PI_2, 1.5), Where::Outside);
         assert_eq!(at(FRAC_PI_2, 3.5), Where::Outside);
@@ -951,7 +952,7 @@ mod tests {
         let m = 3.0 / 3f64.sqrt();
         assert_eq!(classify(&oct, face, tf.point(DVec3::new(m, m, m))), Where::Inside);
         assert_eq!(classify(&oct, face, tf.point(DVec3::new(-m, m, m))), Where::Outside);
-        let near = |lon: f64, lat: f64| tf.point(DVec3::new(lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()) * 3.0);
+        let near = |lon: f64, lat: f64| tf.point(DVec3::new(fmath::cos(lat) * fmath::cos(lon), fmath::cos(lat) * fmath::sin(lon), fmath::sin(lat)) * 3.0);
         assert_eq!(classify(&oct, face, near(1e-3, 1e-3)), Where::Inside);
         assert_eq!(classify(&oct, face, near(-1e-3, 1e-3)), Where::Outside);
         // The unit cube's top (face 1), moved: the plane is off the origin.

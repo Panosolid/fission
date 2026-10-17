@@ -55,6 +55,7 @@
 //! of travel are written s·v (not v·s) for s = ±1, so that `/` there gives
 //! s/v, which the sphere tests catch, rather than an equivalent v/s.
 
+use crate::fmath;
 use crate::geom::{Curve, Surface};
 use crate::topology::{Body, Coedge, Face};
 use glam::DVec3;
@@ -126,7 +127,7 @@ fn theta_minus_sin(t: f64) -> f64 {
         let t2 = t * t;
         t * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0 * (1.0 - t2 / 110.0))))
     } else {
-        t - t.sin()
+        t - fmath::sin(t)
     }
 }
 
@@ -144,7 +145,7 @@ fn cylinder_terms(curve: &Curve, ta: f64, tb: f64, p: DVec3, o: DVec3, center: D
         Curve::Circle { center: cc, axis: k, .. } => {
             let flat = |v: DVec3| v - axis * axis.dot(v);
             let (from, at) = (flat(p - center), flat(curve.eval(ta) - center));
-            let ua = axis.dot(from.cross(at)).atan2(from.dot(at));
+            let ua = fmath::atan2(axis.dot(from.cross(at)), from.dot(at));
             let ub = ua + axis.dot(k) * (tb - ta);
             let s = axis.dot(cc - o);
             (-s * (theta_minus_sin(ub) - theta_minus_sin(ua)), -s * (ub - ua))
@@ -171,7 +172,7 @@ fn geodesic_turn(curve: &Curve, ta: f64, tb: f64, n: impl Fn(DVec3) -> DVec3) ->
 /// Signed angle the boundary turns through at a corner, from the incoming
 /// tangent to the outgoing one, positive turning left about `n`.
 fn corner_turn(t_in: DVec3, t_out: DVec3, n: DVec3) -> f64 {
-    n.dot(t_in.cross(t_out)).atan2(t_in.dot(t_out))
+    fmath::atan2(n.dot(t_in.cross(t_out)), t_in.dot(t_out))
 }
 
 /// (∬ (x − o)·n dA, area) for one face.
@@ -348,8 +349,8 @@ pub(crate) mod tests {
         // has area (r²/2)(φ − sin φ) and the arc is r·φ long instead of 10.
         // Extruded 3: V = 3(100 − cut); A = 2(100 − cut) + 3(30 + rφ).
         let bowed = extrude(&Profile { outer: path(&square, &[0.0, 0.0, -0.4, 0.0]), holes: vec![] }, 3.0).unwrap();
-        let (r, phi) = (7.25, 4.0 * 0.4f64.atan());
-        let cut = r * r / 2.0 * (phi - phi.sin());
+        let (r, phi) = (7.25, 4.0 * fmath::atan(0.4f64));
+        let cut = r * r / 2.0 * (phi - fmath::sin(phi));
         check(&bowed, 3.0 * (100.0 - cut), 2.0 * (100.0 - cut) + 3.0 * (30.0 + r * phi));
     }
 
@@ -429,7 +430,7 @@ pub(crate) mod tests {
         assert!(extrude(&too_flat, 3.0).is_err(), "an arc of radius 2.5e6 is over MAX_SIZE");
         let beta: f64 = 3e-6;
         let bowed = extrude(&Profile { outer: path(&square, &[0.0, 0.0, -beta, 0.0]), holes: vec![] }, 3.0).unwrap();
-        let (r, phi) = (10.0 * (1.0 + beta * beta) / (4.0 * beta), 4.0 * beta.atan());
+        let (r, phi) = (10.0 * (1.0 + beta * beta) / (4.0 * beta), 4.0 * fmath::atan(beta));
         let phi_minus_sin = phi.powi(3) / 6.0 - phi.powi(5) / 120.0 + phi.powi(7) / 5040.0;
         let cut = r * r / 2.0 * phi_minus_sin;
         let m = mass_properties(&bowed);
@@ -644,8 +645,8 @@ pub(crate) mod tests {
         // have equal sines, which can hide a wrong angle).
         let square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         let bowed = extrude(&Profile { outer: path(&square, &[0.0, 0.0, -0.4, 0.0]), holes: vec![] }, 3.0).unwrap();
-        let (r, phi) = (7.25, 4.0 * 0.4f64.atan());
-        let cut = r * r / 2.0 * (phi - phi.sin());
+        let (r, phi) = (7.25, 4.0 * fmath::atan(0.4f64));
+        let cut = r * r / 2.0 * (phi - fmath::sin(phi));
         for (name, body, volume, area) in [
             ("bowed square", bowed, 3.0 * (100.0 - cut), 2.0 * (100.0 - cut) + 3.0 * (30.0 + r * phi)),
             ("half cylinder", hand_half_cylinder(2.0, 3.0), 6.0 * PI, 10.0 * PI + 12.0),

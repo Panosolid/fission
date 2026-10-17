@@ -19,6 +19,7 @@
 //!   is 0 at 1 and already √(2·2⁻⁵³) ≈ 1.49e-8 at the next double below 1,
 //!   so it is never exactly ANGULAR = 1e-9.
 
+use crate::fmath;
 use crate::geom::{Curve, Surface};
 use crate::mesh::Mesh;
 use crate::tolerance;
@@ -351,7 +352,7 @@ fn segments(curve: &Curve, span: f64, opts: &TessOptions) -> usize {
             // A chord spanning θ sags r(1 - cos(θ/2)) below the arc, which
             // grows up to 2r. Solving for θ is valid while chord < 2r.
             let chord_angle =
-                if opts.chord < 2.0 * radius { 2.0 * (1.0 - opts.chord / radius).acos() } else { f64::INFINITY };
+                if opts.chord < 2.0 * radius { 2.0 * fmath::acos(1.0 - opts.chord / radius) } else { f64::INFINITY };
             // No segment may turn more than a third of a circle, so a full
             // circle always has at least 3 chords and encloses some area.
             let step = opts.max_angle.min(chord_angle).clamp(TAU / tolerance::MAX_SEGMENTS_PER_TURN, MAX_SEGMENT_ANGLE);
@@ -543,7 +544,7 @@ fn sphere_cap(body: &Body, fi: FaceId, mesh: &mut Mesh, center: DVec3, radius: f
     // points: those carry the rounding of world coordinates (~1e-8 mm at
     // 100 km), enough to tip the ring count past a whole number, so a part
     // that merely moved would be meshed differently.
-    let theta = rim_radius.atan2((rim_center - center).dot(pole_dir));
+    let theta = fmath::atan2(rim_radius, (rim_center - center).dot(pole_dir));
     let rings = segments(&Curve::Circle { center, axis, x_dir: dirs[0], radius }, theta, mesh_opts(mesh)).max(1);
 
     let mut prev: Vec<u32> = boundary.clone();
@@ -584,11 +585,11 @@ fn mesh_opts(mesh: &Mesh) -> &TessOptions {
 
 /// Spherical interpolation between unit vectors.
 fn slerp(a: DVec3, b: DVec3, f: f64) -> DVec3 {
-    let angle = a.dot(b).clamp(-1.0, 1.0).acos();
+    let angle = fmath::acos(a.dot(b).clamp(-1.0, 1.0));
     if angle < tolerance::ANGULAR {
         return a;
     }
-    (a * ((1.0 - f) * angle).sin() + b * (f * angle).sin()) / angle.sin()
+    (a * fmath::sin((1.0 - f) * angle) + b * fmath::sin(f * angle)) / fmath::sin(angle)
 }
 
 /// Adds a triangle wound so its normal agrees with the face's outward normal.
@@ -823,7 +824,7 @@ mod tests {
             let m = tessellate(&body, &opts).unwrap();
             assert_eq!(m.check_closed(), Ok(()), "r={r} h={h}");
             let n = m.edge_polylines[0].len() - 1;
-            let polygon = 0.5 * n as f64 * r * r * (TAU / n as f64).sin();
+            let polygon = 0.5 * n as f64 * r * r * fmath::sin(TAU / n as f64);
             assert!(crate::tolerance::rel_eq(m.signed_volume(), polygon * h, crate::tolerance::FP_REL), "r={r} h={h}");
             let (on, mid) = surface_error(&body, &m);
             assert!(on <= crate::tolerance::LINEAR);
@@ -906,7 +907,7 @@ mod tests {
             let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
             assert_eq!(m.check_closed(), Ok(()));
             let n = m.edge_polylines[0].len() - 1;
-            let half_polygon = 0.5 * n as f64 * r * r * (PI / n as f64).sin();
+            let half_polygon = 0.5 * n as f64 * r * r * fmath::sin(PI / n as f64);
             assert!(rel_eq(m.signed_volume(), half_polygon * h, FP_REL), "r={r} h={h}");
             let (on, mid) = surface_error(&body, &m);
             assert!(on <= LINEAR && mid <= TessOptions::DISPLAY.chord);
@@ -1256,7 +1257,7 @@ mod tests {
                             .map(|k| {
                                 let a = TAU * (k as f64 + turn) / sides as f64;
                                 let r = 0.3 + jitter * rnd();
-                                (i as f64 + 0.5 + r * a.cos(), j as f64 + 0.5 + r * a.sin())
+                                (i as f64 + 0.5 + r * fmath::cos(a), j as f64 + 0.5 + r * fmath::sin(a))
                             })
                             .collect(),
                     );
@@ -1317,7 +1318,7 @@ mod tests {
         let opts = TessOptions::DISPLAY;
         let n = segments(&c, std::f64::consts::TAU, &opts);
         // Chord height of each segment within the limit.
-        let sag = 100.0 * (1.0 - (std::f64::consts::PI / n as f64).cos());
+        let sag = 100.0 * (1.0 - fmath::cos(std::f64::consts::PI / n as f64));
         assert!(sag <= opts.chord);
         let small = Curve::Circle { center: Default::default(), axis: glam::DVec3::Z, x_dir: glam::DVec3::X, radius: 1e-3 };
         assert!(segments(&small, std::f64::consts::TAU, &opts) as f64 >= std::f64::consts::TAU / opts.max_angle);
@@ -1426,7 +1427,7 @@ mod tests {
     /// square's 16 less the inscribed 32-gon, (32/2)·sin(2π/32) ≈ 3.1214.
     /// (r = 1 at max angle 0.2: ceil(2π / 0.2) = 32 chords.)
     fn plate_area() -> f64 {
-        16.0 - 16.0 * (PI / 16.0).sin()
+        16.0 - 16.0 * fmath::sin(PI / 16.0)
     }
 
     #[test]
@@ -1512,7 +1513,7 @@ mod tests {
         let rim = b.add_edge(Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, v, v, 0.0, TAU);
         let mut loops = vec![Loop { coedges: vec![Coedge { edge: rim, reversed: false }] }];
         for &a in at {
-            let polar = |r: f64, t: f64| DVec3::new(r * t.cos(), r * t.sin(), 0.0);
+            let polar = |r: f64, t: f64| DVec3::new(r * fmath::cos(t), r * fmath::sin(t), 0.0);
             let p = [polar(0.999, a + phi), polar(0.9, a), polar(0.9, a + 2.0 * phi)].map(|q| b.add_vertex(q));
             let coedges = (0..3).map(|i| Coedge { edge: b.add_line(p[i], p[(i + 1) % 3]), reversed: false }).collect();
             loops.push(Loop { coedges });
@@ -1541,8 +1542,8 @@ mod tests {
         // the centre: 15·sin 2φ + 2·sin φ. Each hole, as quadrilateral OQPR
         // less triangle OQR: 2·(½·0.9·0.999·sin φ) − ½·0.9²·sin 2φ.
         let phi = PI / 32.0;
-        let hole = 0.9 * 0.999 * phi.sin() - 0.5 * 0.81 * (2.0 * phi).sin();
-        let expected = 15.0 * (2.0 * phi).sin() + 2.0 * phi.sin() - 2.0 * hole;
+        let hole = 0.9 * 0.999 * fmath::sin(phi) - 0.5 * 0.81 * fmath::sin(2.0 * phi);
+        let expected = 15.0 * fmath::sin(2.0 * phi) + 2.0 * fmath::sin(phi) - 2.0 * hole;
         assert!(rel_eq(m.area(), expected, FP_REL), "area {} vs {expected}", m.area());
     }
 
@@ -1627,7 +1628,7 @@ mod tests {
         // sin α), so v = sin α.
         for (alpha, snapped) in [(0.9 * tolerance::ANGULAR, true), (1.1 * tolerance::ANGULAR, false)] {
             let mut body = hand_cylinder(1.0, 2.0).transformed(&crate::geom::Transform::translation(DVec3::new(0.0, 0.0, 5.0)));
-            let axis = DVec3::new(0.0, -alpha.sin(), alpha.cos());
+            let axis = DVec3::new(0.0, -fmath::sin(alpha), fmath::cos(alpha));
             body.edges[0].curve = Curve::Circle { center: DVec3::new(0.0, 0.0, 5.0), axis, x_dir: DVec3::X, radius: 1.0 };
             let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
             let (bottom, top) = (snapped_loop_uv(&body, &m, 2, 0), snapped_loop_uv(&body, &m, 2, 1));
@@ -1637,7 +1638,7 @@ mod tests {
                 assert!(bottom.iter().all(|p| p.y == 0.0), "α = {alpha:e}: bottom {bottom:?}");
             } else {
                 // 5 + sin α carries the rounding of 5 (4.4e-16).
-                assert!((bottom[7].y - alpha.sin()).abs() < 1e-15, "α = {alpha:e}: v = {:e}", bottom[7].y);
+                assert!((bottom[7].y - fmath::sin(alpha)).abs() < 1e-15, "α = {alpha:e}: v = {:e}", bottom[7].y);
             }
         }
         // Lines: the half cylinder's side line at +X (edge 4, from vertex 0

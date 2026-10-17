@@ -26,6 +26,8 @@
 //! workflow (`.github/workflows/fuzz.yml`). A failing input saved in
 //! `tests/regressions/fuzz-stl/` is replayed forever by
 //! `saved_fuzz_inputs_still_pass`.
+// Expected values may use the f64 maths methods (clippy.toml, src/fmath.rs).
+#![allow(clippy::disallowed_methods)]
 use fission_kernel::ops::KernelError;
 use fission_kernel::ops::extrude::extrude;
 use fission_kernel::ops::primitives::{make_box, make_cylinder, make_sphere};

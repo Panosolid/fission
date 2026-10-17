@@ -208,6 +208,7 @@ fn c3(p: DVec3) -> robust::Coord3D<f64> {
 
 #[cfg(test)]
 mod tests {
+    use crate::fmath;
     use super::*;
 
     #[test]
@@ -256,7 +257,7 @@ mod tests {
 
     #[test]
     fn near_misses_either_side_of_angular_tolerance() {
-        let tilt = |angle: f64| DVec3::new(angle.cos(), angle.sin(), 0.0);
+        let tilt = |angle: f64| DVec3::new(fmath::cos(angle), fmath::sin(angle), 0.0);
         assert!(dirs_eq(DVec3::X, tilt(ANGULAR * 0.9)));
         assert!(!dirs_eq(DVec3::X, tilt(ANGULAR * 1.1)));
         assert!(!dirs_eq(DVec3::X, -DVec3::X), "opposite directions are not equal");
