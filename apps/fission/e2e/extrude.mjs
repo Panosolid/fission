@@ -182,7 +182,7 @@ try {
     await drawn(page, [[0, 0], [40, 0], [40, 30]]);
     await statusStarts(page, "2 lines, not closed: ");
     await page.click("#extrude"); // the toolbar's, while drawing: offers the sketch being drawn
-    await extrudeStatus(page, "Sketch 1 can't be extruded: its lines don't close (");
+    await extrudeStatus(page, "Sketch 1 can't be extruded: it doesn't make one closed outline (");
     assert.match(await page.textContent("#extrude-status"), /not joined to another line/);
     assert.equal(await page.isDisabled("#extrude-ok"), true);
     await page.keyboard.press("Escape");
