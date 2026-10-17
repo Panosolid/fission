@@ -11,8 +11,10 @@
 // - rebuilding twice gives the same result, and so does a rebuild from
 //   scratch when the subject has a cache;
 // - the rebuild is the model's: build order, each item's status and cause,
-//   each body's volume, and each face by name with its area and centroid;
-// - no two faces in the document share a name;
+//   each body's volume, each face by name with its area and centroid, and
+//   each edge by name (its two faces, step 24c) with its length and
+//   centroid;
+// - no two faces in the document share a name, nor two edges;
 // - an edit to one item changes nothing that doesn't depend on it (checked
 //   on the subject alone, without the model);
 // - every face reference held earlier resolves to the face with that name
@@ -28,6 +30,8 @@ import {
   applyOp,
   createModel,
   dependsOn,
+  edgeKey,
+  edgeName,
   faceKey,
   insertAt,
   outlineProblem,
@@ -295,6 +299,14 @@ function resultDiff(a: ItemResult, b: ItemResult): string | null {
     if (!close(f.area, g.area)) return `${faceKey(f.name)} area ${f.area} vs ${g.area}`;
     if (!f.centroid.every((x, k) => close(x, g.centroid[k]))) return `${faceKey(f.name)} centroid (${f.centroid.join(", ")}) vs (${g.centroid.join(", ")})`;
   }
+  const edgesA = a.body.edges.map((e) => edgeKey(e.name)).sort();
+  const edgesB = b.body.edges.map((e) => edgeKey(e.name)).sort();
+  if (edgesA.join() !== edgesB.join()) return `edges [${edgesA.join(", ")}] vs [${edgesB.join(", ")}]`;
+  for (const e of a.body.edges) {
+    const g = b.body.edges.find((x) => edgeKey(x.name) === edgeKey(e.name))!;
+    if (!close(e.length, g.length)) return `${edgeKey(e.name)} length ${e.length} vs ${g.length}`;
+    if (!e.centroid.every((x, k) => close(x, g.centroid[k]))) return `${edgeKey(e.name)} centroid (${e.centroid.join(", ")}) vs (${g.centroid.join(", ")})`;
+  }
   return null;
 }
 
@@ -320,7 +332,14 @@ function translateRebuild(r: Rebuild, to: (id: string) => string): Rebuild {
       res.status === "failed"
         ? { ...res, input: res.input === undefined ? undefined : to(res.input) }
         : res.status === "built" && res.body
-          ? { status: "built", body: { volume: res.body.volume, faces: res.body.faces.map((f) => ({ ...f, name: nameTo(f.name, to) })) } }
+          ? {
+              status: "built",
+              body: {
+                volume: res.body.volume,
+                faces: res.body.faces.map((f) => ({ ...f, name: nameTo(f.name, to) })),
+                edges: res.body.edges.map((e) => ({ ...e, name: edgeName(nameTo(e.name.faces[0], to), nameTo(e.name.faces[1], to), e.name.ordered) })),
+              },
+            }
           : res;
   }
   return { order: r.order.map(to), results };
@@ -438,6 +457,12 @@ export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]
     });
     const dup = names.find((n, k) => names.indexOf(n) !== k);
     if (dup !== undefined) fail("two faces share a name", dup);
+    const edgeNames = now.order.flatMap((id) => {
+      const r = now.results[id];
+      return r.status === "built" && r.body ? r.body.edges.map((e) => edgeKey(e.name)) : [];
+    });
+    const dupEdge = edgeNames.find((n, k) => edgeNames.indexOf(n) !== k);
+    if (dupEdge !== undefined) fail("two edges share a name", dupEdge);
 
     const d2 = rebuildDiff(now, subject.rebuild());
     if (d2 !== null) fail("rebuilding twice differs", d2);

@@ -98,9 +98,32 @@ export interface ModelFace {
   centroid: Vec3;
 }
 
+/**
+ * An edge is named by the two faces it joins (step 24c). Two sides of an
+ * extrude can meet at more than one corner (a half disc's line and arc meet
+ * at both ends), so between two sides the order says which corner:
+ * `faces[0]` is the side before the corner going round the loop with the
+ * solid on the left, seen from the end cap (counter-clockwise round an
+ * outline), and `ordered` is true. Every other edge joins two faces that
+ * meet only there, so its pair is a set, kept sorted by `facePart`.
+ */
+export interface EdgeName {
+  feature: string;
+  faces: readonly [FaceName, FaceName];
+  ordered: boolean;
+}
+
+/** An edge with its length and centroid (the mean point along it: a line's middle, a circle's centre). */
+export interface ModelEdge {
+  name: EdgeName;
+  length: number;
+  centroid: Vec3;
+}
+
 export interface ModelBody {
   volume: number;
   faces: ModelFace[];
+  edges: ModelEdge[];
 }
 
 export type FailCause = "deleted-input" | "suppressed-input" | "failed-input" | "open-outline" | "invalid-outline";
@@ -156,7 +179,10 @@ export type ModelFault =
   | "sphere-one-name"
   | "rebuild-drifts"
   | "resolve-last-body-only"
-  | "save-stamps";
+  | "save-stamps"
+  | "uprights-as-given"
+  | "cap-edges-swapped"
+  | "end-edges-named-start";
 
 export const MODEL_FAULTS: readonly ModelFault[] = [
   "reorder-past-dependency",
@@ -174,10 +200,25 @@ export const MODEL_FAULTS: readonly ModelFault[] = [
   "rebuild-drifts",
   "resolve-last-body-only",
   "save-stamps",
+  "uprights-as-given",
+  "cap-edges-swapped",
+  "end-edges-named-start",
 ];
 
 /** "item-3/side:curve-5": a face name as one string, for maps and messages. */
 export const faceKey = (n: FaceName): string => `${n.feature}/${n.role}${n.curve === undefined ? "" : `:${n.curve}`}`;
+
+/** A face name without its feature: "side:curve-5", "top". */
+export const facePart = (n: FaceName): string => `${n.role}${n.curve === undefined ? "" : `:${n.curve}`}`;
+
+/** The name of the edge joining faces a and b of one feature: in that order when `ordered`, else as a set (sorted). */
+export function edgeName(a: FaceName, b: FaceName, ordered: boolean): EdgeName {
+  const faces: [FaceName, FaceName] = ordered || facePart(a) <= facePart(b) ? [a, b] : [b, a];
+  return { feature: a.feature, faces, ordered };
+}
+
+/** "item-3/side:curve-5>side:curve-6", "item-3/side:curve-5+start": an edge name as one string. */
+export const edgeKey = (n: EdgeName): string => `${n.feature}/${facePart(n.faces[0])}${n.ordered ? ">" : "+"}${facePart(n.faces[1])}`;
 
 /** The ids an item reads: an extrude its sketch; nothing else yet. */
 export const dependsOn = (item: ModelItem): string[] => (item.kind === "extrude" ? [item.sketch] : []);
@@ -294,21 +335,67 @@ function extrudeBody(id: string, s: ModelShape, curves: readonly string[], d: nu
   // polygon gets every side's name on the wrong face.
   if (faults.has("side-names-by-list") && s.kind === "polygon" && shoelace(s.corners) < 0)
     for (let k = 0; k < sides.length; k++) sides[k] = { ...sides[k], ...sideFace(s, sides.length - 1 - k, d) };
+  const start: FaceName = { feature: id, role: "start" };
+  const end: FaceName = { feature: id, role: "end" };
   return {
     volume: area * d,
-    faces: [
-      { name: { feature: id, role: "start" }, area, centroid: [cx, cy, 0] },
-      { name: { feature: id, role: "end" }, area, centroid: [cx, cy, d] },
-      ...sides,
-    ],
+    faces: [{ name: start, area, centroid: [cx, cy, 0] }, { name: end, area, centroid: [cx, cy, d] }, ...sides],
+    edges: extrudeEdges(s, sides.map((f) => f.name), start, end, d, faults),
   };
+}
+
+/**
+ * An extrude's edges: each curve's edge in the start cap (z = 0) and in the
+ * end cap (z = d), with the length and centroid of that curve (a line's
+ * middle; a half circle's centroid 2r/π from its centre towards its bulge,
+ * the mean of r cos θ over −π/2…π/2; a circle's centre); and an upright
+ * of length d at each corner, centred half way up, its sides in order
+ * going counter-clockwise round the outline. A polygon's corner k ends side
+ * k − 1 and starts side k as drawn, so a clockwise polygon's uprights list
+ * side k first. A slot runs counter-clockwise as drawn: bottom line,
+ * right half circle, top line, left half circle.
+ */
+function extrudeEdges(s: ModelShape, sides: readonly FaceName[], start: FaceName, end: FaceName, d: number, faults: ReadonlySet<ModelFault>): ModelEdge[] {
+  const curves: { length: number; at: [number, number] }[] = [];
+  const corners: { at: Point; before: number; after: number }[] = [];
+  if (s.kind === "polygon") {
+    const n = s.corners.length;
+    const ccw = shoelace(s.corners) > 0 || faults.has("uprights-as-given");
+    for (let k = 0; k < n; k++) {
+      const [a, b] = [s.corners[k], s.corners[(k + 1) % n]];
+      curves.push({ length: Math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2), at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] });
+      const prev = (k + n - 1) % n;
+      corners.push({ at: a, before: ccw ? prev : k, after: ccw ? k : prev });
+    }
+  } else if (s.kind === "circle") {
+    curves.push({ length: 2 * Math.PI * s.radius, at: [s.centre[0], s.centre[1]] });
+  } else {
+    const [x, y, L, r] = [s.at[0], s.at[1], s.length, s.radius];
+    const off = (2 * r) / Math.PI;
+    curves.push({ length: L, at: [x + L / 2, y - r] }, { length: Math.PI * r, at: [x + L + off, y] }, { length: L, at: [x + L / 2, y + r] }, { length: Math.PI * r, at: [x - off, y] });
+    const at: Point[] = [[x + L, y - r], [x + L, y + r], [x, y + r], [x, y - r]];
+    for (let k = 0; k < 4; k++) corners.push({ at: at[k], before: k, after: (k + 1) % 4 });
+  }
+  // Planted bugs: "cap-edges-swapped" puts each curve's start-cap edge at the end cap's height and back;
+  // "uprights-as-given" (above) orders a clockwise polygon's uprights as drawn.
+  const [z0, z1] = faults.has("cap-edges-swapped") ? [d, 0] : [0, d];
+  return [
+    ...curves.flatMap((c, k): ModelEdge[] => [
+      { name: edgeName(start, sides[k], false), length: c.length, centroid: [c.at[0], c.at[1], z0] },
+      // Planted bug ("end-edges-named-start"): the end cap's edges named after the start cap.
+      { name: edgeName(faults.has("end-edges-named-start") ? start : end, sides[k], false), length: c.length, centroid: [c.at[0], c.at[1], z1] },
+    ]),
+    ...corners.map((c): ModelEdge => ({ name: edgeName(sides[c.before], sides[c.after], true), length: d, centroid: [c.at[0], c.at[1], d / 2] })),
+  ];
 }
 
 /** A preset's body. The box has a corner at the origin and the opposite one at (w, d, h); the cylinder and sphere are on the Z axis, the cylinder standing on z = 0, the sphere centred on the origin (kernel/src/ops/primitives.rs). */
 function presetBody(item: Extract<ModelItem, { kind: PresetKind }>, faults: ReadonlySet<ModelFault>): ModelBody {
   const f = (role: FaceRole, area: number, centroid: Vec3): ModelFace => ({ name: { feature: item.id, role }, area, centroid });
+  const e = (a: FaceRole, b: FaceRole, length: number, centroid: Vec3): ModelEdge => ({ name: edgeName({ feature: item.id, role: a }, { feature: item.id, role: b }, false), length, centroid });
   if (item.kind === "box") {
     const [w, d, h] = [item.width, item.depth, item.height];
+    // Edges: the bottom's and the top's four sides, and the four uprights.
     return {
       volume: w * d * h,
       faces: [
@@ -319,17 +406,36 @@ function presetBody(item: Extract<ModelItem, { kind: PresetKind }>, faults: Read
         f("left", d * h, [0, d / 2, h / 2]),
         f("right", d * h, [w, d / 2, h / 2]),
       ],
+      edges: [
+        ...(["bottom", "top"] as const).flatMap((cap) => {
+          const z = cap === "bottom" ? 0 : h;
+          return [e(cap, "front", w, [w / 2, 0, z]), e(cap, "back", w, [w / 2, d, z]), e(cap, "left", d, [0, d / 2, z]), e(cap, "right", d, [w, d / 2, z])];
+        }),
+        e("front", "left", h, [0, 0, h / 2]),
+        e("front", "right", h, [w, 0, h / 2]),
+        e("back", "left", h, [0, d, h / 2]),
+        e("back", "right", h, [w, d, h / 2]),
+      ],
     };
   }
   const r = item.diameter / 2;
+  const rim = 2 * Math.PI * r;
   if (item.kind === "cylinder") {
     const h = item.height;
-    return { volume: Math.PI * r * r * h, faces: [f("bottom", Math.PI * r * r, [0, 0, 0]), f("top", Math.PI * r * r, [0, 0, h]), f("side", 2 * Math.PI * r * h, [0, 0, h / 2])] };
+    return {
+      volume: Math.PI * r * r * h,
+      faces: [f("bottom", Math.PI * r * r, [0, 0, 0]), f("top", Math.PI * r * r, [0, 0, h]), f("side", 2 * Math.PI * r * h, [0, 0, h / 2])],
+      edges: [e("bottom", "side", rim, [0, 0, 0]), e("top", "side", rim, [0, 0, h])],
+    };
   }
   // A hemisphere's surface centroid is r/2 from the centre (Archimedes: equal heights, equal areas, so the mean height is half way).
   // Planted bug ("sphere-one-name"): both halves named upper.
   const lower = faults.has("sphere-one-name") ? "upper" : "lower";
-  return { volume: (4 / 3) * Math.PI * r ** 3, faces: [f("upper", 2 * Math.PI * r * r, [0, 0, r / 2]), f(lower, 2 * Math.PI * r * r, [0, 0, -r / 2])] };
+  return {
+    volume: (4 / 3) * Math.PI * r ** 3,
+    faces: [f("upper", 2 * Math.PI * r * r, [0, 0, r / 2]), f(lower, 2 * Math.PI * r * r, [0, 0, -r / 2])],
+    edges: [e("upper", lower, rim, [0, 0, 0])],
+  };
 }
 
 // ---------------------------------------------------------------- rebuild
