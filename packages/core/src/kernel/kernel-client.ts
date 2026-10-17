@@ -38,8 +38,8 @@ export class KernelError extends Error {
   readonly kind: KernelErrorKind;
   readonly inputs: KernelInput[];
   constructor(failure: KernelFailure) {
+    // Its name stays "Error", so String(e) reads as it always has.
     super(failure.message);
-    this.name = "KernelError";
     this.kind = failure.kind;
     this.inputs = failure.inputs;
   }

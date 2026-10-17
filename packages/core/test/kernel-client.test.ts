@@ -56,6 +56,8 @@ test("kernelFailure keeps the kernel's kind, inputs and message", () => {
   assert.equal(e.message, failure.message);
   assert.equal(e.kind, "invalid-input");
   assert.deepEqual(e.inputs, failure.inputs);
+  // Printed as any Error was, which tests matching /^Error: …/ rely on.
+  assert.equal(String(e), "Error: width must be between 0.001 and 1000000 mm, got -1");
 });
 
 test("anything else thrown is an internal failure with no inputs", () => {
