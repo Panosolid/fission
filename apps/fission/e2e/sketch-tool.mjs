@@ -119,7 +119,7 @@ try {
     assert.equal(await undoTitle(page), "Undo Create sketch (Ctrl+Z)");
     assert.equal(await data(page, "planes"), "", "the planes go once one is picked");
     assert.ok(await page.isVisible('[data-node="sketches/sketch-2"]'), "the browser lists it");
-    await status(page, "No lines yet.");
+    await status(page, "Nothing drawn yet.");
     // Each click a little off a grid node lands on the node (grid 10).
     await at(page, [1.5, -2], TOP);
     await points(page, "0,0");
@@ -150,7 +150,7 @@ try {
     await page.keyboard.press("Control+z");
     await page.keyboard.press("Control+z");
     await page.keyboard.press("Control+z");
-    await status(page, "No lines yet.");
+    await status(page, "Nothing drawn yet.");
     await page.keyboard.press("Control+z"); // the sketch itself
     await until(page, () => document.querySelector("#sketch-panel")?.hidden === true, null, "the sketch is gone, so is the tool");
     assert.equal(await page.$('[data-node="sketches/sketch-2"]'), null);
@@ -239,12 +239,12 @@ try {
     if (shots) await page.screenshot({ path: `${shots}/sketch-rectangle-1280.png` });
     // One Ctrl+Z takes the whole rectangle back, staying in the sketch with the rectangle tool.
     await page.keyboard.press("Control+z");
-    await status(page, "No lines yet.");
+    await status(page, "Nothing drawn yet.");
     assert.equal(await page.getAttribute("#sketch-tool-rectangle", "aria-pressed"), "true", "still the rectangle tool after Undo");
     await page.keyboard.press("Control+Shift+z");
     await status(page, "4 lines, a closed outline.");
     await page.keyboard.press("Control+z");
-    await status(page, "No lines yet.");
+    await status(page, "Nothing drawn yet.");
     // Two clicks after the Undo draw a rectangle again: the tool really is still Rectangle, not only its button.
     await at(page, [1.5, -2], TOP);
     await at(page, [41, 29], TOP);
@@ -286,6 +286,90 @@ try {
     await status(page, "4 lines, a closed outline.");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
     if (shots) await page.screenshot({ path: `${shots}/sketch-rectangle-375.png`, fullPage: true });
+    await page.context().close();
+  });
+
+  await check("the circle tool: C, a centre then a point on the circle as one undo step, the preview, a click on the centre says why, Escape, extruded 10 mm is 4000π mm³", async () => {
+    const page = await fresh();
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("c");
+    assert.equal(await page.getAttribute("#sketch-tool-circle", "aria-pressed"), "true", "C chose Circle");
+    assert.equal(await page.getAttribute("#sketch-tool-line", "aria-pressed"), "false");
+    assert.equal(await page.getAttribute("#sketch-tool-circle", "title"), "Circle (C)");
+    assert.match(await page.textContent("#sketch-help"), /^Click the centre, then a point on the circle/);
+    // The centre (1.5, −2) snaps to (0, 0); the pointer at (19, 1) snaps to (20, 0): the preview is a circle of radius 20 in 64 sides.
+    await at(page, [1.5, -2], TOP);
+    await points(page, "0,0");
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const hover = screenPoint(box, [19, 1, 0], TOP);
+    await page.mouse.move(hover.x, hover.y);
+    await until(page, () => (document.querySelector("#viewport").dataset.sketchPreview ?? "").split(" | ").length === 64, null, "the circle's preview");
+    const preview = (await data(page, "sketchPreview")).split(" | ");
+    assert.equal(preview[0].split(" ")[0], "20,0", "the preview starts at the east point, centre + (20, 0)");
+    // A second click on the centre: nothing drawn, and the reason under the grid.
+    await at(page, [0.5, 0.5], TOP);
+    await until(page, () => !document.querySelector("#sketch-grid-error").hidden, null, "the centre note");
+    assert.match(await page.textContent("#sketch-grid-error"), /^A circle needs a radius/);
+    assert.equal(await data(page, "sketchLines"), "0");
+    await at(page, [19, 1], TOP);
+    await status(page, "1 circle, a closed outline.");
+    assert.equal(await page.isHidden("#sketch-grid-error"), true, "the note goes once a circle is drawn");
+    assert.equal(await data(page, "sketchLines"), "64", "the circle drawn as 64 segments");
+    await points(page, "0,0");
+    assert.equal(await undoTitle(page), "Undo Draw circle (Ctrl+Z)");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-circle-1280.png` });
+    // One Ctrl+Z takes the circle back (and its centre), staying in the sketch with the circle tool; Ctrl+Shift+Z puts it back.
+    await page.keyboard.press("Control+z");
+    await status(page, "Nothing drawn yet.");
+    await points(page, "");
+    assert.equal(await page.getAttribute("#sketch-tool-circle", "aria-pressed"), "true", "still the circle tool after Undo");
+    await page.keyboard.press("Control+Shift+z");
+    await status(page, "1 circle, a closed outline.");
+    // Escape drops a centre: the next click is a centre again.
+    await at(page, [30, 40], TOP);
+    await points(page, "0,0 30,40");
+    await page.keyboard.press("Escape");
+    await points(page, "0,0");
+    assert.equal(await data(page, "sketchPreview"), "");
+    // A rectangle beside it: the status counts both, and the kernel says why it doesn't close.
+    await page.keyboard.press("r");
+    await at(page, [30, 30], TOP);
+    await at(page, [40, 40], TOP);
+    await statusStarts(page, "4 lines and 1 circle, not closed: ");
+    await page.keyboard.press("Control+z");
+    await status(page, "1 circle, a closed outline.");
+    // Extruded 10 mm: π · 20² · 10 = 4000π = 12,566.3706143… mm³, shown to ten figures.
+    await page.click("#sketch-extrude");
+    await until(page, () => document.querySelector("#extrude-ok")?.disabled === false, null, "Extrude's OK on");
+    await page.fill("#extrude-distance", "10");
+    await page.click("#extrude-ok");
+    await until(page, () => document.querySelector("#volume")?.textContent === "12,566.37061 mm³", null, "4000π mm³");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-circle-extruded-1280.png` });
+    // Outside a sketch C does nothing to Design.
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("c");
+    assert.equal(await page.isVisible("#sketch-panel"), false);
+    await page.context().close();
+  });
+
+  await check("the circle tool at 375 px with taps: three tool buttons fit and are 44 px, two taps make a closed circle", async () => {
+    const page = await fresh(375, true);
+    await page.tap("#create-sketch");
+    await page.tap("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.tap("#sketch-tool-circle");
+    for (const id of ["sketch-tool-line", "sketch-tool-rectangle", "sketch-tool-circle"]) {
+      const b = await page.locator(`#${id}`).boundingBox();
+      assert.ok(b.height >= 44, `${id} is ${b.height} px tall, at least 44 to tap`);
+      assert.ok(b.x >= 0 && b.x + b.width <= 375, `${id} fits across the screen`);
+    }
+    for (const p of [[10, 10], [10, 30]]) await at(page, p, TOP, true);
+    await status(page, "1 circle, a closed outline.");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-circle-375.png`, fullPage: true });
     await page.context().close();
   });
 
