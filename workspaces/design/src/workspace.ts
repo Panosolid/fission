@@ -1,5 +1,5 @@
 // The Design workspace: the CAD, and the source of truth for all geometry.
-// Until the sketcher (steps 21–31) it builds primitives and ready-made
+// Until the sketcher (steps 21–33) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
@@ -21,7 +21,7 @@ import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { snapOnSketch, withSnap, type Snap } from "./snap.ts";
-import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -74,7 +74,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   extrude.type = "button";
   extrude.id = "extrude";
   extrude.textContent = "Extrude";
-  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 32).";
+  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 24).";
   extrude.addEventListener("click", onExtrude);
   sketch.append(sketchName, create, extrude);
   slot.append(sketch);
@@ -125,7 +125,7 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
  * Fills the browser slot with the document's tree: groups fold (native
  * details/summary). A row for selectable geometry (Body 1, a profile) is a button
  * that selects it (Shift adds or takes out); the others are plain rows
- * until features (step 32) and origin planes (step 21) can be selected.
+ * until features (step 24) and origin planes (step 21) can be selected.
  * Rebuilt on every edit; folding is kept by id.
  */
 function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void) {
@@ -424,11 +424,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     void showOutline();
   }
 
-  /** Line, Rectangle, Circle or Arc (the panel's buttons, or L, R, C and A): what was part way through is dropped, as Escape would. */
+  /** Line, Rectangle, Circle, Arc or Tangent arc (the panel's buttons, or L, R, C, A and T): what was part way through is dropped, as Escape would, except that a line chain and a tangent arc carry on from each other's last point (`switchTool`). */
   function chooseTool(kind: ToolKind) {
     if (mode.kind !== "edit" || !editingSketch) return;
     editingSketch.tool = kind;
-    mode.tool = startTool(kind, mode.tool.sketch);
+    mode.tool = switchTool(designDoc(), mode.tool, kind);
     mode.snap = null;
     toolChanges++;
     sketchBox.showTool(kind);
@@ -656,7 +656,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
-      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle or arc being drawn.
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
@@ -667,7 +667,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         drawSketches();
         return true;
       }
-      // L, R, C and A choose the line, rectangle, circle and arc tools while a sketch is edited; otherwise the key does what it would.
+      // L, R, C, A and T choose the line, rectangle, circle, arc and tangent arc tools while a sketch is edited; otherwise the key does what it would.
       const kind = sketchToolKey(id);
       if (kind) return mode.kind === "edit" ? (chooseTool(kind), true) : false;
       const items = ctx.selection.items;

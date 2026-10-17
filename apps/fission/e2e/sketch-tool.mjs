@@ -10,7 +10,8 @@
 // row draws nothing and says why, Escape drops the first corner, L goes
 // back to lines; extruded it is a box of the hand-worked volume; the same
 // at 375 px. The circle tool (22c) and the 3-point arc tool (23b, a half
-// disc of hand-worked volume) the same way. Screenshots at 1280 and 375 px
+// disc of hand-worked volume) the same way, and the tangent arc tool (23c,
+// a slot of lines and tangent arcs). Screenshots at 1280 and 375 px
 // go to E2E_SHOTS when set.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
@@ -507,6 +508,88 @@ try {
     await points(page, "40,0 0,0 20,0");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
     if (shots) await page.screenshot({ path: `${shots}/sketch-arc-375.png`, fullPage: true });
+    await page.context().close();
+  });
+
+  await check("the tangent arc tool: T carries on from a line, a slot of two lines and two tangent arcs as one undo step each, notes for no free end and no turn, extruded 10 mm is 8000 + 1000π mm³", async () => {
+    const page = await fresh();
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    // A first click that is no line's or arc's end says why.
+    await page.keyboard.press("t");
+    assert.equal(await page.getAttribute("#sketch-tool-tangent", "aria-pressed"), "true", "T chose Tangent arc");
+    assert.equal(await page.getAttribute("#sketch-tool-tangent", "title"), "Tangent arc (T)");
+    assert.match(await page.textContent("#sketch-help"), /^Click the end of a line or arc, then where the arc ends/);
+    await at(page, [20, 30], TOP);
+    await until(page, () => /^A tangent arc starts at the end of a line or arc/.test(document.querySelector("#sketch-grid-error").textContent), null, "the no-free-end note");
+    // The bottom side, then T: the arc leaves from the chain's last point, (40, 0).
+    await page.keyboard.press("l");
+    for (const p of [[0, 0], [40, 0]]) await at(page, p, TOP);
+    // Each key waits for the click before it to land: a click still being snapped when the tool changes is dropped.
+    await points(page, "0,0 40,0");
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("t");
+    // Straight on along the line: no turn, a note, nothing drawn.
+    await at(page, [50, 0], TOP);
+    await until(page, () => /^A tangent arc needs to turn/.test(document.querySelector("#sketch-grid-error").textContent), null, "the no-turn note");
+    assert.equal(await data(page, "sketchLines"), "1", "only the line");
+    // The pointer at (40, 20): the preview is the half circle round (40, 10), 32 segments.
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const up = screenPoint(box, [40, 20, 0], TOP);
+    await page.mouse.move(up.x, up.y);
+    await until(page, () => (document.querySelector("#viewport").dataset.sketchPreview ?? "").split(" | ").length === 32, null, "the tangent arc's preview");
+    await at(page, [40, 20], TOP);
+    // Leaving (40, 0) heading +x to (40, 20): the centre is on x = 40 and as far from both, (40, 10).
+    await statusStarts(page, "1 line and 1 arc, not closed: ");
+    assert.equal(await page.isHidden("#sketch-grid-error"), true, "the note goes once an arc is drawn");
+    assert.equal(await undoTitle(page), "Undo Draw tangent arc (Ctrl+Z)");
+    // L carries on from the arc's end: the top side to (0, 20); T again, and a click on (0, 0) closes the slot.
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("l");
+    await at(page, [0, 20], TOP);
+    await points(page, "0,0 40,0 40,20 40,10 0,20");
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("t");
+    await at(page, [0, 0], TOP);
+    await status(page, "2 lines and 2 arcs, a closed outline.");
+    await points(page, "0,0 40,0 40,20 40,10 0,20 0,10");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-tangent-1280.png` });
+    // One Ctrl+Z takes the last arc and its centre back, keeping the tool; Ctrl+Shift+Z puts it back.
+    await page.keyboard.press("Control+z");
+    await statusStarts(page, "2 lines and 1 arc, not closed: ");
+    await points(page, "0,0 40,0 40,20 40,10 0,20");
+    assert.equal(await page.getAttribute("#sketch-tool-tangent", "aria-pressed"), "true", "still the tangent arc tool after Undo");
+    await page.keyboard.press("Control+Shift+z");
+    await status(page, "2 lines and 2 arcs, a closed outline.");
+    // Extruded 10 mm: a 40 × 20 rectangle and two half discs of radius 10, (800 + 100π)·10 = 11,141.592653… mm³, shown to ten figures.
+    await page.click("#sketch-extrude");
+    await until(page, () => document.querySelector("#extrude-ok")?.disabled === false, null, "Extrude's OK on");
+    await page.fill("#extrude-distance", "10");
+    await page.click("#extrude-ok");
+    await until(page, () => document.querySelector("#volume")?.textContent === "11,141.59265 mm³", null, "8000 + 1000π mm³");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-tangent-extruded-1280.png` });
+    await page.context().close();
+  });
+
+  await check("the tangent arc tool at 375 px with taps: five tool buttons fit and are 44 px, a line then a tangent arc", async () => {
+    const page = await fresh(375, true);
+    await page.tap("#create-sketch");
+    await page.tap("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    for (const id of ["sketch-tool-line", "sketch-tool-rectangle", "sketch-tool-circle", "sketch-tool-arc", "sketch-tool-tangent"]) {
+      const b = await page.locator(`#${id}`).boundingBox();
+      assert.ok(b.height >= 44, `${id} is ${b.height} px tall, at least 44 to tap`);
+      assert.ok(b.x >= 0 && b.x + b.width <= 375, `${id} fits across the screen`);
+    }
+    for (const p of [[0, 0], [40, 0]]) await at(page, p, TOP, true);
+    await points(page, "0,0 40,0");
+    await page.tap("#sketch-tool-tangent");
+    await at(page, [40, 20], TOP, true);
+    await statusStarts(page, "1 line and 1 arc, not closed: ");
+    await points(page, "0,0 40,0 40,20 40,10");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-tangent-375.png`, fullPage: true });
     await page.context().close();
   });
 

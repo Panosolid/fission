@@ -6,7 +6,7 @@ export interface PlaceholderInfo {
   summary: string;
   /** What the workspace will do, one line each. */
   plans: string[];
-  /** When work starts, e.g. "after CAD step 33 (the timeline)". */
+  /** When work starts, e.g. "after CAD step 25 (the timeline)". */
   startsAfter: string;
   /** Extra sections, e.g. the marketplace inside Slice. */
   sections?: { title: string; summary: string; plans: string[] }[];

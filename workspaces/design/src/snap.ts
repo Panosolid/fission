@@ -1,5 +1,5 @@
 // Sketch snapping: where a click on the sketch plane lands, before the
-// sketch constraints (27) exist. The kernel snaps the pointer to the grid
+// sketch constraints (29) exist. The kernel snaps the pointer to the grid
 // (snap_to_grid); this then lets nearby sketch geometry win over the grid,
 // as pure functions every tool shares:
 //
@@ -15,7 +15,7 @@
 //
 // Snapping is only where the click lands: nothing is remembered as a rule
 // (a line drawn horizontal is not kept horizontal); that is what the
-// constraints of step 27 add. The reach is in screen pixels, turned into mm
+// constraints of step 29 add. The reach is in screen pixels, turned into mm
 // by the size of a pixel on the plane at the pointer (SketchPointer.pixel),
 // so it feels the same at any zoom. It is a pick radius, not a geometric
 // tolerance: nothing is judged equal by it.
@@ -54,7 +54,7 @@ export type Snap =
 
 const same = (a: SketchXY, b: SketchXY) => a[0] === b[0] && a[1] === b[1];
 
-/** The tool's own clicks so far (a chain's last point, a first corner, a centre, an arc's start and end); none before them. A kind it does not know has none. */
+/** The tool's own clicks so far (a chain's last point, a first corner, a centre, an arc's start and end, a tangent arc's start); none before them. A kind it does not know has none. */
 function ownClicks(sketch: Sketch, tool: SketchTool): SketchXY[] {
   if (tool.kind === "line") {
     if (tool.from === null) return [];
@@ -63,6 +63,10 @@ function ownClicks(sketch: Sketch, tool: SketchTool): SketchXY[] {
     return p ? [[p.x, p.y]] : [];
   }
   if (tool.kind === "arc") return [tool.start, tool.end].filter((p) => p !== null);
+  if (tool.kind === "tangent") {
+    const p = sketch.points.find((x) => x.id === tool.from);
+    return p ? [[p.x, p.y]] : [];
+  }
   const at = tool.kind === "rectangle" ? tool.corner : tool.kind === "circle" ? tool.centre : null;
   return at ? [at] : [];
 }

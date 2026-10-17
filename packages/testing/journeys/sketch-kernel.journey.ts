@@ -1,12 +1,12 @@
 // Journey: the sketch maths through the real WASM kernel (step 21a), the
 // same calls the sketcher will make: snap pointer positions to the grid,
 // find the outline the lines make, extrude it; and a saved sketch's
-// outline handed to another workspace (step 21b). Arcs from step 23a. Run with `npm run journeys`
+// outline handed to another workspace (step 21b). Arcs from step 23a; slots drawn with the line and tangent arc tools from 23c. Run with `npm run journeys`
 // after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, fetchLinked, linkTo, projectFromJson, projectToJson, RepresentationRegistry, XY_PLANE, type Outline, type SketchArc, type SketchLine, type SourceLookup } from "@fission/core";
-import { addSketch, deleteCurve, designObjects, designWorkspace, drawLine, movePoint, partDocument, type DesignDocument } from "@fission/design";
+import { addSketch, clickAt, deleteCurve, designObjects, designWorkspace, drawLine, movePoint, partDocument, sketchCurves, startTool, switchTool, type DesignDocument, type SketchTool } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
@@ -188,6 +188,57 @@ test("seeded sketches with arcs: snapped polygons with some sides bowed out clos
   // Must not pass by opening everything, and most cases must have arcs.
   assert.ok(closed >= 0.7 * cases, `only ${closed} of ${cases} closed`);
   assert.ok(curved >= 0.9 * cases, `only ${curved} of ${cases} had arcs`);
+});
+
+test("seeded slots drawn with the line and tangent arc tools close and extrude to the hand-worked area (23c)", async () => {
+  // A slot: from p0 a line along d (whole grid steps), a tangent arc to
+  // p1 + d⊥·m (half a turn, so its diameter is |d|·m), a line back along
+  // −d, a tangent arc closing on p0. The area is the rectangle |d| × |d|m
+  // plus two half discs of radius |d|m/2: |d|²m + π(|d|m/2)², times the
+  // grid squared. Half the slots go clockwise (d⊥ the other way), where
+  // both arcs turn right and are stored from their far ends.
+  let cases = 0;
+  for (const seed of [21n, 22n, 23n, 24n]) {
+    const r = seeded(seed);
+    for (let c = 0; c < 25; c++) {
+      const spacing = [0.1, 0.25, 1, 2.5, 10][Math.floor(r.next() * 5)];
+      const step = (k: number) => (spacing < 1 ? k / Math.round(1 / spacing) : k * spacing);
+      const [ox, oy] = [Math.floor(r.next() * 2001) - 1000, Math.floor(r.next() * 2001) - 1000];
+      const [a, b] = [1 + Math.floor(r.next() * 9), Math.floor(r.next() * 19) - 9];
+      const m = 1 + Math.floor(r.next() * 4);
+      const turn = r.next() < 0.5 ? 1 : -1;
+      const [nx, ny] = [-b * m * turn, a * m * turn];
+      const corners: [number, number][] = [[ox, oy], [ox + a, oy + b], [ox + a + nx, oy + b + ny], [ox + nx, oy + ny]];
+      const at = corners.map(([i, j]) => [step(i), step(j)] as [number, number]);
+      let doc: DesignDocument = partDocument("box", 40, 30, 20);
+      const made = addSketch(doc);
+      doc = made.doc;
+      let tool: SketchTool = startTool("line", made.id);
+      const click = (p: [number, number], kind: "line" | "tangent") => {
+        if (tool.kind !== kind) tool = switchTool(doc, tool, kind);
+        const done = clickAt(doc, tool, p);
+        assert.equal(done.note, undefined, `seed ${seed} case ${c}: ${kind} to ${p}`);
+        ({ doc, tool } = done);
+      };
+      click(at[0], "line");
+      click(at[1], "line");
+      click(at[2], "tangent");
+      click(at[3], "line");
+      click(at[0], "tangent");
+      const curves = sketchCurves(doc.sketches[0]);
+      const context = `seed ${seed} case ${c}: ${JSON.stringify(curves)}`;
+      assert.equal(curves.arcs.length, 2, context);
+      const out = await kernel.call("sketch_outline", curves.lines, curves.circles, curves.arcs);
+      assert.ok("closed" in out, `${context} → ${JSON.stringify(out)}`);
+      const len = Math.sqrt(a * a + b * b) * spacing;
+      const want = len * len * m + Math.PI * ((len * m) / 2) ** 2;
+      const h = 1 + Math.floor(r.next() * 20);
+      const body = await kernel.call("make_extrude", out.closed, h);
+      assert.ok(Math.abs(body.volume - want * h) <= 1e-9 * want * h, `${context}: volume ${body.volume} vs ${want * h}`);
+      cases++;
+    }
+  }
+  assert.equal(cases, 100);
 });
 
 test("a saved sketch's outline reaches another workspace through a live link, and follows an edit (step 21b)", async () => {

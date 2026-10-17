@@ -91,7 +91,7 @@ test("the drawings: the edited sketch with its grid, points and preview; the oth
   assert.deepEqual(sketchDrawings(doc, null).map((d) => d.editing), [undefined, undefined], "nothing edited");
 });
 
-test("the plane prompt offers only the ground plane until step 24, and each plane is looked at straight down", () => {
+test("the plane prompt offers only the ground plane until step 26, and each plane is looked at straight down", () => {
   assert.deepEqual(ORIGIN_PLANES.filter((p) => p.offered).map((p) => p.id), ["XY"]);
   assert.deepEqual(originPlanes().map((p) => [p.id, p.offered]), [["XY", true], ["XZ", false], ["YZ", false]]);
   // Straight down means the camera on the normal's side: XY's normal +Z is the top
@@ -335,7 +335,8 @@ test("tools: Escape ends what is part way, switching starts afresh, L, R, C and 
   assert.equal(toolBusy(freshCircle().tool), false);
   assert.equal(toolBusy(clickAt(freshCircle().doc, freshCircle().tool, [0, 0]).tool), true, "a centre down");
   assert.deepEqual(startTool("arc", "sketch-2"), { kind: "arc", sketch: "sketch-2", start: null, end: null });
-  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"]]);
+  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"], ["tangent", "T"]]);
+  assert.deepEqual(startTool("tangent", "sketch-2"), { kind: "tangent", sketch: "sketch-2", from: null });
   // The keys in Design's table are the ones the panel's buttons name, and they choose those tools.
   for (const t of SKETCH_TOOLS) {
     const spec = DESIGN_SHORTCUTS.find((s) => s.keys === t.key)!;

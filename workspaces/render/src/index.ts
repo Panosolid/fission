@@ -2,7 +2,7 @@
 //
 // Realistic images of your design, straight from the Design timeline.
 // It will refer to Design's geometry by stable IDs and never copy it, so a
-// design change flows straight through. Work starts after CAD step 33 (editing the timeline and rebuilding).
+// design change flows straight through. Work starts after CAD step 25 (editing the timeline and rebuilding).
 
 import type { BodyReference, WorkspacePlugin } from "@fission/core";
 import { showPlaceholder } from "@fission/ui";
@@ -33,7 +33,7 @@ export const renderWorkspace: WorkspacePlugin = {
       title: "Render",
       summary: "Realistic images of your design, straight from the Design timeline.",
       plans: ["Path-traced images of the bodies in the current design, updated when the design changes", "Materials from the shared library (the same ones Design shows)", "Lighting, environments and saved cameras", "Scenes saved in the project file next to the design"],
-      startsAfter: "after CAD step 33 (editing the timeline and rebuilding)",
+      startsAfter: "after CAD step 25 (editing the timeline and rebuilding)",
     });
     return { unmount: () => ctx.properties.replaceChildren() };
   },

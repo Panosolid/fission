@@ -57,7 +57,7 @@ try {
       // Worked out from the table: Design is on screen, so it comes first, then the
       // app's keys; no placeholder binds a key and Image binds none yet.
       assert.deepEqual(await listed(page), [
-        { title: "Design on screen", rows: ["Esc: Clear the selection", "Ctrl+C: Copy the selected profile as SVG", "L: Line tool (in a sketch)", "R: Rectangle tool (in a sketch)", "C: Circle tool (in a sketch)", "A: 3-point arc tool (in a sketch)"] },
+        { title: "Design on screen", rows: ["Esc: Clear the selection", "Ctrl+C: Copy the selected profile as SVG", "L: Line tool (in a sketch)", "R: Rectangle tool (in a sketch)", "C: Circle tool (in a sketch)", "A: 3-point arc tool (in a sketch)", "T: Tangent arc tool (in a sketch)"] },
         { title: "Everywhere", rows: ["?: Show the keyboard shortcuts", "Ctrl+V: Paste files into the project (a project file, an image…)", "Ctrl+Z: Undo", "Ctrl+Shift+Z: Redo", "Ctrl+Y: Redo"] },
       ]);
       await page.screenshot({ path: "e2e/shortcuts.png" });

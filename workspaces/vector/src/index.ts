@@ -5,7 +5,7 @@
 // export. It is the bridge between making art and making things: a vector
 // graphic can become an emboss or deboss in Design, an engraving or cut in
 // Laser, a decal in Render, or silkscreen on a board in Circuit, live-linked
-// so editing the artwork updates every use. Work starts after CAD step 31
+// so editing the artwork updates every use. Work starts after CAD step 33
 // (it reuses the sketcher's curves and constraints).
 
 import type { WorkspacePlugin } from "@fission/core";
@@ -47,7 +47,7 @@ export const vectorWorkspace: WorkspacePlugin = {
         "SVG import and export",
         "Use a graphic as an emboss or deboss in Design, an engraving or cut in Laser, a decal in Render or silkscreen in Circuit, live-linked",
       ],
-      startsAfter: "after CAD step 31 (when the sketcher is solid: it reuses its curves and constraints)",
+      startsAfter: "after CAD step 33 (when the sketcher is solid: it reuses its curves and constraints)",
     });
     return { unmount: () => ctx.properties.replaceChildren() };
   },

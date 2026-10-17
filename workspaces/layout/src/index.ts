@@ -58,7 +58,7 @@ export const layoutWorkspace: WorkspacePlugin = {
         "PDF, PNG and SVG export, print at real size, and full-screen slides",
         "Send a page to Laser to engrave or cut it",
       ],
-      startsAfter: "after CAD step 33, once Vector (V1–V2) and Image (G1) work",
+      startsAfter: "after CAD step 25, once Vector (V1–V2) and Image (G1) work",
     });
     return { unmount: () => ctx.properties.replaceChildren() };
   },
