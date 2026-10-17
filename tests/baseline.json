@@ -1,10 +1,10 @@
 {
   "about": "Known-good speed and memory (root CLAUDE.md, Metrics and baselines), checked on every pull request by .github/scripts/baseline.py (ci.yml, job baseline). Metric names are <kernel|app>.<operation>.<kind>; the kind picks the margin. Update the values only when the owner confirms a change is intended: python3 .github/scripts/baseline.py --update. Values are from GitHub's ubuntu-latest runners. The same file holds the magic-moment journeys (journeys_about, journeys).",
-  "journeys_about": "Magic-moment journeys (X8, packages/testing/src/magic.ts): the most clicks and the slowest of 5 walks in Chromium on GitHub's ubuntu-latest runners, confirmed by the owner on 2026-10-16. apps/fission/e2e/journeys.mjs fails on any extra click (every run) and, nightly (JOURNEY_NIGHTLY=1), on a slowest walk more than 15% over.",
+  "journeys_about": "Magic-moment journeys (X8, packages/testing/src/magic.ts): the most clicks and the slowest of 5 walks in Chromium on GitHub's ubuntu-latest runners, confirmed by the owner on 2026-10-16; re-measured that day as the slowest of 12 five-walk runs on 4 runners (0.19-1.23 s). apps/fission/e2e/journeys.mjs fails on any extra click (every run) and, nightly (JOURNEY_NIGHTLY=1), on a slowest walk more than 15% over.",
   "journeys": {
     "Design: shape to STL": {
       "clicks": 3,
-      "slowestMs": 700
+      "slowestMs": 1230
     }
   },
   "margins": {
