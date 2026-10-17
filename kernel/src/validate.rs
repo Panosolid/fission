@@ -10,7 +10,7 @@ use crate::geom::{Curve, Surface};
 use crate::tessellate::{tessellate, TessOptions};
 use crate::tolerance;
 use crate::topology::{Body, EdgeId, Face, FaceId, Loop};
-use glam::DVec3;
+use glam::{DVec2, DVec3};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -369,12 +369,13 @@ fn planar_loop_area(body: &Body, face: &Face, l: &Loop) -> f64 {
             pts.push(e.point_at(if c.reversed { 1.0 - s } else { s }));
         }
     }
-    let origin = pts.first().copied().unwrap_or_default();
-    let mut twice = DVec3::ZERO;
-    for i in 0..pts.len() {
-        twice += (pts[i] - origin).cross(pts[(i + 1) % pts.len()] - origin);
-    }
-    twice.dot(n) / 2.0
+    // Project onto the coordinate plane the normal is most along, keeping
+    // the axes in cyclic order (yz, zx or xy): dropping a coordinate is
+    // exact, and the projection's twice area is n_k times the loop's, so
+    // with the exact shoelace the sign is exact for these corners.
+    let k = if n.x.abs() >= n.y.abs().max(n.z.abs()) { 0 } else if n.y.abs() >= n.z.abs() { 1 } else { 2 };
+    let flat: Vec<DVec2> = pts.iter().map(|p| DVec2::new(p[(k + 1) % 3], p[(k + 2) % 3])).collect();
+    tolerance::twice_area(&flat) / (2.0 * n[k])
 }
 
 fn is_connected(body: &Body, faces: &[FaceId], edge_faces: &[Vec<(FaceId, crate::topology::Coedge)>]) -> bool {
@@ -718,6 +719,46 @@ mod tests {
         rev.coedges.reverse();
         rev.coedges.iter_mut().for_each(|c| c.reversed = true);
         assert!(tolerance::eq(planar_loop_area(&b, &up, &rev), -6.0));
+    }
+
+    #[test]
+    fn planar_loop_area_on_a_slanted_face_by_hand() {
+        // Corners (0,0,0), (1,0,1), (1,3,1), (0,3,0): sides (1,0,1), of
+        // length √2, and (0,3,0), at right angles, so area 3√2. Their cross
+        // product (1,0,1)×(0,3,0) = (−3, 0, 3) gives the normal they run
+        // counter-clockwise about, (−1, 0, 1)/√2. Its x and z parts tie,
+        // so the loop is measured in the yz projection, which runs
+        // clockwise there: twice area −6, over 2·n_x = −√2, is 3√2.
+        let mut b = Body::default();
+        let corners = [(0.0, 0.0, 0.0), (1.0, 0.0, 1.0), (1.0, 3.0, 1.0), (0.0, 3.0, 0.0)].map(|(x, y, z)| DVec3::new(x, y, z));
+        let v: Vec<usize> = corners.iter().map(|&p| b.add_vertex(p)).collect();
+        let coedges = (0..4).map(|i| crate::topology::Coedge { edge: b.add_line(v[i], v[(i + 1) % 4]), reversed: false }).collect();
+        let l = Loop { coedges };
+        let normal = DVec3::new(-1.0, 0.0, 1.0) / 2f64.sqrt();
+        let up = Face { surface: Surface::Plane { origin: DVec3::ZERO, normal, x_dir: DVec3::new(1.0, 0.0, 1.0) / 2f64.sqrt() }, sense: true, loops: vec![] };
+        assert!(tolerance::rel_eq(planar_loop_area(&b, &up, &l), 3.0 * 2f64.sqrt(), tolerance::FP_REL));
+        let down = Face { sense: false, ..up };
+        assert!(tolerance::rel_eq(planar_loop_area(&b, &down, &l), -3.0 * 2f64.sqrt(), tolerance::FP_REL));
+    }
+
+    #[test]
+    fn planar_loop_area_sign_of_a_sliver_is_exact() {
+        // The sliver of tolerance::tests (o, A = (1 + t, 1), B = (1, 1 − t),
+        // C = (0, t²/2), t = 2⁻³⁰): twice its area is −t²/2 = −2⁻⁶¹ exactly,
+        // clockwise, where the plain shoelace sum says +2⁻⁶¹. On the
+        // face x = 5 with corners (5, y, z): seen from +x the yz plane runs
+        // counter-clockwise, so the loop's area about +x is −2⁻⁶², and
+        // about −x (sense false) +2⁻⁶².
+        let t = (2f64).powi(-30);
+        let yz = [(0.0, 0.0), (1.0 + t, 1.0), (1.0, 1.0 - t), (0.0, t * t / 2.0)];
+        let mut b = Body::default();
+        let v: Vec<usize> = yz.iter().map(|&(y, z)| b.add_vertex(DVec3::new(5.0, y, z))).collect();
+        let coedges = (0..4).map(|i| crate::topology::Coedge { edge: b.add_line(v[i], v[(i + 1) % 4]), reversed: false }).collect();
+        let l = Loop { coedges };
+        let plane = Surface::Plane { origin: DVec3::new(5.0, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y };
+        let f = Face { surface: plane, sense: true, loops: vec![] };
+        assert_eq!(planar_loop_area(&b, &f, &l), -(2f64).powi(-62));
+        assert_eq!(planar_loop_area(&b, &Face { sense: false, ..f }, &l), (2f64).powi(-62));
     }
 
     #[test]
