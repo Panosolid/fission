@@ -3,7 +3,8 @@
 // group; changing the part keeps it, Undo puts the part back and keeps it,
 // and Save writes it back unchanged. A version 1 file (before sketches)
 // still opens. A file whose part extrudes a one-circle sketch (step 22b)
-// opens as a cylinder of πr²h. Screenshots at 1280 and 375 px wide go to
+// opens as a cylinder of πr²h; one with a pie slice of a line, an arc and
+// a line (step 23a) draws the arc and extrudes to a quarter of one. Screenshots at 1280 and 375 px wide go to
 // E2E_SHOTS when set.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
@@ -178,6 +179,66 @@ try {
       await page.close();
     }
   });
+
+  /** Sketch 1: a pie slice, (0,0) → (30,0), the quarter arc round (0,0) to (0,30), back to (0,0), as docs/project-format.md describes. */
+  const pie = {
+    id: "sketch-2",
+    points: [
+      { id: "point-3", x: 0, y: 0 },
+      { id: "point-4", x: 30, y: 0 },
+      { id: "point-6", x: 0, y: 30 },
+    ],
+    curves: [
+      { id: "line-5", kind: "line", start: "point-3", end: "point-4" },
+      { id: "arc-7", kind: "arc", start: "point-4", end: "point-6", centre: "point-3" },
+      { id: "line-8", kind: "line", start: "point-6", end: "point-3" },
+    ],
+    constraints: [],
+  };
+  for (const width of [1280, 375])
+    await check(`a file with an arc in a sketch draws it, and extruded it is a quarter of πr²h, saved unchanged (23a, ${width} px)`, async () => {
+      const page = await fresh(width);
+      try {
+        const drawn = structuredClone(project);
+        drawn.workspaces.design.sketches = [pie];
+        await open(page, "Pie.fission.json", JSON.stringify(drawn));
+        // Two lines and the quarter arc's ⌈64/4⌉ = 16 segments.
+        await page.waitForFunction(() => document.querySelector("[data-sketch-lines]")?.dataset.sketchLines === "18");
+        assert.deepEqual(await rows(page, "sketches"), ["Sketch 1"]);
+        if (shots) await page.screenshot({ path: `${shots}/sketch-arc-${width}.png` });
+        // Extruded 10 mm: V = ¼π·30²·10 = 2250π ≈ 7068.58 mm³. A = the two
+        // quarter discs 2·225π, the flat sides 2·30·10 = 600 and the curved
+        // side ¼·2π·30·10 = 150π: 600π + 600 ≈ 2484.96 mm².
+        const extruded = structuredClone(drawn);
+        const design = extruded.workspaces.design;
+        design.nextId = 10;
+        design.timeline.features = [
+          design.timeline.features[1],
+          {
+            id: "feature-9",
+            intent: { type: "extrude", parameters: { sketch: "sketch-2", distance: 10 }, summary: "Extrude: Sketch 1 by 10 mm" },
+            provenance: { self: { workspace: "design", id: "feature-9", label: "Extrude 1" }, from: [{ workspace: "design", id: "sketch-2", label: "Sketch 1" }] },
+            dependsOn: ["sketch-2"],
+            suppressed: false,
+          },
+        ];
+        await open(page, "Pie extruded.fission.json", JSON.stringify(extruded));
+        await page.waitForFunction(() => /^[1-9][0-9,.]* mm³$/.test(document.querySelector("#volume")?.textContent ?? "") && document.querySelector("#volume").textContent !== "24,000 mm³");
+        const shown = async (id) => Number((await page.textContent(id)).replace(/[^0-9.]/g, ""));
+        const [volume, area] = [await shown("#volume"), await shown("#area")];
+        assert.ok(Math.abs(volume - 2250 * Math.PI) <= 1e-6, `volume ${volume}`); // shown to six decimals
+        assert.ok(Math.abs(area - (600 * Math.PI + 600)) <= 1e-6, `area ${area}`);
+        if (shots) await page.screenshot({ path: `${shots}/sketch-arc-extruded-${width}.png` });
+        // Save (behind Menu at phone width, checked once at desktop width) writes the arc back as it was opened.
+        if (width === 1280) {
+          const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
+          const saved = JSON.parse(readFileSync(await download.path(), "utf8"));
+          assert.deepEqual(saved.workspaces.design.sketches, [pie]);
+        }
+      } finally {
+        await page.close();
+      }
+    });
 
   await check("no page errors", async () => assert.deepEqual(errors, []));
 } finally {

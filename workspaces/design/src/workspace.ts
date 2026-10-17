@@ -67,7 +67,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   create.type = "button";
   create.id = "create-sketch";
   create.textContent = "Create sketch";
-  create.title = "Draw lines, rectangles and circles on a plane: pick the plane, then click.";
+  create.title = "Draw lines, rectangles, circles and arcs on a plane: pick the plane, then click.";
   create.addEventListener("click", onSketch);
   const extrude = document.createElement("button");
   extrude.type = "button";
@@ -418,7 +418,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     void showOutline();
   }
 
-  /** Line, Rectangle or Circle (the panel's buttons, or L, R and C): what was part way through is dropped, as Escape would. */
+  /** Line, Rectangle, Circle or Arc (the panel's buttons, or L, R, C and A): what was part way through is dropped, as Escape would. */
   function chooseTool(kind: ToolKind) {
     if (mode.kind !== "edit" || !editingSketch) return;
     editingSketch.tool = kind;
@@ -639,7 +639,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
-      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle or circle being drawn.
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle or arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
@@ -648,7 +648,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         drawSketches();
         return true;
       }
-      // L, R and C choose the line, rectangle and circle tools while a sketch is edited; otherwise the key does what it would.
+      // L, R, C and A choose the line, rectangle, circle and arc tools while a sketch is edited; otherwise the key does what it would.
       const kind = sketchToolKey(id);
       if (kind) return mode.kind === "edit" ? (chooseTool(kind), true) : false;
       const items = ctx.selection.items;
