@@ -9,6 +9,7 @@
 .sketch button:disabled { opacity: 0.45; cursor: default; }
 .sketch .sketch-grid input { width: 6em; }
 .sketch .sketch-status { color: #b7c0cc; }
+.sketch .sketch-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
 .sketch .sketch-finish { margin-top: 4px; }
 @media (max-width: 700px) {
   .sketch button, .sketch .sketch-grid input { min-height: 44px; }

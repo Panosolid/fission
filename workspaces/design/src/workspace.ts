@@ -5,8 +5,9 @@
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import type { ShapeKind } from "./profiles.ts";
-import { lastFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
-import { DISTANCE_STEP, featureSpec, setExtrudeDistance } from "./extrude.ts";
+import { isSketchItem, lastFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
+import { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
+import { extrudePanel } from "./extrude-panel.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
 import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
@@ -50,7 +51,7 @@ let editingSketch: { id: string; grid: number; typed: string } | null = null;
 let fits = 0;
 
 /** Fills the toolbar slot with the command groups; returns each button with its element. */
-function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: () => void): [ToolButton, HTMLButtonElement][] {
+function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: () => void, onExtrude: () => void): [ToolButton, HTMLButtonElement][] {
   const made: [ToolButton, HTMLButtonElement][] = [];
   const document = slot.ownerDocument; // the slot's own page, not a global one
   // The sketch tool is the user's, not a command yet: whether the AI gets
@@ -68,7 +69,13 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   create.textContent = "Create sketch";
   create.title = "Draw lines on a plane: pick the plane, then click point to point.";
   create.addEventListener("click", onSketch);
-  sketch.append(sketchName, create);
+  const extrude = document.createElement("button");
+  extrude.type = "button";
+  extrude.id = "extrude";
+  extrude.textContent = "Extrude";
+  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 32).";
+  extrude.addEventListener("click", onExtrude);
+  sketch.append(sketchName, create, extrude);
   slot.append(sketch);
   for (const group of toolbarGroups()) {
     const div = document.createElement("div");
@@ -181,7 +188,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Mounted by Undo or Redo (step 20c): the first build keeps the camera unless the body no longer fits, even for another shape. */
   let keepCamera = ctx.history.restoring() || putAwayByRestore;
   putAwayByRestore = false;
-  const buttons = toolbar(ctx.toolbar, (b) => run(b.command), () => startSketch());
+  const buttons = toolbar(ctx.toolbar, (b) => run(b.command), () => startSketch(), () => startExtrude());
   const { kernel, viewport } = ctx;
   /** On screen (awake); false while asleep (X7) and after unmount. */
   let shown = true;
@@ -265,8 +272,12 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(`Change shape to ${SHAPE_LABELS[kind] ?? kind}`);
   }
 
-  /** Builds the part from the panel; `label` and `mergeKey` name the undo step when this is a user's edit (none while mounting). */
-  async function update(label?: string, mergeKey?: string) {
+  /**
+   * Builds the part from the panel, or makes `next` the document (an
+   * extrude); `label` and `mergeKey` name the undo step when this is a
+   * user's edit (none while mounting).
+   */
+  async function update(label?: string, mergeKey?: string, next?: DesignDocument) {
     const kind = shape;
     for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
@@ -275,7 +286,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // project holds it. An opened file's document is kept as it is until the
     // first edit. An extrude of a sketch has one size, its distance (the height box).
     const current = ctx.project.workspaces.design as DesignDocument | undefined;
-    const doc = loaded ?? (kind === "sketch-extrude" && current ? setExtrudeDistance(current, Number(inputs[2].value)) : documentFor(partCommand(), current));
+    const doc = next ?? loaded ?? (kind === "sketch-extrude" && current ? setExtrudeDistance(current, Number(inputs[2].value)) : documentFor(partCommand(), current));
     // An opened document is all new to the graph: out of date until it builds.
     const before = loaded ? null : (current ?? null);
     loaded = undefined;
@@ -346,6 +357,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     cancel: () => leaveSketch(),
     grid: (typed) => void setGrid(typed),
     finish: () => leaveSketch(),
+    extrude: () => startExtrude(),
   });
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
 
@@ -377,6 +389,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
 
   /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
   function startSketch() {
+    leaveExtrude();
     if (mode.kind === "edit") leaveSketch();
     mode = { kind: "pick" };
     viewport.showPlanes(originPlanes());
@@ -445,6 +458,85 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     } catch (e) {
       sketchBox.showStatus(`${n}: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // Extrude (step 21d): pick a sketch, type a distance, OK when the kernel says it closes.
+  /** The sketch the Extrude panel is set to, while it is open. */
+  let extruding: { sketch: string | null } | null = null;
+  const extrudeBox = extrudePanel(ctx.properties, {
+    sketch: (id) => {
+      if (!extruding) return;
+      extruding.sketch = id;
+      extrudeBox.showError("");
+      void checkExtrude(id);
+    },
+    ok: (typed) => void finishExtrude(typed),
+    cancel: () => leaveExtrude(),
+  });
+
+  /**
+   * Extrude: like Finish sketch first when a sketch is being drawn (that
+   * sketch is the one offered); otherwise the newest sketch.
+   */
+  function startExtrude() {
+    const doc = ctx.project.workspaces.design as DesignDocument | undefined;
+    const editing = mode.kind === "edit" ? mode.tool.sketch : null;
+    if (mode.kind !== "none") leaveSketch();
+    const items = doc ? doc.timeline.features.filter(isSketchItem) : [];
+    const chosen = editing ?? items.at(-1)?.id ?? null;
+    extruding = { sketch: chosen };
+    extrudeBox.show(items.map((f) => ({ id: f.id, label: f.provenance.self.label })), chosen, String(DEFAULT_DISTANCE));
+    if (chosen) void checkExtrude(chosen);
+  }
+
+  function leaveExtrude() {
+    extruding = null;
+    extrudeBox.hide();
+  }
+
+  /** Says whether the chosen sketch makes a closed outline (OK on) or the kernel's reason it doesn't (OK off). */
+  const extrudeOutline = latestOnly((lines: ReturnType<typeof sketchLines>) => kernel.call("sketch_outline", lines));
+  async function checkExtrude(id: string) {
+    const doc = designDoc();
+    const sketch = doc.sketches.find((s) => s.id === id);
+    if (!sketch) return;
+    const name = sketchItem(doc, id).provenance.self.label;
+    extrudeBox.showStatus(sketch.curves.length === 0 ? `${name} has no lines yet.` : `Checking ${name}…`, false);
+    if (sketch.curves.length === 0) return;
+    try {
+      const { current, value } = await extrudeOutline(sketchLines(sketch));
+      if (!current || extruding?.sketch !== id) return;
+      if ("closed" in value) extrudeBox.showStatus(`${name} makes a closed outline.`, true);
+      else extrudeBox.showStatus(`${name} can't be extruded: its lines don't close (${value.open}).`, false);
+    } catch (e) {
+      if (extruding?.sketch === id) extrudeBox.showStatus(`${name} can't be extruded: ${e instanceof Error ? e.message : String(e)}`, false);
+    }
+  }
+
+  /**
+   * OK: the kernel builds the extrude first; only one that builds is
+   * recorded, as one undo step ("Replace the part with Extrude of Sketch
+   * 1"). A refused distance keeps the panel open and says why.
+   */
+  async function finishExtrude(typed: string) {
+    const id = extruding?.sketch;
+    if (!id) return;
+    const distance = Number(typed);
+    if (typed.trim() === "" || !Number.isFinite(distance)) return extrudeBox.showError("Type the distance in mm.");
+    const before = designDoc();
+    const made = extrudeSketch(before, id, distance);
+    try {
+      await buildSpec(kernel, await featureSpec(kernel, made.doc, lastFeature(made.doc)));
+    } catch (e) {
+      if (extruding?.sketch === id) extrudeBox.showError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    // Something else changed the design while the kernel worked: this extrude is out of date.
+    if (extruding?.sketch !== id || designDoc() !== before) return;
+    leaveExtrude();
+    shape = "sketch-extrude";
+    inputs[SIZE_KEYS.indexOf("height")].value = typed;
+    await update(extrudeStep(before, id), undefined, made.doc);
   }
 
   const snapMove = latestOnly((at: SketchXY, grid: number) => kernel.call("snap_to_grid", at[0], at[1], grid));
@@ -538,6 +630,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!shown) return false; // the shell only asks while shown; never act asleep
       // Escape in the sketch tool: leaves the plane prompt, or ends the line being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
+      if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && mode.tool.from !== null) {
         mode.tool = { ...mode.tool, from: null };
         drawSketches();
