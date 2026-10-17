@@ -11,10 +11,15 @@
 // lines' end coordinates only, no point ids: every point is at its own
 // place (new points never land on a used one), so a coordinate names a
 // point, and moving one moves every line end there.
+//
+// Extruding the sketch (step 21d) replaces the box with "Extrude of Sketch
+// 1" as one step; its typed distance merges like a size. The model keeps
+// the part as its feature id with the box's width or the extrude's
+// distance: a box after an extrude is a new feature, with a new id.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHistory, emptyProject, projectFromJson, projectToJson, type Project } from "@fission/core";
-import { addSketch, deleteCurve, designWorkspace, drawLine, movePoint, partDocument, partOf, SKETCH_STEPS, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, deleteCurve, designWorkspace, DISTANCE_STEP, drawLine, extrudeSketch, extrudeStep, lastFeature, movePoint, partDocument, partOf, setExtrudeDistance, SKETCH_STEPS, withPart, type DesignDocument } from "@fission/design";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
 const SEEDS = [0x5eedn, 1n, 2n, 3n, 0xdeadbeefn];
@@ -29,10 +34,14 @@ const designOf = (p: Project) => p.workspaces.design as DesignDocument;
 /** The same project with the box's width changed, its sketch kept. */
 const withWidth = (p: Project, w: number): Project => ({ ...p, workspaces: { design: withPart(designOf(p), "box", w, 30, 20) } });
 
-/** The model's state: the width, and each line as [id, x1, y1, x2, y2] in drawing order. As text, so states compare with ===. */
+/**
+ * The model's state: the part ("box <feature id> <width>" or "extrude
+ * <feature id> <distance>"), and each line as [id, x1, y1, x2, y2] in
+ * drawing order. As text, so states compare with ===.
+ */
 type Line = [string, number, number, number, number];
-const state = (width: number, lines: readonly Line[]) => JSON.stringify({ width, lines });
-const parse = (s: string): { width: number; lines: Line[] } => JSON.parse(s);
+const state = (part: string, lines: readonly Line[]) => JSON.stringify({ part, lines });
+const parse = (s: string): { part: string; lines: Line[] } => JSON.parse(s);
 
 /** The project's state, read the same way: what the model must match. */
 function stateOf(p: Project): string {
@@ -44,7 +53,9 @@ function stateOf(p: Project): string {
   const ends = new Set(sketch.curves.flatMap((c) => [c.start, c.end]));
   assert.deepEqual(new Set(sketch.points.map((q) => q.id)), ends, "a point no line uses");
   assert.equal(new Set(sketch.points.map((q) => `${q.x},${q.y}`)).size, sketch.points.length, "two points at one place");
-  return state(partOf(doc).sizes.width!, lines);
+  const part = partOf(doc);
+  const id = lastFeature(doc).id;
+  return state(part.shape === "sketch-extrude" ? `extrude ${id} ${part.sizes.height}` : `box ${id} ${part.sizes.width}`, lines);
 }
 
 interface Undo {
@@ -74,11 +85,29 @@ function session(seed: bigint, steps: number) {
   });
 
   // The model.
-  let present = state(40, []);
+  let present = state("box feature-1 40", []);
   let undos: Undo[] = [];
   let redos: { after: string; label: string }[] = [];
   let lastWasRecord = false;
-  const width = () => parse(present).width;
+  const part = () => parse(present).part.split(" ");
+  /** A box width to go back to: the box's in this state, or a new one when it held an extrude. */
+  const boxWidth = (s: string) => {
+    const [kind, , w] = parse(s).part.split(" ");
+    return kind === "box" ? Number(w) : 1 + Math.floor(r.next() * 20);
+  };
+  /** Every feature id in a state undo can go back to. */
+  const featureIds = () => new Set([present, ...undos.map((u) => u.before)].map((s) => parse(s).part.split(" ")[1]));
+  /**
+   * The part after the project's box got width `w`: the same feature when it
+   * was a box, else a new feature whose id no state undo reaches has.
+   */
+  const boxPart = (w: number) => {
+    const [kind, id] = part();
+    if (kind === "box") return `box ${id} ${w}`;
+    const made = lastFeature(designOf(project)).id;
+    assert.ok(!featureIds().has(made), `${made} was used before`);
+    return `box ${made} ${w}`;
+  };
   /** A place no point of the sketch is at, on a 0.1 mm grid. */
   const freePlace = (): [number, number] => {
     const used = new Set(parse(present).lines.flatMap(([, x1, y1, x2, y2]) => [`${x1},${y1}`, `${x2},${y2}`]));
@@ -87,7 +116,7 @@ function session(seed: bigint, steps: number) {
       if (!used.has(`${xy[0]},${xy[1]}`)) return xy;
     }
   };
-  const counts = { draws: 0, chained: 0, deletes: 0, moves: 0, edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0, steps: 0, stepsFailed: 0, stepsEmpty: 0 };
+  const counts = { draws: 0, chained: 0, deletes: 0, moves: 0, extrudes: 0, distances: 0, edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0, steps: 0, stepsFailed: 0, stepsEmpty: 0 };
 
   for (let i = 0; i < steps; i++) {
     const at = `seed ${seed} step ${i}`;
@@ -100,7 +129,7 @@ function session(seed: bigint, steps: number) {
       const label = pick(r, ["Hand Width to Laser", "AI: resize"]);
       const inner = 1 + Math.floor(r.next() * 3);
       const widths = Array.from({ length: inner }, () => 1 + Math.floor(r.next() * 20));
-      if (r.next() < 0.2) widths.push(width()); // ends where it began
+      if (r.next() < 0.2 && part()[0] === "box") widths.push(Number(part()[2])); // ends where it began
       const fails = r.next() < 0.2;
       const run = () => {
         for (const [j, w] of widths.entries()) {
@@ -114,7 +143,7 @@ function session(seed: bigint, steps: number) {
         counts.stepsFailed++; // put back, nothing recorded, the model is unchanged
       } else {
         h.step(label, run);
-        const after = state(widths[widths.length - 1], parse(present).lines);
+        const after = state(boxPart(widths[widths.length - 1]), parse(present).lines);
         if (after === present) counts.stepsEmpty++; // nothing recorded, the redo kept
         else {
           redos = [];
@@ -130,12 +159,16 @@ function session(seed: bigint, steps: number) {
       }
     } else if (n < 0.18) {
       // A sketch edit, one undo step each, never merged: draw a line (from a
-      // new place or chained from a point), delete one, or move a point.
+      // new place or chained from a point), delete one, move a point, or
+      // extrude the sketch (the part becomes the extrude, open or not: the
+      // kernel judges the outline when it builds, which this test doesn't).
       const doc = designOf(project);
       const sketch = doc.sketches[0];
       const { lines } = parse(present);
-      const kind = lines.length === 0 ? "draw" : pick(r, ["draw", "draw", "delete", "move"] as const);
+      const kind = lines.length === 0 ? "draw" : pick(r, ["draw", "draw", "delete", "move", "extrude"] as const);
       let after: Line[];
+      let made = parse(present).part;
+      let label: string = kind === "extrude" ? extrudeStep(doc, sketch.id) : SKETCH_STEPS[kind];
       if (kind === "draw") {
         const chain = sketch.points.length > 0 && r.next() < 0.5;
         const start = chain ? pick(r, sketch.points) : null;
@@ -158,6 +191,16 @@ function session(seed: bigint, steps: number) {
         project = { ...project, workspaces: { design: deleteCurve(doc, sketch.id, gone) } };
         after = lines.filter(([id]) => id !== gone);
         counts.deletes++;
+      } else if (kind === "extrude") {
+        const d = 1 + Math.floor(r.next() * 20);
+        const extruded = extrudeSketch(doc, sketch.id, d);
+        // A new feature id: in no state undo can go back to.
+        assert.ok(!featureIds().has(extruded.id), `${at}: ${extruded.id} was used before`);
+        project = { ...project, workspaces: { design: extruded.doc } };
+        after = lines;
+        made = `extrude ${extruded.id} ${d}`;
+        label = "Replace the part with Extrude of Sketch 1";
+        counts.extrudes++;
       } else {
         const p = pick(r, sketch.points);
         const [x, y] = freePlace();
@@ -166,23 +209,34 @@ function session(seed: bigint, steps: number) {
         after = lines.map(([id, x1, y1, x2, y2]) => [id, ...move(x1, y1), ...move(x2, y2)] as Line);
         counts.moves++;
       }
-      assert.equal(h.record(SKETCH_STEPS[kind]), true, at);
+      assert.equal(h.record(label), true, at);
       redos = [];
-      undos.push({ before: present, label: SKETCH_STEPS[kind], key: undefined, at: t });
+      undos.push({ before: present, label, key: undefined, at: t });
       if (undos.length > LIMIT) {
         undos.shift();
         counts.dropped++;
       }
-      present = state(width(), after);
+      present = state(made, after);
       lastWasRecord = true;
     } else if (n < 0.58) {
-      // An edit: mostly a new width, sometimes the same, sometimes back to the one before.
-      const key = pick(r, KEYS);
-      const label = key ? `Change ${key}` : "Change shape";
-      const w = r.next() < 0.1 ? width() : r.next() < 0.3 && undos.length ? parse(undos[undos.length - 1].before).width : 1 + Math.floor(r.next() * 20);
-      project = withWidth(project, w);
+      // An edit: mostly a new width, sometimes the same, sometimes back to
+      // the one before; on an extrude, half the time a typed distance (the
+      // height box, merged like the sizes), else a width (back to a box).
+      const extrude = part()[0] === "extrude" && r.next() < 0.5 ? part() : null;
+      const key = extrude ? "height" : pick(r, KEYS);
+      const label = extrude ? DISTANCE_STEP : key ? `Change ${key}` : "Change shape";
+      let next: string;
+      if (extrude) {
+        const d = r.next() < 0.1 ? Number(extrude[2]) : 1 + Math.floor(r.next() * 20);
+        project = { ...project, workspaces: { design: setExtrudeDistance(designOf(project), d) } };
+        next = state(`extrude ${extrude[1]} ${d}`, parse(present).lines);
+        counts.distances++;
+      } else {
+        const w = r.next() < 0.1 ? boxWidth(present) : r.next() < 0.3 && undos.length ? boxWidth(undos[undos.length - 1].before) : 1 + Math.floor(r.next() * 20);
+        project = withWidth(project, w);
+        next = state(boxPart(w), parse(present).lines);
+      }
       const recorded = h.record(label, key);
-      const next = state(w, parse(present).lines);
       if (next === present) {
         assert.equal(recorded, false, at);
         counts.same++;
@@ -213,10 +267,22 @@ function session(seed: bigint, steps: number) {
     } else if (n < 0.62) {
       // A change nobody made (a workspace filling in a default when first
       // shown): taken into the present, not a step; back to the state before
-      // the present step, that step goes. The redo stays.
-      const w = r.next() < 0.1 ? width() : r.next() < 0.3 && undos.length ? parse(undos[undos.length - 1].before).width : 1 + Math.floor(r.next() * 20);
-      project = withWidth(project, w);
-      const next = state(w, parse(present).lines);
+      // the present step, that step goes. The redo stays. A default fills in
+      // a size, never replaces a feature: on an extrude it is the distance
+      // (a box there would take a new id the redo's older counter could
+      // hand out again, which no workspace's default ever does).
+      let next: string;
+      const [kind, id, size] = part();
+      const before = undos.length ? parse(undos[undos.length - 1].before).part.split(" ") : null;
+      const back = r.next() < 0.3 && before?.[0] === kind && before[1] === id ? Number(before[2]) : null;
+      const value = r.next() < 0.1 ? Number(size) : (back ?? 1 + Math.floor(r.next() * 20));
+      if (kind === "extrude") {
+        project = { ...project, workspaces: { design: setExtrudeDistance(designOf(project), value) } };
+        next = state(`extrude ${id} ${value}`, parse(present).lines);
+      } else {
+        project = withWidth(project, value);
+        next = state(boxPart(value), parse(present).lines);
+      }
       assert.equal(h.amend(), next !== present, at);
       if (next !== present) {
         if (undos.length && undos[undos.length - 1].before === next) {
@@ -278,7 +344,7 @@ function session(seed: bigint, steps: number) {
     } else {
       // A file opened: a fresh start.
       const w = 1 + Math.floor(r.next() * 20);
-      present = state(w, []);
+      present = state(`box feature-1 ${w}`, []);
       project = projectWith(w);
       h.reset();
       undos = [];

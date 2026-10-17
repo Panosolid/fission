@@ -5,7 +5,7 @@
 
 import { describeProvenance, type BodyView, type Feature } from "@fission/core";
 import { downstreamChip, formatQuantity as fmt, type ChipInfo } from "@fission/ui";
-import type { ShapeKind } from "./profiles.ts";
+import type { PartKind } from "./document.ts";
 import { PLACEHOLDER_ID_NOTE } from "./references.ts";
 import type { SelectionRow } from "./selection.ts";
 
@@ -21,14 +21,16 @@ export interface ParameterRow {
 /**
  * Which size inputs a shape uses and what they are called: round shapes
  * take a diameter and no depth, a sphere no height either, and an extruded
- * outline's height is how far it is extruded.
+ * outline's height is how far it is extruded. An extrude of a sketch has
+ * only that distance: the sketch gives its outline.
  */
-export function parameterRows(shape: ShapeKind): ParameterRow[] {
+export function parameterRows(shape: PartKind): ParameterRow[] {
   const round = shape === "cylinder" || shape === "sphere";
   const primitive = round || shape === "box";
+  const sketched = shape === "sketch-extrude";
   return [
-    { key: "width", label: round ? "Diameter" : "Width", shown: true },
-    { key: "depth", label: "Depth", shown: !round },
+    { key: "width", label: round ? "Diameter" : "Width", shown: !sketched },
+    { key: "depth", label: "Depth", shown: !round && !sketched },
     { key: "height", label: primitive ? "Height" : "Extrude by", shown: shape !== "sphere" },
   ];
 }
@@ -74,7 +76,7 @@ export interface PropertiesPanel {
   /** The size inputs, in SIZE_KEYS order. */
   inputs: HTMLInputElement[];
   /** Labels and shows the size inputs for this shape. */
-  setShape(shape: ShapeKind): void;
+  setShape(shape: PartKind): void;
   showFeature(feature: Feature): void;
   /** What is selected: one row per item, or the empty note. */
   showSelection(rows: readonly SelectionRow[]): void;

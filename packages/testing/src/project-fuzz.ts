@@ -22,7 +22,7 @@
 // shortest text that fails the same way.
 
 import { FORMAT_VERSION, MAX_NESTING, emptyProject, projectFromJson, projectToJson, type DataReader, type Project } from "@fission/core";
-import { addSketch, designWorkspace, drawLine, lastFeature, migrateDesignV1, partDocument, partOf, specOf, type DesignDocument } from "@fission/design";
+import { addSketch, designWorkspace, drawLine, extrudeSketch, lastFeature, migrateDesignV1, partDocument, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
@@ -93,7 +93,7 @@ function randomJson(r: SeededRandom, depth = 0): unknown {
 
 /**
  * Design's data as Fission saves it: sometimes with sketches (lines, some
- * chained, so they share points), sometimes as the version 1 data saved
+ * chained, so they share points; sometimes the part extrudes one), sometimes as the version 1 data saved
  * before step 21b (no sketches, no counter).
  */
 function designData(r: SeededRandom, part: DesignDocument): unknown {
@@ -112,6 +112,12 @@ function designData(r: SeededRandom, part: DesignDocument): unknown {
       const from = points.length > 0 && r.next() < 0.6 ? pick(r, points).id : ([below(r, 100) - 50, below(r, 100) / 10] as const);
       doc = drawLine(doc, sketch.id, from, [below(r, 100), -below(r, 1000) / 100]).doc;
     }
+  }
+  // Sometimes the part is an extrude of one of them (step 21d), open or
+  // closed (the kernel judges that when it builds), sometimes a preset again after it.
+  if (r.next() < 0.5) {
+    doc = extrudeSketch(doc, pick(r, doc.sketches).id, below(r, 1000) / 10).doc;
+    if (r.next() < 0.3) doc = withPart(doc, pick(r, SHAPES), 1 + below(r, 50), 1 + below(r, 50), 1 + below(r, 50));
   }
   return doc;
 }
@@ -277,7 +283,8 @@ export function checkText(text: string, readers: readonly DataReader[] = READERS
   const design = project.workspaces.design as DesignDocument | undefined;
   if (design) {
     const shown = guard("showing the Design part", () => {
-      partOf(design);
+      // An extrude of a sketch needs the kernel for its outline; readDesignDocument checked its sketch and distance.
+      if (partOf(design).shape === "sketch-extrude") return null;
       return specOf(design, lastFeature(design));
     });
     if (isProblem(shown)) return shown;

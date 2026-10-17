@@ -7,7 +7,8 @@
 // this same producer, so there is no sketch-only path.
 
 import type { KernelCalls, Outline, Plane, Producible, Producer, RepresentationRegistry } from "@fission/core";
-import { lastFeature, specOf, type DesignDocument, type SketchPlane } from "./document.ts";
+import { lastFeature, type DesignDocument, type SketchPlane } from "./document.ts";
+import { featureSpec } from "./extrude.ts";
 import { outline } from "./profiles.ts";
 import { planeOf, sketchItem, sketchOutline } from "./sketch.ts";
 import { buildSpec } from "./spec.ts";
@@ -59,11 +60,12 @@ export function registerDesign(registry: RepresentationRegistry, kernel: KernelC
     const { document } = o as FeatureHandle;
     const feature = document.timeline.features.find((f) => f.id === o.id);
     if (!feature) throw new Error(`feature ${o.id} is not in the design`);
-    return specOf(document, feature);
+    // An extrude of a sketch asks the kernel for the outline, now.
+    return featureSpec(kernel, document, feature);
   };
-  registry.registerProducer("design.feature", "solid", (o) => ({ kind: "solid", spec: spec(o) }));
+  registry.registerProducer("design.feature", "solid", async (o) => ({ kind: "solid", spec: await spec(o) }));
   registry.registerProducer("design.feature", "mesh", async (o) => {
-    const view = await buildSpec(kernel, spec(o));
+    const view = await buildSpec(kernel, await spec(o));
     return { kind: "mesh", positions: view.mesh.positions, indices: view.mesh.indices };
   });
 }

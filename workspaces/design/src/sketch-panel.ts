@@ -1,8 +1,8 @@
 // The sketch tool's panel (step 21c), at the top of the properties: the
 // "Pick a plane" prompt of Create sketch, then while a sketch is edited its
-// name, how to draw, the typeable grid size, whether the lines close, and
-// Finish sketch. The workspace drives it; the panel only shows what it is
-// given and reports clicks. Styles: src/styles/sketch.css.
+// name, how to draw, the typeable grid size, whether the lines close,
+// Finish sketch and Extrude (step 21d). The workspace drives it; the panel
+// only shows what it is given and reports clicks. Styles: src/styles/sketch.css.
 
 import { ORIGIN_PLANES } from "./sketch-tool.ts";
 import type { SketchPlane } from "./document.ts";
@@ -12,6 +12,8 @@ export interface SketchPanelEvents {
   cancel(): void;
   grid(typed: string): void;
   finish(): void;
+  /** Extrude this sketch (step 21d): finishes it and opens the Extrude panel. */
+  extrude(): void;
 }
 
 export interface SketchPanel {
@@ -85,8 +87,9 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
         label,
         gridError,
         status,
-        button("Finish sketch", "sketch-finish", () => on.finish(), "sketch-finish"),
+        el("div", { className: "sketch-buttons" }),
       );
+      box.lastElementChild!.append(button("Finish sketch", "sketch-finish", () => on.finish(), "sketch-finish"), button("Extrude", "sketch-extrude", () => on.extrude(), "sketch-finish"));
       box.hidden = false;
     },
     showStatus(text) {
