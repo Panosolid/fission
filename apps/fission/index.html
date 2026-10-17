@@ -21,6 +21,7 @@
         <button id="open" type="button" title="Open a project or an image">Open</button>
         <input id="open-file" type="file" hidden /><!-- accept: set from the registered importers (src/main.ts) -->
         <button id="assistant-toggle" type="button" aria-pressed="false" title="The optional AI assistant. No AI provider is active: nothing is sent anywhere.">AI <span id="ai-status">off</span></button>
+        <button id="guide-open" type="button" title="How Fission works: a scrolling 3D guide to Design and the kernel">Guide</button>
         <button id="community" type="button" title="Shared models, free to download (coming soon)">Community</button>
       </div>
       <div id="file-notice">
@@ -51,5 +52,6 @@
       <aside id="assistant" hidden></aside>
     </main>
     <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/guide-button.ts"></script>
   </body>
 </html>
