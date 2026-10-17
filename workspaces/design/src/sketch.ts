@@ -11,7 +11,7 @@
 
 import type { Feature, KernelCalls, Outline, Plane, SketchArc, SketchCircle, SketchLine } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
-import { curvePoints, isSketchItem, shown, type DesignDocument, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
+import { curvePoints, insertItem, isSketchItem, shown, type DesignDocument, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
 
 /** The undo step each sketch edit is recorded as. */
 export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", tangent: "Draw tangent arc", delete: "Delete line", move: "Move point" } as const;
@@ -51,7 +51,7 @@ export function sketchItem(doc: DesignDocument, id: string): Feature {
 }
 
 /**
- * A new empty sketch on a plane, appended to the timeline. Its name is
+ * A new empty sketch on a plane, put in the timeline at the marker (insertItem). Its name is
  * "Sketch n", n one more than the sketches there are, skipping a name in
  * use; the name is part of its summary and stays when others are added.
  */
@@ -70,7 +70,7 @@ export function addSketch(doc: DesignDocument, plane: SketchPlane = "XY"): { doc
   };
   return {
     id,
-    doc: { ...next, sketches: [...doc.sketches, { id, points: [], curves: [], constraints: [] }], timeline: { ...doc.timeline, features: [...doc.timeline.features, item] } },
+    doc: { ...next, sketches: [...doc.sketches, { id, points: [], curves: [], constraints: [] }], timeline: insertItem(doc, item) },
   };
 }
 

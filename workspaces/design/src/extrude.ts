@@ -5,18 +5,18 @@
 // the sketch rebuilds the solid (a live link), and a sketch that no longer
 // closes makes the build fail with the kernel's reason.
 //
-// Until the timeline (step 24) the part is one body, so extruding a sketch
-// replaces the part's solid feature, as one undo step that says so.
+// Every extrude is a new body ("New body", step 24d1) until booleans join
+// them: it is added to the timeline at the marker and replaces nothing.
 
 import type { BodySpec, Feature, KernelCalls } from "@fission/core";
-import { isSketchExtrude, isSketchItem, lastFeature, shown, specOf, type DesignDocument } from "./document.ts";
+import { insertAt, insertItem, isSketchExtrude, isSketchItem, lastFeature, shown, specOf, type DesignDocument } from "./document.ts";
 import { sketchItem, sketchOutline } from "./sketch.ts";
 
 /** How far a new extrude goes until the user types another distance (mm). */
 export const DEFAULT_DISTANCE = 10;
 
-/** The undo step an extrude is recorded as: "Replace the part with Extrude of Sketch 1". */
-export const extrudeStep = (doc: DesignDocument, sketchId: string) => `Replace the part with Extrude of ${sketchItem(doc, sketchId).provenance.self.label}`;
+/** The undo step an extrude is recorded as: "Extrude Sketch 1". */
+export const extrudeStep = (doc: DesignDocument, sketchId: string) => `Extrude ${sketchItem(doc, sketchId).provenance.self.label}`;
 
 /** The undo step a typed distance is recorded as, merged per box like the other sizes. */
 export const DISTANCE_STEP = "Change extrude distance";
@@ -24,35 +24,38 @@ export const DISTANCE_STEP = "Change extrude distance";
 const summary = (sketchLabel: string, distance: number) => `Extrude ${sketchLabel} by ${distance} mm`;
 
 /**
- * The document with the part replaced by an extrude of this sketch by
- * `distance` mm: a new feature with the next id, appended to the timeline
- * (after the sketch, which is already in it), depending on the sketch.
- * Profiles no feature uses any more leave with the old part. The kernel
- * judges the distance and the outline when the feature is built.
+ * The document with an extrude of this sketch by `distance` mm added: a
+ * new feature with the next id, put in at the marker (insertItem), which
+ * must be after the sketch, depending on the sketch; every feature already
+ * there stays. It is named "Extrude n", n one more than the extrudes of
+ * sketches there are, skipping a name in use. The kernel judges the
+ * distance and the outline when the feature is built.
  */
 export function extrudeSketch(doc: DesignDocument, sketchId: string, distance: number): { doc: DesignDocument; id: string } {
   const sketch = sketchItem(doc, sketchId);
   if (!Number.isFinite(distance)) throw new Error(`an extrude needs its distance in mm, not ${shown(distance)}`);
+  if (doc.timeline.features.indexOf(sketch) >= insertAt(doc)) throw new Error(`${sketch.provenance.self.label} comes after the rollback marker, so an extrude put in at the marker can't use it`);
   const id = `feature-${doc.nextId}`;
   const label = sketch.provenance.self.label;
+  const extrudes = doc.timeline.features.filter(isSketchExtrude);
+  const names = new Set(extrudes.map((f) => f.provenance.self.label));
+  let n = extrudes.length + 1;
+  while (names.has(`Extrude ${n}`)) n++;
   const feature: Feature = {
     id,
     intent: { type: "extrude", parameters: { sketch: sketchId, distance }, summary: summary(label, distance) },
-    // "Extrude 1": the one solid feature until step 24 numbers them by position.
-    provenance: { self: { workspace: "design", id, label: "Extrude 1" }, from: [{ workspace: "design", id: sketchId, label }] },
+    provenance: { self: { workspace: "design", id, label: `Extrude ${n}` }, from: [{ workspace: "design", id: sketchId, label }] },
     dependsOn: [sketchId],
     suppressed: false,
   };
-  const old = lastFeature(doc);
-  const features = [...doc.timeline.features.filter((f) => f !== old), feature];
-  const used = new Set(features.map((f) => f.intent.parameters.profile));
-  return { id, doc: { ...doc, nextId: doc.nextId + 1, profiles: doc.profiles.filter((p) => used.has(p.id)), timeline: { ...doc.timeline, features } } };
+  return { id, doc: { ...doc, nextId: doc.nextId + 1, timeline: insertItem(doc, feature) } };
 }
 
-/** The document with the part's extrude going `distance` mm instead; the part must be an extrude of a sketch. */
-export function setExtrudeDistance(doc: DesignDocument, distance: number): DesignDocument {
-  const old = lastFeature(doc);
-  if (!isSketchExtrude(old)) throw new Error(`the part is ${old.intent.summary}, not an extrude of a sketch`);
+/** The document with an extrude of a sketch (the part, `lastFeature`, unless `id` names another) going `distance` mm instead. */
+export function setExtrudeDistance(doc: DesignDocument, distance: number, id?: string): DesignDocument {
+  const old = id === undefined ? lastFeature(doc) : doc.timeline.features.find((f) => f.id === id);
+  if (!old) throw new Error(`there is no feature ${shown(id)} in the design`);
+  if (!isSketchExtrude(old)) throw new Error(`${old.intent.summary} is not an extrude of a sketch`);
   const sketchLabel = sketchItem(doc, old.intent.parameters.sketch as string).provenance.self.label;
   const feature: Feature = { ...old, intent: { ...old.intent, parameters: { ...old.intent.parameters, distance }, summary: summary(sketchLabel, distance) } };
   return { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f) => (f === old ? feature : f)) } };

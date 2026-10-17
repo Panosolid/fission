@@ -66,7 +66,8 @@ try {
     try {
       await page.click("#toolbar [data-shape=l-bracket]");
       await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "12,240 mm³");
-      const row = "#browser [data-node=profile-1]";
+      // The new project's box is feature-1 (counter 2); the profile a preset now needs takes the counter's 2 (24d1).
+      const row = "#browser [data-node=profile-2]";
       assert.equal(await page.textContent(row), "L-bracket profile");
       assert.equal(await page.isVisible("#selection-actions"), false);
       await page.click(row);
@@ -104,7 +105,7 @@ try {
     const page = await fresh();
     try {
       await page.click("#toolbar [data-shape=slot]");
-      await page.click("#browser [data-node=profile-1]");
+      await page.click("#browser [data-node=profile-2]");
       await clearClipboard(page);
       await page.keyboard.press("Control+c");
       await page.waitForFunction(() => document.querySelector("#action-note")?.textContent.startsWith("Copied"));
@@ -135,14 +136,14 @@ try {
     const page = await fresh();
     try {
       await page.click("#toolbar [data-shape=star]");
-      await page.click("#browser [data-node=profile-1]");
+      await page.click("#browser [data-node=profile-2]");
       assert.deepEqual(await page.$$eval("#selection-actions button", (bs) => bs.map((b) => b.textContent)), ["Copy as SVG"]);
       await page.click("#toolbar [data-shape=box]");
       await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       await page.waitForFunction(() => document.querySelector("#selection-note")?.textContent !== "");
       assert.equal(await page.textContent("#selection-note"), "Taken out of the selection: the profile. The part has no profile now.");
       assert.equal(await page.isVisible("#selection-actions"), false);
-      assert.equal(await page.$("#browser [data-node=profile-1]"), null);
+      assert.equal(await page.$("#browser [data-node=profile-2]"), null);
     } finally {
       await page.close();
     }

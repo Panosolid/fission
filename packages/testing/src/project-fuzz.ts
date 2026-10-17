@@ -22,7 +22,7 @@
 // shortest text that fails the same way.
 
 import { FORMAT_VERSION, MAX_NESTING, emptyProject, projectFromJson, projectToJson, type DataReader, type Project } from "@fission/core";
-import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, lastFeature, migrateDesignV1, partDocument, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, insertPreset, lastFeature, migrateDesignV1, migrateDesignV2, partDocument, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
@@ -95,8 +95,10 @@ function randomJson(r: SeededRandom, depth = 0): unknown {
  * Design's data as Fission saves it: sometimes with sketches (lines, some
  * chained, so they share points, circles (22b), some round a point
  * already there, and arcs (23a), some from a point already there;
- * sometimes the part extrudes one), sometimes as the version 1 data saved
- * before step 21b (no sketches, no counter).
+ * sometimes the part extrudes one; from 24d1 several solid features and a
+ * rollback marker), sometimes as the version 1 data saved before step 21b
+ * (no sketches, no counter), sometimes as version 2 (steps 21b to 24c,
+ * which a save upgrades: its earlier solid features suppressed).
  */
 function designData(r: SeededRandom, part: DesignDocument): unknown {
   const n = r.next();
@@ -124,6 +126,13 @@ function designData(r: SeededRandom, part: DesignDocument): unknown {
     doc = extrudeSketch(doc, pick(r, doc.sketches).id, below(r, 1000) / 10).doc;
     if (r.next() < 0.3) doc = withPart(doc, pick(r, SHAPES), 1 + below(r, 50), 1 + below(r, 50), 1 + below(r, 50));
   }
+  // More bodies (24d1): presets added; as version 2 saved it (no marker),
+  // or some suppressed and a marker. The first item is the first preset,
+  // never suppressed, so something always builds.
+  for (let k = below(r, 3); k > 0; k--) doc = insertPreset(doc, pick(r, SHAPES), 1 + below(r, 50), 1 + below(r, 50), 1 + below(r, 50)).doc;
+  if (r.next() < 0.2) return { ...doc, version: 2 };
+  if (r.next() < 0.2) doc = { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f, i) => (i > 0 && r.next() < 0.3 ? { ...f, suppressed: true } : f)) } };
+  if (r.next() < 0.3) doc = { ...doc, timeline: { ...doc.timeline, marker: pick(r, doc.timeline.features).id } };
   return doc;
 }
 
@@ -299,10 +308,11 @@ export function checkText(text: string, readers: readonly DataReader[] = READERS
   const again = guard("opening the saved project", () => projectToJson(projectFromJson(saved, readers)));
   if (isProblem(again)) return again;
   if (again !== saved) return { kind: "saving, opening and saving again changed the text", detail: "" };
-  // Design's own upgrade (version 1 → 2, docs/project-format.md) is the one change a save may make.
+  // Design's own upgrades (version 1 → 2 → 3, docs/project-format.md) are the one change a save may make.
   const upgraded = structuredClone(want.upgraded) as { workspaces: Record<string, unknown> };
   const old = upgraded.workspaces.design;
-  if (isObj(old) && old.version === 1) upgraded.workspaces.design = migrateDesignV1(old);
+  if (isObj(old) && old.version === 1) upgraded.workspaces.design = migrateDesignV2(migrateDesignV1(old));
+  if (isObj(old) && old.version === 2) upgraded.workspaces.design = migrateDesignV2(old);
   if (canonical(JSON.parse(saved)) !== canonical(upgraded)) return { kind: "saving lost or changed something the file had", detail: "" };
   return null;
 }
