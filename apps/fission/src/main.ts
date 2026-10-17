@@ -634,6 +634,7 @@ $("assistant-toggle").addEventListener("click", () => {
   const panel = $("assistant");
   panel.hidden = !panel.hidden;
   $("assistant-toggle").setAttribute("aria-pressed", String(!panel.hidden));
+  if (!panel.hidden) assistant.opened();
 });
 // At phone width the browser and properties fold away behind two toggles
 // (theme.css hides a closed one there); wider screens hide the toggles and
