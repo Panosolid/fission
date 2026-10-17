@@ -9,7 +9,8 @@
   "scripts": {
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
     "journeys": "node --experimental-strip-types --no-warnings --test journeys/*.journey.ts",
-    "fuzz": "node --experimental-strip-types --no-warnings fuzz/project-loader.ts"
+    "fuzz": "node --experimental-strip-types --no-warnings fuzz/project-loader.ts",
+    "sessions": "node --experimental-strip-types --no-warnings fuzz/sketch-extrude.ts"
   },
   "dependencies": {
     "@fission/ai": "*",

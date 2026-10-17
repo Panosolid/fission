@@ -108,8 +108,16 @@ failure: accepted a malformed file | case 3 (model refuses it: WrongLength) | sh
 FUZZ_STL_B = """STL reader fuzzing, seed 12, 2000 inputs: 1 kind(s) of failure
 failure: panic in stl::read: range end index 84 out of range for slice of length 80 at src/stl.rs:95 | case 9 | shrunk input: input-9.stl (80 bytes)
 """
+FUZZ_KERNEL = """Kernel extrude fuzzing, seed 14, 52000 inputs: 1 failure(s)
+failure: volume 80.07 want 80.56 (slack 3.4e-6) | input input-1-crash-85ef (31 bytes)
+"""
 FUZZ_PROJECT = """Project loader fuzzing, seed 13, 2000 inputs: 1 kind(s) of failure
 failure: saving lost or changed something the file had | case 34 | shrunk input: input-34.json (307 characters)
+"""
+FUZZ_SESSIONS = """Sketch-extrude sessions, seed 1000003, 40 steps: 1 kind(s) of failure
+failure: volume 406830.71135582257, model 406830.7105421612 | seed 1000003, step 8 (extrude sketch-2 by 141): volume 406830.71135582257, model 406830.7105421612 | replay: FISSION_SEED=1000003 FISSION_SESSIONS=1 FISSION_SESSION_STEPS=40 npm run journeys
+steps:
+  0. draw 5 sides (2 arcs)
 """
 
 
@@ -124,6 +132,10 @@ class Fuzz(unittest.TestCase):
         # Another round's panic at other numbers is the same kind.
         self.assertEqual(fuzz_kinds(FUZZ_STL_B)[0][0], fuzz_kinds(FUZZ_STL_A)[0][0])
         self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_PROJECT)], ["fuzzing the project loader: saving lost or changed something the file had"])
+        # A session's kind is its problem with the numbers out; the steps after it are not kinds.
+        self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_SESSIONS)], ["fuzzing the sketch-extrude sessions: volume #, model #"])
+        # kernel/fuzz/run.sh's reports name the coverage-guided target.
+        self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_KERNEL)], ["fuzzing the kernel's extrude: volume # want # (slack #)"])
         # A report with no failure lines has no kinds; an unknown first line still files, as "?".
         self.assertEqual(fuzz_kinds("STL reader fuzzing, seed 1, 2000 inputs: 0 kind(s) of failure\n"), [])
         self.assertEqual(fuzz_kinds("something else\nfailure: x | y")[0][0], "fuzzing the ?: x")

@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { DESIGN_COMMANDS } from "@fission/design";
-import { EVAL_CASES } from "@fission/testing";
+import { EVAL_CASES, HELD_OUT_CASES } from "@fission/testing";
 import { nodeKernel } from "../../packages/testing/src/node-kernel.ts";
 import { dataset, generate, OFFERED, RECIPES, RULES } from "../src/index.ts";
 
@@ -17,7 +17,7 @@ if (!/^\d+$/.test(values.seed!) || !/^\d+$/.test(values.count!)) throw new Error
 const seed = BigInt(values.seed!);
 const specs = values.ops ? DESIGN_COMMANDS.filter((c) => values.ops!.split(",").includes(c.op)) : OFFERED;
 
-const run = await generate({ seed, count: Number(values.count), specs, rules: RULES, recipes: RECIPES, kernel: nodeKernel(), heldOut: EVAL_CASES.map((c) => c.prompt) });
+const run = await generate({ seed, count: Number(values.count), specs, rules: RULES, recipes: RECIPES, kernel: nodeKernel(), heldOut: [...EVAL_CASES, ...HELD_OUT_CASES].map((c) => c.prompt) });
 if (!run.ok) throw new Error(run.error);
 if (run.conflicts.length > 0) throw new Error(`the same words meant two things, a recipe bug:\n${run.conflicts.join("\n")}`);
 const out = dataset(run.examples, { specs, seed, drafts: run.drafts, dropped: run.dropped });

@@ -14,6 +14,7 @@ const ops = {
   make_extrude: (profile: Outline, distance: number) => kernel.make_extrude(profile, distance),
   export_stl: (spec: BodySpec, name: string) => kernel.export_stl(spec, name),
   snap_to_grid: (x: number, y: number, spacing: number) => kernel.snap_to_grid(x, y, spacing),
+  place_freely: (x: number, y: number, pixel: number) => kernel.place_freely(x, y, pixel),
   sketch_outline: (lines: SketchLine[], circles: SketchCircle[], arcs: SketchArc[]) => kernel.sketch_outline(lines, circles, arcs),
 } satisfies Record<KernelRequest["op"], (...args: never[]) => unknown>;
 

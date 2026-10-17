@@ -26,7 +26,7 @@ export {
   type JourneyVerdict,
   type MagicJourney,
 } from "./magic.ts";
-export { EVAL_CASES, matches, runEval, successRates, type EvalCase, type EvalResult, type TaskType } from "./ai-eval.ts";
+export { commandsMatch, EVAL_CASES, HELD_OUT_CASES, matches, partAfter, runEval, successRates, type EvalCase, type EvalResult, type TaskType } from "./ai-eval.ts";
 
 /** A random source that gives the same sequence for the same seed. */
 export interface SeededRandom {

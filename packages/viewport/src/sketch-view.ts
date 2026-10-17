@@ -43,29 +43,97 @@ export function rayOnPlane(from: readonly number[], dir: readonly number[], plan
   return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
 }
 
-/** How far the grid reaches each way from the plane's origin (mm), unless that would take more than MAX_GRID_LINES lines each way. */
-export const GRID_REACH = 200;
-export const MAX_GRID_LINES = 100;
-/** Every this many lines is drawn brighter. */
+/** Minor grid lines are never drawn closer together than this on screen (px), so the grid never turns into a grey haze. */
+export const GRID_MIN_PIXELS = 8;
+/** Every this many minor lines is a major one. */
 export const GRID_MAJOR = 10;
+/** The most minor lines drawn each way from the grid's centre (a very large screen gets a grid that stops short). */
+export const MAX_GRID_LINES = 300;
+
+/** 10^e written as a short decimal (1e-3 is 0.001 exactly as typed, not 10 ** −3's 0.0010000000000000002). */
+const tenTo = (e: number) => Number(`1e${e}`);
 
 /**
- * The grid's lines in the plane's frame: n = min(MAX_GRID_LINES,
- * ceil(GRID_REACH / spacing)) lines each side of each axis, so 2n + 1
- * lines across and 2n + 1 up, each running from −n·spacing to n·spacing.
- * `major` marks every GRID_MAJOR-th line (the axes included).
+ * The minor grid spacing for a pixel size on the plane (mm per pixel):
+ * the smallest spacing at least GRID_MIN_PIXELS pixels apart, from
+ * `step` × 10^k (k ≥ 0) when points snap to a grid of `step` (so every line
+ * drawn is one a click can land on), else from the powers of ten. Null for
+ * a pixel or step that is not a positive finite number, or no spacing in
+ * reach of a double.
  */
-export function gridLines(spacing: number): { a: SketchXY; b: SketchXY; major: boolean }[] {
-  if (!(spacing > 0) || !Number.isFinite(spacing)) return [];
-  const n = Math.min(MAX_GRID_LINES, Math.ceil(GRID_REACH / spacing));
-  const end = n * spacing;
-  const lines: { a: SketchXY; b: SketchXY; major: boolean }[] = [];
+export function gridSpacing(pixel: number, step: number | null = null): number | null {
+  if (!(pixel > 0) || !Number.isFinite(pixel)) return null;
+  if (step !== null && (!(step > 0) || !Number.isFinite(step))) return null;
+  const want = GRID_MIN_PIXELS * pixel;
+  const base = step ?? 1;
+  // want / base can round a hair under a power of ten (log10 then guesses one too few), so check the guess.
+  let e = Math.ceil(Math.log10(want / base));
+  if (step !== null) e = Math.max(0, e);
+  if (base * tenTo(e) < want) e += 1;
+  const spacing = base * tenTo(e);
+  return Number.isFinite(spacing) && spacing > 0 ? spacing : null;
+}
+
+/**
+ * How strongly the minor lines are drawn, 0 to 1, from how far apart they
+ * are on screen: log10(px / GRID_MIN_PIXELS), so none at GRID_MIN_PIXELS
+ * apart and full at GRID_MAJOR times that. Zooming in past full makes the
+ * spacing GRID_MAJOR times finer: the full minor lines become the major
+ * ones and new minor lines start at none, so the grid never jumps.
+ */
+export function minorStrength(px: number): number {
+  if (!(px > 0)) return 0;
+  return Math.min(1, Math.max(0, Math.log10(px / GRID_MIN_PIXELS) / Math.log10(GRID_MAJOR)));
+}
+
+/** What the sketch grid draws, in the plane's frame. */
+export interface SketchGrid {
+  minor: number;
+  major: number;
+  /** minorStrength of the minor spacing. */
+  strength: number;
+  /** The grid's lines; the two through the origin are left out, `axes` draws them. */
+  lines: { a: SketchXY; b: SketchXY; major: boolean }[];
+  /** How far the lines run, in the plane's frame: x from, x to, y from, y to. */
+  bounds: [number, number, number, number];
+  /** The red x axis (y = 0) and green y axis (x = 0) across the grid, or null when the grid doesn't reach it. */
+  axes: { x: [SketchXY, SketchXY] | null; y: [SketchXY, SketchXY] | null };
+}
+
+/**
+ * The grid around `centre` (where the view's centre meets the plane) for
+ * a pixel size there: minor lines `gridSpacing(pixel, step)` apart at
+ * whole multiples of it, a major line every GRID_MAJOR; the centre moves
+ * to the nearest major line, so panning keeps lines where they were. It
+ * reaches `reachPx` pixels (at the centre's pixel size) past the centre
+ * each way, plus half a major spacing for the move, at most
+ * MAX_GRID_LINES minor lines each way. Null when there is no spacing.
+ */
+export function sketchGrid(centre: SketchXY, pixel: number, reachPx: number, step: number | null = null): SketchGrid | null {
+  const minor = gridSpacing(pixel, step);
+  if (minor === null || !centre.every(Number.isFinite) || !(reachPx > 0)) return null;
+  const major = GRID_MAJOR * minor;
+  const n = Math.min(MAX_GRID_LINES, Math.ceil((reachPx * pixel + major / 2) / minor));
+  // The centre as a whole number of minor spacings, on a major line.
+  const [cx, cy] = centre.map((c) => GRID_MAJOR * Math.round(c / major));
+  if (!Number.isSafeInteger(cx) || !Number.isSafeInteger(cy)) return null;
+  const at = (i: number) => i * minor;
+  const [x0, x1, y0, y1] = [at(cx - n), at(cx + n), at(cy - n), at(cy + n)];
+  const lines: SketchGrid["lines"] = [];
   for (let k = -n; k <= n; k++) {
-    const at = k * spacing;
-    const major = k % GRID_MAJOR === 0;
-    lines.push({ a: [at, -end], b: [at, end], major }, { a: [-end, at], b: [end, at], major });
+    const i = cx + k;
+    const j = cy + k;
+    if (i !== 0) lines.push({ a: [at(i), y0], b: [at(i), y1], major: i % GRID_MAJOR === 0 });
+    if (j !== 0) lines.push({ a: [x0, at(j)], b: [x1, at(j)], major: j % GRID_MAJOR === 0 });
   }
-  return lines;
+  return {
+    minor,
+    major,
+    strength: minorStrength(minor / pixel),
+    lines,
+    bounds: [x0, x1, y0, y1],
+    axes: { x: y0 <= 0 && 0 <= y1 ? [[x0, 0], [x1, 0]] : null, y: x0 <= 0 && 0 <= x1 ? [[0, y0], [0, y1]] : null },
+  };
 }
 
 /**

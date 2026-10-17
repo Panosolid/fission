@@ -20,8 +20,8 @@ test("random AI commands build a valid part or fail cleanly", async () => {
   for (let i = 0; i < 3_000; i++) {
     const parsed = parseCommand(randomCommand(r), DESIGN_COMMANDS);
     if (!parsed.ok) continue;
-    const doc = documentFor(parsed.command);
     try {
+      const doc = documentFor(parsed.command); // a missing size the shape needs is a clean error too
       const view = await buildSpec(kernel, specOf(doc, lastFeature(doc)));
       assert.deepEqual(view.errors, [], `seed ${SEED} case ${i}: ${JSON.stringify(parsed.command)}`);
       built++;

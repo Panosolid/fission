@@ -48,3 +48,29 @@ export function selectionFraming(
   const centre = lo.map((l, k) => (l + hi[k]) / 2) as [number, number, number];
   return { centre, radius: Math.hypot(...hi.map((h, k) => h - lo[k])) / 2 };
 }
+
+/** The sphere Look At frames when there is nothing to frame (no body, nothing drawn): 50 mm round the plane's origin. */
+export const LOOK_AT_EMPTY_RADIUS = 50;
+
+/**
+ * What Look At frames: the box around `points` (the body's bounding-box
+ * corners and the edited sketch's ends, model space), as its centre and
+ * half its diagonal like a body is framed; with no points, or all of them
+ * in one place, LOOK_AT_EMPTY_RADIUS round `fallback` (the plane's origin)
+ * or round that one place.
+ */
+export function lookAtFraming(points: readonly (readonly number[])[], fallback: readonly number[]): Framing {
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of points) {
+    if (!p.every(Number.isFinite)) continue;
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], p[k]);
+      hi[k] = Math.max(hi[k], p[k]);
+    }
+  }
+  if (!(lo[0] <= hi[0])) return { centre: [fallback[0], fallback[1], fallback[2]], radius: LOOK_AT_EMPTY_RADIUS };
+  const centre = lo.map((l, k) => (l + hi[k]) / 2) as [number, number, number];
+  const radius = Math.sqrt(hi.reduce((s, h, k) => s + (h - lo[k]) ** 2, 0)) / 2;
+  return { centre, radius: radius > 0 ? radius : LOOK_AT_EMPTY_RADIUS };
+}

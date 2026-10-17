@@ -322,7 +322,7 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
     try {
       if (s.kind === "in-browser" && !(await confirmDownload(s))) return say("Nothing was downloaded or sent.");
       const setup = partCommand(host.project());
-      const answer = await askForCommands(provider(s), { system: systemPrompt(setup), messages: [{ role: "user", content: words }] }, AI_COMMANDS);
+      const answer = await askForCommands(provider(s), { system: systemPrompt(setup, AI_COMMANDS), messages: [{ role: "user", content: words }] }, AI_COMMANDS);
       if (!answer.ok) return say(answer.error, true);
       const design = host.design();
       if (!design?.run) return say("Design isn't open, so nothing was changed.", true);

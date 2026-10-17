@@ -49,7 +49,7 @@ test("every check refuses a draft broken in its way", async () => {
     ["a size of 0", draft([{ ...box, width: 0 }]), "not a valid command: set_part: width must be a length"],
     ["a size as text", draft([{ ...box, depth: "30" }]), "not a valid command: set_part: depth must be a length"],
     ["a parameter it doesn't have", draft([{ ...box, colour: "red" }]), 'not a valid command: set_part has no parameter "colour"'],
-    ["a missing size", draft([{ op: "set_part", shape: "box", width: 40, depth: 30 }]), "not a valid command: set_part needs height"],
+    ["a missing size", draft([{ op: "set_part", shape: "box", width: 40, depth: 30 }]), "answer refused: command 1 (set_part): the kernel refused it: set_part: a box needs its height"], // height is optional since AI4, so Design refuses it, not the parser
     ["a command that isn't offered", draft([{ op: "fillet", radius: 2 }]), 'not a valid command: unknown command "fillet"'],
     ["a bad setup", draft([box], [{ ...box, height: -1 }]), "not a valid command: set_part: height must be a length"],
     ["export with no part", draft([{ op: "export_stl" }]), "answer refused: command 1 (export_stl): there is no part to export"],
@@ -149,8 +149,8 @@ test("a record is the chat the app has: the same system prompt, and an answer th
   const g = await generate({ seed: 4n, count: 300, specs: DESIGN_COMMANDS, rules: RULES, recipes: DESIGN_RECIPES, kernel: fakeKernel(), heldOut: [] });
   assert.ok(g.ok);
   for (const e of g.examples) {
-    const rec = toRecord(e);
-    assert.equal(rec.messages[0].content, systemPrompt(e.setup));
+    const rec = toRecord(e, DESIGN_COMMANDS);
+    assert.equal(rec.messages[0].content, systemPrompt(e.setup, DESIGN_COMMANDS));
     assert.equal(rec.messages[1].content, e.prompt);
     const parsed = parseCommandList(rec.messages[2].content, DESIGN_COMMANDS);
     assert.ok(parsed.ok);

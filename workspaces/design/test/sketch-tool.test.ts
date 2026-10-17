@@ -82,7 +82,9 @@ test("the drawings: the edited sketch with its grid, points and preview; the oth
   const doc = clicks(other.doc, { kind: "line", sketch: other.id, from: null }, [[0, 0], [0, 5]]).doc;
   const [first, second] = sketchDrawings(doc, { tool: drawn.tool, grid: 5, pointer: [20, 10] });
   assert.deepEqual(first.lines, [[[0, 0], [10, 0]], [[10, 0], [10, 10]]]);
-  assert.deepEqual(first.editing, { grid: 5, points: [[0, 0], [10, 0], [10, 10]], preview: [[[10, 10], [20, 10]]] });
+  assert.deepEqual(first.editing, { grid: 5, gridSnap: false, points: [[0, 0], [10, 0], [10, 10]], preview: [[[10, 10], [20, 10]]] });
+  // Grid snap on reaches the viewport, which then draws the snap grid's multiples (SF2).
+  assert.equal(sketchDrawings(doc, { tool: drawn.tool, grid: 5, pointer: null, gridSnap: true })[0].editing!.gridSnap, true);
   assert.deepEqual(first.plane.normal, [0, 0, 1]);
   assert.deepEqual(second, { plane: first.plane, lines: [[[0, 0], [0, 5]]] });
   // The pending first click is drawn as a point before it is one.
@@ -335,7 +337,8 @@ test("tools: Escape ends what is part way, switching starts afresh, L, R, C and 
   assert.equal(toolBusy(freshCircle().tool), false);
   assert.equal(toolBusy(clickAt(freshCircle().doc, freshCircle().tool, [0, 0]).tool), true, "a centre down");
   assert.deepEqual(startTool("arc", "sketch-2"), { kind: "arc", sketch: "sketch-2", start: null, end: null });
-  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"]]);
+  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"], ["tangent", "T"]]);
+  assert.deepEqual(startTool("tangent", "sketch-2"), { kind: "tangent", sketch: "sketch-2", from: null });
   // The keys in Design's table are the ones the panel's buttons name, and they choose those tools.
   for (const t of SKETCH_TOOLS) {
     const spec = DESIGN_SHORTCUTS.find((s) => s.keys === t.key)!;

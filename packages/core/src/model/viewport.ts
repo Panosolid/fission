@@ -40,11 +40,14 @@ export type SketchXY = readonly [number, number];
  * band, a rectangle's four sides), empty when it would draw nothing,
  * and where the pointer snapped (Design's snap.ts): its marks, drawn over
  * everything, and the snap in words ("endpoint 10,0"), absent on the grid.
+ * `gridSnap` says points snap to the grid (sketch feel SF1), so the grid
+ * drawn is the snapping one's multiples; without it the grid drawn is
+ * powers of ten, adapting to the zoom (SF2).
  */
 export interface SketchDrawing {
   plane: Plane;
   lines: readonly (readonly [SketchXY, SketchXY])[];
-  editing?: { grid: number; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[]; snap?: { label: string; marks: readonly (readonly [SketchXY, SketchXY])[] } };
+  editing?: { grid: number; gridSnap?: boolean; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[]; snap?: { label: string; marks: readonly (readonly [SketchXY, SketchXY])[] } };
 }
 
 /** An origin plane drawn small at the origin to be picked (Create sketch); one not offered is drawn faint and can't be clicked. */
@@ -98,6 +101,8 @@ export interface SharedViewport {
   setView(name: ViewName): Framing | null;
   /** Frames the selection (as last shown) from the current direction; null, camera untouched, when nothing is selected. */
   fitSelection(): Framing | null;
+  /** Look At (sketch feel SF2): the camera square onto the plane, its y axis up on screen, framing the body and the edited sketch (or 50 mm round the plane's origin when there is neither); returns what it framed. */
+  lookAt(plane: Plane): Framing | null;
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
   setOverlay(overlay: AnalysisOverlay): void;
   clearOverlay(id: string): void;
