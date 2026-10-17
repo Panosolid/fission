@@ -6,7 +6,7 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
 - `src/kernel/`:
   - `kernel-client.ts` is the only way the app talks to the kernel (`kernel.call(op, ...args)` returns a promise; add new ops to `KernelOps` and the worker's `ops` table).
   - `kernel.worker.ts` runs the WASM kernel in a Web Worker.
-  - `kernel-types.ts` holds the shapes of kernel results and inputs (`Outline`, the kernel's `ProfileIn`).
+  - `kernel-types.ts` holds the shapes of kernel results and inputs (`Outline`, the kernel's `ProfileIn`; `SketchLine` and `SketchOutline` for the sketch ops `snap_to_grid` and `sketch_outline`, step 21a).
   - `npm run kernel` (in `apps/fission`) builds the WASM package into `src/kernel/wasm/` (generated, gitignored).
 - `src/model/` (see docs/integration.md), built:
   - `project.ts`: format version and migrations, `projectToJson`/`projectFromJson`: the .fission.json file.

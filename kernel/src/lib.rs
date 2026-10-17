@@ -3,6 +3,12 @@
 //! Pure Rust lives in the modules; the `#[wasm_bindgen]` functions below are the
 //! thin layer the browser app calls. Vectors cross the boundary as flat
 //! `[x, y, z]` arrays (`Float64Array` in JavaScript).
+//!
+//! Mutation testing leaves these survivors, excluded in
+//! `.cargo/mutants.toml`: every `#[wasm_bindgen]` function returning
+//! `Result<JsValue, JsError>` replaced with `Ok(Default::default())`. A
+//! JsValue exists only in a WebAssembly build, so lib tests can't call them;
+//! the journeys on the real kernel (`packages/testing/journeys`) do, and fail.
 
 pub mod accurate;
 pub mod geom;
@@ -15,6 +21,7 @@ pub mod mesh;
 pub mod ops;
 pub mod placed;
 pub mod self_intersect;
+pub mod sketch;
 pub mod stl;
 pub mod tessellate;
 pub mod tolerance;
@@ -159,6 +166,72 @@ pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsError>
     to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
 }
 
+/// The nearest node of a square grid (`sketch::snap_to_grid`), as `[x, y]`.
+#[wasm_bindgen]
+pub fn snap_to_grid(x: f64, y: f64, spacing: f64) -> Result<JsValue, JsError> {
+    let p = sketch::snap_to_grid(glam::DVec2::new(x, y), spacing).map_err(|e| JsError::new(&e.to_string()))?;
+    serde_wasm_bindgen::to_value(&[p.x, p.y]).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// A sketch line as the app sends it: `{ a: [x, y], b: [x, y] }`.
+#[derive(Debug, Deserialize)]
+pub struct LineIn {
+    pub a: [f64; 2],
+    pub b: [f64; 2],
+}
+
+/// A straight-edged outline in the form `make_extrude` takes:
+/// `{ outer: { path: { corners: [x0, y0, …], bulges: [] } }, holes: [] }`.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct ProfileOut {
+    pub outer: PathOut,
+    pub holes: Vec<PathOut>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct PathOut {
+    pub path: CornersOut,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub struct CornersOut {
+    pub corners: Vec<f64>,
+    pub bulges: Vec<f64>,
+}
+
+/// What a sketch's lines make: `{ closed: profile }` or `{ open: "why, in words" }`.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SketchOutlineOut {
+    Closed(ProfileOut),
+    Open(String),
+}
+
+/// `sketch::sketch_outline` in the app's form; lines breaking the sketch
+/// rules are an error.
+pub fn sketch_outline_of(lines: &[LineIn]) -> Result<SketchOutlineOut, String> {
+    let lines: Vec<sketch::Line> = lines.iter().map(|l| sketch::Line { a: l.a.into(), b: l.b.into() }).collect();
+    match sketch::sketch_outline(&lines).map_err(|e| e.to_string())? {
+        sketch::SketchOutline::Open(why) => Ok(SketchOutlineOut::Open(why.to_string())),
+        sketch::SketchOutline::Closed(profile) => {
+            let ops::profile::Boundary::Path { corners, bulges } = profile.outer else {
+                return Err("internal error: a sketch outline is a path".to_string());
+            };
+            let corners = corners.iter().flat_map(|p| [p.x, p.y]).collect();
+            Ok(SketchOutlineOut::Closed(ProfileOut { outer: PathOut { path: CornersOut { corners, bulges } }, holes: vec![] }))
+        }
+    }
+}
+
+/// The one closed outline a sketch's lines (`[LineIn, …]`) make, or why
+/// they make none (see `SketchOutlineOut`).
+#[wasm_bindgen]
+pub fn sketch_outline(lines: JsValue) -> Result<JsValue, JsError> {
+    let lines: Vec<LineIn> = serde_wasm_bindgen::from_value(lines).map_err(|e| JsError::new(&format!("bad sketch lines: {e}")))?;
+    let out = sketch_outline_of(&lines).map_err(|e| JsError::new(&e))?;
+    serde_wasm_bindgen::to_value(&out).map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// What to build, in the app's words: the same shapes as `make_box`,
 /// `make_cylinder`, `make_sphere` and `make_extrude`. In JavaScript:
 /// `{ box: { width, depth, height } }`, `{ cylinder: { radius, height } }`,
@@ -218,6 +291,31 @@ mod tests {
     use super::*;
     use crate::tolerance::{rel_eq, FP_REL};
     use std::f64::consts::{PI, TAU};
+
+    #[test]
+    fn sketch_outline_in_the_apps_form() {
+        // A 3-4-5 right triangle drawn with its last line backwards: the
+        // corners come out as flat pairs in walking order, no bulges, no holes.
+        let line = |a: [f64; 2], b: [f64; 2]| LineIn { a, b };
+        let lines = [line([0.0, 0.0], [4.0, 0.0]), line([4.0, 0.0], [0.0, 3.0]), line([0.0, 0.0], [0.0, 3.0])];
+        let want = ProfileOut {
+            outer: PathOut { path: CornersOut { corners: vec![0.0, 0.0, 4.0, 0.0, 0.0, 3.0], bulges: vec![] } },
+            holes: vec![],
+        };
+        assert_eq!(sketch_outline_of(&lines).unwrap(), SketchOutlineOut::Closed(want));
+        // Its closed outline extrudes: area ½·4·3 = 6, so 2 mm deep is 12 mm³.
+        let SketchOutlineOut::Closed(p) = sketch_outline_of(&lines).unwrap() else { panic!() };
+        let profile = ops::profile::Profile::polygon(p.outer.path.corners.chunks(2).map(|c| glam::DVec2::new(c[0], c[1])).collect(), vec![]);
+        let body = ops::extrude::extrude(&profile, 2.0).unwrap();
+        assert!(rel_eq(view_body(&body).unwrap().volume, 12.0, FP_REL));
+        // Open sketches say why in words; bad lines are errors.
+        assert_eq!(
+            sketch_outline_of(&lines[..2]).unwrap(),
+            SketchOutlineOut::Open("the line end at (0, 0) is not joined to another line".into())
+        );
+        assert_eq!(sketch_outline_of(&[]).unwrap(), SketchOutlineOut::Open("the sketch has no lines yet".into()));
+        assert_eq!(sketch_outline_of(&[line([0.0, 0.0], [0.0, 0.0])]).unwrap_err(), "line 1 must be between 0.001 and 1000000 mm long, got 0");
+    }
 
     #[test]
     fn version_comes_from_cargo() {

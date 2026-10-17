@@ -22,6 +22,8 @@ export function nodeKernel(): KernelCalls {
     make_sphere: (r) => wasm.make_sphere(r),
     make_extrude: (p, d) => wasm.make_extrude(p, d),
     export_stl: (spec, name) => wasm.export_stl(spec, name),
+    snap_to_grid: (x, y, s) => wasm.snap_to_grid(x, y, s),
+    sketch_outline: (lines) => wasm.sketch_outline(lines),
   };
   return {
     // Async like the worker, and errors become rejections with the kernel's message.

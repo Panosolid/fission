@@ -38,6 +38,18 @@ export interface Outline {
   holes: Loop[];
 }
 
+/** A straight sketch line from a to b, in the sketch plane's x and y (mm); LineIn in kernel/src/lib.rs. */
+export interface SketchLine {
+  a: [number, number];
+  b: [number, number];
+}
+
+/**
+ * What a sketch's lines make (SketchOutlineOut in kernel/src/lib.rs): the one
+ * closed outline, ready for make_extrude, or why there is none yet, in words.
+ */
+export type SketchOutline = { closed: Outline } | { open: string };
+
 /** What to build, as the kernel's BodySpec (kernel/src/lib.rs). */
 export type BodySpec =
   | { box: { width: number; depth: number; height: number } }
