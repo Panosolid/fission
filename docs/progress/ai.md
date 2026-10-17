@@ -15,3 +15,14 @@ The AI workstream: `packages/ai`, the assistant panel (`apps/fission/src/assista
   qwen2.5:1.5b 8/12 (create 3/7, edit 5/5, all usable first try, 37 s); llama3.2:3b 8/12 (same, 95 s); gemma2:2b 3/12 (create 1/7, edit 2/5, 53 s).
   Both 8/12 models miss the same four: radius read as the diameter (sphere 15 mm radius gave width 15; rod 6 mm radius gave width 6), "a 25 mm cube" became a cylinder, and centimetres were not converted (4 cm gave 4). Edits of an existing part were all right.
   Not yet good enough to call the gate passed; qwen2.5:1.5b stays the in-browser default (as fast and as right as the 3B model).
+
+## AI4. Better instructions, checked on held-out cases (one PR)
+- [ ] AI4. Improve `packages/ai/src/prompt.ts` against the first run's misses (radius read as diameter, "cube" as a cylinder, centimetres not converted), judged on `HELD_OUT_CASES` (14 new hand-worked cases, written first and never used while writing the prompt) as well as the original 12. Ben chose "Improve now" (2026-10-17).
+  Found: with constrained output (Ollama's `format`) the model never sees the schema's descriptions, so it was never told that a cylinder's width is its diameter. The prompt now lists the offered commands with what each parameter means, then the unit, radius and cube rules (v1), and a rule that every size is above 0 even where a shape ignores it (v2).
+  Scores (right answers, GitHub runner CPU, set_part only; original 12 / held-out 14):
+  before: qwen2.5:1.5b 8/12, 5/14; llama3.2:3b 8/12, 4/14; gemma2:2b 2/12, 5/14.
+  v1: qwen2.5:1.5b 6/12, 4/14; llama3.2:3b 11/12, 8/14; gemma2:2b 3/12, 3/14.
+  v2: qwen2.5:1.5b 6/12, 2/14; llama3.2:3b 11/12, 8/14; gemma2:2b 3/12, 4/14.
+  llama3.2:3b gains on both sets, so the gain is not fitted to the 12. qwen2.5:1.5b (the in-browser default) gets worse: once told depth is "ignored by cylinders and spheres" it answers depth or height 0, which set_part refuses, and the v2 rule didn't stop it (two tries, so stopped here per the root rules). Units in edits ("2 cm taller" gave +2 mm) and inches/metres are still missed by every model.
+  Known gap in the scoring: `matches` ignores commands after the expected ones, so an answer whose last set_part is wrong could still pass; none of the passes above has a second command.
+  Next: Ben's call on the zero sizes (make the sizes a shape ignores optional in set_part, or switch the default to llama3.2:3b); the PR stays a draft until then.
