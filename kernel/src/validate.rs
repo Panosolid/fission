@@ -746,7 +746,7 @@ mod tests {
         let v: Vec<usize> = corners.iter().map(|&p| b.add_vertex(p)).collect();
         let coedges = (0..4).map(|i| crate::topology::Coedge { edge: b.add_line(v[i], v[(i + 1) % 4]), reversed: false }).collect();
         let l = Loop { coedges };
-        let up = Face { surface: Surface::Plane { origin: o, normal: DVec3::Z, x_dir: DVec3::X }, sense: true, loops: vec![] };
+        let up = Face { surface: Surface::Plane { origin: o, normal: DVec3::Z, x_dir: DVec3::X }, sense: true, loops: vec![], role: None };
         assert!(tolerance::eq(planar_loop_area(&b, &up, &l), 6.0));
         let down = Face { sense: false, ..up.clone() };
         assert!(tolerance::eq(planar_loop_area(&b, &down, &l), -6.0));
@@ -770,7 +770,7 @@ mod tests {
         let coedges = (0..4).map(|i| crate::topology::Coedge { edge: b.add_line(v[i], v[(i + 1) % 4]), reversed: false }).collect();
         let l = Loop { coedges };
         let normal = DVec3::new(-1.0, 0.0, 1.0) / 2f64.sqrt();
-        let up = Face { surface: Surface::Plane { origin: DVec3::ZERO, normal, x_dir: DVec3::new(1.0, 0.0, 1.0) / 2f64.sqrt() }, sense: true, loops: vec![] };
+        let up = Face { surface: Surface::Plane { origin: DVec3::ZERO, normal, x_dir: DVec3::new(1.0, 0.0, 1.0) / 2f64.sqrt() }, sense: true, loops: vec![], role: None };
         assert!(tolerance::rel_eq(planar_loop_area(&b, &up, &l), 3.0 * 2f64.sqrt(), tolerance::FP_REL));
         let down = Face { sense: false, ..up };
         assert!(tolerance::rel_eq(planar_loop_area(&b, &down, &l), -3.0 * 2f64.sqrt(), tolerance::FP_REL));
@@ -791,7 +791,7 @@ mod tests {
         let coedges = (0..4).map(|i| crate::topology::Coedge { edge: b.add_line(v[i], v[(i + 1) % 4]), reversed: false }).collect();
         let l = Loop { coedges };
         let plane = Surface::Plane { origin: DVec3::new(5.0, 0.0, 0.0), normal: DVec3::X, x_dir: DVec3::Y };
-        let f = Face { surface: plane, sense: true, loops: vec![] };
+        let f = Face { surface: plane, sense: true, loops: vec![], role: None };
         assert_eq!(planar_loop_area(&b, &f, &l), -(2f64).powi(-62));
         assert_eq!(planar_loop_area(&b, &Face { sense: false, ..f }, &l), (2f64).powi(-62));
     }

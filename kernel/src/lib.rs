@@ -41,6 +41,7 @@ pub mod mass;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod debug_dump;
 pub mod display;
+pub mod face_mass;
 pub mod fmath;
 pub mod mesh;
 pub mod ops;
@@ -81,6 +82,13 @@ pub struct BodyView {
     pub face_types: Vec<&'static str>,
     /// The curve type of each edge, by edge index ("line", "circle").
     pub edge_types: Vec<&'static str>,
+    /// What each face is in the operation that made it, by face index
+    /// (`FaceRoleOut`; null for a body built by hand).
+    pub face_roles: Vec<Option<FaceRoleOut>>,
+    /// Each face's exact area and centroid [x, y, z], by face index
+    /// (`face_mass`).
+    pub face_areas: Vec<f64>,
+    pub face_centroids: Vec<[f64; 3]>,
     /// Empty when the body passed validation.
     pub errors: Vec<String>,
 }
@@ -100,6 +108,7 @@ pub fn view_body(body: &Body) -> Result<BodyView, String> {
 /// The view of a body with its display mesh and validation errors.
 fn view_parts(body: &Body, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
     let exact = mass::mass_properties(body);
+    let faces = face_mass::face_masses(body);
     BodyView {
         mesh: display::display_mesh(body, mesh),
         volume: exact.volume,
@@ -109,7 +118,45 @@ fn view_parts(body: &Body, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
         faces: body.faces.len(),
         face_types: body.faces.iter().map(|f| surface_type(&f.surface)).collect(),
         edge_types: body.edges.iter().map(|e| curve_type(&e.curve)).collect(),
+        face_roles: body.faces.iter().map(|f| f.role.map(FaceRoleOut::from)).collect(),
+        face_areas: faces.iter().map(|m| m.area).collect(),
+        face_centroids: faces.iter().map(|m| m.centroid.to_array()).collect(),
         errors,
+    }
+}
+
+/// A face's role as the app sees it: `{ role: "start" }`, …, or for an
+/// extrude's side `{ role: "side", boundary, piece }` (the profile loop, 0
+/// the outer one, and the piece in it as given; a cylinder's side has
+/// neither). Roles: start, end, side, bottom, top, front, back, left,
+/// right, upper, lower (`topology::FaceRole`).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct FaceRoleOut {
+    pub role: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub piece: Option<usize>,
+}
+
+impl From<topology::FaceRole> for FaceRoleOut {
+    fn from(role: topology::FaceRole) -> Self {
+        use topology::FaceRole::*;
+        let only = |role| FaceRoleOut { role, boundary: None, piece: None };
+        match role {
+            Start => only("start"),
+            End => only("end"),
+            Wall => only("side"),
+            Side(p) => FaceRoleOut { role: "side", boundary: Some(p.boundary.into()), piece: Some(p.piece.into()) },
+            Bottom => only("bottom"),
+            Top => only("top"),
+            Front => only("front"),
+            Back => only("back"),
+            Left => only("left"),
+            Right => only("right"),
+            Upper => only("upper"),
+            Lower => only("lower"),
+        }
     }
 }
 
@@ -234,11 +281,36 @@ pub struct ArcIn {
 }
 
 /// An outline in the form `make_extrude` takes (`ProfileIn`):
-/// `{ outer: loop, holes: [] }`.
+/// `{ outer: loop, holes: [], pieces }`, where `pieces` (which
+/// `make_extrude` ignores) says which sketch curve each piece of `outer`
+/// came from, in order: the extrude's side of piece i
+/// (`{ role: "side", boundary: 0, piece: i }`) is that curve's.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct ProfileOut {
     pub outer: LoopOut,
     pub holes: Vec<LoopOut>,
+    pub pieces: Vec<PieceOut>,
+}
+
+/// `{ curve: "line" | "arc" | "circle", index, reversed }`: the sketch's
+/// line, arc or circle at `index` in the list given, run backwards (from
+/// its `b` or `end`) when `reversed` (`sketch::Source`).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct PieceOut {
+    pub curve: &'static str,
+    pub index: usize,
+    pub reversed: bool,
+}
+
+impl From<sketch::Source> for PieceOut {
+    fn from(s: sketch::Source) -> Self {
+        let (curve, index) = match s.curve {
+            sketch::SketchCurve::Line(i) => ("line", i),
+            sketch::SketchCurve::Arc(i) => ("arc", i),
+            sketch::SketchCurve::Circle(i) => ("circle", i),
+        };
+        PieceOut { curve, index, reversed: s.reversed }
+    }
 }
 
 /// One loop: `{ path: { corners: [x0, y0, …], bulges: [] } }` or
@@ -266,12 +338,13 @@ pub fn sketch_outline_of(lines: &[LineIn], circles: &[CircleIn], arcs: &[ArcIn])
     let arcs: Vec<sketch::Arc> = arcs.iter().map(|a| sketch::Arc { start: a.start.into(), end: a.end.into(), centre: a.centre.into() }).collect();
     match sketch::sketch_outline(&lines, &circles, &arcs).map_err(|e| e.to_string())? {
         sketch::SketchOutline::Open(why) => Ok(SketchOutlineOut::Open(why.to_string())),
-        sketch::SketchOutline::Closed(profile) => {
+        sketch::SketchOutline::Closed(profile, sources) => {
             let outer = match profile.outer {
                 ops::profile::Boundary::Path { corners, bulges } => LoopOut::Path { corners: corners.iter().flat_map(|p| [p.x, p.y]).collect(), bulges },
                 ops::profile::Boundary::Circle { center, radius } => LoopOut::Circle { center: center.into(), radius },
             };
-            Ok(SketchOutlineOut::Closed(ProfileOut { outer, holes: vec![] }))
+            let pieces = sources.into_iter().map(PieceOut::from).collect();
+            Ok(SketchOutlineOut::Closed(ProfileOut { outer, holes: vec![], pieces }))
         }
     }
 }
@@ -366,10 +439,16 @@ mod tests {
     #[test]
     fn sketch_outline_in_the_apps_form() {
         // A 3-4-5 right triangle drawn with its last line backwards: the
-        // corners come out as flat pairs in walking order, no bulges, no holes.
+        // corners come out as flat pairs in walking order, no bulges, no
+        // holes. The walk runs line 1 then line 2, and line 3 from (0, 3)
+        // back to (0, 0), the other way from how it was drawn.
         let line = |a: [f64; 2], b: [f64; 2]| LineIn { a, b };
         let lines = [line([0.0, 0.0], [4.0, 0.0]), line([4.0, 0.0], [0.0, 3.0]), line([0.0, 0.0], [0.0, 3.0])];
-        let want = ProfileOut { outer: LoopOut::Path { corners: vec![0.0, 0.0, 4.0, 0.0, 0.0, 3.0], bulges: vec![] }, holes: vec![] };
+        let want = ProfileOut { outer: LoopOut::Path { corners: vec![0.0, 0.0, 4.0, 0.0, 0.0, 3.0], bulges: vec![] }, holes: vec![], pieces: vec![
+            PieceOut { curve: "line", index: 0, reversed: false },
+            PieceOut { curve: "line", index: 1, reversed: false },
+            PieceOut { curve: "line", index: 2, reversed: true },
+        ] };
         assert_eq!(sketch_outline_of(&lines, &[], &[]).unwrap(), SketchOutlineOut::Closed(want));
         // Its closed outline extrudes: area ½·4·3 = 6, so 2 mm deep is 12 mm³.
         let SketchOutlineOut::Closed(p) = sketch_outline_of(&lines, &[], &[]).unwrap() else { panic!() };
@@ -393,8 +472,11 @@ mod tests {
         // √2 − 1 on its second piece.
         let lines = [LineIn { a: [0.0, 0.0], b: [10.0, 0.0] }, LineIn { a: [0.0, 10.0], b: [0.0, 0.0] }];
         let arcs = [ArcIn { start: [10.0, 0.0], end: [0.0, 10.0], centre: [0.0, 0.0] }];
-        let SketchOutlineOut::Closed(ProfileOut { outer: LoopOut::Path { corners, bulges }, holes }) = sketch_outline_of(&lines, &[], &arcs).unwrap() else { panic!() };
+        let SketchOutlineOut::Closed(ProfileOut { outer: LoopOut::Path { corners, bulges }, holes, pieces }) = sketch_outline_of(&lines, &[], &arcs).unwrap() else { panic!() };
         assert_eq!((corners.clone(), holes), (vec![0.0, 0.0, 10.0, 0.0, 0.0, 10.0], vec![]));
+        // Pieces: line 0, the arc, then line 1, each the way it was drawn.
+        let piece = |curve, index| PieceOut { curve, index, reversed: false };
+        assert_eq!(pieces, vec![piece("line", 0), piece("arc", 0), piece("line", 1)]);
         assert!(bulges[0] == 0.0 && rel_eq(bulges[1], 2f64.sqrt() - 1.0, FP_REL) && bulges[2] == 0.0, "{bulges:?}");
         // Extruded 4 mm: V = ¼π·10²·4 = 100π. A = the two quarter discs
         // 2 × 25π, the two flat sides 2 × 10·4 = 80 and the curved side
@@ -415,7 +497,7 @@ mod tests {
         // make_extrude's form, the same numbers back.
         let c = CircleIn { centre: [3.0, -4.0], radius: 5.0 };
         let out = sketch_outline_of(&[], &[c], &[]).unwrap();
-        assert_eq!(out, SketchOutlineOut::Closed(ProfileOut { outer: LoopOut::Circle { center: [3.0, -4.0], radius: 5.0 }, holes: vec![] }));
+        assert_eq!(out, SketchOutlineOut::Closed(ProfileOut { outer: LoopOut::Circle { center: [3.0, -4.0], radius: 5.0 }, holes: vec![], pieces: vec![PieceOut { curve: "circle", index: 0, reversed: false }] }));
         // Extruded 2 mm: V = πr²h = π·25·2 = 50π; A = two discs 2πr² = 50π
         // plus the side 2πr·h = 20π, so 70π. One cylinder side, two discs;
         // each rim is one closed circle edge starting and ending at its one
@@ -611,6 +693,38 @@ mod tests {
         let (faces, edges) = types(&ops::extrude::extrude(&plate, 1.0).unwrap());
         assert_eq!((faces.iter().filter(|t| **t == "cylinder").count(), faces.len()), (1, 7));
         assert_eq!((edges.iter().filter(|t| **t == "circle").count(), edges.len()), (2, 14));
+    }
+
+    #[test]
+    fn a_sketched_slot_names_its_faces_by_the_curves_drawn_worked_by_hand() {
+        // The slot of sketch.rs's each_piece_names_the_arc_it_came_from:
+        // radius 5 round (0, 5) and (20, 5), walked clockwise, so its
+        // pieces are line 0, arc 1 backwards, line 1 backwards, arc 0
+        // backwards. Extruded by 4 from the outline as the app sends it,
+        // the side of piece 1 is arc 1's wall, the left half circle: π·5·4
+        // = 20π, its centroid 2r/π = 10/π left of (0, 5), half way up.
+        // Caps: 20·10 + 25π, centred (10, 5) by symmetry.
+        let lines = [LineIn { a: [20.0, 0.0], b: [0.0, 0.0] }, LineIn { a: [20.0, 10.0], b: [0.0, 10.0] }];
+        let arcs = [ArcIn { start: [20.0, 0.0], end: [20.0, 10.0], centre: [20.0, 5.0] }, ArcIn { start: [0.0, 10.0], end: [0.0, 0.0], centre: [0.0, 5.0] }];
+        let SketchOutlineOut::Closed(ProfileOut { outer: LoopOut::Path { corners, bulges }, pieces, .. }) = sketch_outline_of(&lines, &[], &arcs).unwrap() else { panic!() };
+        assert_eq!((pieces[1].curve, pieces[1].index, pieces[1].reversed), ("arc", 1, true));
+        let profile = profile_from_input(ProfileIn { outer: BoundaryIn::Path { corners, bulges }, holes: vec![] }).unwrap();
+        let v = view_body(&ops::extrude::extrude(&profile, 4.0).unwrap()).unwrap();
+        let face = |role: FaceRoleOut| v.face_roles.iter().position(|r| r.as_ref() == Some(&role)).unwrap();
+        let only = |role| FaceRoleOut { role, boundary: None, piece: None };
+        let side = |piece| FaceRoleOut { role: "side", boundary: Some(0), piece: Some(piece) };
+        let near = |got: [f64; 3], want: [f64; 3]| (0..3).all(|k| (got[k] - want[k]).abs() <= 1e-12 * want[k].abs().max(1.0));
+        let left = face(side(1));
+        assert!(rel_eq(v.face_areas[left], 20.0 * PI, FP_REL) && near(v.face_centroids[left], [-10.0 / PI, 5.0, 2.0]), "{:?}", v.face_centroids[left]);
+        let right = face(side(3));
+        assert!(near(v.face_centroids[right], [20.0 + 10.0 / PI, 5.0, 2.0]), "{:?}", v.face_centroids[right]);
+        let start = face(only("start"));
+        assert!(rel_eq(v.face_areas[start], 200.0 + 25.0 * PI, FP_REL) && near(v.face_centroids[start], [10.0, 5.0, 0.0]));
+        // In JavaScript: { role: "side", boundary: 0, piece: 1 } and { role: "start" }.
+        assert_eq!(serde_json::to_string(&v.face_roles[left]).unwrap(), r#"{"role":"side","boundary":0,"piece":1}"#);
+        assert_eq!(serde_json::to_string(&v.face_roles[start]).unwrap(), r#"{"role":"start"}"#);
+        // A body built by hand has no roles.
+        assert!(view_body(&fixtures::hand_cube()).unwrap().face_roles.iter().all(Option::is_none));
     }
 
     #[test]

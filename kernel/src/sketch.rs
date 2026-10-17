@@ -62,7 +62,11 @@
 //!   clockwise). The loop then goes through the profile rules
 //!   (`ops::profile::check_profile`: no crossings, touching or slivers),
 //!   so a closed sketch is exactly a profile the extrude accepts (a lone
-//!   circle goes through the same check). Several
+//!   circle goes through the same check). With the profile come the
+//!   sources of its pieces (`Source`, step 24b): piece i of the outline is
+//!   which line, arc or circle, and whether the walk runs it backwards, so
+//!   the app can name each side of an extrude by the sketch curve it came
+//!   from (`topology::FaceRole::Side`). Several
 //!   separate loops, and loops inside loops, wait for profile detection
 //!   (step 28); until then they are reported, not guessed at.
 //!
@@ -307,9 +311,26 @@ impl fmt::Display for Open {
 /// What a sketch's curves make.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SketchOutline {
-    /// One closed loop that passes the profile rules: ready to extrude.
-    Closed(Profile),
+    /// One closed loop that passes the profile rules: ready to extrude;
+    /// with the source of each of its outer loop's pieces, in order.
+    Closed(Profile, Vec<Source>),
     Open(Open),
+}
+
+/// One of a sketch's curves, by its index in the list it was given in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SketchCurve {
+    Line(usize),
+    Arc(usize),
+    Circle(usize),
+}
+
+/// Where a piece of an outline came from: the sketch curve, and whether the
+/// outline runs it backwards (a line from its `b`, an arc from its end).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Source {
+    pub curve: SketchCurve,
+    pub reversed: bool,
 }
 
 /// A line or an arc as the walk sees it: two ends and the bulge from `a`
@@ -343,7 +364,10 @@ pub fn sketch_outline(lines: &[Line], circles: &[Circle], arcs: &[Arc]) -> Resul
     if pieces.is_empty() {
         return match circles {
             [] => Ok(SketchOutline::Open(Open::Empty)),
-            [c] => profiled(Profile { outer: Boundary::Circle { center: c.centre, radius: c.radius }, holes: vec![] }),
+            [c] => profiled(
+                Profile { outer: Boundary::Circle { center: c.centre, radius: c.radius }, holes: vec![] },
+                vec![Source { curve: SketchCurve::Circle(0), reversed: false }],
+            ),
             _ => Ok(SketchOutline::Open(Open::SeveralLoops { loops: circles.len() })),
         };
     }
@@ -388,14 +412,23 @@ pub fn sketch_outline(lines: &[Line], circles: &[Circle], arcs: &[Arc]) -> Resul
     if bulges.iter().all(|&b| b == 0.0) {
         bulges.clear();
     }
-    profiled(Profile { outer: Boundary::Path { corners, bulges }, holes: vec![] })
+    // Lines come first in `pieces`, then arcs.
+    let sources = walk
+        .iter()
+        .map(|&e| {
+            let piece = e / 2;
+            let curve = if piece < lines.len() { SketchCurve::Line(piece) } else { SketchCurve::Arc(piece - lines.len()) };
+            Source { curve, reversed: e % 2 == 1 }
+        })
+        .collect();
+    profiled(Profile { outer: Boundary::Path { corners, bulges }, holes: vec![] }, sources)
 }
 
 /// The profile as a closed outline if it passes the profile rules, else
 /// open with their reason.
-fn profiled(profile: Profile) -> Result<SketchOutline, KernelError> {
+fn profiled(profile: Profile, sources: Vec<Source>) -> Result<SketchOutline, KernelError> {
     match check_profile(&profile) {
-        Ok(_) => Ok(SketchOutline::Closed(profile)),
+        Ok(_) => Ok(SketchOutline::Closed(profile, sources)),
         Err(KernelError::InvalidInput(reason)) => Ok(SketchOutline::Open(Open::NotAProfile { reason })),
         Err(e) => Err(e),
     }
@@ -478,7 +511,7 @@ mod tests {
 
     fn corners(outline: SketchOutline) -> Vec<DVec2> {
         match outline {
-            SketchOutline::Closed(Profile { outer: Boundary::Path { corners, bulges }, holes }) => {
+            SketchOutline::Closed(Profile { outer: Boundary::Path { corners, bulges }, holes }, _) => {
                 assert!(bulges.is_empty() && holes.is_empty());
                 corners
             }
@@ -720,7 +753,7 @@ mod tests {
         assert_eq!(open(&tri(1.1 * LINEAR)), Open::LooseEnd { at: v(0.0, 0.0) });
         // The same along y, so the distance (not just x) decides.
         let tri_y = |d: f64| vec![line((0.0, 0.0), (4.0, 0.0)), line((4.0, 0.0), (0.0, 3.0)), line((0.0, 3.0), (0.0, d))];
-        assert!(matches!(sketch_outline(&tri_y(0.9 * LINEAR), &[], &[]).unwrap(), SketchOutline::Closed(_)));
+        assert!(matches!(sketch_outline(&tri_y(0.9 * LINEAR), &[], &[]).unwrap(), SketchOutline::Closed(..)));
         assert_eq!(open(&tri_y(1.1 * LINEAR)), Open::LooseEnd { at: v(0.0, 0.0) });
         // Diagonal: 0.8 LINEAR in x and in y is 1.13 LINEAR apart.
         let d = 0.8 * LINEAR;
@@ -733,7 +766,7 @@ mod tests {
         // The sweep stops once x is more than LINEAR further on, but an end
         // exactly LINEAR along in x and level is still joined.
         let tri = |d: f64| vec![line((d, 0.0), (4.0, 0.0)), line((4.0, 0.0), (0.0, 3.0)), line((0.0, 3.0), (0.0, 0.0))];
-        assert!(matches!(sketch_outline(&tri(LINEAR), &[], &[]).unwrap(), SketchOutline::Closed(_)));
+        assert!(matches!(sketch_outline(&tri(LINEAR), &[], &[]).unwrap(), SketchOutline::Closed(..)));
         assert_eq!(open(&tri(1.1 * LINEAR)), Open::LooseEnd { at: v(1.1 * LINEAR, 0.0) });
     }
 
@@ -809,7 +842,7 @@ mod tests {
         // 1.1 MIN_FEATURE tall: the tip is 1.1 MIN_FEATURE from the base, so
         // it is accepted.
         let thin = ring(&[(0.0, 0.0), (10.0, 0.0), (5.0, 1.1 * MIN_FEATURE)]);
-        assert!(matches!(sketch_outline(&thin, &[], &[]).unwrap(), SketchOutline::Closed(_)));
+        assert!(matches!(sketch_outline(&thin, &[], &[]).unwrap(), SketchOutline::Closed(..)));
     }
 
     #[test]
@@ -827,7 +860,7 @@ mod tests {
         // is that circle, unchanged (no corners to walk), with no holes.
         let got = sketch_outline(&[], &[circle(3.0, -4.0, 5.0)], &[]).unwrap();
         let want = Profile { outer: Boundary::Circle { center: v(3.0, -4.0), radius: 5.0 }, holes: vec![] };
-        assert_eq!(got, SketchOutline::Closed(want.clone()));
+        assert_eq!(got, SketchOutline::Closed(want.clone(), vec![Source { curve: SketchCurve::Circle(0), reversed: false }]));
         // It passes the profile rules: one loop, area π·5² = 25π (the
         // profile's own signed area, counter-clockwise).
         let loops = check_profile(&want).unwrap();
@@ -840,7 +873,7 @@ mod tests {
         // Smallest: MIN_FEATURE. Largest: MAX_SIZE / 2 = 500000 mm, a
         // diameter of exactly MAX_SIZE, the most a profile may span.
         let at = |r: f64| sketch_outline(&[], &[circle(0.0, 0.0, r)], &[]);
-        let closed = |r: f64| matches!(at(r), Ok(SketchOutline::Closed(_)));
+        let closed = |r: f64| matches!(at(r), Ok(SketchOutline::Closed(..)));
         assert!(closed(1.1 * MIN_FEATURE) && closed(MIN_FEATURE));
         assert!(closed(0.9 * MAX_SIZE / 2.0) && closed(MAX_SIZE / 2.0));
         for bad in [0.9 * MIN_FEATURE, 1.1 * MAX_SIZE / 2.0, 0.0, -5.0, f64::NAN, f64::INFINITY] {
@@ -895,7 +928,7 @@ mod tests {
         eight.extend(ring(&[(0.0, 0.0), (-4.0, 1.0), (-4.0, -1.0)]));
         assert_eq!(open_with(&eight, &[circle(50.0, 0.0, 1.0)]), Open::Branch { at: v(0.0, 0.0), ends: 4 });
         // Without the circle the square closes, so the count is the circle's.
-        assert!(matches!(sketch_outline(&square, &[], &[]).unwrap(), SketchOutline::Closed(_)));
+        assert!(matches!(sketch_outline(&square, &[], &[]).unwrap(), SketchOutline::Closed(..)));
     }
 
     #[test]
@@ -930,6 +963,56 @@ mod tests {
         );
     }
 
+    // ---- where each piece came from (step 24b)
+
+    #[test]
+    fn each_piece_names_the_line_it_came_from_worked_by_hand() {
+        // A 40 × 30 rectangle drawn as four lines, two of them backwards:
+        // line 0 (0,0) → (40,0), line 1 (40,30) → (40,0), line 2 (0,30) →
+        // (40,30), line 3 (0,30) → (0,0). The walk starts at line 0's start
+        // and goes (0,0) → (40,0), reaches line 1 at its end, so runs it
+        // backwards up to (40,30), meets line 2 at its end, runs it back to
+        // (0,30), then line 3 forwards home.
+        let lines = [line((0.0, 0.0), (40.0, 0.0)), line((40.0, 30.0), (40.0, 0.0)), line((0.0, 30.0), (40.0, 30.0)), line((0.0, 30.0), (0.0, 0.0))];
+        let SketchOutline::Closed(profile, sources) = sketch_outline(&lines, &[], &[]).unwrap() else { panic!() };
+        assert_eq!(profile, Profile::polygon(vec![v(0.0, 0.0), v(40.0, 0.0), v(40.0, 30.0), v(0.0, 30.0)], vec![]));
+        let src = |k, reversed| Source { curve: SketchCurve::Line(k), reversed };
+        assert_eq!(sources, vec![src(0, false), src(1, true), src(2, true), src(3, false)]);
+        // Listing the same lines in another order renumbers them and the
+        // walk starts at the new line 0, but each piece still names the
+        // line that runs between its corners.
+        let shuffled = [lines[2], lines[0], lines[3], lines[1]];
+        let SketchOutline::Closed(profile, sources) = sketch_outline(&shuffled, &[], &[]).unwrap() else { panic!() };
+        // From (0,30) along old line 2 to (40,30), old line 1 back down to
+        // (40,0), old line 0 backwards to (0,0), old line 3 backwards up.
+        assert_eq!(profile, Profile::polygon(vec![v(0.0, 30.0), v(40.0, 30.0), v(40.0, 0.0), v(0.0, 0.0)], vec![]));
+        assert_eq!(sources, vec![src(0, false), src(3, false), src(1, true), src(2, true)]);
+    }
+
+    #[test]
+    fn each_piece_names_the_arc_it_came_from_worked_by_hand() {
+        // A slot of radius 5 between (0,5) and (20,5), drawn so the walk
+        // runs clockwise: line 0 (20,0) → (0,0) first, then arc 1 (the left
+        // half, drawn counter-clockwise from (0,10) round (0,5) to (0,0)),
+        // met at its end so run backwards with its bulge 1 negated; line 1
+        // (20,10) → (0,10) met at its end; arc 0 (the right half, (20,0) to
+        // (20,10) round (20,5)) met at its end. Arcs are listed after lines.
+        let lines = [line((20.0, 0.0), (0.0, 0.0)), line((20.0, 10.0), (0.0, 10.0))];
+        let arcs = [arc((20.0, 0.0), (20.0, 10.0), (20.0, 5.0)), arc((0.0, 10.0), (0.0, 0.0), (0.0, 5.0))];
+        let SketchOutline::Closed(profile, sources) = sketch_outline(&lines, &[], &arcs).unwrap() else { panic!() };
+        let corners = vec![v(20.0, 0.0), v(0.0, 0.0), v(0.0, 10.0), v(20.0, 10.0)];
+        assert_eq!(profile, Profile { outer: Boundary::Path { corners, bulges: vec![0.0, -1.0, 0.0, -1.0] }, holes: vec![] });
+        assert_eq!(
+            sources,
+            vec![
+                Source { curve: SketchCurve::Line(0), reversed: false },
+                Source { curve: SketchCurve::Arc(1), reversed: true },
+                Source { curve: SketchCurve::Line(1), reversed: true },
+                Source { curve: SketchCurve::Arc(0), reversed: true },
+            ]
+        );
+    }
+
     // ---- arcs (step 23a)
 
     fn arc(start: (f64, f64), end: (f64, f64), centre: (f64, f64)) -> Arc {
@@ -939,7 +1022,7 @@ mod tests {
     /// The corners and bulges of a closed outline that is a path.
     fn path(outline: SketchOutline) -> (Vec<DVec2>, Vec<f64>) {
         match outline {
-            SketchOutline::Closed(Profile { outer: Boundary::Path { corners, bulges }, holes }) => {
+            SketchOutline::Closed(Profile { outer: Boundary::Path { corners, bulges }, holes }, _) => {
                 assert!(holes.is_empty());
                 (corners, bulges)
             }
@@ -953,7 +1036,7 @@ mod tests {
 
     /// The area inside a closed outline, by the profile's own signed area.
     fn area(outline: SketchOutline) -> f64 {
-        let SketchOutline::Closed(profile) = outline else { panic!("expected a closed outline, got {outline:?}") };
+        let SketchOutline::Closed(profile, _) = outline else { panic!("expected a closed outline, got {outline:?}") };
         crate::ops::profile::signed_area(&check_profile(&profile).unwrap()[0]).abs()
     }
 
@@ -1069,7 +1152,7 @@ mod tests {
             let lines = [line((0.0, 0.0), (10.0, 0.0)), line((0.0, 10.0 + d), (0.0, 0.0))];
             sketch_outline(&lines, &[], &[arc((10.0, 0.0), (0.0, 10.0), (0.0, 0.0))]).unwrap()
         };
-        assert!(matches!(at(0.9 * LINEAR), SketchOutline::Closed(_)));
+        assert!(matches!(at(0.9 * LINEAR), SketchOutline::Closed(..)));
         // Ends numbered lines first: line 2's start (end 2) is the lowest loose one.
         assert_eq!(at(1.1 * LINEAR), SketchOutline::Open(Open::LooseEnd { at: v(0.0, 10.0 + 1.1 * LINEAR) }));
     }
