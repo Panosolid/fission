@@ -1,17 +1,10 @@
 //! `validate` checks that a body is a well-formed closed solid. Every kernel
 //! operation must finish with `checked`, which runs it.
 //!
-//! Mutation testing (`cargo mutants`, lib tests) leaves one survivor,
-//! equivalent for what `validate` decides:
-//! - `check_geometry`, the outer loop's area `< 0.0` → `<= 0.0`: differs
-//!   only when the first loop's area is exactly zero while the face's net
-//!   area is above AREA, so another loop has positive area. A zero-area
-//!   outer loop doubles back on itself (overlapping or zero-length edges)
-//!   and a positive inner loop runs the wrong way, so the body is already
-//!   rejected (self-intersection, ZeroLengthEdge, LoopOrientation); the
-//!   mutant only adds a FaceOrientation label to a body that is invalid
-//!   either way. The `> LINEAR` ties for vertex-off-edge and edge-off-face
-//!   are pinned by tests at exactly LINEAR.
+//! Mutation testing (`cargo mutants -f src/validate.rs`, lib tests) leaves
+//! no survivors. Ties are pinned by tests: `> LINEAR` for vertex-off-edge
+//! and edge-off-face at exactly LINEAR, and the outer loop's area `< 0.0`
+//! for FaceOrientation at exactly 0 (`a_zero_area_outer_loop_is_not_called_inside_out`).
 
 use crate::geom::{Curve, Surface};
 use crate::tessellate::{tessellate, TessOptions};
@@ -565,6 +558,42 @@ mod tests {
             .map(|(face, loop_index)| ValidationError::LoopOrientation { face, loop_index })
             .to_vec();
         assert_eq!(errs, expected);
+    }
+
+    #[test]
+    fn a_zero_area_outer_loop_is_not_called_inside_out() {
+        // A plane face whose outer loop goes from (0,0,0) to (4,0,0) and
+        // straight back on a second edge, enclosing nothing (shoelace: the
+        // two cross products are 0 exactly), with a counter-clockwise
+        // triangle (0,1) (2,1) (0,3) inside it, area ½·2·2 = 2. The net
+        // area is 2 > AREA, so the face isn't zero-area; the outer loop
+        // runs neither way, so it isn't FaceOrientation either (which
+        // means "runs clockwise", area < 0). The geometry checks report
+        // nothing: what's wrong here is for the topology and solid checks.
+        let mut b = Body::default();
+        let p = [(0.0, 0.0), (4.0, 0.0), (0.0, 1.0), (2.0, 1.0), (0.0, 3.0)].map(|(x, y)| b.add_vertex(DVec3::new(x, y, 0.0)));
+        let c = |edge| crate::topology::Coedge { edge, reversed: false };
+        let outer = Loop { coedges: vec![c(b.add_line(p[0], p[1])), c(b.add_line(p[1], p[0]))] };
+        let inner = Loop { coedges: vec![c(b.add_line(p[2], p[3])), c(b.add_line(p[3], p[4])), c(b.add_line(p[4], p[2]))] };
+        let plane = Surface::Plane { origin: DVec3::ZERO, normal: DVec3::Z, x_dir: DVec3::X };
+        let f = b.add_face(plane, true, vec![outer, inner]);
+        let areas: Vec<f64> = b.faces[f].loops.iter().map(|l| planar_loop_area(&b, &b.faces[f], l)).collect();
+        assert!(areas[0] == 0.0 && tolerance::eq(areas[1], 2.0), "{areas:?}");
+        let mut errs = vec![];
+        check_geometry(&b, &mut errs);
+        assert_eq!(errs, vec![]);
+        // Flipped (normal −Z), the face sees the triangle run clockwise,
+        // area −2, and the zero loop's area becomes −0.0, still not below
+        // 0: nothing reported while the zero loop is first. With the
+        // triangle first, the outer loop runs clockwise: FaceOrientation.
+        b.faces[f].sense = false;
+        let mut errs = vec![];
+        check_geometry(&b, &mut errs);
+        assert_eq!(errs, vec![]);
+        b.faces[f].loops.swap(0, 1);
+        let mut errs = vec![];
+        check_geometry(&b, &mut errs);
+        assert_eq!(errs, vec![ValidationError::FaceOrientation { face: f }]);
     }
 
     #[test]

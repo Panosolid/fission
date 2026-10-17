@@ -79,6 +79,8 @@ export function partCommand(project: Project): Command[] {
   if (!doc) return [];
   try {
     const { shape, sizes } = partOf(doc);
+    // An extrude of a sketch (step 21d) has no set_part that makes it.
+    if (shape === "sketch-extrude") return [];
     return [{ op: "set_part", shape, ...sizes }];
   } catch {
     return [];

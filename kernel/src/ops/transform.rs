@@ -46,10 +46,12 @@ fn checked_place(placed: Placed) -> Result<Placed, KernelError> {
     Ok(placed)
 }
 
-/// Every part of the body must lie within ±MAX_COORD. In `extrude` this is
-/// a backstop no test can reach: the profile check already bounds every
-/// piece of the outline, and the height is at most MAX_SIZE < MAX_COORD
-/// (so `cargo mutants` replacing it with Ok(()) there is equivalent).
+/// Every part of the body must lie within ±MAX_COORD. In `extrude` the
+/// profile check already bounds every piece of the outline, and the height
+/// is at most MAX_SIZE < MAX_COORD, but an arc's extreme there can round
+/// down onto MAX_COORD while the body's own bound for it rounds up past it,
+/// and this check refuses those (extrude's test
+/// `an_arc_too_close_to_the_edge_of_model_space_is_refused`).
 pub(crate) fn check_in_model_space(body: &Body) -> Result<(), KernelError> {
     let (lo, hi) = body.bounds();
     check_reach(lo, hi)

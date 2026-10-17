@@ -18,7 +18,10 @@ function fakeScene() {
     showSelection: (h) => void calls.push(`showSelection faces ${h.faces.join(",")}`),
     showImage: () => void calls.push("scene.showImage"),
     clearImage: () => void calls.push("scene.clearImage"),
+    showSketches: (d) => void calls.push(`showSketches ${d.length}`),
+    showPlanes: (p) => void calls.push(`showPlanes ${p.map((x) => x.id).join(",")}`),
     onPick: null,
+    onSketchPointer: null,
   };
   return { scene, calls };
 }
@@ -114,4 +117,24 @@ test("a pane clearing a handler it never set leaves the other pane's alone, and 
   // Unchanged by showSelection(NO_HIGHLIGHT), which is a scene call only.
   b.showSelection(NO_HIGHLIGHT);
   assert.equal(scene.onPick, handlerB);
+});
+
+test("sketches and planes reach the one viewer; the sketch pointer follows the same newest-pane rule as picking", () => {
+  const { scene, calls } = fakeScene();
+  const pane = paneViewports(scene);
+  const a = pane(fakeView("a", []));
+  const b = pane(fakeView("b", []));
+  a.showSketches([]);
+  b.showPlanes([{ id: "XY", plane: { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, offered: true }]);
+  assert.deepEqual(calls, ["showSketches 0", "showPlanes XY"]);
+  const handlerA = () => {};
+  const handlerB = () => {};
+  a.onSketchPointer = handlerA;
+  b.onSketchPointer = handlerB;
+  assert.equal(scene.onSketchPointer, handlerB, "the newest wins");
+  b.onSketchPointer = null;
+  assert.equal(scene.onSketchPointer, handlerA, "a keeps it when b hides");
+  assert.equal(scene.onPick, null, "the pick handler is separate");
+  a.onSketchPointer = null;
+  assert.equal(scene.onSketchPointer, null);
 });

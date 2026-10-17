@@ -23,19 +23,34 @@
 //! still sees the proposed point.
 //!
 //! Mutation testing (`cargo mutants -f src/intersect.rs`) leaves these
-//! survivors, all equivalent: `>` vs `>=` (or `<` vs `<=`) at exact ties
-//! in `trig_zeros` ruling an interval out, `trig1_zeros` (s = 1 is taken by
-//! the branch before), `quadratic` (at d = 0 both forms give the double
-//! root −b) and `curve_curve`'s off-the-plane tests; `b − a` vs `b + a` or
-//! `b / a` in the grid size of a run (never a coarser grid, and a finer one
-//! only finds the same sign changes); `||` vs `&&` in `bisect`'s stop test
-//! (the 80-step cap ends it anyway); `+` vs `−` before the sine term of
-//! the plane–cylinder ellipse, `around_cylinder`'s walk and
-//! `circle_points`, and before `circle_points`' offset from its centre (the
-//! curve walked the other way round, or mirrored through its centre, gives
-//! the same points at the fixed angles, which are symmetric); and `−` vs
-//! `+` in the centred rod–ball test where the result is only that
-//! the general path is taken, which gives the same points.
+//! survivors, all equivalent (no input can tell them apart):
+//! - `s > 1` → `s >= 1` in `trig1_zeros`: s = 1 is taken by the branch
+//!   before (|s| ≤ 1).
+//! - `||` → `&&` in `bisect`'s stop test, which only ends the loop early:
+//!   once a and b are neighbouring doubles, every further step leaves them
+//!   as they are (the midpoint rounds to one of them, where f's sign is
+//!   already known and not 0), and the 80-step cap ends it with the same
+//!   answer.
+//! - `b − a` → `b + a` or `b / a` in `grid_steps`: 64 steps where the
+//!   real count is fewer, which is only in a run narrower than
+//!   63·LEAF_WIDTH, and such a run holds at most one zero. (Two zeros
+//!   s ≤ 6.3e-5 apart have a turning point between them where |f| ≤
+//!   slope_bound·s²/4 ≈ 1e-9·slope_bound; as |f″| ≤ 2·slope_bound, |f|
+//!   stays under a leaf's bound, slope_bound·LEAF_WIDTH/2 or so, for
+//!   ~6e-4 either side, so their run is that wide.) Both grids then see
+//!   the one sign change, and bisect it to the same zero, up to the
+//!   rounding noise where f's computed sign flips back and forth: checked
+//!   on 20,000 polynomials (random, near-tangent and with near-double
+//!   zeros), the same number of zeros every time, 141 of ~40,000 differing
+//!   in value, by at most 1.3e-14 rad.
+//!
+//! The circles walked round (the plane–cylinder ellipse, `around_cylinder`,
+//! `circle_points`) are evaluated by `Curve::eval`, and the part of a
+//! vector across an axis by `across`, each tested wherever it is used:
+//! written out in place, a slip in them (walking a circle the other way
+//! round, or mirrored, or a centred ball taken for an off-centre one) would
+//! only change which points of the same curves are proposed, and go
+//! unseen.
 
 use crate::geom::{Curve, Surface};
 use crate::tolerance::{ANGULAR, LINEAR};
@@ -152,7 +167,7 @@ fn trig_zeros_counted(f: &Trig2) -> (Vec<f64>, usize) {
     for (a, b) in runs {
         let mut found = false;
         // Look for sign changes on a fine grid across the run.
-        let steps = (((b - a) / LEAF_WIDTH).ceil() as usize).clamp(1, 64);
+        let steps = grid_steps(a, b);
         let mut prev = (a, f.eval(a));
         for i in 1..=steps {
             let t = a + (b - a) * i as f64 / steps as f64;
@@ -175,6 +190,12 @@ fn trig_zeros_counted(f: &Trig2) -> (Vec<f64>, usize) {
         }
     }
     (out.iter().map(|t| t.rem_euclid(TAU)).collect(), evals)
+}
+
+/// Steps of the grid `trig_zeros` lays across a run [a, b] to look for
+/// sign changes: at most LEAF_WIDTH apart, but no more than 64.
+fn grid_steps(a: f64, b: f64) -> usize {
+    (((b - a) / LEAF_WIDTH).ceil() as usize).clamp(1, 64)
 }
 
 /// A zero of f between a and b, where f(a) and f(b) differ in sign.
@@ -304,8 +325,7 @@ pub fn curve_surface(curve: &Curve, surface: &Surface, known: &[f64]) -> Vec<f64
         }
         (Curve::Circle { center, axis, x_dir, radius: rho }, Surface::Cylinder { origin: c, axis: a, radius, .. }) => {
             let (x, y) = circle_frame(axis, x_dir);
-            let across = |v: DVec3| v - a * v.dot(a);
-            let w = across(center - c);
+            let w = across(center - c, a);
             if axis.cross(a).length() <= ANGULAR {
                 // The circle lies across the axis: in its plane, the
                 // cylinder is a circle about the axis, and
@@ -317,11 +337,16 @@ pub fn curve_surface(curve: &Curve, surface: &Surface, known: &[f64]) -> Vec<f64
             // trigonometric polynomial in θ. No deflation here: a shared
             // vertex's own candidates are dropped by the caller's distance
             // test. (No body can have such a pair until booleans.)
-            let (xa, ya) = (across(x), across(y));
+            let (xa, ya) = (across(x, a), across(y, a));
             let f = Trig2::fit(|t| (w + (xa * t.cos() + ya * t.sin()) * rho).length_squared() - radius * radius);
             trig_zeros(&f)
         }
     }
+}
+
+/// The part of v across a unit axis (less its part along it).
+fn across(v: DVec3, axis: DVec3) -> DVec3 {
+    v - axis * v.dot(axis)
 }
 
 fn line_quadratic(b: f64, c: f64, known: &[f64]) -> Vec<f64> {
@@ -445,12 +470,13 @@ pub fn closed_meetings(a: &Surface, b: &Surface) -> Vec<DVec3> {
             if na.abs() <= ANGULAR {
                 return vec![]; // parallel to the axis: lines
             }
-            // An ellipse: over the cylinder at angle θ, the height h with
-            // n·(c + r w(θ) + h a − o) = 0.
-            let y = axis.cross(x_dir);
+            // An ellipse: over the point p(θ) = c + r w(θ) of the
+            // cylinder's circle at its origin, the height h with
+            // n·(p(θ) + h a − o) = 0.
+            let base = Curve::Circle { center: c, axis, x_dir, radius };
             ring(|t| {
-                let w = (x_dir * t.cos() + y * t.sin()) * radius;
-                c + w + axis * (-(n.dot(c + w - po)) / na)
+                let p = base.eval(t);
+                p + axis * (-(n.dot(p - po)) / na)
             })
         }
         (Plane { origin: po, normal: n, .. }, Sphere { center, radius, .. }) => {
@@ -478,9 +504,8 @@ pub fn closed_meetings(a: &Surface, b: &Surface) -> Vec<DVec3> {
             circle_points(c1 + u * x, u, rho2.sqrt())
         }
         (Cylinder { origin: c, axis, x_dir, radius }, Sphere { center: s, radius: big_r, .. }) => {
-            let y = axis.cross(x_dir);
-            let off = (s - c) - axis * (s - c).dot(axis);
-            let h0 = (s - c).dot(axis);
+            let sc = s - c;
+            let (off, h0) = (across(sc, axis), sc.dot(axis));
             if off.length() <= LINEAR {
                 // Centre on the axis: circles at h0 ± √(R² − r²).
                 let d2 = (big_r - radius) * (big_r + radius);
@@ -489,7 +514,8 @@ pub fn closed_meetings(a: &Surface, b: &Surface) -> Vec<DVec3> {
             }
             // Over angle θ: h² + 2Bh + C = 0 with d = c + r w(θ) − s,
             // B = a·d, C = |d|² − R².
-            around_cylinder(c, axis, x_dir, y, radius, |d| (d.dot(axis), d.length_squared() - big_r * big_r), s)
+            let base = Curve::Circle { center: c, axis, x_dir, radius };
+            around_cylinder(&base, axis, |d| (d.dot(axis), d.length_squared() - big_r * big_r), s)
         }
         (Cylinder { origin: c1, axis: a1, x_dir, radius: r1 }, Cylinder { origin: c2, axis: a2, radius: r2, .. }) => {
             let e = a1 - a2 * a1.dot(a2);
@@ -500,13 +526,10 @@ pub fn closed_meetings(a: &Surface, b: &Surface) -> Vec<DVec3> {
             // A point c1 + r1 w(θ) + h a1 is at distance r2 from axis 2 when
             // |d⊥ + h e|² = r2², d = c1 + r1 w − c2, ⊥ across a2, e = a1⊥:
             // h² + 2Bh + C = 0, B = d⊥·e/|e|², C = (|d⊥|² − r2²)/|e|².
-            let y = a1.cross(x_dir);
+            let base = Curve::Circle { center: c1, axis: a1, x_dir, radius: r1 };
             around_cylinder(
-                c1,
+                &base,
                 a1,
-                x_dir,
-                y,
-                r1,
                 |d| {
                     let dp = d - a2 * d.dot(a2);
                     (dp.dot(e) / e2, (dp.length() - r2) * (dp.length() + r2) / e2)
@@ -517,25 +540,16 @@ pub fn closed_meetings(a: &Surface, b: &Surface) -> Vec<DVec3> {
     }
 }
 
-/// Points round a cylinder (origin c, axis a, frame x, y, radius r) on the
-/// curve where h² + 2B h + C = 0, with (B, C) = coeffs(c + r w(θ) − other)
-/// at each angle θ. The discriminant D(θ) = B² − C is ≥ 0 on each closed
+/// Points round a cylinder (axis a) on the curve where h² + 2B h + C = 0,
+/// with (B, C) = coeffs(p(θ) − other) at each point p(θ) = c + r w(θ) of
+/// `base`, the cylinder's circle at its origin c. The discriminant D(θ) = B² − C is ≥ 0 on each closed
 /// piece of the curve, and every piece that is not a whole loop round the
 /// cylinder holds a maximum of D, so the angles proposed are D's turning
 /// points plus fixed angles (for loops round the cylinder); at each, both
 /// heights −B ± √D, or −B, where the surfaces come closest, if D < 0.
-fn around_cylinder(
-    c: DVec3,
-    a: DVec3,
-    x: DVec3,
-    y: DVec3,
-    r: f64,
-    coeffs: impl Fn(DVec3) -> (f64, f64),
-    other: DVec3,
-) -> Vec<DVec3> {
-    let w = |t: f64| (x * t.cos() + y * t.sin()) * r;
+fn around_cylinder(base: &Curve, a: DVec3, coeffs: impl Fn(DVec3) -> (f64, f64), other: DVec3) -> Vec<DVec3> {
     let disc = |t: f64| {
-        let (b, cc) = coeffs(c + w(t) - other);
+        let (b, cc) = coeffs(base.eval(t) - other);
         b * b - cc
     };
     let d = Trig2::fit(disc);
@@ -543,10 +557,10 @@ fn around_cylinder(
     angles.extend((0..RING_SAMPLES).map(|i| TAU * i as f64 / RING_SAMPLES as f64));
     let mut out = Vec::new();
     for t in angles {
-        let (b, cc) = coeffs(c + w(t) - other);
-        let base = c + w(t);
+        let p = base.eval(t);
+        let (b, cc) = coeffs(p - other);
         for h in quadratic(b, cc, None) {
-            out.push(base + a * h);
+            out.push(p + a * h);
         }
     }
     out
@@ -554,9 +568,8 @@ fn around_cylinder(
 
 /// RING_SAMPLES points of the circle with this centre, normal and radius.
 fn circle_points(center: DVec3, normal: DVec3, radius: f64) -> Vec<DVec3> {
-    let x = crate::geom::any_perpendicular(normal);
-    let y = normal.cross(x);
-    ring(|t| center + (x * t.cos() + y * t.sin()) * radius)
+    let circle = Curve::Circle { center, axis: normal, x_dir: crate::geom::any_perpendicular(normal), radius };
+    ring(|t| circle.eval(t))
 }
 
 fn ring(p: impl Fn(f64) -> DVec3) -> Vec<DVec3> {
@@ -1414,13 +1427,100 @@ mod tests {
         // be proposed too). Here
         // h² − 1 = 0 (B = 0, C = −1) round the unit rod along z: the points
         // (cos kπ/4, sin kπ/4, ±1).
-        let pts = around_cylinder(DVec3::ZERO, DVec3::Z, DVec3::X, DVec3::Y, 1.0, |_| (0.0, -1.0), DVec3::ZERO);
+        let base = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let pts = around_cylinder(&base, DVec3::Z, |_| (0.0, -1.0), DVec3::ZERO);
         let mut want = Vec::new();
         for k in 0..RING_SAMPLES {
             let t = PI * k as f64 / 4.0;
             want.extend([DVec3::new(t.cos(), t.sin(), 1.0), DVec3::new(t.cos(), t.sin(), -1.0)]);
         }
         proposes_among(&pts, &want, "flat discriminant");
+    }
+
+    #[test]
+    fn a_touch_is_a_double_root() {
+        // The line y = 1 from (−2, 1, 0) along x grazes the unit ball at
+        // (0, 1, 0), t = 2: B = o·d = −2, C = |o|² − 1 = 4, so d = B² − C
+        // = 0 and t² − 4t + 4 = (t − 2)². A touch is a double root: like a
+        // crossing, it gives two roots (sum −2B = 4, product C = 4), here
+        // both 2, and knowing one leaves the other, −2B − 2 = 2.
+        assert_eq!(quadratic(-2.0, 4.0, None), vec![2.0, 2.0]);
+        let line = Curve::Line { origin: DVec3::new(-2.0, 1.0, 0.0), dir: DVec3::X };
+        let ball = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        assert_eq!(curve_surface(&line, &ball, &[]), vec![2.0, 2.0]);
+        assert_eq!(curve_surface(&line, &ball, &[2.0]), vec![2.0]);
+        // Crossing, y = 0.6: x = ±0.8, t = 2 ∓ 0.8 (sum 4, product 3.36 =
+        // C = 4 + 0.36 − 1). Missing, y = 1.5: no roots, the nearest point
+        // t = −B = 2.
+        let r = quadratic(-2.0, 3.36, None);
+        assert!(r.len() == 2 && close(r[0], 2.8, 1e-14) && close(r[1], 1.2, 1e-14), "{r:?}");
+        assert_eq!(quadratic(-2.0, 5.25, None), vec![2.0]);
+    }
+
+    #[test]
+    fn a_curve_within_linear_of_a_circle_s_plane_is_in_it() {
+        // Parallel to the unit circle's plane z = 0 and h above it: the
+        // line y = ½, and the unit circle about (1, 0, h). In the plane
+        // they would meet the circle at (±√¾, ½) and (½, ±√¾). Within
+        // LINEAR (0.9× and exactly 1×, as everywhere) counts as in the
+        // plane: they are met as if coplanar, at points 1 from the centres,
+        // for the caller to measure as touching (each within h of both).
+        // The line's: x² + ¼ + h² = 1, so (±√(¾ − h²), ½, h). The circles':
+        // halfway along the line of centres (1, 0, h), whose length is
+        // √(1 + h²), and √(1 − (1 + h²)/4) across it, along y:
+        // (½, ±√((3 − h²)/4)/√(1 + h²), h/2). At 1.1× they are apart:
+        // nothing.
+        let c1 = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        for k in [0.9, 1.0, 1.1] {
+            let h = k * LINEAR;
+            let line = Curve::Line { origin: DVec3::new(-3.0, 0.5, h), dir: DVec3::X };
+            let c2 = Curve::Circle { center: DVec3::new(1.0, 0.0, h), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+            let (x, y) = ((0.75 - h * h).sqrt(), ((3.0 - h * h) / 4.0).sqrt() / (1.0 + h * h).sqrt());
+            for (other, want) in [(&line, [DVec3::new(x, 0.5, h), DVec3::new(-x, 0.5, h)]), (&c2, [DVec3::new(0.5, y, h / 2.0), DVec3::new(0.5, -y, h / 2.0)])] {
+                let got = curve_curve(&c1, other, &[]);
+                if k > 1.0 {
+                    assert_eq!(got, Vec::<DVec3>::new(), "{k}× LINEAR off the plane");
+                } else {
+                    assert_eq!(got.len(), 2, "{k}×: {got:?}");
+                    for w in want {
+                        assert!(got.iter().any(|g| g.distance(w) <= 1e-12), "{k}×: {w} not in {got:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_interval_is_ruled_out_only_past_its_bound() {
+        // f = k0 + cos θ, slope bound 1, with k0 chosen so that at the
+        // middle m of the 12th starting interval [11, 12]·2π/64, f(m)
+        // equals the bound (width/2 = 2π/128) exactly. Exactly, in
+        // doubles: the ends lie in [1, 2), so their difference and its half
+        // are multiples of 2^-53; cos m ≈ 0.4276 lies in [¼, ½), a multiple
+        // of 2^-54; so k0 = bound − cos m ≈ −0.3785 is a double, and
+        // f(m) = k0 + cos m = bound. Both sides are rounded, so only a
+        // bigger |f(mid)| rules an interval out: this one is split, and its
+        // halves are ruled out (at m ∓ 2π/256, f = bound + cos(m ∓ 2π/256)
+        // − cos m ≈ 0.0711 and 0.0268, above their bound 2π/256 ≈ 0.0245).
+        // So it costs 2 evaluations more than with k0 a hair bigger, which
+        // rules the interval out at once. Either way the zeros are where
+        // cos θ = −k0: ±acos(0.3785) ≈ ±1.1827 (outside the interval).
+        let (a, b) = (TAU * 11.0 / 64.0, TAU * 12.0 / 64.0);
+        let m = 0.5 * (a + b);
+        let bound = (b - a) / 2.0;
+        let k0 = bound - m.cos();
+        let tie = Trig2([k0, 1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(tie.eval(m), bound, "the tie is exact");
+        let above = Trig2([k0 + 1e-15, 1.0, 0.0, 0.0, 0.0]);
+        assert!(above.eval(m) > bound);
+        let ((z_tie, n_tie), (z_above, n_above)) = (trig_zeros_counted(&tie), trig_zeros_counted(&above));
+        assert_eq!(n_tie, n_above + 2);
+        let want = sorted(vec![(-k0).acos(), TAU - (-k0).acos()]);
+        for z in [sorted(z_tie), sorted(z_above)] {
+            assert_eq!(z.len(), 2, "{z:?}");
+            assert!(close(z[0], want[0], 1e-12) && close(z[1], want[1], 1e-12), "{z:?} vs {want:?}");
+        }
+        assert!(close(want[0], 1.1827, 1e-4), "{want:?}");
     }
 
     /// Each wanted point is among those proposed (others may be too).

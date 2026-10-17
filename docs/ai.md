@@ -132,7 +132,7 @@ These rules are in addition to the ones at the top of this page.
 - **Training data is generated and checked.** A script samples random valid commands from every workspace's `CommandSpec` list, using the same machinery as the command fuzzer. Each command is built on the real kernel, and only commands that produce a valid result are kept. The English side of each example comes from templates, plus paraphrases from a model whose terms allow that use. Opted-in user examples (rule 1) are added once a server for them exists; it is the same open question as in `community.md`.
 - **Evaluation.** The model is scored with `runEval` on `EVAL_CASES`, plus a larger held-out set written by hand that never comes from the data generator. Four rates are reported per task type: valid on the first try, exactly the intended command, the right stable id, and needing the retry. It ships only if it clearly beats the untrained base model.
 - **Delivered** in two formats: one for the in-browser provider (WebGPU) and one for Ollama. The download is hosted for free, and the size is shown before it starts.
-- **Kept apart.** The generator and the training scripts live in a separate repository, so Fission's own tests and CI never depend on them.
+- **Kept apart.** The generator lives in `training/` for now, ready to move to a repository of its own: nothing in the app imports it, and the training scripts will live beside it. Its tests are quick, so CI runs them.
 
 ### Phases
 

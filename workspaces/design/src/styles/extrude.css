@@ -1,0 +1,17 @@
+/* The Extrude panel (step 21d, extrude-panel.ts): at the top of the
+   properties while you set up an extrude, with the same accent edge as the
+   sketch panel so it reads as the mode you are in; controls are 44 px tall
+   at phone width, so they can be tapped. */
+.extrude { border-left: 3px solid #6cc4ff; padding: 4px 0 8px 10px; margin-bottom: 12px; }
+.extrude h2 { margin-top: 0; }
+.extrude p { margin: 6px 0; }
+.extrude .extrude-row { display: block; margin: 6px 0; }
+.extrude .extrude-row select { max-width: 100%; }
+.extrude .extrude-row input { width: 6em; }
+.extrude .extrude-status { color: #b7c0cc; }
+.extrude .extrude-note { color: #8b95a3; font-size: 0.9em; }
+.extrude .extrude-buttons { display: flex; gap: 6px; margin-top: 4px; }
+.extrude button:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 700px) {
+  .extrude button, .extrude select, .extrude input { min-height: 44px; }
+}

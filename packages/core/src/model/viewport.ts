@@ -5,7 +5,7 @@
 
 import type { DisplayMesh } from "../kernel/kernel-types.ts";
 import type { AnalysisOverlay } from "./overlay.ts";
-import type { ImageRep } from "./representation.ts";
+import type { ImageRep, Plane } from "./representation.ts";
 
 /** A sphere around a body: what the camera frames. */
 export interface Framing {
@@ -24,7 +24,46 @@ export interface ViewportPick {
   face: number | null;
   /** Absent or null when no edge was picked. */
   edge?: number | null;
+  /** The offered origin plane clicked (showPlanes), by id; absent or null when none was. A plane wins over the body behind it. */
+  plane?: string | null;
   shift: boolean;
+}
+
+/** A point in a sketch plane's own 2D frame, in mm. */
+export type SketchXY = readonly [number, number];
+
+/**
+ * A sketch as the viewport draws it (step 21c): its lines in its plane's
+ * frame (x along `xAxis`, y along normal × xAxis), drawn over the body.
+ * The sketch being edited also has its grid (spacing in mm), its points
+ * and what the tool would draw at the pointer (the line tool's rubber
+ * band, a rectangle's four sides), empty when it would draw nothing,
+ * and where the pointer snapped (Design's snap.ts): its marks, drawn over
+ * everything, and the snap in words ("endpoint 10,0"), absent on the grid.
+ */
+export interface SketchDrawing {
+  plane: Plane;
+  lines: readonly (readonly [SketchXY, SketchXY])[];
+  editing?: { grid: number; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[]; snap?: { label: string; marks: readonly (readonly [SketchXY, SketchXY])[] } };
+}
+
+/** An origin plane drawn small at the origin to be picked (Create sketch); one not offered is drawn faint and can't be clicked. */
+export interface OriginPlane {
+  id: string;
+  plane: Plane;
+  offered: boolean;
+}
+
+/**
+ * The pointer over the sketch being edited: where it meets the sketch's
+ * plane in its frame, or null (off the view, or looking along the plane),
+ * and how big a screen pixel is on the plane there (mm), for snapping
+ * within a few pixels; absent when the viewport can't tell.
+ */
+export interface SketchPointer {
+  kind: "move" | "click";
+  at: SketchXY | null;
+  pixel?: number;
 }
 
 /**
@@ -70,6 +109,17 @@ export interface SharedViewport {
    * pointer is drawn hovered.
    */
   onPick: ((pick: ViewportPick) => void) | null;
+  /** Draws these sketches (replacing the ones drawn before); an empty list draws none. While one is being edited the ground grid gives way to its own. */
+  showSketches(drawings: readonly SketchDrawing[]): void;
+  /** Draws the origin planes small at the origin for picking (a click on an offered one picks it); an empty list takes them away. */
+  showPlanes(planes: readonly OriginPlane[]): void;
+  /**
+   * While set and a sketch is being edited (showSketches), clicks and
+   * hovers over the viewport come here instead of onPick, with where they
+   * meet that sketch's plane. The shown workspace sets it and puts back
+   * null on hide.
+   */
+  onSketchPointer: ((pointer: SketchPointer) => void) | null;
   /**
    * Shows an image as a flat sheet at its real size in mm, lying on the XY
    * plane with its centre at the origin and its top towards +Y, in a

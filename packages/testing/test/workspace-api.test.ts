@@ -143,8 +143,11 @@ function testContext(): WorkspaceContext {
       shownHighlights.set(viewport, h);
     },
     onPick: null,
+    onSketchPointer: null,
     showImage() {},
     clearImage() {},
+    showSketches() {},
+    showPlanes() {},
   };
   return {
     project: emptyProject(),
@@ -433,8 +436,8 @@ test("Design shows a kernel failure in its panel rather than throwing", async ()
   const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   assert.match(ctx.properties.querySelector("#error")!.textContent!, /no kernel in this test/);
-  // Its toolbar (16b): the command groups, with the part's shape pressed.
-  assert.deepEqual([...ctx.toolbar.querySelectorAll("[role=group]")].map((g) => g.getAttribute("aria-label")), ["Create", "Export"]);
+  // Its toolbar (16b): the sketch tool (21c), then the command groups, with the part's shape pressed.
+  assert.deepEqual([...ctx.toolbar.querySelectorAll("[role=group]")].map((g) => g.getAttribute("aria-label")), ["Sketch", "Create", "Export"]);
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[aria-pressed=true]")].map((b) => b.textContent), ["Box"]);
   view.unmount();
 });

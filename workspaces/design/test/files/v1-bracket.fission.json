@@ -1,0 +1,72 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Bracket",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "profiles": [
+        {
+          "depth": 30,
+          "id": "profile-1",
+          "kind": "l-bracket",
+          "plane": {
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "xAxis": [
+              1,
+              0,
+              0
+            ]
+          },
+          "width": 40
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [
+              "profile-1"
+            ],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "distance": 20,
+                "profile": "profile-1"
+              },
+              "summary": "Extrude: L-bracket profile 40 × 30 mm, by 20 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "profile-1",
+                  "label": "L-bracket profile",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (extrude)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 1
+    }
+  }
+}

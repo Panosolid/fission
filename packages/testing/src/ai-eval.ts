@@ -119,6 +119,13 @@ export const HELD_OUT_CASES: readonly EvalCase[] = [
 const same = (a: unknown, b: unknown) =>
   typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b)) : a === b;
 
+/** Whether `actual` contains each expected command (by the parameters given), in order: command by command, for any commands. */
+export function commandsMatch(actual: readonly Command[], expected: readonly Partial<Command>[]): boolean {
+  let i = 0;
+  for (const c of actual) if (i < expected.length && Object.entries(expected[i]).every(([k, v]) => same(c[k], v))) i++;
+  return i === expected.length;
+}
+
 /**
  * The part after these commands, as set_part's parameters. Until the
  * timeline (step 32) the part is one set_part: each command's parameters

@@ -13,3 +13,6 @@ __pycache__/
 .venv/
 kernel/endless-results/
 kernel/mutants.out*/
+
+# Training data the generator writes (training/scripts/generate.ts)
+training/data/

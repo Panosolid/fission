@@ -38,6 +38,37 @@ export interface Outline {
   holes: Loop[];
 }
 
+/** A straight sketch line from a to b, in the sketch plane's x and y (mm); LineIn in kernel/src/lib.rs. */
+export interface SketchLine {
+  a: [number, number];
+  b: [number, number];
+}
+
+/** A sketch circle round `centre` with radius `radius`, in the sketch plane's x and y (mm); CircleIn in kernel/src/lib.rs. */
+export interface SketchCircle {
+  centre: [number, number];
+  radius: number;
+}
+
+/**
+ * A sketch arc from `start` to `end`, counter-clockwise round `centre`, in
+ * the sketch plane's x and y (mm); ArcIn in kernel/src/lib.rs. The centre
+ * must be midway between the ends (within the kernel's LINEAR).
+ */
+export interface SketchArc {
+  start: [number, number];
+  end: [number, number];
+  centre: [number, number];
+}
+
+/**
+ * What a sketch's lines, circles and arcs make (SketchOutlineOut in
+ * kernel/src/lib.rs): the one closed outline, ready for make_extrude (a
+ * path, or a circle when the sketch is one circle), or why there is none
+ * yet, in words.
+ */
+export type SketchOutline = { closed: Outline } | { open: string };
+
 /** What to build, as the kernel's BodySpec (kernel/src/lib.rs). */
 export type BodySpec =
   | { box: { width: number; depth: number; height: number } }
