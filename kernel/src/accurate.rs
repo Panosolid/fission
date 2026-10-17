@@ -10,6 +10,10 @@
 //! The building blocks are exact (Knuth's two-sum, and two-product via a
 //! fused multiply-add): a + b and a·b are each returned as the rounded
 //! result plus its exact rounding error.
+//!
+//! `Exact` goes further for sums whose sign must be right however much
+//! cancels (the area predicates in `tolerance.rs`): it keeps every digit,
+//! as a list of doubles that add up to the exact value (Shewchuk 1997).
 
 use glam::DVec3;
 
@@ -109,6 +113,60 @@ pub fn det3(o: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Dd {
     triple(diff3(a, o), diff3(b, o), diff3(c, o))
 }
 
+/// An exact sum of doubles and products of doubles, held as an expansion
+/// (Shewchuk, "Adaptive precision floating-point arithmetic", 1997):
+/// nonzero doubles in increasing magnitude, none overlapping the next (each
+/// smaller than the next one's lowest bit), whose exact sum is the value.
+/// Without overlap a double can't be split across more than ~40 of them
+/// (2,098 bits of exponent range / 53), so the list stays short however
+/// many terms go in. Exact unless a product underflows (factors below
+/// ~1e-146, far under any length the kernel accepts), when up to ~1e-292
+/// of it is lost.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Exact(Vec<f64>);
+
+impl Exact {
+    /// Adds x exactly (Grow-Expansion with zero elimination): x passes up
+    /// the list from the smallest part, each two-sum keeping the rounded
+    /// sum moving up and leaving the exact rounding error behind.
+    pub fn add(&mut self, x: f64) {
+        let mut q = x;
+        let mut k = 0;
+        for i in 0..self.0.len() {
+            let (s, e) = two_sum(q, self.0[i]);
+            if e != 0.0 {
+                self.0[k] = e;
+                k += 1;
+            }
+            q = s;
+        }
+        self.0.truncate(k);
+        if q != 0.0 {
+            self.0.push(q);
+        }
+    }
+
+    /// Adds a·b exactly.
+    pub fn add_product(&mut self, a: f64, b: f64) {
+        let (p, e) = two_prod(a, b);
+        self.add(e);
+        self.add(p);
+    }
+
+    /// The exact sign: 1, −1, or 0 only when the value is exactly 0. The
+    /// largest part decides it, being bigger than all the others together.
+    pub fn sign(&self) -> i8 {
+        self.0.last().map_or(0, |&x| if x > 0.0 { 1 } else { -1 })
+    }
+
+    /// The value as one double, within a few ulps, with the exact sign.
+    /// (Adding up from the smallest part: everything below the largest
+    /// sums to less than it, so the sign can't change on the way.)
+    pub fn value(&self) -> f64 {
+        self.0.iter().sum()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +238,55 @@ mod tests {
         // And the difference of two such: (1e16 + 1) − (1e16 − 1) = 2.
         let b = Dd::new(1e16) - Dd::new(1.0);
         assert_eq!((a - b).to_f64(), 2.0);
+    }
+
+    #[test]
+    fn exact_sums_by_hand() {
+        // Empty: exactly 0.
+        let mut e = Exact::default();
+        assert_eq!((e.sign(), e.value()), (0, 0.0));
+        // 1e16 + 1 − 1e16 = 1 (doubles give 0); the parts are kept apart
+        // while both are there: [1, 1e16].
+        e.add(1e16);
+        e.add(1.0);
+        assert_eq!(e, Exact(vec![1.0, 1e16]));
+        e.add(-1e16);
+        assert_eq!((e.sign(), e.value()), (1, 1.0));
+        assert_eq!(e, Exact(vec![1.0]), "a part that cancels to 0 is dropped");
+        // − 1 leaves exactly 0, with no parts.
+        e.add(-1.0);
+        assert_eq!((e.sign(), e.value(), e.0.len()), (0, 0.0, 0));
+        // Three scales at once: 2¹⁰⁰ + 1 + 2⁻¹⁰⁰ − 2¹⁰⁰ = 1 + 2⁻¹⁰⁰, whose
+        // nearest double is 1 but whose parts are both still there.
+        let (big, small) = ((2f64).powi(100), (2f64).powi(-100));
+        let mut e = Exact::default();
+        for x in [big, 1.0, small, -big] {
+            e.add(x);
+        }
+        assert_eq!(e, Exact(vec![small, 1.0]));
+        assert_eq!(e.value(), 1.0);
+        // Then − 1: what's left, 2⁻¹⁰⁰, is positive, and the sign says so.
+        e.add(-1.0);
+        assert_eq!((e.sign(), e.value()), (1, small));
+        e.add(-2.0 * small);
+        assert_eq!((e.sign(), e.value()), (-1, -small));
+    }
+
+    #[test]
+    fn exact_products_by_hand() {
+        // (2²⁷ + 1)² − 2⁵⁴ − 2²⁸ = 1: the product's last bit lives only in
+        // its rounding error, which add_product must keep.
+        let a = 134217729.0; // 2^27 + 1
+        let mut e = Exact::default();
+        e.add_product(a, a);
+        e.add(-(2f64).powi(54));
+        e.add(-(2f64).powi(28));
+        assert_eq!((e.sign(), e.value()), (1, 1.0));
+        // p·s − q·r with p = 1e8 + 1, s = 1e8 − 1, q = r = 1e8:
+        // (1e16 − 1) − 1e16 = −1 (doubles give 0, see above).
+        let mut e = Exact::default();
+        e.add_product(1e8 + 1.0, 1e8 - 1.0);
+        e.add_product(-1e8, 1e8);
+        assert_eq!((e.sign(), e.value()), (-1, -1.0));
     }
 }
