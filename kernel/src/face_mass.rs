@@ -51,6 +51,10 @@
 //! Mutation testing (`cargo mutants`) leaves these survivors, equivalent:
 //! - `> → >=` in an arc's `left`: an arc on a plane is square to it, so
 //!   `axis.dot(n)` is ±1, never 0, and an edge never has `tb == ta`.
+//! - `- → +` in a cylinder's `across`: a cylinder face's vector area is
+//!   radial (its normal never has an axial part), so the axial part
+//!   removed there is only rounding; it is kept so that rounding can't
+//!   leak into the centroid's height.
 //!
 //! Each factor that is ±1 (`sign`, `left`, `axis.dot(k)`) comes first in
 //! its product, so `* → /` there changes the answer (±1 / x, not x / ±1)
