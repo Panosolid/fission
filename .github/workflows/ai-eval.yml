@@ -1,0 +1,49 @@
+name: AI eval
+
+# The A10 check (docs/ai.md, AI3): scores small free models through Ollama on
+# the evaluation suite. Run by hand (Actions > AI eval > Run workflow, with
+# the models to score), and on pull requests that change the suite, the
+# prompt or the providers. A measurement: it fails only if it can't run.
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Ollama models to score, separated by spaces"
+        default: "qwen2.5:1.5b llama3.2:3b gemma2:2b"
+  pull_request:
+    paths:
+      - ".github/workflows/ai-eval.yml"
+      - "packages/testing/scripts/ai-eval-ollama.ts"
+      - "packages/testing/src/ai-eval.ts"
+      - "packages/ai/src/prompt.ts"
+      - "packages/ai/src/ollama.ts"
+      - "packages/ai/src/commands.ts"
+
+jobs:
+  ollama:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MODELS: ${{ inputs.models || 'qwen2.5:1.5b llama3.2:3b gemma2:2b' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Install and start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          (ollama serve > ollama.log 2>&1 &)
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/tags > /dev/null && break; sleep 1; done
+      - name: Pull the models
+        run: for m in $MODELS; do ollama pull "$m"; done
+      - name: Score them
+        run: node --experimental-strip-types --no-warnings packages/testing/scripts/ai-eval-ollama.ts ai-eval.json $MODELS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-eval
+          path: |
+            ai-eval.json
+            ollama.log
