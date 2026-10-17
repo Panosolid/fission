@@ -6,7 +6,7 @@ import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.
 import { ViewCube } from "./viewcube.ts";
 import { selectionFraming } from "./framing.ts";
 import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
-import { gridLines, rayOnPlane, toWorld } from "./sketch-view.ts";
+import { gridLines, pixelSize, rayOnPlane, toWorld } from "./sketch-view.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -86,7 +86,7 @@ export class ViewportView {
       if (!start || start.id !== e.pointerId || !isClick(start, { x: e.clientX, y: e.clientY })) return;
       // Sketching: a click places a point on the sketch's plane, it picks nothing.
       const plane = this.host.sketchPlane();
-      if (plane) return this.host.sketchPointer({ kind: "click", at: this.onPlane(e.clientX, e.clientY, plane) });
+      if (plane) return this.host.sketchPointer({ kind: "click", ...this.pointerOn(e.clientX, e.clientY, plane) });
       const offered = this.planeAt(e.clientX, e.clientY);
       if (offered) return this.host.pick({ face: null, edge: null, plane: offered, shift: e.shiftKey });
       const edge = this.edgeAt(e.clientX, e.clientY);
@@ -100,7 +100,7 @@ export class ViewportView {
       this.queuedHover = requestAnimationFrame(() => {
         this.queuedHover = 0;
         const plane = this.host.sketchPlane();
-        if (plane) return this.host.sketchPointer({ kind: "move", at: pointer && this.onPlane(pointer.x, pointer.y, plane) });
+        if (plane) return this.host.sketchPointer(pointer ? { kind: "move", ...this.pointerOn(pointer.x, pointer.y, plane) } : { kind: "move", at: null });
         if (!pointer || !this.host.picking()) return this.host.setHover(null, null);
         const edge = this.edgeAt(pointer.x, pointer.y);
         this.host.setHover(edge === null ? this.faceAt(pointer.x, pointer.y) : null, edge);
@@ -152,6 +152,13 @@ export class ViewportView {
     if (this.image || !this.aim(clientX, clientY)) return null;
     const { origin, direction } = this.raycaster.ray;
     return rayOnPlane(origin.toArray(), direction.toArray(), plane);
+  }
+
+  /** Where a point on screen meets a sketch plane and the size of a pixel there (sketch-view's pixelSize). */
+  private pointerOn(clientX: number, clientY: number, plane: Plane): { at: SketchXY | null; pixel?: number } {
+    const at = this.onPlane(clientX, clientY, plane);
+    const pixel = at ? pixelSize(at, this.onPlane(clientX + 1, clientY, plane), this.onPlane(clientX, clientY + 1, plane)) : undefined;
+    return pixel === undefined ? { at } : { at, pixel };
   }
 
   /** The offered origin plane under a point on screen, by id, or null. */
@@ -402,7 +409,7 @@ export class ViewportView {
 }
 
 /** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint. */
-const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, point: 0xffffff, grid: 0x262b33, gridMajor: 0x3c4450, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0x262b33, gridMajor: 0x3c4450, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
 
 /** Empties a group, freeing its geometry and materials. */
 function clearGroup(group: THREE.Group) {
@@ -556,7 +563,7 @@ export class Viewer implements SharedViewport {
   /**
    * Draws the sketches over the body (no depth test, so a sketch on a face
    * of the body never hides in it): lines, and for the one being edited its
-   * grid, its points and the rubber-band line. Replaces what was drawn.
+   * grid, its points, the rubber-band line and the snap's marks. Replaces what was drawn.
    */
   showSketches(drawings: readonly SketchDrawing[]) {
     clearGroup(this.sketches);
@@ -590,6 +597,7 @@ export class Viewer implements SharedViewport {
         dots.renderOrder = 5;
         this.sketches.add(dots);
       }
+      if (d.editing.snap) segments(d.editing.snap.marks, SKETCH_COLOURS.snap, 7);
     }
     this.grid.visible = this.editedPlane === null;
     // Read by the e2e test: how many lines are drawn, and the edited sketch's points and preview.
@@ -598,6 +606,7 @@ export class Viewer implements SharedViewport {
     this.element.dataset.sketchLines = String(lines);
     this.element.dataset.sketchPoints = edited ? edited.points.map(xy).join(" ") : "";
     this.element.dataset.sketchPreview = edited ? edited.preview.map((s) => s.map(xy).join(" ")).join(" | ") : "";
+    this.element.dataset.sketchSnap = edited?.snap?.label ?? "";
     this.labelSketches();
   }
 

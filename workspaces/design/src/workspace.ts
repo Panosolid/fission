@@ -20,6 +20,7 @@ import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts"
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
+import { snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
@@ -350,7 +351,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // The sketch tool (step 21c, docs/document-model.md section 3).
-  type Mode = { kind: "none" } | { kind: "pick" } | { kind: "edit"; tool: SketchTool; grid: number; pointer: SketchXY | null };
+  /** While editing: the tool, the grid, where the pointer landed (snapped) and why, with the pixel size it was snapped at. */
+  type Mode = { kind: "none" } | { kind: "pick" } | { kind: "edit"; tool: SketchTool; grid: number; pointer: SketchXY | null; snap: Snap | null; pixel?: number };
   let mode: Mode = { kind: "none" };
   const sketchBox = sketchPanel(ctx.properties, {
     pickPlane: (id) => pickPlane(id),
@@ -361,12 +363,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     tool: (kind) => chooseTool(kind),
   });
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
+  /** Counts tool changes (a tool chosen, Escape, the sketch entered again): a click the kernel was still snapping across one is dropped. */
+  let toolChanges = 0;
 
   /** Draws every sketch, the edited one with its grid, points and preview. */
   function drawSketches() {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
-    viewport.showSketches(sketchDrawings(doc, mode.kind === "edit" ? mode : null));
+    const editing = mode.kind === "edit" ? mode : null;
+    viewport.showSketches(withSnap(sketchDrawings(doc, editing), editing?.snap ?? null, editing?.pixel));
   }
 
   /**
@@ -412,7 +417,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   function enterSketch() {
     const doc = designDoc();
     if (!editingSketch || !doc.sketches.some((s) => s.id === editingSketch!.id)) return void (editingSketch = null);
-    mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null };
+    mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null, snap: null };
+    toolChanges++;
     sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, editingSketch.tool);
     drawSketches();
     void showOutline();
@@ -423,6 +429,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (mode.kind !== "edit" || !editingSketch) return;
     editingSketch.tool = kind;
     mode.tool = startTool(kind, mode.tool.sketch);
+    mode.snap = null;
+    toolChanges++;
     sketchBox.showTool(kind);
     sketchBox.showError("");
     drawSketches();
@@ -558,31 +566,40 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const at = pointer.at;
     if (pointer.kind === "move") {
       if (!at) {
-        mode.pointer = null;
+        mode.pointer = mode.snap = null;
         return drawSketches();
       }
       // A hover off the modelling range just doesn't move the preview.
       void snapMove(at, mode.grid).then(({ current, value }) => {
         if (!current || mode.kind !== "edit") return;
-        mode.pointer = value;
+        mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel);
+        mode.pointer = mode.snap.at;
+        mode.pixel = pointer.pixel;
         drawSketches();
       }, () => {});
       return;
     }
     if (!at) return;
+    const changes = toolChanges;
     clicks = clicks.then(async () => {
       if (mode.kind !== "edit") return;
-      let snapped: SketchXY;
+      let grid: SketchXY;
       try {
-        snapped = await kernel.call("snap_to_grid", at[0], at[1], mode.grid);
+        grid = await kernel.call("snap_to_grid", at[0], at[1], mode.grid);
       } catch (e) {
         return sketchBox.showError(e instanceof Error ? e.message : String(e));
       }
-      if (mode.kind !== "edit") return;
+      // The tool changed while the kernel snapped (L, R, C or Escape): the click was for the old tool, so it is dropped.
+      if (mode.kind !== "edit" || toolChanges !== changes) return;
+      // The click lands where the hover showed it would: on the grid, or on the point or line-up snap.ts finds.
+      const snapped = snapOnSketch(designDoc(), mode.tool, at, grid, pointer.pixel).at;
       const done = clickAt(designDoc(), mode.tool, snapped);
       sketchBox.showError(done.note ?? "");
       mode.tool = done.tool;
-      mode.pointer = snapped;
+      // The pointer is still there: what it snaps to now, with the new point and the tool's next step.
+      mode.snap = snapOnSketch(done.doc, done.tool, at, grid, pointer.pixel);
+      mode.pointer = mode.snap.at;
+      mode.pixel = pointer.pixel;
       if (done.drew) applySketchEdit(done.doc, drawStep(done.tool), done.tool.sketch);
       drawSketches();
       if (done.drew) await showOutline();
@@ -644,6 +661,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
         mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
+        mode.snap = null;
+        toolChanges++;
         sketchBox.showError("");
         drawSketches();
         return true;
