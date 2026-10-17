@@ -43,7 +43,7 @@ A file dropped anywhere on the app, or pasted outside a text field, goes through
 
 ## Live links (`links.ts`)
 
-A `LiveLink` stores where its source is, as an `Origin` (an object id, or a stable face or edge id from step 32). It also stores the representations its holder accepts. `fetchLinked` goes through the registry each time, so the holder always shows the current source. `breakLink` turns a link into a `FrozenCopy` holding what the link showed at that moment, and keeps the source so provenance still works. `resolveLink` runs after every edit. A missing source gives a warning for the holding item. It is never dropped silently. In the UI, `linkBadge` shows Linked, Frozen copy or Link broken.
+A `LiveLink` stores where its source is, as an `Origin` (an object id, or a stable face or edge id from step 24). It also stores the representations its holder accepts. `fetchLinked` goes through the registry each time, so the holder always shows the current source. `breakLink` turns a link into a `FrozenCopy` holding what the link showed at that moment, and keeps the source so provenance still works. `resolveLink` runs after every edit. A missing source gives a warning for the holding item. It is never dropped silently. In the UI, `linkBadge` shows Linked, Frozen copy or Link broken.
 
 ## Features, intent and provenance (`feature.ts`)
 
@@ -52,7 +52,7 @@ A `Feature` is `{ id, intent, provenance, dependsOn, suppressed }`, and a `Timel
 - Downstream workspaces read the intent: CAM drills holes, Laser tells cuts from engraves, Circuit matches mounting holes to screw posts, and Slice treats holes specially.
 - `describeProvenance` answers "where did I come from?" in one sentence, for the properties panel.
 
-Today, Design's part is feature #1 of a one-step timeline, and its body is built from the feature's intent. Step 32 adds features to the same list, so no migration is needed.
+Today, Design's part is feature #1 of a one-step timeline, and its body is built from the feature's intent. Step 24 adds features to the same list, so no migration is needed.
 
 ## The dependency graph (`graph.ts`)
 
@@ -86,7 +86,7 @@ Every linked value has exactly one owner. An edit made from the side that doesn'
 
 Until the kernel has exact splines, a Vector Bézier entering Design is fitted with biarcs: pairs of arcs that meet tangent to each other and to their neighbours, within the kernel's tolerance. Printed or cut parts have no visible kinks, because the fitted outline is tangent-continuous. Design shows a note saying the curve is approximated.
 
-- All faces created from one fitted curve form one logical face for topological naming (step 32). References point to that group, never to an individual arc face, so the switch to exact NURBS at step 65 changes no references.
+- All faces created from one fitted curve form one logical face for topological naming (step 24). References point to that group, never to an individual arc face, so the switch to exact NURBS at step 65 changes no references.
 - The original stays in Vector as the owner (decision 1), so nothing is lost and the Vector → Design → Vector round trip is exact.
 - Biarc fitting is an operation of the kernel's 2D curve library (decision 5), so it uses the kernel's tolerance.
 
@@ -101,7 +101,7 @@ Scans, imported STL files and relief features are **mesh bodies**: a clearly mar
 Mesh bodies can:
 - be shown, moved, turned, measured (volume, area, bounding box) and sectioned;
 - be printed, rendered, and sent to Laser as a projected outline;
-- be used as a reference to sketch over (projected points and outlines, step 25);
+- be used as a reference to sketch over (projected points and outlines, step 27);
 - be combined with an exact solid or another mesh body by a mesh boolean (after step 45, sharing its exact predicates). The result is a mesh body, clearly marked, and the exact input is kept unchanged in the timeline;
 - be exported as STL or 3MF.
 
@@ -111,7 +111,7 @@ A later, user-initiated "fit exact surfaces" feature (reverse engineering: fitti
 
 ### 5. One 2D curve library, in the kernel
 
-The sketcher, Vector, Laser and Layout share one 2D curve library: lines, arcs, Béziers, offsets, path booleans, biarc fitting, and later the constraint solver's geometry. It lives in the Rust kernel and uses `tolerance.rs`, not TypeScript, so sketcher constraints, Vector path booleans and laser kerf offsets use exactly the same maths. Its operations go through `validate`-style checks for 2D results and into the stateful random-testing harness like any kernel operation. It is built a piece at a time as its users need it: lines and arcs with the sketcher (steps 21–23), offsets with step 31, Béziers, path booleans and biarc fitting with Vector (V1–V3).
+The sketcher, Vector, Laser and Layout share one 2D curve library: lines, arcs, Béziers, offsets, path booleans, biarc fitting, and later the constraint solver's geometry. It lives in the Rust kernel and uses `tolerance.rs`, not TypeScript, so sketcher constraints, Vector path booleans and laser kerf offsets use exactly the same maths. Its operations go through `validate`-style checks for 2D results and into the stateful random-testing harness like any kernel operation. It is built a piece at a time as its users need it: lines and arcs with the sketcher (steps 21–23), offsets with step 33, Béziers, path booleans and biarc fitting with Vector (V1–V3).
 
 ## Experience principles
 
@@ -168,4 +168,4 @@ The format is described in [project-format.md](project-format.md). It is one JSO
 - Downstream feedback (`feedback.ts`).
 - Project parameters and sweeps (`parameters.ts`).
 - Selection and undo (`session.ts`).
-- Stable geometry references (`references.ts`, from step 32).
+- Stable geometry references (`references.ts`, from step 24).

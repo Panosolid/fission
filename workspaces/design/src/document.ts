@@ -1,8 +1,8 @@
 // Design's part of the project: profiles, sketches and the timeline
 // (docs/document-model.md).
 //
-// Until the timeline (step 32) a part is ONE solid feature, with exactly
-// the intent, provenance and dependency structures step 32 uses; sketches
+// Until the timeline (step 24) a part is ONE solid feature, with exactly
+// the intent, provenance and dependency structures step 24 uses; sketches
 // are timeline items of their own next to it (step 21b). The body is built
 // from the feature's intent (specOf), so the intent is the source of
 // truth, not a description written next to the geometry.
@@ -43,22 +43,35 @@ export interface SketchCircleCurve {
   radius: number;
 }
 
-/** A sketch's curves: lines and circles (arcs add a kind at step 23). */
-export type SketchCurve = SketchLineCurve | SketchCircleCurve;
+/**
+ * A sketch arc from one of its sketch's points to another, counter-clockwise
+ * round a third, all named by id (step 23a; Fusion's convention). The
+ * centre is midway between the ends; the kernel holds that rule.
+ */
+export interface SketchArcCurve {
+  id: string;
+  kind: "arc";
+  start: string;
+  end: string;
+  centre: string;
+}
 
-/** The points a curve is drawn from: a line's two ends, a circle's centre. */
-export const curvePoints = (c: SketchCurve): string[] => (c.kind === "line" ? [c.start, c.end] : [c.centre]);
+/** A sketch's curves: lines, circles and arcs. */
+export type SketchCurve = SketchLineCurve | SketchCircleCurve | SketchArcCurve;
+
+/** The points a curve is drawn from: a line's two ends, a circle's centre, an arc's ends and centre. */
+export const curvePoints = (c: SketchCurve): string[] => (c.kind === "line" ? [c.start, c.end] : c.kind === "circle" ? [c.centre] : [c.start, c.end, c.centre]);
 
 /** A sketch's content; its place in the build order and its plane are its timeline item with the same id. */
 export interface Sketch {
   id: string;
   points: SketchPoint[];
   curves: SketchCurve[];
-  /** Empty until the solver (step 27). */
+  /** Empty until the solver (step 29). */
   constraints: never[];
 }
 
-/** The planes a sketch can be on (a stable face id joins these at step 32). */
+/** The planes a sketch can be on (a stable face id joins these at step 24). */
 export const SKETCH_PLANES = ["XY", "XZ", "YZ"] as const;
 export type SketchPlane = (typeof SKETCH_PLANES)[number];
 
@@ -123,7 +136,7 @@ const doc = (profiles: ReadyProfile[], feature: Feature): DesignDocument => ({ v
  * panel and set_part), keeping its sketches where they are in the build
  * order. The part's feature takes the old part feature's place; until step
  * 32 there is only that one, and a preset shape's feature and profile are
- * always "feature-1" and "profile-1" (step 32 turns presets into ordinary
+ * always "feature-1" and "profile-1" (step 24 turns presets into ordinary
  * features with counter ids). The counter never goes back.
  */
 export function withPart(previous: DesignDocument | null | undefined, kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
@@ -265,8 +278,9 @@ const isFiniteNumber = (x: unknown): x is number => typeof x === "number" && Num
 /**
  * A sketch's content, checked: points with finite mm, lines between two
  * different points of the same sketch, circles round a point of the same
- * sketch with a finite positive radius, no constraints yet. The kernel
- * holds the limits on sizes (sketch_outline), as it does for lines.
+ * sketch with a finite positive radius, arcs between two different points
+ * round a third, no constraints yet. The kernel holds the limits on sizes
+ * and where an arc's centre may be (sketch_outline), as it does for lines.
  */
 function checkSketch(s: unknown, i: number): void {
   if (!isRecord(s) || typeof s.id !== "string") throw new Error(`Design sketch ${i + 1} has no id`);
@@ -286,7 +300,14 @@ function checkSketch(s: unknown, i: number): void {
       if (!isFiniteNumber(c.radius) || c.radius <= 0) throw new Error(`${at}: circle ${c.id} needs a radius in mm above 0, not ${shown(c.radius)}`);
       continue;
     }
-    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Fission can't read yet (only lines and circles)`);
+    if (c.kind === "arc") {
+      for (const [role, p] of [["starts at", c.start], ["ends at", c.end], ["is round", c.centre]] as const)
+        if (typeof p !== "string" || !points.has(p)) throw new Error(`${at}: arc ${c.id} ${role} ${shown(p)}, which is not one of the sketch's points`);
+      if (c.start === c.end) throw new Error(`${at}: arc ${c.id} starts and ends at the same point`);
+      if (c.centre === c.start || c.centre === c.end) throw new Error(`${at}: arc ${c.id} is round one of its own ends`);
+      continue;
+    }
+    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Fission can't read yet (only lines, circles and arcs)`);
     for (const end of [c.start, c.end])
       if (typeof end !== "string" || !points.has(end)) throw new Error(`${at}: line ${c.id} ends at ${shown(end)}, which is not one of the sketch's points`);
     if (c.start === c.end) throw new Error(`${at}: line ${c.id} starts and ends at the same point`);
@@ -351,7 +372,7 @@ export function readDesignDocument(data: unknown): DesignDocument {
 
 /**
  * The part's solid feature: the last timeline item that is not a sketch
- * (the only one until step 32, which builds every solid feature).
+ * (the only one until step 24, which builds every solid feature).
  */
 export function lastFeature(document: DesignDocument): Feature {
   const f = [...document.timeline.features].reverse().find((x) => !isSketchItem(x));

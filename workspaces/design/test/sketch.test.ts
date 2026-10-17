@@ -1,12 +1,13 @@
 // Step 21b: sketches saved in the Design document (docs/document-model.md),
 // the edits that change them, the version 1 → 2 migration and the checks
-// a file with sketches must pass when it is opened. Circles from step 22b.
+// a file with sketches must pass when it is opened. Circles from step 22b,
+// arcs from 23a.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { ChangeNotes, DependencyGraph, emptyProject, projectFromJson, projectToJson, type Feature, type KernelCalls } from "@fission/core";
 import { lastFeature, partDocument, partOf, readDesignDocument, withPart, type DesignDocument } from "../src/document.ts";
-import { addSketch, deleteCurve, drawCircle, drawLine, movePoint, planeOf, SKETCH_STEPS, sketchCurves, sketchLines, sketchOutline } from "../src/sketch.ts";
+import { addSketch, deleteCurve, drawArc, drawCircle, drawLine, movePoint, planeOf, SKETCH_STEPS, sketchCurves, sketchLines, sketchOutline } from "../src/sketch.ts";
 import { PART_VIEW, syncGraph } from "../src/graph.ts";
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
@@ -219,7 +220,7 @@ test("a file with sketches that breaks a rule is refused when it is opened, each
     [(d) => ((d.sketches[0].constraints as unknown[]) = [{ kind: "horizontal" }]), /sketch-2 has constraints, which this Fission can't read yet/],
     [(d) => ((d.sketches[0].points[0] as { x: unknown }).x = "0"), /^Error: Design sketch sketch-2: point point-3 needs x and y in mm$/],
     [(d) => ((d.sketches[0].points[1] as { id: unknown }).id = null), /^Error: Design sketch sketch-2: point 2 has no id$/],
-    [(d) => ((d.sketches[0].curves[0] as { kind: string }).kind = "arc"), /curve line-5 is a arc, which this Fission can't read yet \(only lines and circles\)/],
+    [(d) => ((d.sketches[0].curves[0] as { kind: string }).kind = "spline"), /curve line-5 is a spline, which this Fission can't read yet \(only lines, circles and arcs\)/],
     [(d) => (d.sketches[0].curves[1].end = "point-99"), /line line-7 ends at point-99, which is not one of the sketch's points/],
     [(d) => (d.sketches[0].curves[1].end = "point-4"), /line line-7 starts and ends at the same point/],
     [(d) => ((d.sketches[0].curves[0] as { id: unknown }).id = undefined), /^Error: Design sketch sketch-2: curve 1 has no id$/],
@@ -277,6 +278,7 @@ test("hand-worked: circles round a new point and round a shared corner, ids from
   assert.deepEqual(sketchCurves(s), {
     lines: [{ a: [0, 0], b: [40, 0] }, { a: [40, 0], b: [40, 30] }],
     circles: [{ centre: [10, 5], radius: 3 }, { centre: [40, 0], radius: 2.5 }],
+    arcs: [],
   });
   assert.deepEqual(sketchLines(s), sketchCurves(s).lines);
   assert.equal(SKETCH_STEPS.circle, "Draw circle");
@@ -288,7 +290,7 @@ test("sketchOutline hands the kernel the lines and the circles, and names the sk
   const asked: unknown[][] = [];
   const kernel = { call: (async (...args: unknown[]) => (asked.push(args), { closed: { outer: { circle: { center: [1, 2], radius: 4 } }, holes: [] } })) } as unknown as KernelCalls;
   assert.deepEqual(await sketchOutline(kernel, doc, s.id), { outer: { circle: { center: [1, 2], radius: 4 } }, holes: [] });
-  assert.deepEqual(asked, [["sketch_outline", [], [{ centre: [1, 2], radius: 4 }]]]);
+  assert.deepEqual(asked, [["sketch_outline", [], [{ centre: [1, 2], radius: 4 }], []]]);
   const open = { call: (async () => ({ open: "the sketch makes 2 separate loops; for now a sketch makes one outline" })) } as unknown as KernelCalls;
   await assert.rejects(sketchOutline(open, doc, s.id), /^Error: Sketch 1 has no closed outline: the sketch makes 2 separate loops/);
 });
@@ -374,4 +376,113 @@ test("a file value whose own toString is broken is named by its kind, not run (f
   const slot = partDocument("slot", 40, 30, 20);
   slot.timeline.features[0].intent.parameters.profile = evil as never;
   assert.throws(() => readDesignDocument(slot), /its profile an object is missing$/);
+});
+
+/**
+ * lSketch with a quarter arc from the L's corner point-4 (40, 0) to a new
+ * point (0, 40) round the L's start point-3 (0, 0), and a line from there
+ * back to point-3: with the first line, a pie slice.
+ */
+function pie() {
+  const { doc, sketch } = lSketch();
+  const doc2 = deleteCurve(doc, sketch, "line-7");
+  const a = drawArc(doc2, sketch, "point-4", [0, 40], "point-3");
+  const back = drawLine(a.doc, sketch, "point-8", "point-3");
+  return { doc: back.doc, sketch, arc: a.id, line: back.id };
+}
+
+test("hand-worked: an arc sharing a line's end and a centre point, ids from the one counter (23a)", () => {
+  // lSketch leaves the counter at 8; deleting line-7 drops point-6 (only it
+  // used it) but never moves the counter back. The arc starts at point-4
+  // and is round point-3 (both shared, no new ids); its new end (0, 40)
+  // takes 8 and the arc 9. The closing line from point-8 to point-3 is
+  // line-10, and the counter ends at 11.
+  const { doc: l, sketch } = lSketch();
+  const a = drawArc(deleteCurve(l, sketch, "line-7"), sketch, "point-4", [0, 40], "point-3");
+  assert.equal(a.id, "arc-9");
+  const back = drawLine(a.doc, sketch, "point-8", "point-3");
+  assert.equal(back.id, "line-10");
+  assert.equal(back.doc.nextId, 11);
+  const s = back.doc.sketches[0];
+  assert.deepEqual(s.points.map((p) => [p.id, p.x, p.y]), [["point-3", 0, 0], ["point-4", 40, 0], ["point-8", 0, 40]]);
+  assert.deepEqual(s.curves, [
+    { id: "line-5", kind: "line", start: "point-3", end: "point-4" },
+    { id: "arc-9", kind: "arc", start: "point-4", end: "point-8", centre: "point-3" },
+    { id: "line-10", kind: "line", start: "point-8", end: "point-3" },
+  ]);
+  // The kernel gets lines, circles and arcs apart, rebuilt from point ids.
+  assert.deepEqual(sketchCurves(s), {
+    lines: [{ a: [0, 0], b: [40, 0] }, { a: [0, 40], b: [0, 0] }],
+    circles: [],
+    arcs: [{ start: [40, 0], end: [0, 40], centre: [0, 0] }],
+  });
+  assert.equal(SKETCH_STEPS.arc, "Draw arc");
+  // Every point new: ids in the order start, end, centre, then the arc.
+  const fresh = addSketch(partDocument("box", 10, 10, 10));
+  const b = drawArc(fresh.doc, fresh.id, [5, 0], [-5, 0], [0, 0]);
+  assert.deepEqual(b.doc.sketches[0].points.map((p) => p.id), ["point-3", "point-4", "point-5"]);
+  assert.deepEqual(b.doc.sketches[0].curves, [{ id: "arc-6", kind: "arc", start: "point-3", end: "point-4", centre: "point-5" }]);
+});
+
+test("deleting an arc keeps the points lines share and drops the ones only it used (23a)", () => {
+  const { doc, sketch, arc } = pie();
+  // The arc's start point-4 and centre point-3 are line ends; its end
+  // point-8 is the closing line's start. All three stay.
+  const gone = deleteCurve(doc, sketch, arc).sketches[0];
+  assert.deepEqual(gone.points.map((p) => p.id), ["point-3", "point-4", "point-8"]);
+  // On a sketch of the arc alone, all three of its points go with it.
+  const fresh = addSketch(partDocument("box", 10, 10, 10));
+  const b = drawArc(fresh.doc, fresh.id, [5, 0], [-5, 0], [0, 0]);
+  assert.deepEqual(deleteCurve(b.doc, fresh.id, b.id).sketches[0], { id: fresh.id, points: [], curves: [], constraints: [] });
+  // Deleting a line beside an arc keeps every point the arc uses, its
+  // centre too, though no line touches that.
+  const beside = drawLine(b.doc, fresh.id, [20, 0], [30, 0]);
+  const kept = deleteCurve(beside.doc, fresh.id, beside.id).sketches[0];
+  assert.deepEqual(kept.points.map((p) => p.id), ["point-3", "point-4", "point-5"]);
+  assert.deepEqual(sketchCurves(kept).arcs, [{ start: [5, 0], end: [-5, 0], centre: [0, 0] }]);
+  // Moving the centre moves the arc with it (curves name points).
+  const moved = movePoint(doc, sketch, "point-3", 1, 1).sketches[0];
+  assert.deepEqual(sketchCurves(moved).arcs, [{ start: [40, 0], end: [0, 40], centre: [1, 1] }]);
+});
+
+test("drawArc refuses what makes no sense, each with its own message (23a)", () => {
+  const { doc, sketch } = lSketch();
+  assert.throws(() => drawArc(doc, sketch, "point-3", "point-3", [5, 5]), /^Error: an arc can't start and end at the same point point-3$/);
+  assert.throws(() => drawArc(doc, sketch, "point-3", "point-4", "point-4"), /^Error: an arc can't be round its own end point-4$/);
+  assert.throws(() => drawArc(doc, sketch, "point-3", [9, 9], "point-3"), /^Error: an arc can't be round its own end point-3$/);
+  assert.throws(() => drawArc(doc, sketch, "point-99", [9, 9], [0, 9]), /sketch-2 has no point point-99/);
+  assert.throws(() => drawArc(doc, sketch, [Number.NaN, 0], [9, 9], [0, 9]), /a sketch point needs x and y in mm/);
+  assert.throws(() => drawArc(doc, "sketch-77", [0, 0], [9, 9], [0, 9]), /there is no sketch sketch-77/);
+});
+
+test("a file with arcs saves and opens byte-identical, and a broken arc is refused when opened (23a)", () => {
+  const { doc } = pie();
+  const text = projectToJson({ ...emptyProject("Pie"), workspaces: { design: doc } });
+  const opened = projectFromJson(text, DESIGN);
+  assert.deepEqual(opened.workspaces.design, doc);
+  assert.equal(projectToJson(opened), text);
+  // Each case breaks the arc (curve 2) in exactly one way.
+  const broken = (edit: (arc: Record<string, unknown>) => void) => {
+    const d = structuredClone(doc);
+    edit(d.sketches[0].curves[1] as unknown as Record<string, unknown>);
+    return () => readDesignDocument(d);
+  };
+  assert.doesNotThrow(broken(() => {}));
+  const cases: [(arc: Record<string, unknown>) => void, RegExp][] = [
+    [(a) => (a.start = "point-99"), /^Error: Design sketch sketch-2: arc arc-9 starts at point-99, which is not one of the sketch's points$/],
+    [(a) => (a.end = 4), /^Error: Design sketch sketch-2: arc arc-9 ends at 4, which is not one of the sketch's points$/],
+    [(a) => delete a.centre, /^Error: Design sketch sketch-2: arc arc-9 is round undefined, which is not one of the sketch's points$/],
+    [(a) => (a.end = "point-4"), /^Error: Design sketch sketch-2: arc arc-9 starts and ends at the same point$/],
+    [(a) => (a.centre = "point-8"), /^Error: Design sketch sketch-2: arc arc-9 is round one of its own ends$/],
+    [(a) => (a.centre = "point-4"), /^Error: Design sketch sketch-2: arc arc-9 is round one of its own ends$/],
+  ];
+  for (const [edit, message] of cases) assert.throws(broken(edit), message);
+});
+
+test("sketchOutline hands the kernel the arcs apart from the lines and circles (23a)", async () => {
+  const { doc, sketch } = pie();
+  const asked: unknown[][] = [];
+  const kernel = { call: (async (...args: unknown[]) => (asked.push(args), { open: "x" })) } as unknown as KernelCalls;
+  await assert.rejects(sketchOutline(kernel, doc, sketch), /^Error: Sketch 1 has no closed outline: x$/);
+  assert.deepEqual(asked, [["sketch_outline", [{ a: [0, 0], b: [40, 0] }, { a: [0, 40], b: [0, 0] }], [], [{ start: [40, 0], end: [0, 40], centre: [0, 0] }]]]);
 });

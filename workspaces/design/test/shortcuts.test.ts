@@ -6,12 +6,15 @@ import { DESIGN_SHORTCUTS, designShortcut } from "../src/shortcuts.ts";
 const profile: Selected = { kind: "outline", id: "outline:feature-1/profile-1" };
 const face: Selected = { kind: "face", id: "face:feature-1/1" };
 
-test("Design's keys: Escape clears (also in a size field), Copy is Mod+C, L and R choose sketch tools, the last three only in the page", () => {
+test("Design's keys: Escape clears (also in a size field), Copy is Mod+C, L, R, C, A and T choose sketch tools, the last six only in the page", () => {
   assert.deepEqual(DESIGN_SHORTCUTS.map((s) => [s.id, parseChord(s.keys), s.inText ?? false]), [
     ["clear-selection", "Escape", true],
     ["copy-svg", "Mod+C", false],
     ["sketch-line", "L", false],
     ["sketch-rectangle", "R", false],
+    ["sketch-circle", "C", false],
+    ["sketch-arc", "A", false],
+    ["sketch-tangent", "T", false],
   ]);
 });
 

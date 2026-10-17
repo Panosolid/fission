@@ -8,14 +8,18 @@ export const DESIGN_SHORTCUTS: readonly ShortcutSpec[] = [
   { id: "clear-selection", keys: "Escape", label: "Clear the selection", inText: true },
   // Copy (the keys or the browser's Edit menu) with one profile selected.
   { id: "copy-svg", keys: "Mod+C", label: "Copy the selected profile as SVG" },
-  // While a sketch is edited (step 22a); outside a sketch the key does what it would.
+  // While a sketch is edited (steps 22a, 22c, 23b, 23c); outside a sketch the key does what it would.
   { id: "sketch-line", keys: "L", label: "Line tool (in a sketch)" },
   { id: "sketch-rectangle", keys: "R", label: "Rectangle tool (in a sketch)" },
+  { id: "sketch-circle", keys: "C", label: "Circle tool (in a sketch)" },
+  { id: "sketch-arc", keys: "A", label: "3-point arc tool (in a sketch)" },
+  { id: "sketch-tangent", keys: "T", label: "Tangent arc tool (in a sketch)" },
 ];
 
 /** The sketch tool a shortcut chooses, or null for any other shortcut. */
-export function sketchToolKey(id: string): "line" | "rectangle" | null {
-  return id === "sketch-line" ? "line" : id === "sketch-rectangle" ? "rectangle" : null;
+export function sketchToolKey(id: string): "line" | "rectangle" | "circle" | "arc" | "tangent" | null {
+  const tools = { "sketch-line": "line", "sketch-rectangle": "rectangle", "sketch-circle": "circle", "sketch-arc": "arc", "sketch-tangent": "tangent" } as const;
+  return Object.hasOwn(tools, id) ? tools[id as keyof typeof tools] : null;
 }
 
 /**

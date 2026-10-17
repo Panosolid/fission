@@ -2,7 +2,7 @@
 //
 // Pasting or dragging something into another workspace makes a LIVE LINK
 // by default: the item keeps a reference to its source by id (object ids
-// now; topological-naming ids for faces and edges from step 32) and
+// now; topological-naming ids for faces and edges from step 24) and
 // re-fetches it through the representation registry whenever the source
 // changes. Nothing is copied. The user can break a link, which freezes a
 // copy of what the link showed at that moment and says so with an icon.

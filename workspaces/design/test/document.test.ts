@@ -8,7 +8,7 @@ import { outline } from "../src/profiles.ts";
 
 test("a part is feature #1 of a one-step timeline, with its intent", () => {
   const doc = partDocument("box", 40, 30, 20);
-  // The same Timeline type step 32 uses, not a special single-shape format.
+  // The same Timeline type step 24 uses, not a special single-shape format.
   const timeline: Timeline = doc.timeline;
   assert.equal(timeline.features.length, 1);
   assert.deepEqual(timeline.features[0], {
@@ -43,7 +43,7 @@ test("the body is built from the intent: changing a parameter changes the body",
   assert.throws(() => specOf(doc, f), /width must be a number/);
 });
 
-test("step 32 extends the list: a second feature needs no conversion of the first", () => {
+test("step 24 extends the list: a second feature needs no conversion of the first", () => {
   const doc = partDocument("plate", 40, 30, 20);
   const first = structuredClone(lastFeature(doc));
   doc.timeline.features.push({ ...structuredClone(first), id: "feature-2", dependsOn: ["profile-1", "feature-1"] });
@@ -92,8 +92,8 @@ test("step 21: a sketch produces Outline through the same registry and producer,
   d = drawLine(b.doc, s.id, b.doc.sketches[0].curves[1].end, a.doc.sketches[0].curves[0].start).doc;
   const asked: unknown[] = [];
   const kernel: KernelCalls = {
-    call: (async (op: string, lines: unknown, circles: unknown) => {
-      asked.push([op, lines, circles]);
+    call: (async (op: string, lines: unknown, circles: unknown, arcs: unknown) => {
+      asked.push([op, lines, circles, arcs]);
       return { closed: triangle };
     }) as KernelCalls["call"],
   };
@@ -102,8 +102,8 @@ test("step 21: a sketch produces Outline through the same registry and producer,
   const sketch = designObjects(d, kernel).find((o) => o.type === "design.sketch")!;
   assert.equal(sketch.id, s.id);
   assert.deepEqual(await registry.deliver(sketch, ["outline", "mesh"]), { representation: { kind: "outline", plane: XY_PLANE, outline: triangle }, note: null });
-  // The kernel was given the three lines in drawing order, each end at its point's place, and no circles.
-  assert.deepEqual(asked, [["sketch_outline", [{ a: [0, 0], b: [10, 0] }, { a: [10, 0], b: [0, 10] }, { a: [0, 10], b: [0, 0] }], []]]);
+  // The kernel was given the three lines in drawing order, each end at its point's place, and no circles or arcs.
+  assert.deepEqual(asked, [["sketch_outline", [{ a: [0, 0], b: [10, 0] }, { a: [10, 0], b: [0, 10] }, { a: [0, 10], b: [0, 0] }], [], []]]);
   // A sketch that makes no closed outline is refused with the kernel's reason, named.
   const open: KernelCalls = { call: (async () => ({ open: "a line ends loose at (0, 10)" })) as unknown as KernelCalls["call"] };
   const r2 = new RepresentationRegistry();

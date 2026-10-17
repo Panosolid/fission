@@ -1,12 +1,12 @@
 // Journey: the sketch maths through the real WASM kernel (step 21a), the
 // same calls the sketcher will make: snap pointer positions to the grid,
 // find the outline the lines make, extrude it; and a saved sketch's
-// outline handed to another workspace (step 21b). Run with `npm run journeys`
+// outline handed to another workspace (step 21b). Arcs from step 23a; slots drawn with the line and tangent arc tools from 23c. Run with `npm run journeys`
 // after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, fetchLinked, linkTo, projectFromJson, projectToJson, RepresentationRegistry, XY_PLANE, type Outline, type SketchLine, type SourceLookup } from "@fission/core";
-import { addSketch, deleteCurve, designObjects, designWorkspace, drawLine, movePoint, partDocument, type DesignDocument } from "@fission/design";
+import { emptyProject, fetchLinked, linkTo, projectFromJson, projectToJson, RepresentationRegistry, XY_PLANE, type Outline, type SketchArc, type SketchLine, type SourceLookup } from "@fission/core";
+import { addSketch, clickAt, deleteCurve, designObjects, designWorkspace, drawLine, movePoint, partDocument, sketchCurves, startTool, switchTool, type DesignDocument, type SketchTool } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
@@ -34,15 +34,15 @@ test("snapping and a triangle's outline, worked by hand", async () => {
   // A 3-4-5 right triangle, its last line drawn backwards: corners in walking
   // order, and ½·4·3 = 6 mm² extruded 2 mm is 12 mm³.
   const lines: SketchLine[] = [{ a: [0, 0], b: [4, 0] }, { a: [4, 0], b: [0, 3] }, { a: [0, 0], b: [0, 3] }];
-  const out = await kernel.call("sketch_outline", lines, []);
+  const out = await kernel.call("sketch_outline", lines, [], []);
   assert.ok("closed" in out, JSON.stringify(out));
   assert.deepEqual(corners(out.closed), [[0, 0], [4, 0], [0, 3]]);
   const body = await kernel.call("make_extrude", out.closed, 2);
   assert.ok(Math.abs(body.volume - 12) <= 1e-12 * 12, `${body.volume}`);
 
   // Two lines are open, and say why; a zero-length line is refused.
-  assert.deepEqual(await kernel.call("sketch_outline", lines.slice(0, 2), []), { open: "the line end at (0, 0) is not joined to another line" });
-  await assert.rejects(kernel.call("sketch_outline", [{ a: [1, 1], b: [1, 1] }], []), /line 1 must be between/);
+  assert.deepEqual(await kernel.call("sketch_outline", lines.slice(0, 2), [], []), { open: "the end at (0, 0) is not joined to another line or arc" });
+  await assert.rejects(kernel.call("sketch_outline", [{ a: [1, 1], b: [1, 1] }], [], []), /line 1 must be between/);
 });
 
 /** Is `got` the loop `want`, starting anywhere, in either direction? */
@@ -96,11 +96,11 @@ test("seeded sketches: snapped polygons in any order and direction close into th
       if (snapped.length < 3) continue;
       cases++;
       const lines = shuffle(r, ring(snapped)).map((l) => (r.next() < 0.5 ? { a: l.b, b: l.a } : l));
-      const out = await kernel.call("sketch_outline", lines, []);
+      const out = await kernel.call("sketch_outline", lines, [], []);
       const context = `seed ${seed} case ${c}: ${JSON.stringify(lines)} → ${JSON.stringify(out)}`;
       if ("open" in out) {
         // Snapping can fold a star into a sliver or make two corners meet; nothing else may open it.
-        assert.match(out.open, /not a valid outline|line ends meet/, context);
+        assert.match(out.open, /not a valid outline|ends meet/, context);
         continue;
       }
       closed++;
@@ -112,12 +112,133 @@ test("seeded sketches: snapped polygons in any order and direction close into th
 
       // Break it: move one line's end by one grid step; the sketch opens.
       const broken = lines.map((l, i) => (i === 0 ? { a: l.a, b: [l.b[0] + spacing, l.b[1]] as [number, number] } : l));
-      const again = await kernel.call("sketch_outline", broken, []);
+      const again = await kernel.call("sketch_outline", broken, [], []);
       assert.ok("open" in again, `${context}: still closed after moving an end`);
     }
   }
   // Must not pass by opening everything.
   assert.ok(closed >= 0.8 * cases, `only ${closed} of ${cases} closed`);
+});
+
+test("seeded sketches with arcs: snapped polygons with some sides bowed out close and extrude to the model's area (23a)", async () => {
+  // Model: a counter-clockwise polygon's shoelace area, plus for each side
+  // drawn as an arc turning φ on a chord c (radius r = (c/2)/sin(φ/2)) the
+  // segment between chord and arc, r²(φ − sin φ)/2. An arc runs
+  // counter-clockwise round its centre, so it bows out to the right of
+  // start → end: outwards from a counter-clockwise polygon. Its centre is
+  // on the line midway between the ends, (c/2)/tan(φ/2) to the left.
+  let closed = 0;
+  let cases = 0;
+  let curved = 0;
+  for (const seed of [11n, 12n, 13n, 14n, 15n]) {
+    const r = seeded(seed);
+    for (let c = 0; c < 40; c++) {
+      const spacing = [0.1, 0.5, 1, 5][Math.floor(r.next() * 4)];
+      const snapped: [number, number][] = [];
+      for (const [x, y] of pointerPolygon(r)) {
+        const p = await kernel.call("snap_to_grid", x, y, spacing);
+        const last = snapped[snapped.length - 1];
+        if (!last || last[0] !== p[0] || last[1] !== p[1]) snapped.push(p);
+      }
+      if (snapped.length > 1 && snapped[0][0] === snapped[snapped.length - 1][0] && snapped[0][1] === snapped[snapped.length - 1][1]) snapped.pop();
+      // Snapping can turn a thin star over; the model wants it counter-clockwise (positive shoelace sum).
+      const turning = snapped.reduce((sum, [x, y], i) => sum + x * snapped[(i + 1) % snapped.length][1] - snapped[(i + 1) % snapped.length][0] * y, 0);
+      if (snapped.length < 3 || turning <= 0) continue;
+      cases++;
+      const lines: SketchLine[] = [];
+      const arcs: SketchArc[] = [];
+      let want = area(snapped);
+      snapped.forEach((a, i) => {
+        const b = snapped[(i + 1) % snapped.length];
+        if (r.next() < 0.5) {
+          lines.push(r.next() < 0.5 ? { a: b, b: a } : { a, b });
+          return;
+        }
+        const phi = 0.2 + r.next() * 1.2;
+        const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+        const chord = Math.sqrt(dx * dx + dy * dy);
+        const t = chord / 2 / Math.tan(phi / 2);
+        arcs.push({ start: a, end: b, centre: [(a[0] + b[0]) / 2 - (dy / chord) * t, (a[1] + b[1]) / 2 + (dx / chord) * t] });
+        const radius = chord / 2 / Math.sin(phi / 2);
+        want += (radius * radius * (phi - Math.sin(phi))) / 2;
+      });
+      if (arcs.length) curved++;
+      const out = await kernel.call("sketch_outline", shuffle(r, lines), [], shuffle(r, arcs));
+      const context = `seed ${seed} case ${c}: ${JSON.stringify({ lines, arcs })} → ${JSON.stringify(out)}`;
+      if ("open" in out) {
+        // Snapping can fold a star into a sliver, and neighbouring arcs can meet; nothing else may open it.
+        assert.match(out.open, /not a valid outline|ends meet/, context);
+        continue;
+      }
+      closed++;
+      assert.ok(sameLoop(corners(out.closed), snapped), context);
+      const h = 1 + Math.floor(r.next() * 20);
+      const body = await kernel.call("make_extrude", out.closed, h);
+      assert.ok(Math.abs(body.volume - want * h) <= 1e-9 * want * h, `${context}: volume ${body.volume} vs ${want * h}`);
+      // Break it: an arc's centre moved 2·LINEAR along its chord is refused, naming the arc.
+      if (arcs.length) {
+        const [a0] = arcs;
+        const [dx, dy] = [a0.end[0] - a0.start[0], a0.end[1] - a0.start[1]];
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const moved = [{ ...a0, centre: [a0.centre[0] + (2e-5 * dx) / len, a0.centre[1] + (2e-5 * dy) / len] as [number, number] }, ...arcs.slice(1)];
+        await assert.rejects(kernel.call("sketch_outline", lines, [], moved), /arc 1 has its centre 0\.0000(19|2)\d* mm off the line midway/, context);
+      }
+    }
+  }
+  // Must not pass by opening everything, and most cases must have arcs.
+  assert.ok(closed >= 0.7 * cases, `only ${closed} of ${cases} closed`);
+  assert.ok(curved >= 0.9 * cases, `only ${curved} of ${cases} had arcs`);
+});
+
+test("seeded slots drawn with the line and tangent arc tools close and extrude to the hand-worked area (23c)", async () => {
+  // A slot: from p0 a line along d (whole grid steps), a tangent arc to
+  // p1 + d⊥·m (half a turn, so its diameter is |d|·m), a line back along
+  // −d, a tangent arc closing on p0. The area is the rectangle |d| × |d|m
+  // plus two half discs of radius |d|m/2: |d|²m + π(|d|m/2)², times the
+  // grid squared. Half the slots go clockwise (d⊥ the other way), where
+  // both arcs turn right and are stored from their far ends.
+  let cases = 0;
+  for (const seed of [21n, 22n, 23n, 24n]) {
+    const r = seeded(seed);
+    for (let c = 0; c < 25; c++) {
+      const spacing = [0.1, 0.25, 1, 2.5, 10][Math.floor(r.next() * 5)];
+      const step = (k: number) => (spacing < 1 ? k / Math.round(1 / spacing) : k * spacing);
+      const [ox, oy] = [Math.floor(r.next() * 2001) - 1000, Math.floor(r.next() * 2001) - 1000];
+      const [a, b] = [1 + Math.floor(r.next() * 9), Math.floor(r.next() * 19) - 9];
+      const m = 1 + Math.floor(r.next() * 4);
+      const turn = r.next() < 0.5 ? 1 : -1;
+      const [nx, ny] = [-b * m * turn, a * m * turn];
+      const corners: [number, number][] = [[ox, oy], [ox + a, oy + b], [ox + a + nx, oy + b + ny], [ox + nx, oy + ny]];
+      const at = corners.map(([i, j]) => [step(i), step(j)] as [number, number]);
+      let doc: DesignDocument = partDocument("box", 40, 30, 20);
+      const made = addSketch(doc);
+      doc = made.doc;
+      let tool: SketchTool = startTool("line", made.id);
+      const click = (p: [number, number], kind: "line" | "tangent") => {
+        if (tool.kind !== kind) tool = switchTool(doc, tool, kind);
+        const done = clickAt(doc, tool, p);
+        assert.equal(done.note, undefined, `seed ${seed} case ${c}: ${kind} to ${p}`);
+        ({ doc, tool } = done);
+      };
+      click(at[0], "line");
+      click(at[1], "line");
+      click(at[2], "tangent");
+      click(at[3], "line");
+      click(at[0], "tangent");
+      const curves = sketchCurves(doc.sketches[0]);
+      const context = `seed ${seed} case ${c}: ${JSON.stringify(curves)}`;
+      assert.equal(curves.arcs.length, 2, context);
+      const out = await kernel.call("sketch_outline", curves.lines, curves.circles, curves.arcs);
+      assert.ok("closed" in out, `${context} → ${JSON.stringify(out)}`);
+      const len = Math.sqrt(a * a + b * b) * spacing;
+      const want = len * len * m + Math.PI * ((len * m) / 2) ** 2;
+      const h = 1 + Math.floor(r.next() * 20);
+      const body = await kernel.call("make_extrude", out.closed, h);
+      assert.ok(Math.abs(body.volume - want * h) <= 1e-9 * want * h, `${context}: volume ${body.volume} vs ${want * h}`);
+      cases++;
+    }
+  }
+  assert.equal(cases, 100);
 });
 
 test("a saved sketch's outline reaches another workspace through a live link, and follows an edit (step 21b)", async () => {
