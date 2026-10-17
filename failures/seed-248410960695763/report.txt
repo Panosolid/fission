@@ -1,0 +1,25 @@
+Stateful kernel test: 1704 cases over 1 seed(s) ["0xe1edaf1211d3"] in 155.1s
+Failures: 1
+  seed 0xe1edaf1211d3: step 3 (Rotate { target: 0, pivot: [0.0, 0.0, 0.0], axis: [-1.0, 0.0, 0.0], angle: -5.6963562408981145 }): face 7 (Some(Side(Some(Piece { boundary: 1, piece: 0 })))) centroid is at [463050.62097452057, 72478359.9825256, 19844400.207321074] but should be at [463051.6843809797, 72478359.58854786, 19844400.39978653] (1.1502585418211648e0 off) (minimal chain: 3 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seede1edaf1211d3-4fb84634263c1642.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seede1edaf1211d3/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box                901 / 73      →  92.5%   275.3ms  slowest 664.1µs
+  add cylinder           891 / 73      →  92.4%      6.4s  slowest 14.8ms
+  add extrude            574 / 392     →  59.4%      2.6s  slowest 68.6ms
+  add sketch arc extrude      43 / 28      →  60.6%   270.7ms  slowest 15.4ms
+  add sketch circle extrude      65 / 27      →  70.7%   409.9ms  slowest 12.5ms
+  add sketch extrude      38 / 17      →  69.1%    19.5ms  slowest 889.1µs
+  add sphere             864 / 68      →  92.7%     50.0s  slowest 141.1ms
+  move                  1749 / 147     →  92.2%     15.7s  slowest 69.0ms
+  rotate                2152 / 92      →  95.9%     15.6s  slowest 70.0ms
+  ~extreme input          53 / 238     →  18.2%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 25.5, d: 88.0, h: 88.5 }, axis: [0.0, 0.0, 1.0], angle: -6.902362277298714, at: [-11.0, -107.74291173363565, -1.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 404.14533616326446, h: 0.0015967269080634115 }, axis: [-0.20297036725386025, 0.781039938982449, -0.22670772116336407], angle: -6.283185307179586, at: [16.0, 11.0, 19.0] }
+  slowest add extrude: Add { shape: Extrude { outer: Circle { c: [-11.0, 12.0], r: 18284.630814239103 }, holes: [Circle { c: [-4.9486682621272085, 12.0], r: 18278.57848250123 }], dist: 25.0, expect: None, sketch: None }, axis: [9.000000000000001e-10, 0.0, 1.0], angle: -3.141592653589793, at: [1.0, -12.0, 50000000.0] }
+  slowest add sketch arc extrude: Add { shape: Extrude { outer: Path { pts: [[17.000011, -7.499989], [17.001011000000002, -7.499989]], bulges: [-0.0, 5241742.682547316] }, holes: [], dist: 0.02878090854226706, expect: None, sketch: Some(8852494519056320667) }, axis: [-0.6810339721297174, -0.22647720219052228, 0.9786788780179743], angle: -6.283185307179586, at: [-748.0404293878888, 13.0, 6.5] }
+  slowest add sketch circle extrude: Add { shape: Extrude { outer: Circle { c: [-4.0, 4.0], r: 54570.44685571432 }, holes: [], dist: 671532.061766717, expect: Some(true), sketch: Some(6667284269467463580) }, axis: [0.0, 3.0, 4.0], angle: 0.0, at: [-598.794477062407, -27289.72342785716, -0.5] }
+  slowest add sketch extrude: Add { shape: Extrude { outer: Path { pts: [[-125.96002239524168, -15.000000000000002], [-124.1803065804832, -19.900831253840614], [-128.21521371271487, -21.54321172924516], [-132.38529732920406, -27.695721801075265], [-142.2645670177727, -22.708022960748526], [-148.9981846343582, -15.008128614184885], [-148.56076555222103, -9.50564023202142], [-142.27299785302114, -5.516139157447304], [-138.4705773752112, -7.466667862380328], [-134.00289325987276, -2.490493709034954], [-131.3697714135752, -8.56332200835125]], bulges: [] }, holes: [], dist: 85.5, expect: None, sketch: Some(16635215087097369055) }, axis: [0.14835054377517623, -0.9412977505678881, 0.0755186113409213], angle: 3.141592653589793, at: [4.2396427856856835, -13.0, -528.1747234281592] }
+  slowest add sphere: Add { shape: Sphere { r: 66329.0879717289 }, axis: [-1.0, 0.0, 0.0], angle: -8.229081789110229, at: [-15.0, -1.5, 349.3425569138303] }
+  slowest move: Move { target: 0, by: [17.0, 1.0, 2116744.080372041] }
+  slowest rotate: Rotate { target: 0, pivot: [-837.6129993936205, -15.0, 0.49998000000000004], axis: [-0.2978156106203591, -0.769426816712035, 0.24426719525171559], angle: 1.2914570746882337 }

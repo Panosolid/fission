@@ -1,0 +1,25 @@
+Stateful kernel test: 1444 cases over 1 seed(s) ["0xbd9de5289611"] in 137.2s
+Failures: 1
+  seed 0xbd9de5289611: step 3 (Rotate { target: 0, pivot: [0.0, 0.0, 0.0], axis: [1.0, 1.0, 1.0], angle: 2.9791924592397985 }): face 4 (Some(Side(Some(Piece { boundary: 0, piece: 2 })))) centroid is at [-16228071.300406594, 37781546.830778, 28446522.146828536] but should be at [-16228071.30040676, 37781546.83075491, 28446522.146787647] (4.6957836168034957e-5 off) (minimal chain: 3 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seedbd9de5289611-9842274e3e9925a3.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seedbd9de5289611/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box                683 / 54      →  92.7%   208.9ms  slowest 582.7µs
+  add cylinder           731 / 66      →  91.7%      5.3s  slowest 12.8ms
+  add extrude            430 / 277     →  60.8%      2.3s  slowest 68.3ms
+  add sketch arc extrude     106 / 22      →  82.8%   257.0ms  slowest 16.1ms
+  add sketch circle extrude      52 / 15      →  77.6%   315.4ms  slowest 12.9ms
+  add sketch extrude      29 / 20      →  59.2%    16.4ms  slowest 921.6µs
+  add sphere             748 / 63      →  92.2%     43.1s  slowest 140.7ms
+  move                  1690 / 103     →  94.3%     15.5s  slowest 71.6ms
+  rotate                1707 / 87      →  95.2%     15.6s  slowest 68.4ms
+  ~extreme input          45 / 185     →  19.6%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 4053.6357964288154, d: 3.5, h: 36.999991 }, axis: [0.0, 0.0, 1.0], angle: -5.833635313603407, at: [-14.0, -6.5, 16.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 263.3792385564197, h: 0.001 }, axis: [-0.9857039834694836, -0.8060127251555954, -0.3552182999539735], angle: -3.141592652689793, at: [18.0, 13.0, 0.7901032104839665] }
+  slowest add extrude: Add { shape: Extrude { outer: Circle { c: [-6.0, -182.3740255572307], r: 289838.9322155967 }, holes: [Circle { c: [54.0, -182.3740255572307], r: 289778.8572737614 }], dist: 70.5, expect: Some(true), sketch: None }, axis: [1.0, 1.0, 1.0], angle: 4.71238898038469, at: [9.999989, 391.7777342570003, -224.56312201237853] }
+  slowest add sketch arc extrude: Add { shape: Extrude { outer: Path { pts: [[-6.0, 776.5689599656957], [-5.0, 776.5689599656957]], bulges: [-651141.1738267282, 0.0] }, holes: [], dist: 10.78609532705011, expect: Some(true), sketch: Some(15692757805934726492) }, axis: [-0.9731358368228255, 0.4886851344973021, 0.2040444009808079], angle: 0.0, at: [0.5, 18.5, -17.0] }
+  slowest add sketch circle extrude: Add { shape: Extrude { outer: Circle { c: [-15.5, 6272686.751883078], r: 500000.0 }, holes: [], dist: 1000000.0, expect: None, sketch: Some(9001829591911206570) }, axis: [1.0, 1.0, 0.0], angle: 4.71238898038469, at: [-99999999.0, 10.0, 8.000011] }
+  slowest add sketch extrude: Add { shape: Extrude { outer: Path { pts: [[31.132315829540772, 259.3713398116464], [44.19150311177713, 247.02001248251008], [38.73045849126083, 223.46935622795573], [23.347484838480103, 212.99759959754107], [-9.226716137655806, 213.82421559436386], [-15.310014311163844, 240.12041493808215], [-29.327695498466163, 256.843079895177], [-29.201845306576885, 263.69091077576866], [-31.166628849414167, 294.67595096894513], [-15.541018321650142, 302.25686041369556], [22.98562091988414, 297.0508696432883], [44.051384749040245, 280.96611543319835]], bulges: [] }, holes: [], dist: 58.0, expect: None, sketch: Some(14653553634364545359) }, axis: [1.0, 0.0, 0.0], angle: 2.6049819954504208, at: [-15.5, 8.0, 15.5] }
+  slowest add sphere: Add { shape: Sphere { r: 322171.911177653 }, axis: [1.0, 1.0, 0.0], angle: 6.283185307179586, at: [4.0, -655.1568614025731, -593.5812727517994] }
+  slowest move: Move { target: 0, by: [8.0, -54.8665156689559, -9.999989] }
+  slowest rotate: Rotate { target: 0, pivot: [-0.500009, -0.499991, 13.5], axis: [-0.393656586598779, -0.4551402384192812, 0.2705757687830634], angle: 9.006168276872478 }

@@ -1,0 +1,71 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+proptest: Saving this and future failures in tests/regressions/stateful-seeds.txt
+proptest: If this test was run on a CI system, you may wish to add the following line to your copy of the file.
+cc 073f5b90d43b9090dde9887a9895485d65b80755e2d6b1c4556707a5455002ce
+Stateful kernel test: 1416 cases over 1 seed(s) ["0x2df356a19e5e"] in 99.4s
+Failures: 1
+  seed 0x2df356a19e5e: step 1 (Add { shape: Extrude { outer: Path { pts: [[16.0, -99999999.0], [113.5, -99999999.0], [113.5, -99999970.5], [16.0, -99999970.5]], bulges: [] }, holes: [Path { pts: [[16.001, -99999998.999], [16.001, -99999970.501], [113.499, -99999970.501], [113.499, -99999998.999]], bulges: [] }], dist: 0.5, expect: None, sketch: None }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): Start: centroid [64.75000000013205, -99999984.75, 0] but the model says [64.75000000002166, -99999984.75021046, 0] (2.1046400070193325e-4 off) (minimal chain: 1 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seed2df356a19e5e-f3875688abf632bd.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seed2df356a19e5e/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box                725 / 54      →  93.1%   133.3ms  slowest 318.8µs
+  add cylinder           677 / 69      →  90.8%      2.9s  slowest 7.8ms
+  add extrude            312 / 297     →  51.2%      1.4s  slowest 30.2ms
+  add sketch arc extrude      32 / 23      →  58.2%   125.6ms  slowest 9.8ms
+  add sketch circle extrude      60 / 17      →  77.9%   250.8ms  slowest 7.6ms
+  add sketch extrude      31 / 19      →  62.0%    11.5ms  slowest 613.9µs
+  add sphere             751 / 63      →  92.3%     32.6s  slowest 97.9ms
+  move                  1371 / 122     →  91.8%     10.6s  slowest 52.0ms
+  rotate                1414 / 94      →  93.8%     10.5s  slowest 51.9ms
+  ~extreme input          47 / 189     →  19.9%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 79.46782686388973, d: 99.0, h: 66.0 }, axis: [1.1000000000000001e-9, 0.0, 1.0], angle: 0.0, at: [-16.5, -6.5, 14.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 132979.9625291278, h: 0.0014619989338228675 }, axis: [0.6092652222576854, 0.12110800632051091, -0.29124761296783125], angle: -8.47618987323878, at: [17.5, 6358.3922061167505, -13.500009] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-1.0, -5.5], [795.0412882276339, -5.5], [795.0412882276339, 265.51376274254466], [-1.0, 265.51376274254466]], bulges: [] }, holes: [Circle { c: [134.50688137127233, 130.00688137127233], r: 127.00688137127233 }, Circle { c: [397.02064411381696, 130.00688137127233], r: 127.00688137127233 }, Circle { c: [659.5344068563617, 130.00688137127233], r: 127.00688137127233 }], dist: 23.0, expect: Some(true), sketch: None }, axis: [0.7848550123671397, -0.7560331078569001, -0.29468262124395955], angle: 1.5707963278948966, at: [-7.5, 588.5153841227688, -865.7432541508795] }
+  slowest add sketch arc extrude: Add { shape: Extrude { outer: Path { pts: [[-285.39026109678605, -921.7940120931032], [-192.39026109678605, -921.7940120931032], [-192.39026109678605, 143300.86141585466], [-285.39026109678605, 143300.86141585466]], bulges: [0.0, 1.0, 0.0, 1.0] }, holes: [], dist: 1090.312854866587, expect: Some(true), sketch: Some(15076617755647220155) }, axis: [0.0, 0.0, -1.0], angle: 4.71238898038469, at: [-139.85874303097322, -2.194985945527405, 6.5] }
+  slowest add sketch circle extrude: Add { shape: Extrude { outer: Circle { c: [14.5, -404.0126554281095], r: 176.10636969313848 }, holes: [], dist: 64.5, expect: Some(true), sketch: Some(5868852888942381670) }, axis: [0.0, 1.0, 0.0], angle: -6.283185307179586, at: [-15.5, 328.4953815986463, -8.0] }
+  slowest add sketch extrude: Add { shape: Extrude { outer: Path { pts: [[69.28656602607063, 33.25959268941202], [26.65636724788135, 39.42388982225252], [-8.53989297510513, 69.01206941246298], [-49.278872939986634, 69.92501482341564], [-69.63879232133128, 60.3105058542236], [-75.39076251191716, 14.899518529025944], [19.834465658635928, -71.22827750279654], [-38.08787070456262, -48.21967275169596], [1.2448457124313457, -74.97509511177516], [38.42452015785778, -67.48361654948705], [42.21189213080227, -31.259176314990174], [69.71223337349835, 1.25902059562214e-13]], bulges: [] }, holes: [], dist: 9.0, expect: None, sketch: Some(5428097011723633433) }, axis: [0.0, 1.0, 0.0], angle: -4.71238898148469, at: [-332.59180587105527, -18.0, 12.0] }
+  slowest add sphere: Add { shape: Sphere { r: 43980.542839500005 }, axis: [0.0, 1.0, 0.0], angle: 8.770563335156051, at: [-4.500009, 5.5, 10.499991] }
+  slowest move: Move { target: 1, by: [680.124952749337, -680.124943749337, 375.000029] }
+  slowest rotate: Rotate { target: 0, pivot: [5521.221678850694, 3.0, -15.0], axis: [-110000000.00000001, 0.0, 1.0], angle: 5.497787143782138 }
+
+
+thread 'stateful_random_chains' (2858) panicked at tests/stateful.rs:2271:5:
+Stateful kernel test: 1416 cases over 1 seed(s) ["0x2df356a19e5e"] in 99.4s
+Failures: 1
+  seed 0x2df356a19e5e: step 1 (Add { shape: Extrude { outer: Path { pts: [[16.0, -99999999.0], [113.5, -99999999.0], [113.5, -99999970.5], [16.0, -99999970.5]], bulges: [] }, holes: [Path { pts: [[16.001, -99999998.999], [16.001, -99999970.501], [113.499, -99999970.501], [113.499, -99999998.999]], bulges: [] }], dist: 0.5, expect: None, sketch: None }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): Start: centroid [64.75000000013205, -99999984.75, 0] but the model says [64.75000000002166, -99999984.75021046, 0] (2.1046400070193325e-4 off) (minimal chain: 1 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seed2df356a19e5e-f3875688abf632bd.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seed2df356a19e5e/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box                725 / 54      →  93.1%   133.3ms  slowest 318.8µs
+  add cylinder           677 / 69      →  90.8%      2.9s  slowest 7.8ms
+  add extrude            312 / 297     →  51.2%      1.4s  slowest 30.2ms
+  add sketch arc extrude      32 / 23      →  58.2%   125.6ms  slowest 9.8ms
+  add sketch circle extrude      60 / 17      →  77.9%   250.8ms  slowest 7.6ms
+  add sketch extrude      31 / 19      →  62.0%    11.5ms  slowest 613.9µs
+  add sphere             751 / 63      →  92.3%     32.6s  slowest 97.9ms
+  move                  1371 / 122     →  91.8%     10.6s  slowest 52.0ms
+  rotate                1414 / 94      →  93.8%     10.5s  slowest 51.9ms
+  ~extreme input          47 / 189     →  19.9%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 79.46782686388973, d: 99.0, h: 66.0 }, axis: [1.1000000000000001e-9, 0.0, 1.0], angle: 0.0, at: [-16.5, -6.5, 14.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 132979.9625291278, h: 0.0014619989338228675 }, axis: [0.6092652222576854, 0.12110800632051091, -0.29124761296783125], angle: -8.47618987323878, at: [17.5, 6358.3922061167505, -13.500009] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-1.0, -5.5], [795.0412882276339, -5.5], [795.0412882276339, 265.51376274254466], [-1.0, 265.51376274254466]], bulges: [] }, holes: [Circle { c: [134.50688137127233, 130.00688137127233], r: 127.00688137127233 }, Circle { c: [397.02064411381696, 130.00688137127233], r: 127.00688137127233 }, Circle { c: [659.5344068563617, 130.00688137127233], r: 127.00688137127233 }], dist: 23.0, expect: Some(true), sketch: None }, axis: [0.7848550123671397, -0.7560331078569001, -0.29468262124395955], angle: 1.5707963278948966, at: [-7.5, 588.5153841227688, -865.7432541508795] }
+  slowest add sketch arc extrude: Add { shape: Extrude { outer: Path { pts: [[-285.39026109678605, -921.7940120931032], [-192.39026109678605, -921.7940120931032], [-192.39026109678605, 143300.86141585466], [-285.39026109678605, 143300.86141585466]], bulges: [0.0, 1.0, 0.0, 1.0] }, holes: [], dist: 1090.312854866587, expect: Some(true), sketch: Some(15076617755647220155) }, axis: [0.0, 0.0, -1.0], angle: 4.71238898038469, at: [-139.85874303097322, -2.194985945527405, 6.5] }
+  slowest add sketch circle extrude: Add { shape: Extrude { outer: Circle { c: [14.5, -404.0126554281095], r: 176.10636969313848 }, holes: [], dist: 64.5, expect: Some(true), sketch: Some(5868852888942381670) }, axis: [0.0, 1.0, 0.0], angle: -6.283185307179586, at: [-15.5, 328.4953815986463, -8.0] }
+  slowest add sketch extrude: Add { shape: Extrude { outer: Path { pts: [[69.28656602607063, 33.25959268941202], [26.65636724788135, 39.42388982225252], [-8.53989297510513, 69.01206941246298], [-49.278872939986634, 69.92501482341564], [-69.63879232133128, 60.3105058542236], [-75.39076251191716, 14.899518529025944], [19.834465658635928, -71.22827750279654], [-38.08787070456262, -48.21967275169596], [1.2448457124313457, -74.97509511177516], [38.42452015785778, -67.48361654948705], [42.21189213080227, -31.259176314990174], [69.71223337349835, 1.25902059562214e-13]], bulges: [] }, holes: [], dist: 9.0, expect: None, sketch: Some(5428097011723633433) }, axis: [0.0, 1.0, 0.0], angle: -4.71238898148469, at: [-332.59180587105527, -18.0, 12.0] }
+  slowest add sphere: Add { shape: Sphere { r: 43980.542839500005 }, axis: [0.0, 1.0, 0.0], angle: 8.770563335156051, at: [-4.500009, 5.5, 10.499991] }
+  slowest move: Move { target: 1, by: [680.124952749337, -680.124943749337, 375.000029] }
+  slowest rotate: Rotate { target: 0, pivot: [5521.221678850694, 3.0, -15.0], axis: [-110000000.00000001, 0.0, 1.0], angle: 5.497787143782138 }
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+stateful_random_chains --- FAILED
+
+failures:
+
+failures:
+    stateful_random_chains
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 99.44s
+
+[1m[91merror[0m: test failed, to rerun pass `--test stateful`

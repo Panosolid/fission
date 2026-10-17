@@ -1,0 +1,86 @@
+solid before
+  facet normal 0e0 -1e0 2.220446049250313e-16
+    outer loop
+      vertex 0e0 -9.19403460095431e-13 -4.140625080288928e3
+      vertex 1e-3 0e0 0e0
+      vertex 0e0 0e0 0e0
+    endloop
+  endfacet
+  facet normal 0e0 -1e0 2.220446049250313e-16
+    outer loop
+      vertex 1e-3 -9.19403460095431e-13 -4.140625080288928e3
+      vertex 1e-3 0e0 0e0
+      vertex 0e0 -9.19403460095431e-13 -4.140625080288928e3
+    endloop
+  endfacet
+  facet normal 0e0 1e0 -2.2205130385269425e-16
+    outer loop
+      vertex 0e0 5e-1 -1.1102230246251565e-16
+      vertex 1e-3 4.9999999999908057e-1 -4.140625080288928e3
+      vertex 0e0 4.9999999999908057e-1 -4.140625080288928e3
+    endloop
+  endfacet
+  facet normal 0e0 1e0 -2.2205130385269425e-16
+    outer loop
+      vertex 1e-3 5e-1 -1.1102230246251565e-16
+      vertex 1e-3 4.9999999999908057e-1 -4.140625080288928e3
+      vertex 0e0 5e-1 -1.1102230246251565e-16
+    endloop
+  endfacet
+  facet normal 0e0 2.220446049250313e-16 1e0
+    outer loop
+      vertex 0e0 0e0 0e0
+      vertex 1e-3 5e-1 -1.1102230246251565e-16
+      vertex 0e0 5e-1 -1.1102230246251565e-16
+    endloop
+  endfacet
+  facet normal 0e0 2.220446049250313e-16 1e0
+    outer loop
+      vertex 1e-3 0e0 0e0
+      vertex 1e-3 5e-1 -1.1102230246251565e-16
+      vertex 0e0 0e0 0e0
+    endloop
+  endfacet
+  facet normal 0e0 0e0 -1e0
+    outer loop
+      vertex 0e0 4.9999999999908057e-1 -4.140625080288928e3
+      vertex 1e-3 -9.19403460095431e-13 -4.140625080288928e3
+      vertex 0e0 -9.19403460095431e-13 -4.140625080288928e3
+    endloop
+  endfacet
+  facet normal -0e0 -0e0 -1e0
+    outer loop
+      vertex 1e-3 4.9999999999908057e-1 -4.140625080288928e3
+      vertex 1e-3 -9.19403460095431e-13 -4.140625080288928e3
+      vertex 0e0 4.9999999999908057e-1 -4.140625080288928e3
+    endloop
+  endfacet
+  facet normal -1e0 -0e0 0e0
+    outer loop
+      vertex 0e0 5e-1 -1.1102230246251565e-16
+      vertex 0e0 -9.19403460095431e-13 -4.140625080288928e3
+      vertex 0e0 0e0 0e0
+    endloop
+  endfacet
+  facet normal -1e0 0e0 0e0
+    outer loop
+      vertex 0e0 4.9999999999908057e-1 -4.140625080288928e3
+      vertex 0e0 -9.19403460095431e-13 -4.140625080288928e3
+      vertex 0e0 5e-1 -1.1102230246251565e-16
+    endloop
+  endfacet
+  facet normal 1e0 0e0 0e0
+    outer loop
+      vertex 1e-3 0e0 0e0
+      vertex 1e-3 4.9999999999908057e-1 -4.140625080288928e3
+      vertex 1e-3 5e-1 -1.1102230246251565e-16
+    endloop
+  endfacet
+  facet normal 1e0 0e0 0e0
+    outer loop
+      vertex 1e-3 -9.19403460095431e-13 -4.140625080288928e3
+      vertex 1e-3 4.9999999999908057e-1 -4.140625080288928e3
+      vertex 1e-3 0e0 0e0
+    endloop
+  endfacet
+endsolid before

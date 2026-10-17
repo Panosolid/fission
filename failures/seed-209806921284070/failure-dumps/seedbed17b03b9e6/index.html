@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failure dump</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#14161a;color:#e6e8eb;font:13px system-ui,sans-serif}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none;cursor:grab}
+  #info{position:absolute;top:0;left:0;max-width:44em;padding:12px;background:#1c1f24e6;max-height:45%;overflow:auto}
+  #info h1{font-size:15px;margin:0 0 6px} .bad{color:#ff6b6b} pre{white-space:pre-wrap;margin:4px 0}
+  #tools{position:absolute;bottom:12px;left:12px;display:flex;gap:6px}
+  button{font:inherit;color:inherit;background:#2a2e35;border:1px solid #444a53;border-radius:4px;padding:4px 10px;cursor:pointer}
+</style>
+</head><body><canvas id="view"></canvas><div id="info"></div>
+<div id="tools"><button id="faces">Hide faces</button><button id="home">Reset view</button></div>
+<script>
+"use strict";
+const note = "step 3 (Rotate { target: 1, pivot: [99999999.0, 0.0, 0.0], axis: [1.0, 1.0, 0.0], angle: -1.5707963267948966 }): face 7 (Some(Side(Some(Piece { boundary: 1, piece: 1 })))) centroid is at [50003213.14997606, -49985782.18810766, -70707741.46791552] but should be at [50003213.14353791, -49985782.21670572, -70707741.47381634] (2.9901808828621448e-2 off)\n\nChain:\n1. Add { shape: Box { w: 0.5, d: 0.5, h: 0.5 }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }\n2. Add { shape: Extrude { outer: Path { pts: [[0.0, 0.0], [29737.398890958033, 0.0], [29737.398890958033, 12.5], [0.0, 12.5]], bulges: [] }, holes: [Path { pts: [[0.0011, 0.0011], [0.0011, 12.4989], [29737.39779095803, 12.4989], [29737.39779095803, 0.0011]], bulges: [] }], dist: 0.0011, expect: None, sketch: None }, axis: [-0.5813565729461679, -0.3576785653472939, 0.0], angle: 1.5707963267948966, at: [0.0, 0.0, 0.0] }\n3. Rotate { target: 1, pivot: [99999999.0, 0.0, 0.0], axis: [1.0, 1.0, 0.0], angle: -1.5707963267948966 }\n4. Rotate { target: 0, pivot: [0.0, 0.0, 0.0], axis: [1.0, 0.0, 0.0], angle: 0.0 }";
+const scene = [{"label":"before","positions":[0e0,0e0,0e0,2.1571813665814054e4,1.327201879704554e4,1.5582787459829513e4,2.1577392507311637e4,1.3275451169045815e4,1.5572141082511544e4,5.5788414975834675e0,3.4323720002738756e0,-1.0646377317969554e1,-5.764144425901482e-4,9.368812039813209e-4,0e0,2.157181308939961e4,1.3272019733926745e4,1.5582787459829513e4,2.1577391930897193e4,1.327545210592702e4,1.5572141082511544e4,5.578265083140877e0,3.4333088814778567e0,-1.0646377317969554e1,1.2888893157632442e-3,7.929867878114464e-4,-3.604667613911727e-4,5.579148510795656e0,3.4325608895896393e0,-1.0644864022322984e1,2.157739121842232e4,1.3275450376059027e4,1.5572141442978305e4,2.157181335880084e4,1.3272018608156226e4,1.5582785946533866e4,7.12474873173096e-4,1.7298679917927672e-3,-3.604667613911727e-4,5.578572096353066e0,3.4334977707936205e0,-1.0644864022322984e1,2.1577390642007875e4,1.3275451312940231e4,1.5572141442978305e4,2.1571812782386394e4,1.327201954503743e4,1.5582785946533866e4],"triangles":[0,8,1,10,9,2,9,8,3,8,0,3,11,1,8,1,11,2,3,2,9,10,2,11,6,13,14,14,15,6,5,15,12,4,5,12,4,12,7,7,13,6,15,5,6,13,7,12,4,1,5,0,1,4,2,6,1,5,1,6,3,7,6,2,3,6,7,0,4,3,0,7,12,9,13,8,9,12,9,10,14,13,9,14,15,14,11,10,11,14,8,12,11,15,11,12],"faces":[0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9],"edges":[[0e0,0e0,0e0,2.1571813665814054e4,1.327201879704554e4,1.5582787459829513e4],[2.1571813665814054e4,1.327201879704554e4,1.5582787459829513e4,2.1577392507311637e4,1.3275451169045815e4,1.5572141082511544e4],[2.1577392507311637e4,1.3275451169045815e4,1.5572141082511544e4,5.5788414975834675e0,3.4323720002738756e0,-1.0646377317969554e1],[5.5788414975834675e0,3.4323720002738756e0,-1.0646377317969554e1,0e0,0e0,0e0],[-5.764144425901482e-4,9.368812039813209e-4,0e0,2.157181308939961e4,1.3272019733926745e4,1.5582787459829513e4],[2.157181308939961e4,1.3272019733926745e4,1.5582787459829513e4,2.1577391930897193e4,1.327545210592702e4,1.5572141082511544e4],[2.1577391930897193e4,1.327545210592702e4,1.5572141082511544e4,5.578265083140877e0,3.4333088814778567e0,-1.0646377317969554e1],[5.578265083140877e0,3.4333088814778567e0,-1.0646377317969554e1,-5.764144425901482e-4,9.368812039813209e-4,0e0],[0e0,0e0,0e0,-5.764144425901482e-4,9.368812039813209e-4,0e0],[2.1571813665814054e4,1.327201879704554e4,1.5582787459829513e4,2.157181308939961e4,1.3272019733926745e4,1.5582787459829513e4],[2.1577392507311637e4,1.3275451169045815e4,1.5572141082511544e4,2.1577391930897193e4,1.327545210592702e4,1.5572141082511544e4],[5.5788414975834675e0,3.4323720002738756e0,-1.0646377317969554e1,5.578265083140877e0,3.4333088814778567e0,-1.0646377317969554e1],[1.2888893157632442e-3,7.929867878114464e-4,-3.604667613911727e-4,5.579148510795656e0,3.4325608895896393e0,-1.0644864022322984e1],[5.579148510795656e0,3.4325608895896393e0,-1.0644864022322984e1,2.157739121842232e4,1.3275450376059027e4,1.5572141442978305e4],[2.157739121842232e4,1.3275450376059027e4,1.5572141442978305e4,2.157181335880084e4,1.3272018608156226e4,1.5582785946533866e4],[2.157181335880084e4,1.3272018608156226e4,1.5582785946533866e4,1.2888893157632442e-3,7.929867878114464e-4,-3.604667613911727e-4],[7.12474873173096e-4,1.7298679917927672e-3,-3.604667613911727e-4,5.578572096353066e0,3.4334977707936205e0,-1.0644864022322984e1],[5.578572096353066e0,3.4334977707936205e0,-1.0644864022322984e1,2.1577390642007875e4,1.3275451312940231e4,1.5572141442978305e4],[2.1577390642007875e4,1.3275451312940231e4,1.5572141442978305e4,2.1571812782386394e4,1.327201954503743e4,1.5582785946533866e4],[2.1571812782386394e4,1.327201954503743e4,1.5582785946533866e4,7.12474873173096e-4,1.7298679917927672e-3,-3.604667613911727e-4],[1.2888893157632442e-3,7.929867878114464e-4,-3.604667613911727e-4,7.12474873173096e-4,1.7298679917927672e-3,-3.604667613911727e-4],[5.579148510795656e0,3.4325608895896393e0,-1.0644864022322984e1,5.578572096353066e0,3.4334977707936205e0,-1.0644864022322984e1],[2.157739121842232e4,1.3275450376059027e4,1.5572141442978305e4,2.1577390642007875e4,1.3275451312940231e4,1.5572141442978305e4],[2.157181335880084e4,1.3272018608156226e4,1.5582785946533866e4,2.1571812782386394e4,1.327201954503743e4,1.5582785946533866e4]],"badEdges":[],"badCurves":[],"badFaces":[],"badVertices":[],"meshProblems":[],"errors":[]},{"label":"after","positions":[4.999999950000001e7,-4.99999995e7,-7.071067741154796e7,5.00064027215488e7,-4.997155888908593e7,-7.07048085703138e7,5.000641475528115e7,-4.9971561911604784e7,-7.070480705253066e7,5.0000011533732355e7,-5.000000252251885e7,-7.071067589376482e7,4.9999999500180244e7,-4.999999949981976e7,-7.071067741261803e7,5.000640272172904e7,-4.9971558888905704e7,-7.070480857138386e7,5.000641475546138e7,-4.997156191142455e7,-7.070480705360071e7,5.0000011533912584e7,-5.0000002522338614e7,-7.071067589483488e7,4.9999999501295835e7,-4.999999949921395e7,-7.07106774111973e7,5.000001153291024e7,-5.0000002521200836e7,-7.07106758936813e7,5.000641475398532e7,-4.9971561912390836e7,-7.070480705288132e7,5.0006402722370915e7,-4.997155889040395e7,-7.070480857039732e7,4.9999999501476064e7,-4.999999949903372e7,-7.071067741226736e7,5.000001153309048e7,-5.00000025210206e7,-7.071067589475136e7,5.000641475416555e7,-4.99715619122106e7,-7.070480705395138e7,5.0006402722551145e7,-4.997155889022372e7,-7.070480857146738e7],"triangles":[2,10,3,0,8,1,11,1,8,1,11,2,10,2,11,9,3,10,3,9,0,8,0,9,4,15,12,4,12,7,5,15,4,7,13,6,14,6,13,6,14,5,15,5,14,13,7,12,0,5,4,1,5,0,2,6,5,1,2,5,3,7,2,6,2,7,0,4,7,3,0,7,12,8,9,13,12,9,14,13,10,9,10,13,15,14,11,10,11,14,12,15,8,11,8,15],"faces":[0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9],"edges":[[4.999999950000001e7,-4.99999995e7,-7.071067741154796e7,5.00064027215488e7,-4.997155888908593e7,-7.07048085703138e7],[5.00064027215488e7,-4.997155888908593e7,-7.07048085703138e7,5.000641475528115e7,-4.9971561911604784e7,-7.070480705253066e7],[5.000641475528115e7,-4.9971561911604784e7,-7.070480705253066e7,5.0000011533732355e7,-5.000000252251885e7,-7.071067589376482e7],[5.0000011533732355e7,-5.000000252251885e7,-7.071067589376482e7,4.999999950000001e7,-4.99999995e7,-7.071067741154796e7],[4.9999999500180244e7,-4.999999949981976e7,-7.071067741261803e7,5.000640272172904e7,-4.9971558888905704e7,-7.070480857138386e7],[5.000640272172904e7,-4.9971558888905704e7,-7.070480857138386e7,5.000641475546138e7,-4.997156191142455e7,-7.070480705360071e7],[5.000641475546138e7,-4.997156191142455e7,-7.070480705360071e7,5.0000011533912584e7,-5.0000002522338614e7,-7.071067589483488e7],[5.0000011533912584e7,-5.0000002522338614e7,-7.071067589483488e7,4.9999999500180244e7,-4.999999949981976e7,-7.071067741261803e7],[4.999999950000001e7,-4.99999995e7,-7.071067741154796e7,4.9999999500180244e7,-4.999999949981976e7,-7.071067741261803e7],[5.00064027215488e7,-4.997155888908593e7,-7.07048085703138e7,5.000640272172904e7,-4.9971558888905704e7,-7.070480857138386e7],[5.000641475528115e7,-4.9971561911604784e7,-7.070480705253066e7,5.000641475546138e7,-4.997156191142455e7,-7.070480705360071e7],[5.0000011533732355e7,-5.000000252251885e7,-7.071067589376482e7,5.0000011533912584e7,-5.0000002522338614e7,-7.071067589483488e7],[4.9999999501295835e7,-4.999999949921395e7,-7.07106774111973e7,5.000001153291024e7,-5.0000002521200836e7,-7.07106758936813e7],[5.000001153291024e7,-5.0000002521200836e7,-7.07106758936813e7,5.000641475398532e7,-4.9971561912390836e7,-7.070480705288132e7],[5.000641475398532e7,-4.9971561912390836e7,-7.070480705288132e7,5.0006402722370915e7,-4.997155889040395e7,-7.070480857039732e7],[5.0006402722370915e7,-4.997155889040395e7,-7.070480857039732e7,4.9999999501295835e7,-4.999999949921395e7,-7.07106774111973e7],[4.9999999501476064e7,-4.999999949903372e7,-7.071067741226736e7,5.000001153309048e7,-5.00000025210206e7,-7.071067589475136e7],[5.000001153309048e7,-5.00000025210206e7,-7.071067589475136e7,5.000641475416555e7,-4.99715619122106e7,-7.070480705395138e7],[5.000641475416555e7,-4.99715619122106e7,-7.070480705395138e7,5.0006402722551145e7,-4.997155889022372e7,-7.070480857146738e7],[5.0006402722551145e7,-4.997155889022372e7,-7.070480857146738e7,4.9999999501476064e7,-4.999999949903372e7,-7.071067741226736e7],[4.9999999501295835e7,-4.999999949921395e7,-7.07106774111973e7,4.9999999501476064e7,-4.999999949903372e7,-7.071067741226736e7],[5.000001153291024e7,-5.0000002521200836e7,-7.07106758936813e7,5.000001153309048e7,-5.00000025210206e7,-7.071067589475136e7],[5.000641475398532e7,-4.9971561912390836e7,-7.070480705288132e7,5.000641475416555e7,-4.99715619122106e7,-7.070480705395138e7],[5.0006402722370915e7,-4.997155889040395e7,-7.070480857039732e7,5.0006402722551145e7,-4.997155889022372e7,-7.070480857146738e7]],"badEdges":[],"badCurves":[],"badFaces":[],"badVertices":[],"meshProblems":[],"errors":[]}];
+const RED = [255, 59, 59], colours = [[154, 167, 184], [127, 179, 213], [195, 155, 211], [240, 178, 122]];
+const info = document.getElementById("info");
+info.innerHTML = "<h1>Failure dump</h1><pre></pre><div>Drag to turn, wheel to zoom. Red: the problems listed; dashed red: where a named edge's curve really runs.</div>";
+info.querySelector("pre").textContent = note;
+for (const b of scene) {
+  const h = document.createElement("div");
+  h.innerHTML = `<b></b> ${b.errors.length ? `<span class="bad">${b.errors.length} problem(s)</span>` : "valid"}`;
+  h.querySelector("b").textContent = b.label;
+  info.appendChild(h);
+  for (const e of b.errors) { const p = document.createElement("pre"); p.className = "bad"; p.textContent = e; info.appendChild(p); }
+  if (b.meshProblems.length) { const p = document.createElement("pre"); p.className = "bad"; p.textContent = `${b.meshProblems.length / 6} open or flipped mesh edge(s), drawn in red`; info.appendChild(p); }
+}
+// Everything relative to the middle of the scene, in doubles.
+const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+const visit = (a) => { for (let i = 0; i < a.length; i++) if (Number.isFinite(a[i])) { lo[i % 3] = Math.min(lo[i % 3], a[i]); hi[i % 3] = Math.max(hi[i % 3], a[i]); } };
+for (const b of scene) { visit(b.positions); b.edges.forEach(visit); visit(b.badVertices); visit(b.meshProblems); }
+const centre = lo.map((l, i) => (Number.isFinite(l) ? (l + hi[i]) / 2 : 0));
+const radius = Math.max(Number.isFinite(lo[0]) ? Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2 : 1, 1e-9);
+const points = (a) => { const out = []; for (let i = 0; i + 2 < a.length; i += 3) out.push([a[i] - centre[0], a[i + 1] - centre[1], a[i + 2] - centre[2]]); return out; };
+const tris = [], lines = [], dots = [];
+scene.forEach((b, i) => {
+  const p = points(b.positions), bad = new Set(b.badFaces), badE = new Set(b.badEdges);
+  b.faces.forEach((f, t) => tris.push({ v: [0, 1, 2].map((k) => p[b.triangles[3 * t + k]]), colour: bad.has(f) ? RED : colours[i % colours.length], bad: bad.has(f) }));
+  b.edges.forEach((e, k) => lines.push({ v: points(e), bad: badE.has(k) }));
+  for (const c of b.badCurves) lines.push({ v: points(c), bad: true, dashed: true });
+  const m = points(b.meshProblems);
+  for (let k = 0; k + 1 < m.length; k += 2) lines.push({ v: [m[k], m[k + 1]], bad: true });
+  dots.push(...points(b.badVertices));
+});
+lines.sort((a, b) => a.bad - b.bad); // red on top
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const view = { yaw: -1.1, pitch: 0.5, zoom: 1, faces: true };
+const home = () => Object.assign(view, { yaw: -1.1, pitch: 0.5, zoom: 1 });
+const canvas = document.getElementById("view"), ctx = canvas.getContext("2d");
+function draw() {
+  const dpr = devicePixelRatio || 1, W = innerWidth, H = innerHeight;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#14161a"; ctx.fillRect(0, 0, W, H);
+  // Z up: the eye looks back along e; r is screen right, u screen up.
+  const cp = Math.cos(view.pitch), e = [cp * Math.cos(view.yaw), cp * Math.sin(view.yaw), Math.sin(view.pitch)];
+  const r = [-Math.sin(view.yaw), Math.cos(view.yaw), 0], u = cross(e, r);
+  const s = (view.zoom * 0.45 * Math.min(W, H)) / radius;
+  const xy = (p) => [W / 2 + s * dot(p, r), H / 2 - s * dot(p, u)];
+  let drawn = 0;
+  if (view.faces) {
+    const order = tris.map((t) => ({ t, d: dot(t.v[0], e) + dot(t.v[1], e) + dot(t.v[2], e) })).sort((a, b) => a.d - b.d);
+    for (const { t } of order) {
+      if (t.v.some((p) => !p)) continue;
+      const n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0])), len = Math.hypot(...n) || 1;
+      const light = (t.bad ? 0.55 : 0.35) + (t.bad ? 0.45 : 0.65) * Math.abs(dot(n, e) / len);
+      const c = `rgb(${t.colour.map((x) => Math.round(x * light)).join(",")})`;
+      const [a, b, d] = t.v.map(xy);
+      ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...d); ctx.closePath();
+      ctx.fillStyle = c; ctx.strokeStyle = c; ctx.lineWidth = 0.5; ctx.fill(); ctx.stroke();
+      drawn++;
+    }
+  }
+  for (const l of lines) {
+    const pts = l.v.filter((p) => p.every(Number.isFinite));
+    if (pts.length < 2) continue;
+    ctx.beginPath(); ctx.moveTo(...xy(pts[0])); for (const p of pts.slice(1)) ctx.lineTo(...xy(p));
+    ctx.strokeStyle = l.bad ? "rgb(255,59,59)" : view.faces ? "#0b0c0e" : "#9aa7b8"; ctx.lineWidth = l.bad ? 3 : 1;
+    ctx.setLineDash(l.dashed ? [6, 5] : []); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.fillStyle = "rgb(255,59,59)";
+  for (const p of dots) { ctx.beginPath(); ctx.arc(...xy(p), 5, 0, 2 * Math.PI); ctx.fill(); }
+  document.body.dataset.triangles = String(drawn);
+}
+let drag = null;
+canvas.addEventListener("pointerdown", (ev) => { drag = [ev.clientX, ev.clientY]; canvas.setPointerCapture(ev.pointerId); });
+canvas.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  view.yaw -= (ev.clientX - drag[0]) * 0.01;
+  view.pitch = Math.max(-1.55, Math.min(1.55, view.pitch + (ev.clientY - drag[1]) * 0.01));
+  drag = [ev.clientX, ev.clientY]; draw();
+});
+canvas.addEventListener("pointerup", () => { drag = null; });
+canvas.addEventListener("wheel", (ev) => { ev.preventDefault(); view.zoom *= Math.exp(-ev.deltaY * 0.001); draw(); }, { passive: false });
+document.getElementById("faces").onclick = (ev) => { view.faces = !view.faces; ev.target.textContent = view.faces ? "Hide faces" : "Show faces"; draw(); };
+document.getElementById("home").onclick = () => { home(); draw(); };
+addEventListener("resize", draw);
+draw();
+</script></body></html>

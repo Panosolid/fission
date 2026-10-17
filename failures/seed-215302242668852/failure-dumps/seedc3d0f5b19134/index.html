@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failure dump</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#14161a;color:#e6e8eb;font:13px system-ui,sans-serif}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none;cursor:grab}
+  #info{position:absolute;top:0;left:0;max-width:44em;padding:12px;background:#1c1f24e6;max-height:45%;overflow:auto}
+  #info h1{font-size:15px;margin:0 0 6px} .bad{color:#ff6b6b} pre{white-space:pre-wrap;margin:4px 0}
+  #tools{position:absolute;bottom:12px;left:12px;display:flex;gap:6px}
+  button{font:inherit;color:inherit;background:#2a2e35;border:1px solid #444a53;border-radius:4px;padding:4px 10px;cursor:pointer}
+</style>
+</head><body><canvas id="view"></canvas><div id="info"></div>
+<div id="tools"><button id="faces">Hide faces</button><button id="home">Reset view</button></div>
+<script>
+"use strict";
+const note = "step 1 (Add { shape: Extrude { outer: Path { pts: [[49999999.078636475, 7.695031124559154], [49999992.988098525, 3.3008563239010185], [49999995.35578293, -6.2043261182921805], [49999999.596685454, -9.33959640433544], [50000006.88343971, -3.560993186745076], [50000012.76190716, -3.12576575100959e-15]], bulges: [0.0, 0.0, 0.0, 0.0, 0.0, 0.000194718003679231] }, holes: [], dist: 0.0011, expect: None, sketch: Some(0) }, axis: [0.0, 0.5108221716732178, 0.6609441660752673], angle: -1.5707963267948966, at: [0.0, 0.0, 0.0] }): face 3 (Some(Side(Some(Piece { boundary: 0, piece: 1 })))) centroid is at [3.067405486122014, -39561571.77916288, 30575850.471530665] but should be at [3.044641382699427, -39561571.777118824, 30575850.447715137] (3.300851262366572e-2 off)\n\nChain:\n1. Add { shape: Extrude { outer: Path { pts: [[49999999.078636475, 7.695031124559154], [49999992.988098525, 3.3008563239010185], [49999995.35578293, -6.2043261182921805], [49999999.596685454, -9.33959640433544], [50000006.88343971, -3.560993186745076], [50000012.76190716, -3.12576575100959e-15]], bulges: [0.0, 0.0, 0.0, 0.0, 0.0, 0.000194718003679231] }, holes: [], dist: 0.0011, expect: None, sketch: Some(0) }, axis: [0.0, 0.5108221716732178, 0.6609441660752673], angle: -1.5707963267948966, at: [0.0, 0.0, 0.0] }";
+const scene = [{"label":"placed","positions":[-2.8175695227498054e0,-3.956157530984401e7,3.0575847451012116e7,-2.7755621134772923e-9,-3.9561578629428074e7,3.0575852768785678e7,6.088550020997109e0,-3.9561564925215706e7,3.057584812448565e7,2.611741070657604e0,-3.95615617494055e7,3.0575842273891337e7,-4.909057461225453e0,-3.95615671772824e7,3.0575839122674968e7,-7.389781666966212e0,-3.9561571705260985e7,3.0575840199053753e7,-2.8182421913390283e0,-3.956157530931177e7,3.057584745170077e7,-6.726713647847715e-4,-3.9561578628895834e7,3.057585276947433e7,6.087877352407886e0,-3.9561564924683474e7,3.0575848125174303e7,2.611068402068381e0,-3.956156174887327e7,3.057584227457999e7,-4.909730129814676e0,-3.956156717675016e7,3.057583912336362e7,-7.390454335555435e0,-3.9561571704728745e7,3.0575840199742407e7],"triangles":[5,4,0,2,0,4,3,2,4,1,0,2,11,6,10,8,10,6,9,10,8,7,8,6,1,7,0,6,0,7,7,2,8,1,2,7,3,9,2,8,2,9,3,10,9,4,10,3,10,4,11,5,11,4,6,11,0,5,0,11],"faces":[0,0,0,0,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7],"edges":[[-2.8175695227498054e0,-3.956157530984401e7,3.0575847451012116e7,-2.7755621134772923e-9,-3.9561578629428074e7,3.0575852768785678e7],[-2.7755621134772923e-9,-3.9561578629428074e7,3.0575852768785678e7,6.088550020997109e0,-3.9561564925215706e7,3.057584812448565e7],[6.088550020997109e0,-3.9561564925215706e7,3.057584812448565e7,2.611741070657604e0,-3.95615617494055e7,3.0575842273891337e7],[2.611741070657604e0,-3.95615617494055e7,3.0575842273891337e7,-4.909057461225453e0,-3.95615671772824e7,3.0575839122674968e7],[-4.909057461225453e0,-3.95615671772824e7,3.0575839122674968e7,-7.389781666966212e0,-3.9561571705260985e7,3.0575840199053753e7],[-7.389781666966212e0,-3.9561571705260985e7,3.0575840199053753e7,-2.8175695227498054e0,-3.956157530984401e7,3.0575847451012116e7],[-2.8182421913390283e0,-3.956157530931177e7,3.057584745170077e7,-6.726713647847715e-4,-3.9561578628895834e7,3.057585276947433e7],[-6.726713647847715e-4,-3.9561578628895834e7,3.057585276947433e7,6.087877352407886e0,-3.9561564924683474e7,3.0575848125174303e7],[6.087877352407886e0,-3.9561564924683474e7,3.0575848125174303e7,2.611068402068381e0,-3.956156174887327e7,3.057584227457999e7],[2.611068402068381e0,-3.956156174887327e7,3.057584227457999e7,-4.909730129814676e0,-3.956156717675016e7,3.057583912336362e7],[-4.909730129814676e0,-3.956156717675016e7,3.057583912336362e7,-7.390454335555435e0,-3.9561571704728745e7,3.0575840199742407e7],[-7.390454335555435e0,-3.9561571704728745e7,3.0575840199742407e7,-2.8182421913390283e0,-3.956157530931177e7,3.057584745170077e7],[-2.8175695227498054e0,-3.956157530984401e7,3.0575847451012116e7,-2.8182421913390283e0,-3.956157530931177e7,3.057584745170077e7],[-2.7755621134772923e-9,-3.9561578629428074e7,3.0575852768785678e7,-6.726713647847715e-4,-3.9561578628895834e7,3.057585276947433e7],[6.088550020997109e0,-3.9561564925215706e7,3.057584812448565e7,6.087877352407886e0,-3.9561564924683474e7,3.0575848125174303e7],[2.611741070657604e0,-3.95615617494055e7,3.0575842273891337e7,2.611068402068381e0,-3.956156174887327e7,3.057584227457999e7],[-4.909057461225453e0,-3.95615671772824e7,3.0575839122674968e7,-4.909730129814676e0,-3.956156717675016e7,3.057583912336362e7],[-7.389781666966212e0,-3.9561571705260985e7,3.0575840199053753e7,-7.390454335555435e0,-3.9561571704728745e7,3.0575840199742407e7]],"badEdges":[],"badCurves":[],"badFaces":[],"badVertices":[],"meshProblems":[],"errors":[]}];
+const RED = [255, 59, 59], colours = [[154, 167, 184], [127, 179, 213], [195, 155, 211], [240, 178, 122]];
+const info = document.getElementById("info");
+info.innerHTML = "<h1>Failure dump</h1><pre></pre><div>Drag to turn, wheel to zoom. Red: the problems listed; dashed red: where a named edge's curve really runs.</div>";
+info.querySelector("pre").textContent = note;
+for (const b of scene) {
+  const h = document.createElement("div");
+  h.innerHTML = `<b></b> ${b.errors.length ? `<span class="bad">${b.errors.length} problem(s)</span>` : "valid"}`;
+  h.querySelector("b").textContent = b.label;
+  info.appendChild(h);
+  for (const e of b.errors) { const p = document.createElement("pre"); p.className = "bad"; p.textContent = e; info.appendChild(p); }
+  if (b.meshProblems.length) { const p = document.createElement("pre"); p.className = "bad"; p.textContent = `${b.meshProblems.length / 6} open or flipped mesh edge(s), drawn in red`; info.appendChild(p); }
+}
+// Everything relative to the middle of the scene, in doubles.
+const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+const visit = (a) => { for (let i = 0; i < a.length; i++) if (Number.isFinite(a[i])) { lo[i % 3] = Math.min(lo[i % 3], a[i]); hi[i % 3] = Math.max(hi[i % 3], a[i]); } };
+for (const b of scene) { visit(b.positions); b.edges.forEach(visit); visit(b.badVertices); visit(b.meshProblems); }
+const centre = lo.map((l, i) => (Number.isFinite(l) ? (l + hi[i]) / 2 : 0));
+const radius = Math.max(Number.isFinite(lo[0]) ? Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2 : 1, 1e-9);
+const points = (a) => { const out = []; for (let i = 0; i + 2 < a.length; i += 3) out.push([a[i] - centre[0], a[i + 1] - centre[1], a[i + 2] - centre[2]]); return out; };
+const tris = [], lines = [], dots = [];
+scene.forEach((b, i) => {
+  const p = points(b.positions), bad = new Set(b.badFaces), badE = new Set(b.badEdges);
+  b.faces.forEach((f, t) => tris.push({ v: [0, 1, 2].map((k) => p[b.triangles[3 * t + k]]), colour: bad.has(f) ? RED : colours[i % colours.length], bad: bad.has(f) }));
+  b.edges.forEach((e, k) => lines.push({ v: points(e), bad: badE.has(k) }));
+  for (const c of b.badCurves) lines.push({ v: points(c), bad: true, dashed: true });
+  const m = points(b.meshProblems);
+  for (let k = 0; k + 1 < m.length; k += 2) lines.push({ v: [m[k], m[k + 1]], bad: true });
+  dots.push(...points(b.badVertices));
+});
+lines.sort((a, b) => a.bad - b.bad); // red on top
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const view = { yaw: -1.1, pitch: 0.5, zoom: 1, faces: true };
+const home = () => Object.assign(view, { yaw: -1.1, pitch: 0.5, zoom: 1 });
+const canvas = document.getElementById("view"), ctx = canvas.getContext("2d");
+function draw() {
+  const dpr = devicePixelRatio || 1, W = innerWidth, H = innerHeight;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#14161a"; ctx.fillRect(0, 0, W, H);
+  // Z up: the eye looks back along e; r is screen right, u screen up.
+  const cp = Math.cos(view.pitch), e = [cp * Math.cos(view.yaw), cp * Math.sin(view.yaw), Math.sin(view.pitch)];
+  const r = [-Math.sin(view.yaw), Math.cos(view.yaw), 0], u = cross(e, r);
+  const s = (view.zoom * 0.45 * Math.min(W, H)) / radius;
+  const xy = (p) => [W / 2 + s * dot(p, r), H / 2 - s * dot(p, u)];
+  let drawn = 0;
+  if (view.faces) {
+    const order = tris.map((t) => ({ t, d: dot(t.v[0], e) + dot(t.v[1], e) + dot(t.v[2], e) })).sort((a, b) => a.d - b.d);
+    for (const { t } of order) {
+      if (t.v.some((p) => !p)) continue;
+      const n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0])), len = Math.hypot(...n) || 1;
+      const light = (t.bad ? 0.55 : 0.35) + (t.bad ? 0.45 : 0.65) * Math.abs(dot(n, e) / len);
+      const c = `rgb(${t.colour.map((x) => Math.round(x * light)).join(",")})`;
+      const [a, b, d] = t.v.map(xy);
+      ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...d); ctx.closePath();
+      ctx.fillStyle = c; ctx.strokeStyle = c; ctx.lineWidth = 0.5; ctx.fill(); ctx.stroke();
+      drawn++;
+    }
+  }
+  for (const l of lines) {
+    const pts = l.v.filter((p) => p.every(Number.isFinite));
+    if (pts.length < 2) continue;
+    ctx.beginPath(); ctx.moveTo(...xy(pts[0])); for (const p of pts.slice(1)) ctx.lineTo(...xy(p));
+    ctx.strokeStyle = l.bad ? "rgb(255,59,59)" : view.faces ? "#0b0c0e" : "#9aa7b8"; ctx.lineWidth = l.bad ? 3 : 1;
+    ctx.setLineDash(l.dashed ? [6, 5] : []); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.fillStyle = "rgb(255,59,59)";
+  for (const p of dots) { ctx.beginPath(); ctx.arc(...xy(p), 5, 0, 2 * Math.PI); ctx.fill(); }
+  document.body.dataset.triangles = String(drawn);
+}
+let drag = null;
+canvas.addEventListener("pointerdown", (ev) => { drag = [ev.clientX, ev.clientY]; canvas.setPointerCapture(ev.pointerId); });
+canvas.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  view.yaw -= (ev.clientX - drag[0]) * 0.01;
+  view.pitch = Math.max(-1.55, Math.min(1.55, view.pitch + (ev.clientY - drag[1]) * 0.01));
+  drag = [ev.clientX, ev.clientY]; draw();
+});
+canvas.addEventListener("pointerup", () => { drag = null; });
+canvas.addEventListener("wheel", (ev) => { ev.preventDefault(); view.zoom *= Math.exp(-ev.deltaY * 0.001); draw(); }, { passive: false });
+document.getElementById("faces").onclick = (ev) => { view.faces = !view.faces; ev.target.textContent = view.faces ? "Hide faces" : "Show faces"; draw(); };
+document.getElementById("home").onclick = () => { home(); draw(); };
+addEventListener("resize", draw);
+draw();
+</script></body></html>

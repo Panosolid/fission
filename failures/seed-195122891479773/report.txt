@@ -1,0 +1,25 @@
+Stateful kernel test: 1250 cases over 1 seed(s) ["0xb17696a25add"] in 90.4s
+Failures: 1
+  seed 0xb17696a25add: step 2 (Rotate { target: 0, pivot: [-50000000.0, 0.0, 0.0], axis: [0.0, -0.1687902921008463, 0.11153929534184398], angle: 1.5707963258948965 }): face 3 (Some(Side(Some(Piece { boundary: 0, piece: 1 })))) centroid is at [-49999984.12250005, 55131585.87137057, 83429622.61886272] but should be at [-49999984.12247953, 55131585.871286064, 83429622.61879113] (1.1263423540312336e-4 off) (minimal chain: 2 ops)
+  saved regression: /home/runner/work/fission/fission/kernel/tests/regressions/stateful/seedb17696a25add-5cc5ed16be0af31d.json
+  failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/seedb17696a25add/index.html
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box                562 / 53      →  91.4%   124.9ms  slowest 312.3µs
+  add cylinder           575 / 54      →  91.4%      3.1s  slowest 10.4ms
+  add extrude            329 / 253     →  56.5%      1.5s  slowest 43.5ms
+  add sketch arc extrude     154 / 29      →  84.2%   482.0ms  slowest 12.5ms
+  add sketch circle extrude      52 / 12      →  81.2%   237.3ms  slowest 9.4ms
+  add sketch extrude      21 / 12      →  63.6%     8.7ms  slowest 599.2µs
+  add sphere             532 / 61      →  89.7%     28.9s  slowest 115.3ms
+  move                  1204 / 98      →  92.5%      9.9s  slowest 59.6ms
+  rotate                1472 / 69      →  95.5%      9.8s  slowest 59.6ms
+  ~extreme input          40 / 163     →  19.7%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 67.5, d: 0.1899170888890009, h: 2.0970301778185254 }, axis: [1.0, 1.0, 1.0], angle: -4.71238898038469, at: [-13.0, -14.5, -9.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 17028.293966307516, h: 9.000002 }, axis: [1.0, 0.0, 0.0], angle: -5.213488634495314, at: [29.959503406445975, 17.0, 18.0] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[-8.43073287143169, 16.5], [2991.5186165981177, 16.5], [2991.5186165981177, 1073.1497831565166], [-8.43073287143169, 1073.1497831565166]], bulges: [] }, holes: [Circle { c: [519.8941587068266, 544.8248915782583], r: 443.32489157825825 }, Circle { c: [1491.5439418633432, 544.8248915782583], r: 443.32489157825825 }, Circle { c: [2463.1937250198594, 544.8248915782583], r: 443.32489157825825 }], dist: 71.5, expect: Some(true), sketch: None }, axis: [0.8711996679451802, -0.9625925795271877, -0.18980609747499683], angle: -6.283185307179586, at: [-6.0, 8.0, 17.0] }
+  slowest add sketch arc extrude: Add { shape: Extrude { outer: Path { pts: [[20.000011, -8.999989], [20.001011000000002, -8.999989]], bulges: [-1446936468.4827359, 0.0] }, holes: [], dist: 7.5, expect: None, sketch: Some(7832043283381269278) }, axis: [0.914152532760002, 0.2904793151040078, -0.533966336705922], angle: 0.0, at: [-824.2387774027962, 14.0, -252.75191008725315] }
+  slowest add sketch circle extrude: Add { shape: Extrude { outer: Circle { c: [-4.0, 4.0], r: 54570.44685571432 }, holes: [], dist: 671532.061766717, expect: Some(true), sketch: Some(6667284269467463580) }, axis: [0.0, 3.0, 4.0], angle: 0.0, at: [-598.794477062407, -27289.72342785716, -0.5] }
+  slowest add sketch extrude: Add { shape: Extrude { outer: Path { pts: [[20.833340566584468, -199.50884425459293], [22.65036243542727, -182.08362886522295], [11.407489285576567, -165.68010547352964], [-13.339392047791815, -184.8851131818284], [-49.47432413403714, -198.12704299275475], [-83.01103387179376, -228.88503214590656], [-31.759055926003867, -261.1483440269077], [-22.19853884067194, -274.28256116669905], [24.071378991314546, -265.59970566770494], [21.16721427765537, -243.8537585603729], [20.437638014756708, -225.38828427211695]], bulges: [] }, holes: [], dist: 16.0, expect: None, sketch: Some(4174815017931272586) }, axis: [0.7335387558612063, -0.18067928636918887, 0.10692382078293572], angle: -8.003375554251882, at: [-376.795212880198, -15.500011, 617.2642553818716] }
+  slowest add sphere: Add { shape: Sphere { r: 999999.999999 }, axis: [0.0, 1.0, 0.0], angle: 6.283185307179586, at: [11.5, -451.3081840243235, -19.0] }
+  slowest move: Move { target: 0, by: [39640.631101750725, 608.6690608262769, 13.0] }
+  slowest rotate: Rotate { target: 0, pivot: [-9.0, 19.0, 685.0938776576852], axis: [-1.1000000000000001e-9, 0.0, 1.0], angle: 0.0 }

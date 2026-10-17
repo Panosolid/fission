@@ -1,0 +1,226 @@
+solid primitive
+  facet normal 0e0 0e0 -1e0
+    outer loop
+      vertex 5.000001230788102e7 0e0 0e0
+      vertex 5.000001230678102e7 1.1e-3 0e0
+      vertex 5.000001230678102e7 2.89989e1 0e0
+    endloop
+  endfacet
+  facet normal 0e0 -0e0 -1e0
+    outer loop
+      vertex 5.000001230788102e7 2.9e1 0e0
+      vertex 5.000001230788102e7 0e0 0e0
+      vertex 5.000001230678102e7 2.89989e1 0e0
+    endloop
+  endfacet
+  facet normal 0e0 0e0 -1e0
+    outer loop
+      vertex 5.000001230678102e7 2.89989e1 0e0
+      vertex 5.00000000011e7 2.89989e1 0e0
+      vertex 5.000001230788102e7 2.9e1 0e0
+    endloop
+  endfacet
+  facet normal 0e0 0e0 -1e0
+    outer loop
+      vertex 5e7 0e0 0e0
+      vertex 5.00000000011e7 1.1e-3 0e0
+      vertex 5.000001230678102e7 1.1e-3 0e0
+    endloop
+  endfacet
+  facet normal 0e0 -0e0 -1e0
+    outer loop
+      vertex 5.000001230678102e7 1.1e-3 0e0
+      vertex 5.000001230788102e7 0e0 0e0
+      vertex 5e7 0e0 0e0
+    endloop
+  endfacet
+  facet normal 0e0 0e0 -1e0
+    outer loop
+      vertex 5e7 2.9e1 0e0
+      vertex 5.00000000011e7 2.89989e1 0e0
+      vertex 5e7 0e0 0e0
+    endloop
+  endfacet
+  facet normal -0e0 0e0 -1e0
+    outer loop
+      vertex 5.00000000011e7 1.1e-3 0e0
+      vertex 5e7 0e0 0e0
+      vertex 5.00000000011e7 2.89989e1 0e0
+    endloop
+  endfacet
+  facet normal 0e0 0e0 -1e0
+    outer loop
+      vertex 5.00000000011e7 2.89989e1 0e0
+      vertex 5e7 2.9e1 0e0
+      vertex 5.000001230788102e7 2.9e1 0e0
+    endloop
+  endfacet
+  facet normal 0e0 0e0 1e0
+    outer loop
+      vertex 5e7 0e0 1.1942239008086744e1
+      vertex 5.00000000011e7 1.1e-3 1.1942239008086744e1
+      vertex 5.00000000011e7 2.89989e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 0e0 1e0
+    outer loop
+      vertex 5e7 2.9e1 1.1942239008086744e1
+      vertex 5e7 0e0 1.1942239008086744e1
+      vertex 5.00000000011e7 2.89989e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 -0e0 1e0
+    outer loop
+      vertex 5.00000000011e7 2.89989e1 1.1942239008086744e1
+      vertex 5.000001230678102e7 2.89989e1 1.1942239008086744e1
+      vertex 5e7 2.9e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 0e0 1e0
+    outer loop
+      vertex 5.000001230788102e7 0e0 1.1942239008086744e1
+      vertex 5.000001230678102e7 2.89989e1 1.1942239008086744e1
+      vertex 5.000001230678102e7 1.1e-3 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 0e0 1e0
+    outer loop
+      vertex 5.000001230678102e7 1.1e-3 1.1942239008086744e1
+      vertex 5.00000000011e7 1.1e-3 1.1942239008086744e1
+      vertex 5.000001230788102e7 0e0 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 0e0 1e0
+    outer loop
+      vertex 5.00000000011e7 1.1e-3 1.1942239008086744e1
+      vertex 5e7 0e0 1.1942239008086744e1
+      vertex 5.000001230788102e7 0e0 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 0e0 1e0
+    outer loop
+      vertex 5.000001230788102e7 2.9e1 1.1942239008086744e1
+      vertex 5.000001230678102e7 2.89989e1 1.1942239008086744e1
+      vertex 5.000001230788102e7 0e0 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 -0e0 1e0
+    outer loop
+      vertex 5.000001230678102e7 2.89989e1 1.1942239008086744e1
+      vertex 5.000001230788102e7 2.9e1 1.1942239008086744e1
+      vertex 5e7 2.9e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 1e0 0e0
+    outer loop
+      vertex 5.000001230788102e7 2.9e1 1.1942239008086744e1
+      vertex 5e7 2.9e1 0e0
+      vertex 5e7 2.9e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 1e0 -0e0
+    outer loop
+      vertex 5.000001230788102e7 2.9e1 0e0
+      vertex 5e7 2.9e1 0e0
+      vertex 5.000001230788102e7 2.9e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal -1e0 -0e0 0e0
+    outer loop
+      vertex 5e7 2.9e1 1.1942239008086744e1
+      vertex 5e7 0e0 0e0
+      vertex 5e7 0e0 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal -1e0 0e0 0e0
+    outer loop
+      vertex 5e7 2.9e1 0e0
+      vertex 5e7 0e0 0e0
+      vertex 5e7 2.9e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 -1e0 0e0
+    outer loop
+      vertex 5e7 0e0 1.1942239008086744e1
+      vertex 5.000001230788102e7 0e0 0e0
+      vertex 5.000001230788102e7 0e0 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 -1e0 0e0
+    outer loop
+      vertex 5e7 0e0 0e0
+      vertex 5.000001230788102e7 0e0 0e0
+      vertex 5e7 0e0 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 1e0 -0e0 0e0
+    outer loop
+      vertex 5.000001230788102e7 0e0 1.1942239008086744e1
+      vertex 5.000001230788102e7 2.9e1 0e0
+      vertex 5.000001230788102e7 2.9e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 1e0 0e0 0e0
+    outer loop
+      vertex 5.000001230788102e7 0e0 0e0
+      vertex 5.000001230788102e7 2.9e1 0e0
+      vertex 5.000001230788102e7 0e0 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 1e0 -0e0 0e0
+    outer loop
+      vertex 5.00000000011e7 1.1e-3 1.1942239008086744e1
+      vertex 5.00000000011e7 2.89989e1 0e0
+      vertex 5.00000000011e7 2.89989e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 1e0 0e0 0e0
+    outer loop
+      vertex 5.00000000011e7 1.1e-3 0e0
+      vertex 5.00000000011e7 2.89989e1 0e0
+      vertex 5.00000000011e7 1.1e-3 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 -1e0 0e0
+    outer loop
+      vertex 5.00000000011e7 2.89989e1 1.1942239008086744e1
+      vertex 5.000001230678102e7 2.89989e1 0e0
+      vertex 5.000001230678102e7 2.89989e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 -1e0 0e0
+    outer loop
+      vertex 5.00000000011e7 2.89989e1 0e0
+      vertex 5.000001230678102e7 2.89989e1 0e0
+      vertex 5.00000000011e7 2.89989e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal -1e0 -0e0 0e0
+    outer loop
+      vertex 5.000001230678102e7 2.89989e1 1.1942239008086744e1
+      vertex 5.000001230678102e7 1.1e-3 0e0
+      vertex 5.000001230678102e7 1.1e-3 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal -1e0 0e0 0e0
+    outer loop
+      vertex 5.000001230678102e7 2.89989e1 0e0
+      vertex 5.000001230678102e7 1.1e-3 0e0
+      vertex 5.000001230678102e7 2.89989e1 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 1e0 0e0
+    outer loop
+      vertex 5.000001230678102e7 1.1e-3 1.1942239008086744e1
+      vertex 5.00000000011e7 1.1e-3 0e0
+      vertex 5.00000000011e7 1.1e-3 1.1942239008086744e1
+    endloop
+  endfacet
+  facet normal 0e0 1e0 -0e0
+    outer loop
+      vertex 5.000001230678102e7 1.1e-3 0e0
+      vertex 5.00000000011e7 1.1e-3 0e0
+      vertex 5.000001230678102e7 1.1e-3 1.1942239008086744e1
+    endloop
+  endfacet
+endsolid primitive

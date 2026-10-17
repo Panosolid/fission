@@ -1,0 +1,86 @@
+solid before
+  facet normal 0e0 -1e0 -2.220446049250313e-16
+    outer loop
+      vertex 0e0 2.220446049250313e-19 -1e-3
+      vertex 9.99999999999e5 0e0 0e0
+      vertex 0e0 0e0 0e0
+    endloop
+  endfacet
+  facet normal -0e0 -1e0 -2.220446049250313e-16
+    outer loop
+      vertex 9.99999999999e5 2.220446049250313e-19 -1e-3
+      vertex 9.99999999999e5 0e0 0e0
+      vertex 0e0 2.220446049250313e-19 -1e-3
+    endloop
+  endfacet
+  facet normal 0e0 1e0 0e0
+    outer loop
+      vertex 0e0 8.15e1 1.8096635301390052e-14
+      vertex 9.99999999999e5 8.15e1 -9.999999999819034e-4
+      vertex 0e0 8.15e1 -9.999999999819034e-4
+    endloop
+  endfacet
+  facet normal 0e0 1e0 0e0
+    outer loop
+      vertex 9.99999999999e5 8.15e1 1.8096635301390052e-14
+      vertex 9.99999999999e5 8.15e1 -9.999999999819034e-4
+      vertex 0e0 8.15e1 1.8096635301390052e-14
+    endloop
+  endfacet
+  facet normal 0e0 -2.220446049250313e-16 1e0
+    outer loop
+      vertex 0e0 0e0 0e0
+      vertex 9.99999999999e5 8.15e1 1.8096635301390052e-14
+      vertex 0e0 8.15e1 1.8096635301390052e-14
+    endloop
+  endfacet
+  facet normal 0e0 -2.220446049250313e-16 1e0
+    outer loop
+      vertex 9.99999999999e5 0e0 0e0
+      vertex 9.99999999999e5 8.15e1 1.8096635301390052e-14
+      vertex 0e0 0e0 0e0
+    endloop
+  endfacet
+  facet normal 0e0 2.220446049250313e-16 -1e0
+    outer loop
+      vertex 0e0 8.15e1 -9.999999999819034e-4
+      vertex 9.99999999999e5 2.220446049250313e-19 -1e-3
+      vertex 0e0 2.220446049250313e-19 -1e-3
+    endloop
+  endfacet
+  facet normal 0e0 2.220446049250313e-16 -1e0
+    outer loop
+      vertex 9.99999999999e5 8.15e1 -9.999999999819034e-4
+      vertex 9.99999999999e5 2.220446049250313e-19 -1e-3
+      vertex 0e0 8.15e1 -9.999999999819034e-4
+    endloop
+  endfacet
+  facet normal -1e0 0e0 0e0
+    outer loop
+      vertex 0e0 8.15e1 1.8096635301390052e-14
+      vertex 0e0 2.220446049250313e-19 -1e-3
+      vertex 0e0 0e0 0e0
+    endloop
+  endfacet
+  facet normal -1e0 -0e0 0e0
+    outer loop
+      vertex 0e0 8.15e1 -9.999999999819034e-4
+      vertex 0e0 2.220446049250313e-19 -1e-3
+      vertex 0e0 8.15e1 1.8096635301390052e-14
+    endloop
+  endfacet
+  facet normal 1e0 -0e0 0e0
+    outer loop
+      vertex 9.99999999999e5 0e0 0e0
+      vertex 9.99999999999e5 8.15e1 -9.999999999819034e-4
+      vertex 9.99999999999e5 8.15e1 1.8096635301390052e-14
+    endloop
+  endfacet
+  facet normal 1e0 0e0 -0e0
+    outer loop
+      vertex 9.99999999999e5 2.220446049250313e-19 -1e-3
+      vertex 9.99999999999e5 8.15e1 -9.999999999819034e-4
+      vertex 9.99999999999e5 0e0 0e0
+    endloop
+  endfacet
+endsolid before
