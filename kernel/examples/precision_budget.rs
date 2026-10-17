@@ -8,6 +8,8 @@
 //! before any boolean logic runs; compare it with `tolerance::LINEAR`.
 //!
 //! cargo run --release --example precision_budget
+// Expected values may use the f64 maths methods (clippy.toml, src/fmath.rs).
+#![allow(clippy::disallowed_methods)]
 
 use fission_kernel::geom::{Curve, Surface};
 use fission_kernel::intersect::curve_surface;

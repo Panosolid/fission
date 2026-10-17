@@ -117,6 +117,7 @@ pub fn make_sphere_meshed(radius: f64) -> Result<Meshed, KernelError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::fmath;
     use super::*;
     use crate::tessellate::{tessellate, TessOptions};
     use crate::tolerance::{self, points_eq, rel_eq, FP_REL, MIN_FEATURE};
@@ -193,8 +194,8 @@ mod tests {
         assert_eq!((c.v, c.e, c.f, c.rings), (2, 2, 3, 1));
         let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
         let n = (m.edge_polylines[0].len() - 1) as f64;
-        let polygon = 0.5 * n * 9.0 * (TAU / n).sin();
-        let side = n * 2.0 * 3.0 * (std::f64::consts::PI / n).sin() * 4.0;
+        let polygon = 0.5 * n * 9.0 * fmath::sin(TAU / n);
+        let side = n * 2.0 * 3.0 * fmath::sin(std::f64::consts::PI / n) * 4.0;
         assert!(rel_eq(m.signed_volume(), polygon * 4.0, FP_REL));
         assert!(rel_eq(m.area(), 2.0 * polygon + side, FP_REL));
     }
@@ -243,7 +244,7 @@ mod tests {
     /// Lengths spread evenly on a log scale, so tiny and huge sizes are as
     /// likely as everyday ones.
     fn length() -> impl Strategy<Value = f64> {
-        (-2.0f64..5.0).prop_map(|e| 10f64.powf(e))
+        (-2.0f64..5.0).prop_map(|e| fmath::powf(10f64, e))
     }
 
     proptest! {

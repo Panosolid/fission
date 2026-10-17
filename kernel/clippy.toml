@@ -1,0 +1,30 @@
+# sin, cos and the rest go through src/fmath.rs, which gives the same bits
+# in the browser as in native tests; the f64 methods call the platform's own
+# maths library, which does not. Tests and examples may use them for
+# expected values (they allow this lint at their top).
+disallowed-methods = [
+    { path = "f64::sin", reason = "use fmath::sin: same bits in every build" },
+    { path = "f64::cos", reason = "use fmath::cos: same bits in every build" },
+    { path = "f64::sin_cos", reason = "use fmath::sin_cos: same bits in every build" },
+    { path = "f64::tan", reason = "use fmath::tan: same bits in every build" },
+    { path = "f64::asin", reason = "use fmath::asin: same bits in every build" },
+    { path = "f64::acos", reason = "use fmath::acos: same bits in every build" },
+    { path = "f64::atan", reason = "use fmath::atan: same bits in every build" },
+    { path = "f64::atan2", reason = "use fmath::atan2: same bits in every build" },
+    { path = "f64::hypot", reason = "use fmath::hypot: same bits in every build" },
+    { path = "f64::powf", reason = "use fmath::powf: same bits in every build" },
+    { path = "f64::exp", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::exp_m1", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::ln", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::ln_1p", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::log", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::log2", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::log10", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::cbrt", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::sinh", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::cosh", reason = "add it to fmath: same bits in every build" },
+    { path = "f64::tanh", reason = "add it to fmath: same bits in every build" },
+    { path = "f32::sin", reason = "add an f32 version to fmath: same bits in every build" },
+    { path = "f32::cos", reason = "add an f32 version to fmath: same bits in every build" },
+    { path = "f32::atan2", reason = "add an f32 version to fmath: same bits in every build" },
+]

@@ -33,6 +33,8 @@
 //!
 //! When a new kernel operation lands, add it to `Op`, `Scene::transitions`
 //! and `apply_op`.
+// Expected values may use the f64 maths methods (clippy.toml, src/fmath.rs).
+#![allow(clippy::disallowed_methods)]
 
 use fission_kernel::debug_dump;
 use fission_kernel::mass::MassProps;

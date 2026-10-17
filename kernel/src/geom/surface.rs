@@ -1,3 +1,4 @@
+use crate::fmath;
 use super::Transform;
 use glam::{DVec2, DVec3};
 use std::f64::consts::{FRAC_PI_2, TAU};
@@ -21,11 +22,11 @@ impl Surface {
         match *self {
             Surface::Plane { origin, normal, x_dir } => origin + x_dir * u + normal.cross(x_dir) * v,
             Surface::Cylinder { origin, axis, x_dir, radius } => {
-                origin + (x_dir * u.cos() + axis.cross(x_dir) * u.sin()) * radius + axis * v
+                origin + (x_dir * fmath::cos(u) + axis.cross(x_dir) * fmath::sin(u)) * radius + axis * v
             }
             Surface::Sphere { center, axis, x_dir, radius } => {
-                let ring = x_dir * u.cos() + axis.cross(x_dir) * u.sin();
-                center + (ring * v.cos() + axis * v.sin()) * radius
+                let ring = x_dir * fmath::cos(u) + axis.cross(x_dir) * fmath::sin(u);
+                center + (ring * fmath::cos(v) + axis * fmath::sin(v)) * radius
             }
         }
     }
@@ -34,7 +35,7 @@ impl Surface {
     pub fn normal(&self, uv: DVec2) -> DVec3 {
         match *self {
             Surface::Plane { normal, .. } => normal,
-            Surface::Cylinder { axis, x_dir, .. } => x_dir * uv.x.cos() + axis.cross(x_dir) * uv.x.sin(),
+            Surface::Cylinder { axis, x_dir, .. } => x_dir * fmath::cos(uv.x) + axis.cross(x_dir) * fmath::sin(uv.x),
             Surface::Sphere { center, radius, .. } => (self.eval(uv) - center) / radius,
         }
     }
@@ -54,14 +55,14 @@ impl Surface {
             Surface::Cylinder { origin, axis, x_dir, .. } => {
                 let d = p - origin;
                 let y_dir = axis.cross(x_dir);
-                DVec2::new(d.dot(y_dir).atan2(d.dot(x_dir)).rem_euclid(TAU), d.dot(axis))
+                DVec2::new(fmath::atan2(d.dot(y_dir), d.dot(x_dir)).rem_euclid(TAU), d.dot(axis))
             }
             Surface::Sphere { center, axis, x_dir, .. } => {
                 let d = p - center;
                 let y_dir = axis.cross(x_dir);
                 let h = d.dot(axis);
                 let ring = (d - axis * h).length();
-                DVec2::new(d.dot(y_dir).atan2(d.dot(x_dir)).rem_euclid(TAU), h.atan2(ring).clamp(-FRAC_PI_2, FRAC_PI_2))
+                DVec2::new(fmath::atan2(d.dot(y_dir), d.dot(x_dir)).rem_euclid(TAU), fmath::atan2(h, ring).clamp(-FRAC_PI_2, FRAC_PI_2))
             }
         }
     }

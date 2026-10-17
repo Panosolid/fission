@@ -28,6 +28,7 @@
 //! - probe's `c + X·r` vs `c − X·r`: by the time holes are placed every
 //!   piece is clear of every other, so any point of a hole's circle
 //!   decides whether it is inside a loop.
+use crate::fmath;
 use super::KernelError;
 use crate::tolerance::{segments_touch, side, twice_area, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
@@ -80,7 +81,7 @@ fn perp(v: DVec2) -> DVec2 {
 
 /// Unit vector at angle `t`.
 fn dir(t: f64) -> DVec2 {
-    DVec2::new(t.cos(), t.sin())
+    DVec2::new(fmath::cos(t), fmath::sin(t))
 }
 
 impl Seg {
@@ -96,7 +97,7 @@ impl Seg {
             return None;
         }
         let center = (a + b) * 0.5 + perp(b - a) * ((1.0 - bulge * bulge) / (4.0 * bulge));
-        Some(Seg::Arc { a, b, center, radius, sweep: 4.0 * bulge.atan() })
+        Some(Seg::Arc { a, b, center, radius, sweep: 4.0 * fmath::atan(bulge) })
     }
 
     /// End points (none for a circle).
@@ -340,7 +341,7 @@ pub fn signed_area(segs: &[Seg]) -> f64 {
     for s in segs {
         match *s {
             Seg::Line { .. } => {}
-            Seg::Arc { radius, sweep, .. } => twice += radius * radius * (sweep - sweep.sin()),
+            Seg::Arc { radius, sweep, .. } => twice += radius * radius * (sweep - fmath::sin(sweep)),
             Seg::Circle { radius, ccw, .. } => {
                 let full = radius * radius * TAU;
                 twice += if ccw { full } else { -full };
@@ -382,7 +383,7 @@ pub(crate) fn bounds(s: &Seg) -> (DVec2, DVec2) {
 fn winding(segs: &[Seg], p: DVec2) -> i64 {
     let angle = |a: DVec2, b: DVec2| {
         let (u, v) = (a - p, b - p);
-        f64::from(side(a, b, p)) * u.perp_dot(v).abs().atan2(u.dot(v))
+        f64::from(side(a, b, p)) * fmath::atan2(u.perp_dot(v).abs(), u.dot(v))
     };
     let mut total = 0.0;
     for s in segs {
@@ -722,10 +723,10 @@ mod tests {
         // Bulge tan(π/8): a quarter turn. The chord of 2 subtends 90°, so
         // r = 2/√2 = √2, and the centre is 1 to the left of the midpoint:
         // r·cos 45° = 1, so (1, 1).
-        let Seg::Arc { center, radius, sweep, .. } = Seg::from_bulge(p(0.0, 0.0), p(2.0, 0.0), (PI / 8.0).tan()).unwrap() else { panic!() };
+        let Seg::Arc { center, radius, sweep, .. } = Seg::from_bulge(p(0.0, 0.0), p(2.0, 0.0), fmath::tan(PI / 8.0)).unwrap() else { panic!() };
         assert!(eq(radius, 2f64.sqrt()) && eq(sweep, FRAC_PI_2) && eq(center.x, 1.0) && eq(center.y, 1.0));
         // Negative bulge: the same quarter circle mirrored, centre (1, −1).
-        let Seg::Arc { center, sweep, .. } = Seg::from_bulge(p(0.0, 0.0), p(2.0, 0.0), -(PI / 8.0).tan()).unwrap() else { panic!() };
+        let Seg::Arc { center, sweep, .. } = Seg::from_bulge(p(0.0, 0.0), p(2.0, 0.0), -fmath::tan(PI / 8.0)).unwrap() else { panic!() };
         assert!(eq(sweep, -FRAC_PI_2) && eq(center.y, -1.0));
         // Radius limits: chord 2·MIN_FEATURE as a half circle has r =
         // MIN_FEATURE (allowed); 1.8·MIN_FEATURE gives 0.9× (refused). A
@@ -817,9 +818,9 @@ mod tests {
             assert!(near(signed_area(&moved(&loops[1])), -k * k * 4.0 * PI) && near(perimeter(&moved(&loops[1])), k * 4.0 * PI));
             // Not a half circle (sin φ ≠ 0): the bowed square of
             // concave_arc_by_hand, 100 − (r²/2)(φ − sin φ), sides 30 + rφ.
-            let (r, phi) = (7.25, 4.0 * 0.4f64.atan());
+            let (r, phi) = (7.25, 4.0 * fmath::atan(0.4f64));
             let bowed = pieces(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], &[0.0, 0.0, -0.4, 0.0]);
-            assert!(near(signed_area(&moved(&bowed)), k * k * (100.0 - r * r / 2.0 * (phi - phi.sin()))), "bowed, {k}");
+            assert!(near(signed_area(&moved(&bowed)), k * k * (100.0 - r * r / 2.0 * (phi - fmath::sin(phi)))), "bowed, {k}");
             assert!(near(perimeter(&moved(&bowed)), k * (30.0 + r * phi)), "bowed, {k}");
         }
     }
@@ -831,7 +832,7 @@ mod tests {
         let (lo, hi) = bounds(&upper_half());
         assert_eq!((lo, hi), (p(-1.0, 0.0), p(1.0, 1.0)));
         // A quarter from (1,0) to (0,1): just the box between its ends.
-        let (lo, hi) = bounds(&Seg::from_bulge(p(1.0, 0.0), p(0.0, 1.0), (PI / 8.0).tan()).unwrap());
+        let (lo, hi) = bounds(&Seg::from_bulge(p(1.0, 0.0), p(0.0, 1.0), fmath::tan(PI / 8.0)).unwrap());
         assert!(eq(lo.x, 0.0) && eq(lo.y, 0.0) && eq(hi.x, 1.0) && eq(hi.y, 1.0));
     }
 
@@ -998,10 +999,10 @@ mod tests {
     fn a_cusp_is_refused() {
         // Line (0,0)→(2,0) arriving heading +x; then a quarter circle about
         // (2,1) run clockwise, which leaves (2,0) heading −x: straight back.
-        let cusp = Profile { outer: path(&[(0.0, 0.0), (2.0, 0.0), (1.0, 1.0)], &[0.0, -(PI / 8.0).tan(), 0.0]), holes: vec![] };
+        let cusp = Profile { outer: path(&[(0.0, 0.0), (2.0, 0.0), (1.0, 1.0)], &[0.0, -fmath::tan(PI / 8.0), 0.0]), holes: vec![] };
         assert!(refused(cusp).contains("doubles back"));
         // Counter-clockwise instead it leaves heading +x, smoothly: fine.
-        let smooth = Profile { outer: path(&[(0.0, 0.0), (2.0, 0.0), (3.0, 1.0), (0.0, 1.0)], &[0.0, (PI / 8.0).tan(), 0.0, 0.0]), holes: vec![] };
+        let smooth = Profile { outer: path(&[(0.0, 0.0), (2.0, 0.0), (3.0, 1.0), (0.0, 1.0)], &[0.0, fmath::tan(PI / 8.0), 0.0, 0.0]), holes: vec![] };
         assert!(check_profile(&smooth).is_ok());
     }
 
@@ -1231,7 +1232,7 @@ mod tests {
         assert_crossing(&s, &t_cw, &shared, true);
         // Counter-clockwise from P a quarter turn to (2, 1): never reaches
         // (0, 1). (0, 1) is on s's span but not t's.
-        let t_ccw = Seg::from_bulge(p(1.0, 0.0), p(2.0, 1.0), (PI / 8.0).tan()).unwrap();
+        let t_ccw = Seg::from_bulge(p(1.0, 0.0), p(2.0, 1.0), fmath::tan(PI / 8.0)).unwrap();
         assert_crossing(&s, &t_ccw, &shared, false);
     }
 
@@ -1297,7 +1298,7 @@ mod tests {
         // half). A line 10 long passes it; one 7 long stops short; one
         // exactly 8 long ends on the arc, which touches it there.
         let ps = [p(4.0, 3.0)];
-        let upper_from_p = Seg::from_bulge(p(4.0, 3.0), p(-5.0, 0.0), (((180.0f64 - 36.869_897_645_844_02) / 4.0).to_radians()).tan()).unwrap();
+        let upper_from_p = Seg::from_bulge(p(4.0, 3.0), p(-5.0, 0.0), fmath::tan(((180.0f64 - 36.869_897_645_844_02) / 4.0).to_radians())).unwrap();
         assert_crossing(&upper_from_p, &Seg::Line { a: p(-6.0, 3.0), b: p(4.0, 3.0) }, &ps, true);
         assert_crossing(&upper_from_p, &Seg::Line { a: p(4.0, 3.0), b: p(-3.0, 3.0) }, &ps, false);
         assert!(crossing(&upper_from_p, &Seg::Line { a: p(4.0, 3.0), b: p(-4.0, 3.0) }, &ps));
@@ -1321,7 +1322,7 @@ mod tests {
         // 10·cos 10° grows with the angle. That direction from (1, 0) is
         // atan(0.868/3.924) ≈ 12.5°, on the small arc: gap |x − (1,0)| − 2.
         let near = arc(DVec2::ZERO, 5.0, 10.0, 40.0);
-        let want = (26.0 - 10.0 * 10f64.to_radians().cos()).sqrt() - 2.0;
+        let want = (26.0 - 10.0 * fmath::cos(10f64.to_radians())).sqrt() - 2.0;
         assert!(eq(gap(&near, &small), want), "{} vs {want}", gap(&near, &small));
         // Concentric, radii 5 and 5.5: 0.5 apart wherever both are, here
         // from 30° to 60° (inside the first arc, 0° to 90°).
@@ -1329,7 +1330,7 @@ mod tests {
         assert!(eq(gap(&inner, &arc(DVec2::ZERO, 5.5, 30.0, 60.0)), 0.5));
         // No overlap (100° to 120°): nearest are the ends 10° apart,
         // √(25 + 30.25 − 55·cos 10°) by the cosine rule.
-        let want = (55.25 - 55.0 * 10f64.to_radians().cos()).sqrt();
+        let want = (55.25 - 55.0 * fmath::cos(10f64.to_radians())).sqrt();
         assert!(eq(gap(&inner, &arc(DVec2::ZERO, 5.5, 100.0, 120.0)), want));
         // Two whole concentric circles have no ends at all: still 0.5.
         let whole = |r: f64| Seg::Circle { center: p(2.0, -1.0), radius: r, ccw: true };
@@ -1556,7 +1557,7 @@ mod tests {
         // A to B is 270° (bulge tan 67.5°), from B back to A is 90°
         // (bulge tan 22.5°): together exactly the circle, no overlap.
         let (a, b) = (p(1.0, 0.0), p(0.0, -1.0));
-        let (big, small) = ((67.5f64).to_radians().tan(), (22.5f64).to_radians().tan());
+        let (big, small) = (fmath::tan((67.5f64).to_radians()), fmath::tan((22.5f64).to_radians()));
         let ab = Seg::from_bulge(a, b, big).unwrap();
         assert_crossing(&ab, &Seg::from_bulge(b, a, small).unwrap(), &[a, b], false);
         // From B back to A the long way, clockwise 270° (bulge −tan 67.5°):
@@ -1567,12 +1568,12 @@ mod tests {
         assert_crossing(&ab, &Seg::from_bulge(b, p(0.0, 1.0), 1.0).unwrap(), &[b], true);
         // Out and straight back along the same arc (opposite turns,
         // sharing its far end): overlap.
-        let q = Seg::from_bulge(a, p(0.0, 1.0), (PI / 8.0).tan()).unwrap();
-        let back = Seg::from_bulge(p(0.0, 1.0), a, -(PI / 8.0).tan()).unwrap();
+        let q = Seg::from_bulge(a, p(0.0, 1.0), fmath::tan(PI / 8.0)).unwrap();
+        let back = Seg::from_bulge(p(0.0, 1.0), a, -fmath::tan(PI / 8.0)).unwrap();
         assert_crossing(&q, &back, &[p(0.0, 1.0)], true);
         // Two separate quarter arcs of the circle run opposite ways, sharing
         // nothing: (1,0)→(0,1) and (0,−1)→(−1,0) clockwise. No overlap.
-        let other = Seg::from_bulge(p(0.0, -1.0), p(-1.0, 0.0), -(PI / 8.0).tan()).unwrap();
+        let other = Seg::from_bulge(p(0.0, -1.0), p(-1.0, 0.0), -fmath::tan(PI / 8.0)).unwrap();
         assert_crossing(&q, &other, &[], false);
     }
 }
