@@ -8,14 +8,12 @@
 // 375 px wide with taps. Screenshots go to E2E_SHOTS when set. Run with
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4184, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4184/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 const shots = process.env.E2E_SHOTS;
 
@@ -85,6 +83,9 @@ async function drawn(page, pts, tap = false) {
   if (tap) await page.tap("#sketch-plane-XY");
   else await page.click("#sketch-plane-XY");
   await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+  // On the grid: grid snap is off by default since SF1, and Firefox's clicks land on whole pixels, 0.1 mm off.
+  await page.check("#sketch-grid-snap");
+  await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
   for (const p of pts) await at(page, p, TOP, tap);
 }
 

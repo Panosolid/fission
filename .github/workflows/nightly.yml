@@ -40,12 +40,15 @@ on:
         default: false
 
 # The nightly run has its own group, and every branch its own, so runs started
-# from threads during the day never cancel the night's run, and a new run on
-# a branch replaces one still waiting on that branch. Runs on different
-# branches do run at once; the collect script copes with that.
+# from threads during the day never cancel the night's run. A new run on a
+# thread's branch cancels the one still running or waiting there, which tests
+# older code (Ben, 2026-10-17, after day runs of 4 jobs × 290 minutes filled
+# every runner and CI waited over an hour); runs on main and the nightly run
+# are never cancelled. Runs on different branches do run at once; the
+# collect script copes with that.
 concurrency:
   group: random-testing-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name != 'schedule' && github.ref != 'refs/heads/main' }}
 
 jobs:
   plan:

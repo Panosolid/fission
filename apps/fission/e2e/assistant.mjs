@@ -8,14 +8,12 @@
 // machine. Volumes are worked out by hand from V = width · depth · height.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4181, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4181/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 const KEY = "sk-ant-test-e2e-0123456789";
 

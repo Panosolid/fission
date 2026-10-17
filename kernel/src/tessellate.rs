@@ -25,6 +25,7 @@ use crate::tolerance;
 use crate::topology::{Body, FaceId};
 use glam::{DVec2, DVec3};
 use std::f64::consts::{PI, TAU};
+use spade::handles::FixedVertexHandle;
 use spade::{ConstrainedDelaunayTriangulation, Point2, Triangulation};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -55,7 +56,15 @@ pub struct TessError {
     pub message: String,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Tessellations run on this thread, so tests can catch repeated work.
+    pub(crate) static TESSELLATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub fn tessellate(body: &Body, opts: &TessOptions) -> Result<Mesh, TessError> {
+    #[cfg(test)]
+    TESSELLATIONS.with(|n| n.set(n.get() + 1));
     let mut mesh =
         Mesh { positions: body.vertices.iter().map(|v| v.point).collect(), options: *opts, ..Mesh::default() };
     // Where along each edge (as fractions 0..=1) its mesh points go.
@@ -600,18 +609,40 @@ fn push_triangles(mesh: &mut Mesh, face: FaceId, tris: Vec<[u32; 3]>, sense: boo
     }
 }
 
-/// Constrained Delaunay triangulation of the region bounded by `loops`
-/// (mesh vertex ids with matching uv points). Returns counter-clockwise
-/// triangles inside the region (even-odd rule).
-pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Vec<[u32; 3]>, String> {
-    let mut cdt: ConstrainedDelaunayTriangulation<Point2<f64>> = ConstrainedDelaunayTriangulation::new();
+type Cdt = ConstrainedDelaunayTriangulation<Point2<f64>>;
+
+/// Snaps a uv coordinate the triangulator would refuse (below ~1e-142) to 0.
+fn snap_uv(p: DVec2) -> Point2<f64> {
+    let snap = |x: f64| if x.abs() < tolerance::SNAP_TO_ZERO { 0.0 } else { x };
+    Point2::new(snap(p.x), snap(p.y))
+}
+
+/// All the points of `uv`, loop after loop, bulk loaded into a triangulation
+/// whose handle i is point i; None when two points share a position (bulk
+/// loading would keep only one) or a coordinate is refused. About twice as
+/// fast as inserting the points one at a time in a release build: 4 s
+/// instead of 8 s for a cap face with 2,000 round holes (500,000 points,
+/// slow mostly because points lying almost on one circle need exact
+/// predicates).
+fn bulk_loaded(uv: &[Vec<DVec2>]) -> Option<Cdt> {
+    let points: Vec<Point2<f64>> = uv.iter().flatten().map(|&p| snap_uv(p)).collect();
+    let n = points.len();
+    Cdt::bulk_load_cdt(points, vec![]).ok().filter(|cdt| cdt.num_vertices() == n)
+}
+
+/// The triangulation of `triangulate_uv`'s points inserted one at a time,
+/// with the mesh vertex of each handle and each loop's handles. This path
+/// accepts a repeated point only if it is the same mesh vertex, and reports
+/// anything else (`bulk_loaded` can't tell which point was kept).
+#[allow(clippy::type_complexity)]
+fn insert_one_at_a_time(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<((Cdt, Vec<u32>), Vec<Vec<FixedVertexHandle>>), String> {
+    let mut cdt = Cdt::new();
     let mut handle_to_mesh: Vec<u32> = Vec::new();
     let mut handles = Vec::new();
     for (l, pts) in loops.iter().zip(uv) {
         let mut hs = Vec::new();
-        for (&id, p) in l.iter().zip(pts) {
-            let snap = |x: f64| if x.abs() < tolerance::SNAP_TO_ZERO { 0.0 } else { x };
-            let h = cdt.insert(Point2::new(snap(p.x), snap(p.y))).map_err(|e| format!("{e:?}"))?;
+        for (&id, &p) in l.iter().zip(pts) {
+            let h = cdt.insert(snap_uv(p)).map_err(|e| format!("{e:?}"))?;
             if h.index() == handle_to_mesh.len() {
                 handle_to_mesh.push(id);
             } else if handle_to_mesh[h.index()] != id {
@@ -621,6 +652,33 @@ pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Ve
         }
         handles.push(hs);
     }
+    Ok(((cdt, handle_to_mesh), handles))
+}
+
+/// Constrained Delaunay triangulation of the region bounded by `loops`
+/// (mesh vertex ids with matching uv points). Returns counter-clockwise
+/// triangles inside the region (even-odd rule).
+pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Vec<[u32; 3]>, String> {
+    triangulate_loaded(loops, uv, bulk_loaded(uv))
+}
+
+/// `triangulate_uv` from the bulk loaded points, or (None) from inserting
+/// them one at a time.
+fn triangulate_loaded(loops: &[Vec<u32>], uv: &[Vec<DVec2>], loaded: Option<Cdt>) -> Result<Vec<[u32; 3]>, String> {
+    let ((mut cdt, handle_to_mesh), handles) = match loaded {
+        Some(cdt) => {
+            let mut next = 0;
+            let handles = loops
+                .iter()
+                .map(|l| {
+                    next += l.len();
+                    (next - l.len()..next).map(FixedVertexHandle::from_index).collect()
+                })
+                .collect();
+            ((cdt, loops.iter().flatten().copied().collect()), handles)
+        }
+        None => insert_one_at_a_time(loops, uv)?,
+    };
     for hs in &handles {
         for i in 0..hs.len() {
             let (a, b) = (hs[i], hs[(i + 1) % hs.len()]);
@@ -638,13 +696,15 @@ pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Ve
     // boundary (constraint) edge is crossed. Testing triangle centroids
     // instead misclassifies the slivers that appear when boundary points are
     // collinear up to rounding.
-    let mut inside: std::collections::HashMap<usize, bool> = std::collections::HashMap::new();
+    // Indexed by face handle (dense indices), not hashed: a cap face with
+    // 1,000,000 triangles took 0.4 s with a hash map.
+    let mut inside: Vec<Option<bool>> = vec![None; cdt.num_all_faces()];
     let mut queue = std::collections::VecDeque::new();
     for f in cdt.inner_faces() {
         for e in f.adjacent_edges() {
-            if e.rev().face().is_outer() && !inside.contains_key(&f.fix().index()) {
+            if e.rev().face().is_outer() && inside[f.fix().index()].is_none() {
                 let parity = e.is_constraint_edge();
-                inside.insert(f.fix().index(), parity);
+                inside[f.fix().index()] = Some(parity);
                 queue.push_back((f, parity));
             }
         }
@@ -652,9 +712,10 @@ pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Ve
     while let Some((f, parity)) = queue.pop_front() {
         for e in f.adjacent_edges() {
             if let Some(next) = e.rev().face().as_inner() {
-                let next_parity = parity ^ e.is_constraint_edge();
-                if let std::collections::hash_map::Entry::Vacant(slot) = inside.entry(next.fix().index()) {
-                    slot.insert(next_parity);
+                let slot = &mut inside[next.fix().index()];
+                if slot.is_none() {
+                    let next_parity = parity ^ e.is_constraint_edge();
+                    *slot = Some(next_parity);
                     queue.push_back((next, next_parity));
                 }
             }
@@ -662,7 +723,7 @@ pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Ve
     }
     let mut out = Vec::new();
     for f in cdt.inner_faces() {
-        if inside.get(&f.fix().index()).copied().unwrap_or(false) {
+        if inside[f.fix().index()] == Some(true) {
             out.push(f.vertices().map(|v| handle_to_mesh[v.fix().index()]));
         }
     }
@@ -1124,6 +1185,106 @@ mod tests {
         // never needs them, so they are snapped to zero.
         let (ids, uv) = region(&[vec![(1e-200, 0.0), (1.0, 0.0), (0.0, 1.0)]]);
         assert_eq!(triangulate_uv(&ids, &uv).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn bulk_loading_keeps_input_order_and_leaves_repeats_to_the_slow_path() {
+        // Two loops of distinct points: handle i is point i, loop after loop.
+        let p = |x: f64, y: f64| DVec2::new(x, y);
+        let uv = vec![vec![p(0.0, 0.0), p(4.0, 0.0), p(4.0, 4.0), p(0.0, 4.0)], vec![p(1.0, 1.0), p(1.0, 2.0), p(2.0, 1.0)]];
+        let cdt = bulk_loaded(&uv).expect("distinct points load");
+        let flat: Vec<DVec2> = uv.iter().flatten().copied().collect();
+        assert_eq!(cdt.num_vertices(), 7);
+        for (i, v) in cdt.vertices().enumerate() {
+            assert_eq!(p(v.position().x, v.position().y), flat[i], "handle {i}");
+        }
+        // A repeated position (bulk loading would keep one of the two) and
+        // a coordinate the triangulator refuses both go to the one at a time
+        // path, which decides whether they are an error.
+        let mut repeated = uv.clone();
+        repeated[1][2] = p(4.0, 4.0);
+        assert!(bulk_loaded(&repeated).is_none());
+        assert!(bulk_loaded(&[vec![p(f64::NAN, 0.0), p(1.0, 0.0), p(0.0, 1.0)]]).is_none());
+        assert!(bulk_loaded(&[vec![p(f64::INFINITY, 0.0), p(1.0, 0.0), p(0.0, 1.0)]]).is_none());
+    }
+
+    #[test]
+    fn a_region_with_holes_triangulates_by_hand() {
+        // A 4 × 4 square with a unit square hole and a right-triangle hole
+        // (legs 1): n = 4 + 4 + 3 = 11 boundary points, h = 2 holes. The
+        // triangles' angles add up to the region's: π(4 − 2) at the outer
+        // corners plus 2π·k − π(k − 2) = π(k + 2) round each hole of k
+        // points, π(n − 2 + 2h) in all, so there are n + 2h − 2 = 13
+        // triangles, of area 16 − 1 − 0.5 = 14.5. Both paths agree.
+        let (ids, uv) = region(&[
+            vec![(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)],
+            vec![(0.5, 0.5), (0.5, 1.5), (1.5, 1.5), (1.5, 0.5)],
+            vec![(2.5, 2.5), (2.5, 3.5), (3.5, 2.5)],
+        ]);
+        for tris in [triangulate_uv(&ids, &uv).unwrap(), triangulate_loaded(&ids, &uv, None).unwrap()] {
+            assert_eq!(tris.len(), 13);
+            assert!(rel_eq(area(&tris, &uv), 14.5, FP_REL), "{}", area(&tris, &uv));
+        }
+    }
+
+    #[test]
+    fn bulk_loading_and_one_at_a_time_triangulate_the_same_region() {
+        // Self-consistency, seeded: squares with grids of round holes (regular
+        // polygons, so many points are cocircular and the Delaunay diagonals
+        // are ties either path may break its own way), with and without
+        // jitter. Both must give n + 2h − 2 counter-clockwise triangles of the
+        // same total area, with every boundary step an edge of a triangle on
+        // its left: the same region, meshed watertight.
+        let mut seed: u64 = 0x005e_ed0f_ba11;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for case in 0..40 {
+            let g = 1 + (rnd() * 6.0) as usize;
+            let sides = 3 + (rnd() * 40.0) as usize;
+            let jitter = if case % 2 == 0 { 0.0 } else { 0.05 };
+            let mut loops = vec![vec![(0.0, 0.0), (g as f64, 0.0), (g as f64, g as f64), (0.0, g as f64)]];
+            for i in 0..g {
+                for j in 0..g {
+                    let turn = if case % 3 == 0 { 0.0 } else { rnd() };
+                    loops.push(
+                        (0..sides)
+                            .rev()
+                            .map(|k| {
+                                let a = TAU * (k as f64 + turn) / sides as f64;
+                                let r = 0.3 + jitter * rnd();
+                                (i as f64 + 0.5 + r * a.cos(), j as f64 + 0.5 + r * a.sin())
+                            })
+                            .collect(),
+                    );
+                }
+            }
+            let (ids, uv) = region(&loops);
+            let n: usize = uv.iter().map(Vec::len).sum();
+            let flat: Vec<DVec2> = uv.iter().flatten().copied().collect();
+            let bulk = triangulate_uv(&ids, &uv).unwrap();
+            let slow = triangulate_loaded(&ids, &uv, None).unwrap();
+            for tris in [&bulk, &slow] {
+                assert_eq!(tris.len(), n + 2 * (g * g) - 2, "case {case}");
+                let directed: std::collections::HashSet<(u32, u32)> =
+                    tris.iter().flat_map(|t| (0..3).map(move |k| (t[k], t[(k + 1) % 3]))).collect();
+                for t in tris.iter() {
+                    let [a, b, c] = t.map(|i| flat[i as usize]);
+                    assert!((b - a).perp_dot(c - a) > 0.0, "case {case}: {t:?} is not counter-clockwise");
+                }
+                // The outer loop runs counter-clockwise, holes clockwise: the
+                // region is on the left of every step.
+                for l in &ids {
+                    for k in 0..l.len() {
+                        assert!(directed.contains(&(l[k], l[(k + 1) % l.len()])), "case {case}: step {k}");
+                    }
+                }
+            }
+            assert!(rel_eq(area(&bulk, &uv), area(&slow, &uv), FP_REL), "case {case}");
+        }
     }
 
     #[test]
