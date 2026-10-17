@@ -1,4 +1,4 @@
-Fission random testing, all runs so far (updated 2026-10-17 06:49 UTC)
+Fission random testing, all runs so far (updated 2026-10-17 06:53 UTC)
 
 hours of testing:                 185.2
 rounds:                           2664
@@ -15,13 +15,13 @@ failure-dumps/*/index.html is a 3D view with the problem in red.
 The commit and branch columns of log.csv (and commit.txt in each
 failures folder) say which code a round tested.
 
-Latest mutation run (whole kernel, lib tests), 2026-10-17 06:49 UTC, commit b304292 on claude/project-thread-xiwdvz:
+Latest mutation run (whole kernel, lib tests), 2026-10-17 06:53 UTC, commit b91c8c5 on claude/project-thread-ox0n22:
   shards finished: 0 of 4 (incomplete: survivors list not replaced)
   caught 0, missed , timed out 0, unviable 0
   survivors not in the previous complete run: 0
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit b304292 on claude/project-thread-xiwdvz, 2026-10-17 06:49 UTC (https://github.com/benpy28/fission/actions/runs/39010354558)
+  tested commit b91c8c5 on claude/project-thread-ox0n22, 2026-10-17 06:53 UTC (https://github.com/benpy28/fission/actions/runs/39008530463)
   no report: the journeys job stopped before the walk
 journeys/flags.txt lists every FLAG line so far.
