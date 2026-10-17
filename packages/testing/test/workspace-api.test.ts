@@ -304,6 +304,30 @@ test("every workspace, put to sleep and woken twice, keeps the same slot nodes, 
   }
 });
 
+/**
+ * A kernel that builds only boxes, answering with a box's view as the
+ * kernel gives it (primitives.rs): faces bottom, top, front, back, left,
+ * right; edge 4 the top front edge, joining the top (1) and the front (2).
+ */
+function boxKernel(): KernelCalls {
+  const view = {
+    mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [], edge_line_edges: [] },
+    volume: 24000,
+    area: 5200,
+    vertices: 8,
+    edges: 12,
+    faces: 6,
+    face_types: Array(6).fill("plane"),
+    edge_types: Array(12).fill("line"),
+    face_roles: ["bottom", "top", "front", "back", "left", "right"].map((role) => ({ role })),
+    face_areas: [1200, 1200, 800, 800, 600, 600],
+    face_centroids: Array(6).fill([0, 0, 0]),
+    edge_faces: [[0, 4], [0, 3], [5, 0], [2, 0], [1, 2], [1, 5], [3, 1], [4, 1], [2, 5], [4, 2], [3, 4], [5, 3]],
+    errors: [],
+  };
+  return { call: ((op: string) => (op === "make_box" ? Promise.resolve(view) : Promise.reject(new Error(`no ${op} in this test`)))) as KernelCalls["call"] };
+}
+
 test("Design asleep draws no selection and no kernel reply; on wake it draws the selection made meanwhile and builds again", async () => {
   const ctx = testContext();
   let calls = 0;
@@ -317,12 +341,13 @@ test("Design asleep draws no selection and no kernel reply; on wake it draws the
   assert.equal(calls, 1);
   assert.equal(error(), "", "a reply arriving asleep is not drawn");
   assert.deepEqual(drawn(), NO_HIGHLIGHT, "sleep takes the selection's colours off the viewport");
-  // Face 3 selected in another workspace meanwhile: drawn on wake (worked out:
-  // face 3 alone gives { body: false, faces: [3], edges: [] }).
-  ctx.selection.set([{ kind: "face", id: "face:feature-1/3" as StableId }]);
+  // The body selected in another workspace meanwhile: drawn on wake (worked
+  // out: the body alone gives { body: true, faces: [], edges: [] }; nothing
+  // built, so no face could be).
+  ctx.selection.set([{ kind: "body", id: "body:feature-1" as StableId }]);
   assert.deepEqual(drawn(), NO_HIGHLIGHT, "nothing drawn while asleep");
   view.wake!();
-  assert.deepEqual(drawn(), { body: false, faces: [3], edges: [] });
+  assert.deepEqual(drawn(), { body: true, faces: [], edges: [] });
   await settle();
   assert.equal(calls, 2, "the missed build runs again on wake");
   assert.match(error()!, /no kernel in this test/);
@@ -336,28 +361,30 @@ test("Design asleep draws no selection and no kernel reply; on wake it draws the
 
 test("Design turns viewport picks and Escape into the shared selection", async () => {
   const ctx = testContext();
+  ctx.kernel = boxKernel();
   const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   const ids = () => ctx.selection.items.map((r) => r.id);
+  // Faces 1 and 4 of the box: the top and the left.
   ctx.viewport.onPick!({ face: 1, shift: false });
   ctx.viewport.onPick!({ face: 4, shift: true });
-  assert.deepEqual(ids(), ["face:feature-1/1", "face:feature-1/4"]);
+  assert.deepEqual(ids(), ["face:feature-1/top", "face:feature-1/left"]);
   const doc = ctx.viewport.element.ownerDocument;
   const escape = () => new doc.defaultView!.KeyboardEvent("keydown", { key: "Escape" }) as unknown as Event;
   // Escape comes from the shell's one shortcut table (X7b), never a listener of Design's own.
   doc.dispatchEvent(escape());
-  assert.deepEqual(ids(), ["face:feature-1/1", "face:feature-1/4"], "Design does not listen to the keyboard itself");
+  assert.deepEqual(ids(), ["face:feature-1/top", "face:feature-1/left"], "Design does not listen to the keyboard itself");
   assert.equal(view.shortcut!("clear-selection", escape()), true);
   assert.deepEqual(ids(), []);
   ctx.viewport.onPick!({ face: 2, shift: false });
   view.sleep!();
   assert.equal(view.shortcut!("clear-selection", escape()), false, "asleep: declines");
-  assert.deepEqual(ids(), ["face:feature-1/2"], "Escape while asleep no longer clears");
+  assert.deepEqual(ids(), ["face:feature-1/front"], "Escape while asleep no longer clears");
   view.wake!();
   assert.equal(view.shortcut!("no-such-shortcut", escape()), false, "an id it doesn't have: declines");
   view.unmount();
   assert.equal(view.shortcut!("clear-selection", escape()), false, "after unmount: declines");
-  assert.deepEqual(ids(), ["face:feature-1/2"]);
+  assert.deepEqual(ids(), ["face:feature-1/front"]);
 });
 
 // One shortcut table (X7b): the shell's keys and every workspace's, with no
@@ -398,6 +425,7 @@ test("the key-listener check can fail: it catches a page-level keydown and copy,
 // browser and listed in properties, from whichever of them changed it.
 test("Design draws the selection, selects Body 1 from the browser, and stops drawing on hide", async () => {
   const ctx = testContext();
+  ctx.kernel = boxKernel();
   const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   const drawn = () => shownHighlights.get(ctx.viewport);
@@ -408,8 +436,8 @@ test("Design draws the selection, selects Body 1 from the browser, and stops dra
   ctx.viewport.onPick!({ face: 1, shift: false });
   ctx.viewport.onPick!({ face: null, edge: 4, shift: true });
   assert.deepEqual(drawn(), { body: false, faces: [1], edges: [4] });
-  // No body was built (the kernel fails here), so the types are unknown.
-  assert.deepEqual(listed(), ["Face 1 · … face:feature-1/1", "Edge 4 · … edge:feature-1/4"]);
+  // The box's top (face 1) and its top front edge (edge 4), by name, with their types.
+  assert.deepEqual(listed(), ["Top face · plane face:feature-1/top", "Edge of Front and Top · line edge:feature-1/front+top"]);
   assert.deepEqual(lit(), []);
   const row = ctx.browser.querySelector("[data-node=body-1]") as HTMLElement;
   row.click();

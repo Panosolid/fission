@@ -17,7 +17,8 @@ import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts";
-import { designReference, profileReference } from "./references.ts";
+import { featureNames, type BodyNames } from "./naming.ts";
+import { bodyReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
@@ -34,12 +35,6 @@ import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, t
 let saved: { doc: DesignDocument; shape: PartKind; sizes: string[] } | null = null;
 let framed: Framing | null = null;
 let framedKind: PartKind | null = null;
-/**
- * The last body Design built, kept across mounts: Undo and Redo re-mount
- * Design on the restored project (step 20c), and the selection follows
- * only if the restored body is compared with the one that was on screen.
- */
-let lastBuilt: BodyView | null = null;
 /** Design was put away by an Undo or Redo made in another workspace: the next mount is that restore's, not an opened file's. */
 let putAwayByRestore = false;
 /**
@@ -110,7 +105,7 @@ const folded = new Set<string>();
 
 /** The browser rows that stand for selectable geometry, and the reference each selects. */
 function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  if (node === "body-1") return designReference("body", lastFeature(doc).id);
+  if (node === "body-1") return bodyReference(lastFeature(doc).id);
   return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
 }
 
@@ -199,6 +194,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let missed = false;
   /** The last body that built, for the selection's surface and curve types. */
   let lastView: BodyView | null = null;
+  /** Its faces' and edges' names (step 24c), which the selection holds. */
+  let lastNames: BodyNames | null = null;
   /** The note about items the last rebuild dropped, and whether that drop is being applied now. */
   let note = "";
   let settling = false;
@@ -215,9 +212,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!doc) return;
     const featureId = lastFeature(doc).id;
     const items = ctx.selection.items;
-    viewport.showSelection(highlightOf(items, featureId));
+    viewport.showSelection(highlightOf(items, featureId, lastNames));
     lightRows(ctx.browser, doc, items);
-    panel.showSelection(selectionRows(items, featureId, lastView, doc.profiles));
+    panel.showSelection(selectionRows(items, featureId, lastView, lastNames, doc.profiles));
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -232,7 +229,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // The body is built from the part's feature intent (document.ts); an extrude of a sketch asks the kernel for the outline (extrude.ts).
-  const build = latestOnly(async (doc: DesignDocument) => buildSpec(kernel, await featureSpec(kernel, doc, lastFeature(doc))));
+  // Its faces and edges are named from the spec it was built from (naming.ts).
+  const build = latestOnly(async (doc: DesignDocument) => {
+    const feature = lastFeature(doc);
+    const spec = await featureSpec(kernel, doc, feature);
+    const view = await buildSpec(kernel, spec);
+    return { view, names: featureNames(doc, feature, spec, view) };
+  });
 
   /** Never shows stale numbers unmarked: dims them while out of date, and says so if the rebuild failed. */
   function markStale(failed = false) {
@@ -310,10 +313,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const feature = lastFeature(doc);
     panel.showFeature(feature);
     try {
-      const { current, value: view } = await build(doc);
+      const { current, value } = await build(doc);
       if (!current) return;
       if (!shown) return void (missed = true);
       missed = false;
+      const { view, names } = value;
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
@@ -330,11 +334,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       framedKind = kind;
       panel.showBody(view);
-      // Faces and edges the edit renumbered leave the selection, with a note (17e).
-      // A fresh mount compares with the body Design last built (Undo and
-      // Redo: the selection follows when the faces are still the same ones).
-      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView ?? lastBuilt, view, doc.profiles.map((p) => p.id));
-      lastView = lastBuilt = view;
+      // Faces and edges the edit took off the body leave the selection, with a
+      // note (17e); the rest follow their names, however the kernel numbers them now.
+      const { kept, dropped } = survivors(ctx.selection.items, names, doc.profiles.map((p) => p.id));
+      lastView = view;
+      lastNames = names;
       note = droppedNote(dropped);
       if (dropped.length > 0) {
         settling = true;
@@ -634,7 +638,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!doc) return;
     // Choosing a plane for Create sketch: only an offered plane counts.
     if (mode.kind === "pick") return void (pick.plane && pickPlane(pick.plane as SketchPlane));
-    const c = pickChange(pick, lastFeature(doc).id);
+    const c = pickChange(pick, lastNames);
     if (c.change === "set") ctx.selection.set([c.item]);
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
     else if (c.change === "clear") ctx.selection.clear();
