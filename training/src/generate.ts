@@ -22,7 +22,7 @@ export interface GenerateOptions {
   rules: readonly CommandRule[];
   recipes: readonly Recipe[];
   kernel: KernelCalls;
-  /** Prompts the model is scored on (EVAL_CASES): no example may read like one, numbers aside. */
+  /** Prompts the model is scored on (EVAL_CASES and HELD_OUT_CASES): no example may read like one, numbers aside. */
   heldOut: readonly string[];
   /** Give up after this many drafts (default 20 per example asked for). */
   maxDrafts?: number;

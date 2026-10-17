@@ -99,7 +99,15 @@ def oracle_kinds(disagreements):
     return kinds
 
 
-FUZZ_TARGETS = {"STL reader fuzzing": "STL reader", "Project loader fuzzing": "project loader", "Sketch-extrude sessions": "sketch-extrude sessions"}
+FUZZ_TARGETS = {
+    "STL reader fuzzing": "STL reader",
+    "Project loader fuzzing": "project loader",
+    "Sketch-extrude sessions": "sketch-extrude sessions",
+    # kernel/fuzz/run.sh, the coverage-guided targets (kernel/fuzz/checks.rs)
+    "Kernel extrude fuzzing": "kernel's extrude",
+    "Kernel sketch fuzzing": "kernel's sketch outline",
+    "Kernel placed fuzzing": "kernel's moves and turns",
+}
 
 
 def fuzz_kinds(report):
@@ -191,7 +199,10 @@ def texts(action, kind, hits, run_url, commit, branch):
             "(kernel/tests/regressions/fuzz-stl/*.stl or packages/testing/test/regressions/project-fuzz/*.json "
             "are replayed by every test run), then fix it. Replay a whole round: in kernel/, "
             "`FISSION_SEED=<seed> FISSION_FUZZ_SECONDS=1 cargo test --test fuzz_stl fuzz_stl_random -- --nocapture`; "
-            "for the project loader, `FISSION_SEED=<seed> FISSION_FUZZ_SECONDS=1 npm run fuzz -w @fission/testing`.\n\n"
+            "for the project loader, `FISSION_SEED=<seed> FISSION_FUZZ_SECONDS=1 npm run fuzz -w @fission/testing`. "
+            "For the kernel's coverage-guided targets, copy the input into kernel/tests/regressions/libfuzzer/<target>/ "
+            "(`cargo test --test fuzz_corpus` replays it on stable Rust) or run it alone with "
+            "`cargo +nightly fuzz run -a <target> <input>` in kernel/.\n\n"
             "Close this issue as completed once it is fixed (with a regression test), or as not planned "
             "if it is not a bug (say why in a comment): a kind closed as fixed that comes back on main reopens it; "
             "one closed as not planned is not reported again."
