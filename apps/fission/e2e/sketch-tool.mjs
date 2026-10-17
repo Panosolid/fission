@@ -12,14 +12,12 @@
 // at 375 px. Screenshots at 1280 and 375 px go to E2E_SHOTS when set.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4183, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4183/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 const shots = process.env.E2E_SHOTS;
 

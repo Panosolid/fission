@@ -5,9 +5,8 @@
 // message, and removing one forgets it after another reload.
 // Run with `npm run e2e`.
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { createServer } from "vite";
 
 const root = resolve(import.meta.dirname, "..");
@@ -16,8 +15,7 @@ const server = await createServer({ root, logLevel: "error", server: { port: 0, 
 await server.listen();
 const url = server.resolvedUrls.local[0];
 
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 let passed = 0;
 const check = (name, fn) => {
   fn();

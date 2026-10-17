@@ -10,14 +10,12 @@
 // the default depth 30 and height 20.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4180, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4180/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 
 async function fresh(hash = "#design") {

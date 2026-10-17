@@ -1,14 +1,13 @@
 // Browser smoke test: serves the built app, drives it like a user and checks
 // what is on screen. Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4174, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4174/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
 // The app opens the project it autosaved last (19c); the checks on `page`
 // each expect a fresh app, so every load of it forgets what was stored.
