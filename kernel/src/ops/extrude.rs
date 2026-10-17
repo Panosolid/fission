@@ -117,6 +117,7 @@ pub fn extrude_meshed(profile: &Profile, distance: f64) -> Result<Meshed, Kernel
 
 #[cfg(test)]
 mod tests {
+    use crate::fmath;
     use super::*;
     use crate::tessellate::{tessellate, TessOptions};
     use crate::tolerance::{eq, points_eq, rel_eq, FP_REL, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
@@ -184,8 +185,8 @@ mod tests {
         let bulges = vec![-1.0, 0.0, -1.0, 1.1e6];
         let beta: f64 = 1.1e6;
         let r = (1.0 + beta * beta) / (4.0 * beta);
-        let sigma = 4.0 * beta.atan();
-        let area = r * r * (sigma - sigma.sin()) / 2.0 - (2.0 + PI);
+        let sigma = 4.0 * fmath::atan(beta);
+        let area = r * r * (sigma - fmath::sin(sigma)) / 2.0 - (2.0 + PI);
         let mut back_corners = corners.clone();
         back_corners.reverse();
         // Run backwards, piece i (from corner i to i + 1 of the reversed
@@ -258,7 +259,7 @@ mod tests {
     /// the tessellation rule: each chord turns at most min(0.2 rad, the
     /// angle whose chord sags 0.01: 2·acos(1 − 0.01/r)).
     fn chords(r: f64, phi: f64) -> f64 {
-        (phi.abs() / (0.2f64).min(2.0 * (1.0 - 0.01 / r).acos())).ceil()
+        (phi.abs() / (0.2f64).min(2.0 * fmath::acos(1.0 - 0.01 / r))).ceil()
     }
 
     #[test]
@@ -272,7 +273,7 @@ mod tests {
         assert_eq!(b.counts(&b.shells[0]).genus(), Some(0));
         let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
         assert_eq!(chords(2.0, TAU), 32.0);
-        let v = 16.0 * 4.0 * (TAU / 32.0).sin() * 3.0;
+        let v = 16.0 * 4.0 * fmath::sin(TAU / 32.0) * 3.0;
         assert!(rel_eq(m.signed_volume(), v, FP_REL), "{} vs {v}", m.signed_volume());
         // The same solid as the cylinder primitive.
         let c = tessellate(&crate::ops::primitives::make_cylinder(2.0, 3.0).unwrap(), &TessOptions::DISPLAY).unwrap();
@@ -296,7 +297,7 @@ mod tests {
         let bore = b.faces.iter().find(|f| matches!(f.surface, Surface::Cylinder { .. })).unwrap();
         assert!(!bore.sense);
         let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
-        let (hole, rim) = (16.0 * 4.0 * (PI / 16.0).sin(), 32.0 * 4.0 * (PI / 32.0).sin());
+        let (hole, rim) = (16.0 * 4.0 * fmath::sin(PI / 16.0), 32.0 * 4.0 * fmath::sin(PI / 32.0));
         assert!(rel_eq(m.signed_volume(), (100.0 - hole) * 5.0, FP_REL), "{}", m.signed_volume());
         assert!(rel_eq(m.area(), 2.0 * (100.0 - hole) + 200.0 + rim * 5.0, FP_REL), "{}", m.area());
     }
@@ -315,7 +316,7 @@ mod tests {
         assert!(round.len() == 2 && round.iter().all(|f| f.sense), "both ends bulge outwards");
         let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
         assert_eq!(chords(2.0, PI), 16.0);
-        let area = 40.0 + 2.0 * 8.0 * 4.0 * (PI / 16.0).sin();
+        let area = 40.0 + 2.0 * 8.0 * 4.0 * fmath::sin(PI / 16.0);
         assert!(rel_eq(m.signed_volume(), area * 2.0, FP_REL), "{}", m.signed_volume());
         // Bounds are exact: the round ends reach x = −2 and 12.
         let (lo, hi) = b.bounds();
@@ -334,14 +335,14 @@ mod tests {
         let b = extrude(&p, 3.0).unwrap();
         let wall = b.faces.iter().find(|f| matches!(f.surface, Surface::Cylinder { .. })).unwrap();
         assert!(!wall.sense, "a concave wall faces its axis");
-        let (r, phi) = (7.25, 4.0 * 0.4f64.atan());
+        let (r, phi) = (7.25, 4.0 * fmath::atan(0.4f64));
         let n = chords(r, phi);
-        let cut = r * r / 2.0 * (n * (phi / n).sin() - phi.sin());
+        let cut = r * r / 2.0 * (n * fmath::sin(phi / n) - fmath::sin(phi));
         let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
         assert!(rel_eq(m.signed_volume(), (100.0 - cut) * 3.0, FP_REL), "{}", m.signed_volume());
         // Exact area 100 − (r²/2)(φ − sin φ) ≈ 86.37: the mesh is within the
         // sag of the arc (≤ 0.01 over its length r·φ ≈ 11).
-        let exact = 100.0 - r * r / 2.0 * (phi - phi.sin());
+        let exact = 100.0 - r * r / 2.0 * (phi - fmath::sin(phi));
         assert!((m.signed_volume() / 3.0 - exact).abs() <= 0.01 * r * phi);
     }
 
@@ -387,14 +388,19 @@ mod tests {
         // (c/2)·β, c = y1 − y0 (from the module notes: r − (c/2)·cot(sweep/2)
         // with r = c(1 + β²)/(4β) and cot(sweep/2) = (1 − β²)/(2β) gives
         // (c/2)(1 + β² − 1 + β²)/(2β)). In exact arithmetic on these doubles
-        // that is x0 + (c/2)·β = MAX_COORD + 6.7e-9 (Python, fractions):
+        // that is x0 + (c/2)·β = MAX_COORD + 1.05e-8 (Python, fractions):
         // past model space, so the extrude must be refused. The profile's
-        // own bound for that point, centre + r, rounds to MAX_COORD exactly
-        // and passes; the body's, centre + r·hypot(x_dir.x, y_dir.x) with
-        // the hypot 1 + 2.2e-16, rounds up a step, and the model-space
-        // check refuses it. (Found by search: about 1 in 1e4 such arcs
-        // falls between the two.)
-        let (x0, y0, y1, beta) = (99827566.98656493, -403403.89577761077, 404141.02118983393, 0.4270549162332822);
+        // own bound for that point, centre + r, rounds to MAX_COORD and
+        // passes; the body's, from the circle's centre, radius and
+        // directions, rounds up a step, and the model-space check refuses
+        // it. (Found by search: about 1 in 1e5 such arcs falls between the
+        // two.) The first input kept here, (99827566.98656493,
+        // -403403.89577761077, 404141.02118983393, 0.4270549162332822),
+        // 6.7e-9 past (under half a step between doubles there, 1.5e-8),
+        // was refused only because the old maths libraries' hypot rounded
+        // the body's bound up a step; fmath's (src/fmath.rs) rounds it to
+        // the nearest double, MAX_COORD, which is inside.
+        let (x0, y0, y1, beta) = (99768654.06094639, -415441.7399314088, 414323.0454353704, 0.5576181181305714);
         let d = Profile { outer: path(&[(x0, y0), (x0, y1)], &[beta, 0.0]), holes: vec![] };
         match extrude(&d, 1.0) {
             Err(KernelError::InvalidInput(m)) => assert!(m.contains("reach"), "{m}"),
@@ -442,7 +448,7 @@ mod tests {
         let b = extrude(&bowed, 3.0).unwrap();
         let wall = b.faces.iter().find(|f| matches!(f.surface, Surface::Cylinder { .. })).unwrap();
         assert!(points_eq(wall.surface.eval(DVec2::ZERO), DVec3::new(10.0, 10.0, 0.0)));
-        let phi = 4.0 * 0.4f64.atan();
+        let phi = 4.0 * fmath::atan(0.4f64);
         let uv = wall.surface.project(DVec3::new(0.0, 10.0, 0.0));
         assert!(eq(uv.x, TAU - phi) && eq(uv.y, 0.0), "{uv}");
     }
@@ -628,7 +634,7 @@ mod tests {
             let s = half * bulge;
             let r = (half * half + s * s) / (2.0 * s);
             let height = |x: f64| (r * r - (x - half) * (x - half)).sqrt() - (r - s);
-            let (sin, cos) = turn.sin_cos();
+            let (sin, cos) = fmath::sin_cos(turn);
             let place = |x: f64, y: f64| (x * cos - y * sin + shift.0, x * sin + y * cos + shift.1);
             let x = f * len;
             let profile = if with_hole {

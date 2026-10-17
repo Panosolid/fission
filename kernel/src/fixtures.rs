@@ -2,6 +2,7 @@
 //! validation and tessellation can be tested against shapes whose
 //! correctness is obvious from reading the code.
 
+use crate::fmath;
 use crate::geom::{Curve, Surface};
 use crate::topology::{Body, Coedge, Loop, Shell};
 use glam::DVec3;
@@ -114,7 +115,7 @@ pub fn hand_sphere(r: f64) -> Body {
 /// cylinder tessellation with a non-zero offset.
 pub fn hand_twisted_cylinder(r: f64, h: f64, twist: f64) -> Body {
     let mut b = hand_cylinder(r, h);
-    let x_top = DVec3::new(twist.cos(), twist.sin(), 0.0);
+    let x_top = DVec3::new(fmath::cos(twist), fmath::sin(twist), 0.0);
     b.vertices[1].point = DVec3::new(0.0, 0.0, h) + x_top * r;
     b.edges[1].curve = Curve::Circle { center: DVec3::new(0.0, 0.0, h), axis: DVec3::Z, x_dir: x_top, radius: r };
     b
@@ -162,7 +163,7 @@ pub fn hand_half_cylinder(r: f64, h: f64) -> Body {
 pub fn hand_tube(r_in: f64, r_out: f64, h: f64, twist: f64) -> Body {
     let mut b = Body::default();
     let top = DVec3::new(0.0, 0.0, h);
-    let x_in = DVec3::new(twist.cos(), twist.sin(), 0.0);
+    let x_in = DVec3::new(fmath::cos(twist), fmath::sin(twist), 0.0);
     let ring = |center, x_dir, radius| Curve::Circle { center, axis: DVec3::Z, x_dir, radius };
     let vo0 = b.add_vertex(DVec3::X * r_out);
     let vo1 = b.add_vertex(top + DVec3::X * r_out);

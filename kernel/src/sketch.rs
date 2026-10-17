@@ -70,6 +70,7 @@
 //! less than LINEAR further along, so it is O(n log n) for spread-out
 //! pieces and O(n²) at worst (every end within LINEAR in x), with n capped
 //! at MAX_PROFILE_CORNERS, the same bound as the profile check.
+use crate::fmath;
 use crate::ops::profile::{bounds, check_profile, Boundary, Profile, Seg};
 use crate::ops::KernelError;
 use crate::tolerance::{LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
@@ -129,7 +130,7 @@ impl Arc {
 
     /// The profile's piece for this arc.
     fn seg(&self) -> Seg {
-        Seg::Arc { a: self.start, b: self.end, center: self.centre, radius: self.radius(), sweep: 4.0 * self.bulge().atan() }
+        Seg::Arc { a: self.start, b: self.end, center: self.centre, radius: self.radius(), sweep: 4.0 * fmath::atan(self.bulge()) }
     }
 }
 
@@ -1099,7 +1100,7 @@ mod tests {
         // The centre moved k·LINEAR along the chord from where it belongs,
         // off the line midway between the ends: a quarter, a half and a
         // nearly whole arc (radius 10, ends 1 mm apart).
-        let gap = (0.05f64).asin(); // half the angle 1 mm of chord takes at radius 10
+        let gap = fmath::asin(0.05f64); // half the angle 1 mm of chord takes at radius 10
         let shapes = [(v(5.0, 0.0), v(0.0, 5.0)), (v(5.0, 0.0), v(-5.0, 0.0)), (DVec2::from_angle(gap) * 10.0, DVec2::from_angle(-gap) * 10.0)];
         for (start, end) in shapes {
             let along = (end - start).normalize();
@@ -1150,8 +1151,8 @@ mod tests {
         // nearly a whole circle (start just above the x axis, round the long
         // way to just below) or a tiny sliver of one (the other way).
         let r = 10.0;
-        let half_angle = |k: f64| (k * MIN_FEATURE / (2.0 * r)).asin();
-        let ends = |k: f64| (v(r * half_angle(k).cos(), r * half_angle(k).sin()), v(r * half_angle(k).cos(), -r * half_angle(k).sin()));
+        let half_angle = |k: f64| fmath::asin(k * MIN_FEATURE / (2.0 * r));
+        let ends = |k: f64| (v(r * fmath::cos(half_angle(k)), r * fmath::sin(half_angle(k))), v(r * fmath::cos(half_angle(k)), -r * fmath::sin(half_angle(k))));
         for k in [0.9, 1.1] {
             let (above, below) = ends(k);
             let nearly_whole = check_arcs(&[Arc { start: above, end: below, centre: DVec2::ZERO }]);
@@ -1243,14 +1244,14 @@ mod tests {
             theta in 0.0..std::f64::consts::TAU,
             turn in 1e-6..(1.0 - 1e-6),
         ) {
-            let (c, r): (DVec2, f64) = (v(cx, cy), 10f64.powf(log_r));
+            let (c, r): (DVec2, f64) = (v(cx, cy), fmath::powf(10f64, log_r));
             let phi: f64 = turn * std::f64::consts::TAU;
             let (start, end) = (c + DVec2::from_angle(theta) * r, c + DVec2::from_angle(theta + phi) * r);
             let chord = end - start;
             prop_assume!(chord.length() >= MIN_FEATURE);
             let (mid, left) = ((start + end) / 2.0, DVec2::new(-chord.y, chord.x) / chord.length());
-            let a = Arc { start, end, centre: mid + left * (r * (phi / 2.0).cos()) };
-            let model_middle = mid - left * (2.0 * r * (phi / 4.0).sin().powi(2));
+            let a = Arc { start, end, centre: mid + left * (r * fmath::cos(phi / 2.0)) };
+            let model_middle = mid - left * (2.0 * r * fmath::sin(phi / 4.0).powi(2));
             prop_assert!(check_arcs(&[a]).is_ok(), "{a:?}: {:?}", check_arcs(&[a]));
             let Some(Seg::Arc { center, radius, sweep, .. }) = Seg::from_bulge(a.start, a.end, a.bulge()) else {
                 return Err(TestCaseError::fail(format!("no arc for {a:?}")));
@@ -1281,7 +1282,7 @@ mod tests {
             x in -1e8..1e8f64, y in -1e8..1e8f64,
             log_pixel in -5.0..7.0f64,
         ) {
-            let pixel = 10f64.powf(log_pixel);
+            let pixel = fmath::powf(10f64, log_pixel);
             let printed = format!("{pixel:e}");
             let k: i32 = printed.split('e').nth(1).unwrap().parse().unwrap();
             let model: f64 = format!("1e{}", k.clamp(-3, 6)).parse().unwrap();

@@ -52,6 +52,7 @@
 //! only change which points of the same curves are proposed, and go
 //! unseen.
 
+use crate::fmath;
 use crate::geom::{Curve, Surface};
 use crate::tolerance::{ANGULAR, LINEAR};
 use glam::DVec3;
@@ -84,7 +85,7 @@ const RING_SAMPLES: usize = 8;
 impl Trig2 {
     pub fn eval(&self, t: f64) -> f64 {
         let [k0, k1, k2, k3, k4] = self.0;
-        k0 + k1 * t.cos() + k2 * t.sin() + k3 * (2.0 * t).cos() + k4 * (2.0 * t).sin()
+        k0 + k1 * fmath::cos(t) + k2 * fmath::sin(t) + k3 * fmath::cos(2.0 * t) + k4 * fmath::sin(2.0 * t)
     }
 
     /// f′: cos → −sin, sin → cos, and the double angles double.
@@ -108,10 +109,10 @@ impl Trig2 {
             let t = TAU * j as f64 / n;
             let v = f(t);
             k[0] += v / n;
-            k[1] += 2.0 * v * t.cos() / n;
-            k[2] += 2.0 * v * t.sin() / n;
-            k[3] += 2.0 * v * (2.0 * t).cos() / n;
-            k[4] += 2.0 * v * (2.0 * t).sin() / n;
+            k[1] += 2.0 * v * fmath::cos(t) / n;
+            k[2] += 2.0 * v * fmath::sin(t) / n;
+            k[3] += 2.0 * v * fmath::cos(2.0 * t) / n;
+            k[4] += 2.0 * v * fmath::sin(2.0 * t) / n;
         }
         Trig2(k)
     }
@@ -239,17 +240,17 @@ fn golden_min_abs(f: &Trig2, mut a: f64, mut b: f64) -> f64 {
 /// φ = atan2(c, b): zeros at φ ± acos(−a/m). Given a zero `known`, the
 /// other is its mirror image in φ: 2φ − known.
 fn trig1_zeros(a: f64, b: f64, c: f64, known: Option<f64>) -> Vec<f64> {
-    let m = b.hypot(c);
+    let m = fmath::hypot(b, c);
     if m == 0.0 {
         return vec![];
     }
-    let phi = c.atan2(b);
+    let phi = fmath::atan2(c, b);
     if let Some(k) = known {
         return vec![2.0 * phi - k];
     }
     let s = -a / m;
     if s.abs() <= 1.0 {
-        let d = s.acos();
+        let d = fmath::acos(s);
         vec![phi + d, phi - d]
     } else if s > 1.0 {
         vec![phi]
@@ -338,7 +339,7 @@ pub fn curve_surface(curve: &Curve, surface: &Surface, known: &[f64]) -> Vec<f64
             // vertex's own candidates are dropped by the caller's distance
             // test. (No body can have such a pair until booleans.)
             let (xa, ya) = (across(x, a), across(y, a));
-            let f = Trig2::fit(|t| (w + (xa * t.cos() + ya * t.sin()) * rho).length_squared() - radius * radius);
+            let f = Trig2::fit(|t| (w + (xa * fmath::cos(t) + ya * fmath::sin(t)) * rho).length_squared() - radius * radius);
             trig_zeros(&f)
         }
     }
@@ -762,7 +763,7 @@ mod tests {
         let rod = Surface::Cylinder { origin: DVec3::new(1.5, 0.0, -4.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
         for s in [ball, rod] {
             let z = sorted(curve_surface(&unit, &s, &[]));
-            let a = 0.75f64.acos();
+            let a = fmath::acos(0.75f64);
             assert!(close(z[0], a, 1e-14) && close(z[1], TAU - a, 1e-14), "{z:?}");
         }
         // Tilted: the unit circle in the plane x = 0 against a rod of
@@ -771,7 +772,7 @@ mod tests {
         let upright = Curve::Circle { center: DVec3::ZERO, axis: DVec3::X, x_dir: DVec3::Y, radius: 1.0 };
         let thin = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 0.6 };
         let z = sorted(curve_surface(&upright, &thin, &[]));
-        let a = 0.6f64.acos();
+        let a = fmath::acos(0.6f64);
         let want = sorted(vec![a, PI - a, PI + a, TAU - a]);
         assert_eq!(z.len(), 4, "{z:?}");
         for (got, w) in z.iter().zip(want) {
@@ -919,9 +920,9 @@ mod tests {
             // Unit circle and the unit ball, or rod, about (1.5, 0): cos θ = ¾,
             // sin θ = ±√7/4.
             ("circle–ball", unit.clone(), Surface::Sphere { center: DVec3::new(1.5, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, None, vec![DVec3::new(0.75, s7, 0.0), DVec3::new(0.75, -s7, 0.0)]),
-            ("circle–ball, known", unit.clone(), Surface::Sphere { center: DVec3::new(1.5, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, Some(0.75f64.acos()), vec![DVec3::new(0.75, -s7, 0.0)]),
+            ("circle–ball, known", unit.clone(), Surface::Sphere { center: DVec3::new(1.5, 0.0, 0.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, Some(fmath::acos(0.75f64)), vec![DVec3::new(0.75, -s7, 0.0)]),
             ("circle–rod across", unit.clone(), Surface::Cylinder { origin: DVec3::new(1.5, 0.0, -4.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, None, vec![DVec3::new(0.75, s7, 0.0), DVec3::new(0.75, -s7, 0.0)]),
-            ("circle–rod across, known", unit, Surface::Cylinder { origin: DVec3::new(1.5, 0.0, -4.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, Some(0.75f64.acos()), vec![DVec3::new(0.75, -s7, 0.0)]),
+            ("circle–rod across, known", unit, Surface::Cylinder { origin: DVec3::new(1.5, 0.0, -4.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, Some(fmath::acos(0.75f64)), vec![DVec3::new(0.75, -s7, 0.0)]),
             // The unit circle in x = 0 and a rod of radius 0.6 along z:
             // (0, ±0.6, ±0.8).
             (
@@ -1096,7 +1097,7 @@ mod tests {
         assert_eq!(Trig2([1.0, -2.0, 3.0, 0.5, -4.0]).slope_bound(), 14.0);
         // a + m cos(θ − φ) with no zero: least |f| where cos is 1 if a < −m
         // (θ = φ), −1 if a > m (θ = φ + π). Here φ = atan2(4, 3), m = 5.
-        let phi = 4f64.atan2(3.0);
+        let phi = fmath::atan2(4f64, 3.0);
         assert_eq!(trig1_zeros(-7.0, 3.0, 4.0, None), vec![phi]);
         assert_eq!(trig1_zeros(7.0, 3.0, 4.0, None), vec![phi + PI]);
         // With zeros: −2.5 + 5 cos(θ − φ): θ = φ ± π/3.
@@ -1108,8 +1109,8 @@ mod tests {
     fn zeros_of_lopsided_polynomials() {
         // 0.3 + cos(θ − 0.4) = 0 at θ = 0.4 ± acos(−0.3): written out,
         // 0.3 + cos 0.4 cos θ + sin 0.4 sin θ.
-        let f = Trig2([0.3, 0.4f64.cos(), 0.4f64.sin(), 0.0, 0.0]);
-        let want = sorted(vec![0.4 + (-0.3f64).acos(), 0.4 - (-0.3f64).acos()]);
+        let f = Trig2([0.3, fmath::cos(0.4f64), fmath::sin(0.4f64), 0.0, 0.0]);
+        let want = sorted(vec![0.4 + fmath::acos(-0.3f64), 0.4 - fmath::acos(-0.3f64)]);
         let z = sorted(trig_zeros(&f));
         assert_eq!(z.len(), 2, "{z:?}");
         assert!(close(z[0], want[0], 1e-12) && close(z[1], want[1], 1e-12), "{z:?} vs {want:?}");
@@ -1119,7 +1120,7 @@ mod tests {
         // and π − asin s.
         let f = Trig2([-1.0, 0.0, 2.0, 0.7, 0.0]);
         let s = (2.0 - 2.32f64.sqrt()) / 2.8;
-        let want = sorted(vec![s.asin(), PI - s.asin()]);
+        let want = sorted(vec![fmath::asin(s), PI - fmath::asin(s)]);
         let z = sorted(trig_zeros(&f));
         assert_eq!(z.len(), 2, "{z:?}");
         assert!(close(z[0], want[0], 1e-12) && close(z[1], want[1], 1e-12), "{z:?} vs {want:?}");
@@ -1129,7 +1130,7 @@ mod tests {
     fn zeros_close_together_and_touching() {
         // cos(θ − 2) − (1 − 1e-12): two zeros 2 ± √(2e-12) ≈ 2 ± 1.414e-6,
         // closer than LEAF_WIDTH · 3. Both found, and nothing else.
-        let (c, s) = (2f64.cos(), 2f64.sin());
+        let (c, s) = (fmath::cos(2f64), fmath::sin(2f64));
         let f = Trig2([-(1.0 - 1e-12), c, s, 0.0, 0.0]);
         let z = sorted(trig_zeros(&f));
         let d = (2e-12f64).sqrt();
@@ -1223,14 +1224,14 @@ mod tests {
             // unit rod where |t| sin φ = 1: t = ±1/sin φ, 100 m away. Not
             // "parallel" (that is only within ANGULAR).
             let phi = 1e-5f64;
-            let steep = Curve::Line { origin: DVec3::ZERO, dir: DVec3::new(phi.sin(), 0.0, phi.cos()) };
-            let t = 1.0 / phi.sin();
+            let steep = Curve::Line { origin: DVec3::ZERO, dir: DVec3::new(fmath::sin(phi), 0.0, fmath::cos(phi)) };
+            let t = 1.0 / fmath::sin(phi);
             // The meeting is ill-conditioned (|d across the axis| = 1e-5, so
             // a rounding of 1e-16 in the turned direction moves t by 1e-11 of
             // itself); along the line that barely leaves the rod, so 1e-9 of
             // the distance is plenty for the caller's measuring.
             let got = params(&steep, &unit_rod);
-            for w in [at(DVec3::new(1.0, 0.0, t * phi.cos())), at(DVec3::new(-1.0, 0.0, -t * phi.cos()))] {
+            for w in [at(DVec3::new(1.0, 0.0, t * fmath::cos(phi))), at(DVec3::new(-1.0, 0.0, -t * fmath::cos(phi)))] {
                 assert!(got.iter().any(|g| g.distance(w) <= 1e-9 * w.length()), "nearly upright line–rod: {w} not in {got:?}");
             }
             assert_eq!(got.len(), 2);
@@ -1273,7 +1274,7 @@ mod tests {
         // LEAF_WIDTH/2 for about ±1e-3, so ~2700 neighbouring leaves form
         // one run round c, and its middle grid point falls between them.
         for c in [1.0, 2.0, 3.0, TAU - 1.0] {
-            let f = Trig2([-(1.0 - 2e-12), f64::cos(c), f64::sin(c), 0.0, 0.0]);
+            let f = Trig2([-(1.0 - 2e-12), fmath::cos(c), fmath::sin(c), 0.0, 0.0]);
             let z = sorted(trig_zeros(&f));
             assert_eq!(z.len(), 2, "c = {c}: {z:?}");
             assert!(close(z[0], c - 2e-6, 1e-9) && close(z[1], c + 2e-6, 1e-9), "c = {c}: {z:?}");
@@ -1281,12 +1282,12 @@ mod tests {
         // (1 + 1e-12) − cos(2(θ − ½)) never reaches 0 and comes closest
         // twice, at ½ and ½ + π: two runs, one candidate each. Written out,
         // cos(2θ − 1) = cos 1 cos 2θ + sin 1 sin 2θ.
-        let z = sorted(trig_zeros(&Trig2([1.0 + 1e-12, 0.0, 0.0, -f64::cos(1.0), -f64::sin(1.0)])));
+        let z = sorted(trig_zeros(&Trig2([1.0 + 1e-12, 0.0, 0.0, -fmath::cos(1.0), -fmath::sin(1.0)])));
         assert_eq!(z.len(), 2, "{z:?}");
         assert!(close(z[0], 0.5, 1e-6) && close(z[1], 0.5 + PI, 1e-6), "{z:?}");
         // A near-touch away from θ = 2 (where (a + b)/2 and ab/2 agree):
         // cos(θ − 1.3) − (1 + 1e-12) comes closest at θ = 1.3.
-        let z = trig_zeros(&Trig2([-(1.0 + 1e-12), 1.3f64.cos(), 1.3f64.sin(), 0.0, 0.0]));
+        let z = trig_zeros(&Trig2([-(1.0 + 1e-12), fmath::cos(1.3f64), fmath::sin(1.3f64), 0.0, 0.0]));
         assert_eq!(z.len(), 1, "{z:?}");
         assert!(close(z[0], 1.3, 1e-6), "{z:?}");
     }
@@ -1329,7 +1330,7 @@ mod tests {
             // loop spans ±0.05 rad, and only the discriminant's turning
             // point finds it. There, at the ball's centre, the heights are
             // ±0.05: (cos π/8, sin π/8, ±0.05).
-            let u = DVec3::new((PI / 8.0).cos(), (PI / 8.0).sin(), 0.0);
+            let u = DVec3::new(fmath::cos(PI / 8.0), fmath::sin(PI / 8.0), 0.0);
             let (rod, b) = (big.transformed(&tf), Surface::Sphere { center: u, axis: DVec3::Z, x_dir: DVec3::X, radius: 0.05 }.transformed(&tf));
             proposes_among(&closed_meetings(&rod, &b), &[at(u + DVec3::Z * 0.05), at(u - DVec3::Z * 0.05)], "small ball on a rod");
             // A rod of radius 0.05 along u through the origin crosses the
@@ -1342,7 +1343,7 @@ mod tests {
             // within ANGULAR): radius 0.5 through (0.6, 0, 0) leaning along
             // x, against the unit rod along z. They cross (the thin one's
             // wall reaches x = 1.1 near z = 0); some point is on both.
-            let leaning = Surface::Cylinder { origin: DVec3::new(0.6, 0.0, 0.0), axis: DVec3::new(1e-5f64.sin(), 0.0, 1e-5f64.cos()), x_dir: DVec3::Y, radius: 0.5 }.transformed(&tf);
+            let leaning = Surface::Cylinder { origin: DVec3::new(0.6, 0.0, 0.0), axis: DVec3::new(fmath::sin(1e-5f64), 0.0, fmath::cos(1e-5f64)), x_dir: DVec3::Y, radius: 0.5 }.transformed(&tf);
             let pts = closed_meetings(&rod, &leaning);
             assert!(!distinct_on_both(&rod, &leaning, &pts, 1e-9).is_empty(), "nearly parallel rods: {pts:?}");
             // Rods at a slant (axes 36.9° apart, so |a1 across a2|² = 0.36,
@@ -1392,7 +1393,7 @@ mod tests {
         // (0.05² − (s − ½)²)/0.64, the cos²θ parts cancelling.
         let big = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
         let thin = Surface::Cylinder { origin: DVec3::new(0.0, 0.5, 0.0), axis: DVec3::new(0.8, 0.0, 0.6), x_dir: DVec3::Y, radius: 0.05 };
-        let (c, s) = ((PI / 6.0).cos(), 0.5);
+        let (c, s) = (fmath::cos(PI / 6.0), 0.5);
         let want = [DVec3::new(c, s, 0.75 * c + 0.0625), DVec3::new(c, s, 0.75 * c - 0.0625)];
         for tf in [Transform::IDENTITY, awkward()] {
             let pts = closed_meetings(&big.transformed(&tf), &thin.transformed(&tf));
@@ -1432,7 +1433,7 @@ mod tests {
         let mut want = Vec::new();
         for k in 0..RING_SAMPLES {
             let t = PI * k as f64 / 4.0;
-            want.extend([DVec3::new(t.cos(), t.sin(), 1.0), DVec3::new(t.cos(), t.sin(), -1.0)]);
+            want.extend([DVec3::new(fmath::cos(t), fmath::sin(t), 1.0), DVec3::new(fmath::cos(t), fmath::sin(t), -1.0)]);
         }
         proposes_among(&pts, &want, "flat discriminant");
     }
@@ -1508,14 +1509,14 @@ mod tests {
         let (a, b) = (TAU * 11.0 / 64.0, TAU * 12.0 / 64.0);
         let m = 0.5 * (a + b);
         let bound = (b - a) / 2.0;
-        let k0 = bound - m.cos();
+        let k0 = bound - fmath::cos(m);
         let tie = Trig2([k0, 1.0, 0.0, 0.0, 0.0]);
         assert_eq!(tie.eval(m), bound, "the tie is exact");
         let above = Trig2([k0 + 1e-15, 1.0, 0.0, 0.0, 0.0]);
         assert!(above.eval(m) > bound);
         let ((z_tie, n_tie), (z_above, n_above)) = (trig_zeros_counted(&tie), trig_zeros_counted(&above));
         assert_eq!(n_tie, n_above + 2);
-        let want = sorted(vec![(-k0).acos(), TAU - (-k0).acos()]);
+        let want = sorted(vec![fmath::acos(-k0), TAU - fmath::acos(-k0)]);
         for z in [sorted(z_tie), sorted(z_above)] {
             assert_eq!(z.len(), 2, "{z:?}");
             assert!(close(z[0], want[0], 1e-12) && close(z[1], want[1], 1e-12), "{z:?} vs {want:?}");
