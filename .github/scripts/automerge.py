@@ -37,7 +37,7 @@ PREFIX = "claude/"
 HOLD = "hold"
 # The jobs of ci.yml that gate a merge; a head without all of them has not
 # been tested. (ci.yml's coverage job only reports.)
-REQUIRED_CHECKS = ("kernel", "app", "mutants-in-diff")
+REQUIRED_CHECKS = ("kernel", "app", "mutants-in-diff", "baseline")
 PASSING = ("success", "skipped", "neutral")
 MAX_ACTIONS = 20
 

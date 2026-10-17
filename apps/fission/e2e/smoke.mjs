@@ -905,9 +905,9 @@ try {
     assert.equal(await page.textContent("#assistant-toggle"), "AI off");
     assert.equal(await page.isVisible("#assistant"), false);
     await page.click("#assistant-toggle");
-    assert.match(await page.textContent("#assistant"), /Coming soon/);
+    assert.equal(await page.isDisabled("#ai-ask-button"), true, "nothing to ask with until a provider is chosen");
     assert.match(await page.textContent("#ai-status-detail"), /Nothing is sent anywhere/);
-    assert.match(await page.textContent("#assistant"), /In Design.*Plain-English commands/s);
+    assert.match(await page.textContent("#assistant"), /Planned in Design.*Plain-English commands/s);
     // The settings list the four providers and say which keep data local.
     assert.equal(await page.locator("#assistant [data-provider]").count(), 4);
     assert.match(await page.textContent('[data-provider="ollama"]'), /stays on your machine.*OLLAMA_ORIGINS/s);
@@ -915,8 +915,8 @@ try {
     await page.screenshot({ path: "e2e/assistant.png" });
     // Switching workspace keeps the panel and changes what it lists.
     await page.click('[data-workspace="laser"]');
-    assert.match(await page.textContent("#assistant"), /In Laser.*finger-joint boxes/s);
-    assert.doesNotMatch(await page.textContent("#assistant"), /In Design/);
+    assert.match(await page.textContent("#assistant"), /Planned in Laser.*finger-joint boxes/s);
+    assert.doesNotMatch(await page.textContent("#assistant"), /Planned in Design/);
     await page.click("#assistant-toggle");
     assert.equal(await page.isVisible("#assistant"), false);
     await page.click('[data-workspace="design"]');

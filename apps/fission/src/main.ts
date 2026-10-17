@@ -18,7 +18,7 @@ import { changeNote, shortcutList, defaultSplit, showPlaceholder, SPLIT_MIN_WIDT
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
 import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
-import { showAssistant } from "./assistant.ts";
+import { createAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
@@ -254,6 +254,20 @@ const markTab = workspaceSwitcher(
   (id) => show(id as WorkspaceId),
 );
 
+// The assistant (AI2): changes Design's part through Design's own run, as one undo step.
+const assistant = createAssistant(
+  $("assistant"),
+  {
+    history: ctx.history,
+    project: () => ctx.project,
+    design() {
+      const where = pool.paneOf("design");
+      return where && pool.showing(where) === "design" ? (pool.awake(where)?.view ?? null) : null;
+    },
+  },
+  $("ai-status"),
+);
+
 function show(page: Page) {
   mountingDone(() => showPage(page));
 }
@@ -276,7 +290,7 @@ function showPage(page: Page) {
   }
   if (split) fillSplitChoice();
   showNotes();
-  if (!$("assistant").hidden) showAssistant($("assistant"), page, workspace?.title ?? "Community");
+  assistant.show(page, workspace?.title ?? "Community");
   if (location.hash !== `#${page}`) history.replaceState(null, "", `#${page}`);
 }
 
@@ -642,7 +656,6 @@ $("assistant-toggle").addEventListener("click", () => {
   const panel = $("assistant");
   panel.hidden = !panel.hidden;
   $("assistant-toggle").setAttribute("aria-pressed", String(!panel.hidden));
-  if (!panel.hidden) showAssistant(panel, current, workspaces.find((w) => w.id === current)?.title ?? "Community");
 });
 // At phone width the browser and properties fold away behind two toggles
 // (theme.css hides a closed one there); wider screens hide the toggles and

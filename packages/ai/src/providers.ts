@@ -1,6 +1,6 @@
-// One interface to whichever model the user chooses. PLACEHOLDERS: the
-// provider descriptions below are real (they drive the settings page and
-// the privacy indicator); talking to a model is not built yet.
+// One interface to whichever model the user chooses. The descriptions
+// below drive the settings page and the privacy indicator; the providers
+// themselves are in ollama.ts, hosted.ts and local.ts.
 //
 // AI is always optional: every feature in Fission works without it, and
 // no provider is active until the user picks one. It costs the project
@@ -9,6 +9,12 @@
 //
 // The rest of the app talks to `AIProvider` only and never knows which
 // one is active.
+
+import type { Fetch } from "./http.ts";
+import { browserKeyStore, type ApiKeyStore } from "./keys.ts";
+import { builtInProvider, IN_BROWSER_MODEL, inBrowserDownloadBytes, inBrowserProvider, type BuiltInModelLike, type GpuLike, type WebLLMLike } from "./local.ts";
+import { hostedProvider } from "./hosted.ts";
+import { ollamaProvider } from "./ollama.ts";
 
 export type AIProviderKind = "in-browser" | "ollama" | "api-key" | "browser-built-in";
 
@@ -23,6 +29,19 @@ export interface ProviderSettings {
   endpoint?: string;
   /** api-key: whose API. The key itself lives only in browser storage (keys.ts), never here. */
   vendor?: ApiVendor;
+}
+
+/** What providers reach the outside world through; tests pass stand-ins. Each defaults to the browser's own. */
+export interface ProviderDeps {
+  fetch?: Fetch;
+  keys?: ApiKeyStore;
+  gpu?: GpuLike;
+  loadWebLLM?: () => Promise<WebLLMLike>;
+  builtIn?: BuiltInModelLike;
+  /** In-browser model download progress, 0–1. */
+  onProgress?: (fraction: number, text: string) => void;
+  /** How long an answer may take (ANSWER_TIMEOUT_MS). */
+  timeoutMs?: number;
 }
 
 /** A request in the shape every provider takes. */
@@ -99,12 +118,60 @@ export function dataLeavesMachine(kind: AIProviderKind): boolean {
   return PROVIDERS.find((p) => p.kind === kind)!.remote;
 }
 
-/** A provider for these settings. Not implemented yet. */
-export function createProvider(_settings: ProviderSettings): AIProvider {
-  throw new Error("not implemented");
+const browserFetch: Fetch = (url, init) => globalThis.fetch(url, init);
+const browserGpu = () => (globalThis.navigator as { gpu?: GpuLike } | undefined)?.gpu;
+const browserBuiltIn = () => (globalThis as { LanguageModel?: BuiltInModelLike }).LanguageModel;
+const loadWebLLM = () => import("@mlc-ai/web-llm") as unknown as Promise<WebLLMLike>;
+
+/** A provider for these settings. Throws a clear error for settings that can't work (a bad address, an unknown kind). */
+export function createProvider(settings: ProviderSettings, deps: ProviderDeps = {}): AIProvider {
+  const fetch = deps.fetch ?? browserFetch;
+  switch (settings.kind) {
+    case "ollama":
+      return ollamaProvider({ model: settings.model, endpoint: settings.endpoint, fetch, timeoutMs: deps.timeoutMs });
+    case "api-key":
+      return hostedProvider({ vendor: settings.vendor, model: settings.model, endpoint: settings.endpoint, keys: deps.keys ?? browserKeyStore(), fetch, timeoutMs: deps.timeoutMs });
+    case "in-browser":
+      return inBrowserProvider({ model: settings.model, gpu: "gpu" in deps ? deps.gpu : browserGpu(), loadWebLLM: deps.loadWebLLM ?? loadWebLLM, onProgress: deps.onProgress });
+    case "browser-built-in":
+      return builtInProvider({ api: "builtIn" in deps ? deps.builtIn : browserBuiltIn() });
+    default:
+      throw new Error(`unknown AI provider "${String((settings as { kind: unknown }).kind)}"`);
+  }
 }
 
-/** Which providers this browser could run (WebGPU and its power, a built-in model). Not implemented yet. */
-export function detectProviders(): Promise<{ kind: AIProviderKind; ok: boolean; reason?: string }[]> {
-  throw new Error("not implemented");
+/** The download size in bytes of an in-browser model (the default when none is named), read before anything downloads. */
+export async function inBrowserDownloadSize(model: string = IN_BROWSER_MODEL, deps: Pick<ProviderDeps, "fetch" | "loadWebLLM"> = {}): Promise<number> {
+  const webllm = await (deps.loadWebLLM ?? loadWebLLM)();
+  const info = webllm.prebuiltAppConfig.model_list.find((m) => m.model_id === model);
+  if (!info) throw new Error(`${model} isn't a model the in-browser runner knows`);
+  return inBrowserDownloadBytes(info, deps.fetch ?? browserFetch);
+}
+
+/**
+ * Which providers could run here, each with the reason when one can't:
+ * WebGPU and its power for the default in-browser model, Ollama at its
+ * usual address, the browser's built-in model. An API key always can (the
+ * key is asked for when it is chosen).
+ */
+export async function detectProviders(deps: ProviderDeps = {}): Promise<{ kind: AIProviderKind; ok: boolean; reason?: string }[]> {
+  const out: { kind: AIProviderKind; ok: boolean; reason?: string }[] = [];
+  for (const p of PROVIDERS) {
+    if (p.kind === "api-key") {
+      out.push({ kind: p.kind, ok: true });
+      continue;
+    }
+    const r =
+      p.kind === "ollama"
+        ? await ollamaAnswers(deps.fetch ?? browserFetch)
+        : await createProvider({ kind: p.kind }, deps).check().catch((e: Error) => ({ ok: false as const, reason: e.message }));
+    out.push(r.ok ? { kind: p.kind, ok: true } : { kind: p.kind, ok: false, reason: r.reason });
+  }
+  return out;
+}
+
+async function ollamaAnswers(fetch: Fetch): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // With no model chosen a reachable Ollama always asks for one; anything else means it can't be reached.
+  const r = await ollamaProvider({ model: "", fetch }).check();
+  return r.ok || /^(choose a model|Ollama has no models yet)/.test(r.reason) ? { ok: true } : r;
 }
