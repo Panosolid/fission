@@ -1,7 +1,8 @@
 """One GitHub issue per kind of problem random testing finds.
 
 Called by collect-results.sh after a "Random testing" run is on the
-test-results branch. Every failure folder the run produced (endless.sh's
+test-results branch, and by collect-fuzz.sh after a "Fuzzing" run (its
+fuzz-<target>/seed-<seed>/fuzz-report.txt: one kind per failure line). Every failure folder the run produced (endless.sh's
 seed-<seed>/: the harness report and the OpenCascade disagreements) is
 reduced to its kinds: a harness failure's kind is the operation and the
 message with every number replaced by #, an oracle disagreement's kind is
@@ -98,9 +99,29 @@ def oracle_kinds(disagreements):
     return kinds
 
 
+FUZZ_TARGETS = {"STL reader fuzzing": "STL reader", "Project loader fuzzing": "project loader"}
+
+
+def fuzz_kinds(report):
+    """Kinds in a fuzzer's fuzz-report.txt (kernel/tests/fuzz_stl.rs,
+    packages/testing/src/project-fuzz.ts): a first line naming the target,
+    then one 'failure: <kind> | <case and input>' line per kind, each
+    already one example; numbers are taken out as for the harness."""
+    lines = report.splitlines()
+    target = next((name for head, name in FUZZ_TARGETS.items() if lines and lines[0].startswith(head)), "?")
+    kinds = []
+    for line in lines[1:]:
+        if line.startswith("failure: "):
+            kind = line[len("failure: "):].split(" | ", 1)[0]
+            kinds.append((f"fuzzing the {target}: {numbers_out(kind).strip()[:150]}", line))
+    return kinds
+
+
 def kinds_of(folder_files):
     """{kind: example} for one failure folder, given {file name: text}."""
     found = []
+    if "fuzz-report.txt" in folder_files:
+        found += fuzz_kinds(folder_files["fuzz-report.txt"])
     if "report.txt" in folder_files:
         found += harness_kinds(folder_files["report.txt"])
     if "oracle-disagreements.txt" in folder_files:
@@ -146,8 +167,8 @@ def plan(found, issues, branch):
     return actions
 
 
-def seed_list(seeds):
-    shown = [f"- `{s}` (failures/seed-{s}/)" for s in seeds[:MAX_SEEDS]]
+def seed_list(seeds, where="failures"):
+    shown = [f"- `{s}` ({where}/seed-{s}/)" for s in seeds[:MAX_SEEDS]]
     if len(seeds) > MAX_SEEDS:
         shown.append(f"- and {len(seeds) - MAX_SEEDS} more")
     return "\n".join(shown)
@@ -158,6 +179,24 @@ def texts(action, kind, hits, run_url, commit, branch):
     seeds = [s for s, _ in hits]
     seed, example = hits[0]
     where = f"run {run_url}, commit {commit} on {branch}"
+    if action == "create" and kind.startswith("fuzzing the "):
+        body = (
+            f"{MARK.format(key(kind))}\n"
+            f"Fuzzing found a new kind of problem ({where}).\n\n"
+            f"**Kind:** {kind}\n\n"
+            f"Example (seed `{seed}`):\n```\n{example}\n```\n\n"
+            f"Seen in {len(seeds)} round(s):\n{seed_list(seeds, 'fuzz/failures')}\n\n"
+            "Each folder is on the test-results branch: fuzz-report.txt lists every kind the round found, "
+            "and input-<case> is the failing input, shrunk. Make the input a regression test first "
+            "(kernel/tests/regressions/fuzz-stl/*.stl or packages/testing/test/regressions/project-fuzz/*.json "
+            "are replayed by every test run), then fix it. Replay a whole round: in kernel/, "
+            "`FISSION_SEED=<seed> FISSION_FUZZ_SECONDS=1 cargo test --test fuzz_stl fuzz_stl_random -- --nocapture`; "
+            "for the project loader, `FISSION_SEED=<seed> FISSION_FUZZ_SECONDS=1 npm run fuzz -w @fission/testing`.\n\n"
+            "Close this issue as completed once it is fixed (with a regression test), or as not planned "
+            "if it is not a bug (say why in a comment): a kind closed as fixed that comes back on main reopens it; "
+            "one closed as not planned is not reported again."
+        )
+        return f"Fuzzing: {kind[len('fuzzing the '):]}"[:250], body
     if action == "create":
         body = (
             f"{MARK.format(key(kind))}\n"
@@ -176,21 +215,23 @@ def texts(action, kind, hits, run_url, commit, branch):
         )
         return f"Random testing: {kind}"[:250], body
     head = "Seen again after this issue was closed" if action == "reopen" else "Seen again"
-    return None, f"{head} ({where}), in {len(seeds)} round(s):\n{seed_list(seeds)}"
+    folder = "fuzz/failures" if kind.startswith("fuzzing the ") else "failures"
+    return None, f"{head} ({where}), in {len(seeds)} round(s):\n{seed_list(seeds, folder)}"
 
 
 def read_folders(incoming):
-    """{seed: {file name: text}} for every endless-*/seed-*/ folder."""
+    """{seed: {file name: text}} for every endless-*/seed-*/ and
+    fuzz-*/seed-*/ folder."""
     folders = {}
     for run in sorted(os.listdir(incoming)):
-        if not run.startswith("endless-"):
+        if not run.startswith(("endless-", "fuzz-")):
             continue
         for name in sorted(os.listdir(os.path.join(incoming, run))):
             path = os.path.join(incoming, run, name)
             if not (name.startswith("seed-") and os.path.isdir(path)):
                 continue
             files = {}
-            for f in ("report.txt", "oracle-disagreements.txt", "harness-output.txt"):
+            for f in ("report.txt", "oracle-disagreements.txt", "harness-output.txt", "fuzz-report.txt"):
                 p = os.path.join(path, f)
                 if os.path.isfile(p):
                     with open(p, errors="replace") as fh:

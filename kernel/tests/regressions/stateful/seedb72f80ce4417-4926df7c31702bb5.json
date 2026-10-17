@@ -1,0 +1,56 @@
+{
+  "seed": 201414652347415,
+  "failure": "step 1 (Add { shape: Extrude { outer: Path { pts: [[0.0, 0.0], [0.0, 1.0], [0.0017838642529318352, 1.0], [0.0017838642529318352, 0.0]], bulges: [-1.0, 110000000.00000001, -1.0, -0.0] }, holes: [], dist: 0.5, expect: None }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): sizes valid = false but kernel accepted [harness bug: the bulge 1.1e8 was counted as a coordinate beyond MAX_COORD; a bulge has no unit, and the arc it makes is in range, so the kernel was right]",
+  "ops": [
+    {
+      "Add": {
+        "shape": {
+          "Extrude": {
+            "outer": {
+              "Path": {
+                "pts": [
+                  [
+                    "0.0",
+                    "0.0"
+                  ],
+                  [
+                    "0.0",
+                    "1.0"
+                  ],
+                  [
+                    "0.0017838642529318352",
+                    "1.0"
+                  ],
+                  [
+                    "0.0017838642529318352",
+                    "0.0"
+                  ]
+                ],
+                "bulges": [
+                  "-1.0",
+                  "110000000.00000001",
+                  "-1.0",
+                  "-0.0"
+                ]
+              }
+            },
+            "holes": [],
+            "dist": "0.5",
+            "expect": null
+          }
+        },
+        "axis": [
+          "1.0",
+          "0.0",
+          "0.0"
+        ],
+        "angle": "0.0",
+        "at": [
+          "0.0",
+          "0.0",
+          "0.0"
+        ]
+      }
+    }
+  ]
+}

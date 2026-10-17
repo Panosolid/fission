@@ -23,7 +23,9 @@ name: Random testing
 # mutants/), files one issue per kind of problem found
 # (.github/scripts/file_issues.py: new kinds get an issue, known ones a
 # comment, fixed ones that come back on main are reopened) and opens one for
-# new mutation survivors. Scheduled runs only fire from the default branch.
+# new mutation survivors. A journeys job walks the magic-moment journeys
+# against tests/baseline.json (X8b) and its lines go into summary.txt.
+# Scheduled runs only fire from the default branch.
 on:
   schedule:
     - cron: "0 15 * * *"
@@ -196,8 +198,45 @@ jobs:
           path: ${{ runner.temp }}/mutants/
           if-no-files-found: ignore
 
+  # The magic-moment journeys (X8b, apps/fission/e2e/journeys.mjs) against
+  # their baseline in tests/baseline.json: red on an extra click or a slowest
+  # walk more than 15% over; the lines go into summary.txt either way.
+  journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+        working-directory: apps/fission
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/fission
+      - name: Journeys against the baseline
+        working-directory: apps/fission
+        env:
+          JOURNEY_NIGHTLY: "1"
+          JOURNEY_REPORT: ${{ runner.temp }}/journeys/report.txt
+        run: node --experimental-strip-types --no-warnings e2e/journeys.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: journeys
+          path: ${{ runner.temp }}/journeys/
+          if-no-files-found: ignore
+
   collect:
-    needs: [plan, test, test-second-leg, mutants]
+    needs: [plan, test, test-second-leg, mutants, journeys]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15

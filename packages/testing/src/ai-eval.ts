@@ -5,7 +5,7 @@
 // per task type are tracked over time like the fuzzer's metrics.
 
 import { type Command, type CommandSpec } from "@fission/core";
-import { askForCommands, type AIProvider } from "@fission/ai";
+import { askForCommands, systemPrompt, type AIProvider } from "@fission/ai";
 
 export type TaskType = "create" | "edit-parameter" | "reference-geometry" | "explain";
 
@@ -64,7 +64,7 @@ export async function runEval(provider: AIProvider, cases: readonly EvalCase[], 
   const results: EvalResult[] = [];
   for (const c of cases) {
     if (c.waitsFor) continue;
-    const system = `You edit a CAD project by answering with commands. The project so far was made by: ${JSON.stringify(c.setup)}`;
+    const system = systemPrompt(c.setup);
     const answer = await askForCommands(provider, { system, messages: [{ role: "user", content: c.prompt }] }, specs);
     const passed = answer.ok && matches(answer.commands, c.expected);
     results.push({ id: c.id, taskType: c.taskType, passed, detail: answer.ok ? JSON.stringify(answer.commands) : answer.error });

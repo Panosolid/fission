@@ -18,6 +18,9 @@ export type LengthUnit = "mm" | "cm" | "m" | "in";
 /** The version this build writes. Bump it only together with a new entry in MIGRATIONS. */
 export const FORMAT_VERSION = 2;
 
+/** Deepest nesting of lists and objects a file may have (JSON.stringify fails somewhere past ~5,000; real projects are about 10 deep). */
+export const MAX_NESTING = 256;
+
 export interface Project {
   formatVersion: typeof FORMAT_VERSION;
   name: string;
@@ -59,9 +62,15 @@ export function readProject(data: unknown): Project {
   for (let n = v; n < FORMAT_VERSION; n++) p = MIGRATIONS[n](p);
   for (const key of ["name", "units", "materials", "links", "workspaces"])
     if (!(key in p)) throw new Error(`not a Fission project: "${key}" is missing`);
+  if (typeof p.name !== "string") throw new Error('not a Fission project: "name" must be text');
+  if (!isObject(p.units) || !LENGTH_UNITS.includes(p.units.length as LengthUnit)) throw new Error(`not a Fission project: "units" must give a length unit (${LENGTH_UNITS.join(", ")})`);
+  if (!Array.isArray(p.materials)) throw new Error('not a Fission project: "materials" must be a list');
+  if (!Array.isArray(p.links)) throw new Error('not a Fission project: "links" must be a list');
   if (!isObject(p.workspaces)) throw new Error('not a Fission project: "workspaces" must be an object');
   return p as unknown as Project;
 }
+
+const LENGTH_UNITS: readonly LengthUnit[] = ["mm", "cm", "m", "in"];
 
 const isObject = (x: unknown): x is Json => typeof x === "object" && x !== null && !Array.isArray(x);
 
@@ -77,11 +86,29 @@ export function projectToJson(project: Project): string {
     if (typeof x === "number" && !Number.isFinite(x)) throw new Error(`can't save: ${path} is ${x}, not a number a file can hold`);
     if (Array.isArray(x)) return x.map((v, i) => sorted(v, `${path}[${i}]`));
     if (!isObject(x)) return x;
-    const out: Json = {};
-    for (const key of Object.keys(x).sort()) if (x[key] !== undefined) out[key] = sorted(x[key], `${path}.${key}`);
-    return out;
+    // fromEntries defines each key, so a "__proto__" key stays a key
+    // (assigning it would set the object's prototype instead).
+    return Object.fromEntries(Object.keys(x).sort().filter((key) => x[key] !== undefined).map((key) => [key, sorted(x[key], `${path}.${key}`)]));
   };
   return JSON.stringify(sorted(project, "project"), null, 2) + "\n";
+}
+
+/**
+ * Refuses what JSON.parse lets through but a file can't hold again: a
+ * number too big for a double (1e400 reads as Infinity) and nesting past
+ * MAX_NESTING (which saving could not write back). Walks with its own stack,
+ * so a file nested a million deep can't overflow this check either.
+ */
+function checkValues(data: unknown) {
+  const stack: [unknown, string, number][] = [[data, "project", 1]];
+  while (stack.length) {
+    const [x, path, depth] = stack.pop()!;
+    if (typeof x === "number" && !Number.isFinite(x)) throw new Error(`not a Fission project: ${path} is too big a number`);
+    if (typeof x !== "object" || x === null) continue;
+    if (depth > MAX_NESTING) throw new Error(`not a Fission project: ${path} is nested more than ${MAX_NESTING} deep`);
+    if (Array.isArray(x)) x.forEach((v, i) => stack.push([v, `${path}[${i}]`, depth + 1]));
+    else for (const key of Object.keys(x)) stack.push([(x as Json)[key], `${path}.${key}`, depth + 1]);
+  }
 }
 
 /** The part of a workspace plugin that reads its own data (WorkspacePlugin.readData). */
@@ -104,12 +131,14 @@ export function projectFromJson(text: string, readers: readonly DataReader[]): P
   } catch (e) {
     throw new Error(`not a Fission project: the file is not valid JSON (${e instanceof Error ? e.message : String(e)})`);
   }
+  checkValues(data);
   const project = readProject(data);
   const workspaces: Project["workspaces"] = {};
   for (const [id, part] of Object.entries(project.workspaces) as [WorkspaceId, unknown][]) {
     const reader = readers.find((r) => r.id === id)?.readData;
     try {
-      workspaces[id] = reader ? reader(part) : part;
+      // Defined, not assigned, so even an id "__proto__" stays a key.
+      Object.defineProperty(workspaces, id, { value: reader ? reader(part) : part, enumerable: true, writable: true, configurable: true });
     } catch (e) {
       throw new Error(`can't open the ${id} workspace's data: ${e instanceof Error ? e.message : String(e)}`);
     }
