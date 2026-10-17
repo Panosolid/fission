@@ -2,7 +2,9 @@
 // sketch opens with the sketch as a timeline row and a row of the Sketches
 // group; changing the part keeps it, Undo puts the part back and keeps it,
 // and Save writes it back unchanged. A version 1 file (before sketches)
-// still opens. Screenshots at 1280 and 375 px wide go to E2E_SHOTS when set.
+// still opens. A file whose part extrudes a one-circle sketch (step 22b)
+// opens as a cylinder of πr²h. Screenshots at 1280 and 375 px wide go to
+// E2E_SHOTS when set.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -136,6 +138,42 @@ try {
       await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
       assert.deepEqual(await rows(page, "sketches"), []);
       assert.deepEqual(await rows(page, "timeline"), ["1. Box: 50 × 30 × 20 mm"]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  await check("a file whose part extrudes a sketch of one circle opens as a cylinder of πr²h, and saves it unchanged (22b)", async () => {
+    const page = await fresh();
+    try {
+      // Sketch 1: one circle of radius 10 round (5, -5), extruded 10 mm, as docs/project-format.md describes.
+      const circled = structuredClone(project);
+      const design = circled.workspaces.design;
+      const sketch = { id: "sketch-2", points: [{ id: "point-3", x: 5, y: -5 }], curves: [{ id: "circle-4", kind: "circle", centre: "point-3", radius: 10 }], constraints: [] };
+      design.sketches = [sketch];
+      design.nextId = 6;
+      design.timeline.features = [
+        design.timeline.features[1],
+        {
+          id: "feature-5",
+          intent: { type: "extrude", parameters: { sketch: "sketch-2", distance: 10 }, summary: "Extrude: Sketch 1 by 10 mm" },
+          provenance: { self: { workspace: "design", id: "feature-5", label: "Extrude 1" }, from: [{ workspace: "design", id: "sketch-2", label: "Sketch 1" }] },
+          dependsOn: ["sketch-2"],
+          suppressed: false,
+        },
+      ];
+      await open(page, "Circled.fission.json", JSON.stringify(circled));
+      // V = π·10²·10 = 1000π = 3141.59… mm³; A = 2·π·10² + 2π·10·10 = 400π = 1256.64… mm².
+      await page.waitForFunction(() => /^[1-9][0-9,.]* mm³$/.test(document.querySelector("#volume")?.textContent ?? "") && document.querySelector("#volume").textContent !== "24,000 mm³");
+      const shown = async (id) => Number((await page.textContent(id)).replace(/[^0-9.]/g, ""));
+      const [volume, area] = [await shown("#volume"), await shown("#area")];
+      assert.ok(Math.abs(volume - 1000 * Math.PI) <= 1e-6, `volume ${volume}`); // shown to six decimals
+      assert.ok(Math.abs(area - 400 * Math.PI) <= 1e-6, `area ${area}`);
+      assert.deepEqual(await rows(page, "sketches"), ["Sketch 1"]);
+      if (shots) await page.screenshot({ path: `${shots}/sketch-circle-1280.png` });
+      const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
+      const saved = JSON.parse(readFileSync(await download.path(), "utf8"));
+      assert.deepEqual(saved.workspaces.design.sketches, [sketch]);
     } finally {
       await page.close();
     }

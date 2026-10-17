@@ -12,7 +12,7 @@
 // the grid comes with the sketch constraints (27).
 
 import type { Plane, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
-import type { DesignDocument, Sketch, SketchPlane } from "./document.ts";
+import type { DesignDocument, Sketch, SketchLineCurve, SketchPlane } from "./document.ts";
 import { drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchLines, type LineEnd } from "./sketch.ts";
 
 export { pointAt };
@@ -101,7 +101,7 @@ function lineClick(doc: DesignDocument, tool: LineTool, at: SketchXY): { doc: De
   const [fx, fy] = whereIs(sketch, tool.from);
   if (fx === at[0] && fy === at[1]) return { doc, tool, drew: false };
   const drawn = drawLine(doc, tool.sketch, tool.from, end);
-  const line = sketchOf(drawn.doc, tool.sketch).curves.find((c) => c.id === drawn.id)!;
+  const line = sketchOf(drawn.doc, tool.sketch).curves.find((c) => c.id === drawn.id) as SketchLineCurve;
   return { doc: drawn.doc, tool: { ...tool, from: there ? null : line.end }, drew: true };
 }
 

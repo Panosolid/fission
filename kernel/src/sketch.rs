@@ -11,8 +11,15 @@
 //!   same node share their end exactly.
 //! - `check_lines`: the rules for a sketch's lines (finite, within MAX_COORD,
 //!   length within [MIN_FEATURE, MAX_SIZE], at most MAX_PROFILE_CORNERS).
-//! - `sketch_outline`: the one closed outline the lines make, or why they
-//!   make none. Two line ends are joined when they are within LINEAR of
+//! - `check_circles`: the rules for a sketch's circles (step 22b): radius
+//!   within [MIN_FEATURE, MAX_SIZE / 2], so the diameter, the span a
+//!   profile may have, is at most MAX_SIZE; the whole circle (centre ± r in
+//!   both coordinates) within MAX_COORD.
+//! - `sketch_outline`: the one closed outline the lines and circles make,
+//!   or why they make none. A sketch of exactly one circle and no lines is
+//!   that circle's outline (`Boundary::Circle`). A circle together with
+//!   anything else is several loops until regions (step 26), after the
+//!   lines' own loose ends and branches, which are reported first. Two line ends are joined when they are within LINEAR of
 //!   each other (a corner); every corner must join exactly two ends. The
 //!   loop is walked from line 0 in its own direction, each line entered at
 //!   the end that meets the previous one, and each corner is the end of the
@@ -20,7 +27,8 @@
 //!   ordered after line 0, and a line drawn backwards is simply walked the
 //!   other way. The loop then goes through the profile rules
 //!   (`ops::profile::check_profile`: no crossings, touching or slivers),
-//!   so a closed sketch is exactly a profile the extrude accepts. Several
+//!   so a closed sketch is exactly a profile the extrude accepts (a lone
+//!   circle goes through the same check). Several
 //!   separate loops, and loops inside loops, wait for profile detection
 //!   (step 26); until then they are reported, not guessed at.
 //!
@@ -28,7 +36,7 @@
 //! less than LINEAR further along, so it is O(n log n) for spread-out
 //! lines and O(n²) at worst (every end within LINEAR in x), with n capped
 //! at MAX_PROFILE_CORNERS, the same bound as the profile check.
-use crate::ops::profile::{check_profile, Profile};
+use crate::ops::profile::{check_profile, Boundary, Profile};
 use crate::ops::KernelError;
 use crate::tolerance::{LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
@@ -39,6 +47,13 @@ use std::fmt;
 pub struct Line {
     pub a: DVec2,
     pub b: DVec2,
+}
+
+/// One circle of a sketch, round `centre` with radius `radius`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Circle {
+    pub centre: DVec2,
+    pub radius: f64,
 }
 
 /// The nearest node of a square grid with spacing `spacing` to `p`.
@@ -100,17 +115,37 @@ pub fn check_lines(lines: &[Line]) -> Result<(), KernelError> {
     Ok(())
 }
 
+/// The rules every sketch's circles follow; the first broken one is named
+/// with the circle's number (from 1, counting circles only).
+pub fn check_circles(circles: &[Circle]) -> Result<(), KernelError> {
+    for (i, c) in circles.iter().enumerate() {
+        let n = i + 1;
+        let most = MAX_SIZE / 2.0;
+        if !(MIN_FEATURE..=most).contains(&c.radius) {
+            return Err(KernelError::InvalidInput(format!(
+                "circle {n}'s radius must be between {MIN_FEATURE} and {most} mm, got {}",
+                c.radius
+            )));
+        }
+        if !in_range(c.centre - c.radius) || !in_range(c.centre + c.radius) {
+            return Err(KernelError::InvalidInput(format!("circle {n} reaches outside the modelling range")));
+        }
+    }
+    Ok(())
+}
+
 /// Why a sketch's lines make no outline yet. None of these is an error: a
 /// sketch is open while it is being drawn.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Open {
-    /// No lines yet.
+    /// No lines or circles yet.
     Empty,
     /// A line end joined to no other.
     LooseEnd { at: DVec2 },
     /// More than two line ends meet at one corner.
     Branch { at: DVec2, ends: usize },
-    /// Every corner joins two ends, but the lines make several loops.
+    /// Every corner joins two ends, but the lines and circles make several
+    /// loops (each circle is one).
     SeveralLoops { loops: usize },
     /// One loop, but not a valid profile (it crosses or touches itself, a
     /// sliver, a line doubling back…): the profile check's reason.
@@ -120,20 +155,20 @@ pub enum Open {
 impl fmt::Display for Open {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Open::Empty => write!(f, "the sketch has no lines yet"),
+            Open::Empty => write!(f, "the sketch has no lines or circles yet"),
             Open::LooseEnd { at } => write!(f, "the line end at ({}, {}) is not joined to another line", at.x, at.y),
             Open::Branch { at, ends } => {
                 write!(f, "{ends} line ends meet at ({}, {}); every corner of an outline joins exactly two", at.x, at.y)
             }
             Open::SeveralLoops { loops } => {
-                write!(f, "the lines make {loops} separate loops; for now a sketch makes one outline")
+                write!(f, "the sketch makes {loops} separate loops; for now a sketch makes one outline")
             }
             Open::NotAProfile { reason } => write!(f, "the lines close up but are not a valid outline: {reason}"),
         }
     }
 }
 
-/// What a sketch's lines make.
+/// What a sketch's lines and circles make.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SketchOutline {
     /// One closed loop that passes the profile rules: ready to extrude.
@@ -141,12 +176,24 @@ pub enum SketchOutline {
     Open(Open),
 }
 
-/// The one closed outline `lines` make, or why they make none (see the
-/// module comment). Lines that break `check_lines` are an error.
-pub fn sketch_outline(lines: &[Line]) -> Result<SketchOutline, KernelError> {
+/// The one closed outline `lines` and `circles` make, or why they make
+/// none (see the module comment). More than MAX_PROFILE_CORNERS of them
+/// together, or any breaking `check_lines` or `check_circles`, is an error.
+pub fn sketch_outline(lines: &[Line], circles: &[Circle]) -> Result<SketchOutline, KernelError> {
+    let count = lines.len() + circles.len();
+    if count > MAX_PROFILE_CORNERS {
+        return Err(KernelError::InvalidInput(format!(
+            "a sketch has at most {MAX_PROFILE_CORNERS} lines and circles, got {count}"
+        )));
+    }
     check_lines(lines)?;
+    check_circles(circles)?;
     if lines.is_empty() {
-        return Ok(SketchOutline::Open(Open::Empty));
+        return match circles {
+            [] => Ok(SketchOutline::Open(Open::Empty)),
+            [c] => profiled(Profile { outer: Boundary::Circle { center: c.centre, radius: c.radius }, holes: vec![] }),
+            _ => Ok(SketchOutline::Open(Open::SeveralLoops { loops: circles.len() })),
+        };
     }
     let partner = match join_ends(lines) {
         Ok(p) => p,
@@ -163,11 +210,16 @@ pub fn sketch_outline(lines: &[Line]) -> Result<SketchOutline, KernelError> {
         let next = partner[leaving];
         (line, entered) = (next / 2, next % 2);
     }
-    let unseen = seen.iter().filter(|s| !**s).count();
-    if unseen > 0 {
-        return Ok(SketchOutline::Open(Open::SeveralLoops { loops: 1 + count_loops(lines, &partner, seen) }));
+    let loops = 1 + count_loops(lines, &partner, seen) + circles.len();
+    if loops > 1 {
+        return Ok(SketchOutline::Open(Open::SeveralLoops { loops }));
     }
-    let profile = Profile::polygon(corners, vec![]);
+    profiled(Profile::polygon(corners, vec![]))
+}
+
+/// The profile as a closed outline if it passes the profile rules, else
+/// open with their reason.
+fn profiled(profile: Profile) -> Result<SketchOutline, KernelError> {
     match check_profile(&profile) {
         Ok(_) => Ok(SketchOutline::Closed(profile)),
         Err(KernelError::InvalidInput(reason)) => Ok(SketchOutline::Open(Open::NotAProfile { reason })),
@@ -261,7 +313,19 @@ mod tests {
     }
 
     fn open(lines: &[Line]) -> Open {
-        match sketch_outline(lines).unwrap() {
+        match sketch_outline(lines, &[]).unwrap() {
+            SketchOutline::Open(o) => o,
+            other => panic!("expected an open sketch, got {other:?}"),
+        }
+    }
+
+    fn circle(x: f64, y: f64, radius: f64) -> Circle {
+        Circle { centre: v(x, y), radius }
+    }
+
+    /// What the lines and circles make, when they make no outline.
+    fn open_with(lines: &[Line], circles: &[Circle]) -> Open {
+        match sketch_outline(lines, circles).unwrap() {
             SketchOutline::Open(o) => o,
             other => panic!("expected an open sketch, got {other:?}"),
         }
@@ -389,7 +453,7 @@ mod tests {
         let many = |n: usize| (0..n).map(|i| line((i as f64, 0.0), (i as f64, 1.0))).collect::<Vec<_>>();
         assert!(check_lines(&many(MAX_PROFILE_CORNERS)).is_ok());
         assert!(invalid(check_lines(&many(MAX_PROFILE_CORNERS + 1))).contains("at most 2000 lines"));
-        assert!(invalid(sketch_outline(&many(MAX_PROFILE_CORNERS + 1))).contains("at most"));
+        assert!(invalid(sketch_outline(&many(MAX_PROFILE_CORNERS + 1), &[])).contains("at most"));
     }
 
     // ---- sketch_outline
@@ -401,7 +465,7 @@ mod tests {
         // points in the order drawn. Its area by the shoelace formula is
         // ½|Σ x_i y_{i+1} − x_{i+1} y_i| = ½(0 + 100 + 100 + 0) = 100.
         let pts = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
-        let got = corners(sketch_outline(&ring(&pts)).unwrap());
+        let got = corners(sketch_outline(&ring(&pts), &[]).unwrap());
         assert_eq!(got, pts.iter().map(|&(x, y)| v(x, y)).collect::<Vec<_>>());
         let segs = check_profile(&Profile::polygon(got, vec![])).unwrap();
         assert!((crate::ops::profile::signed_area(&segs[0]).abs() - 100.0).abs() <= crate::tolerance::AREA);
@@ -413,10 +477,10 @@ mod tests {
         // backwards: still walked from line 1, (0,0) → (4,0), then the line
         // that meets (4,0), entered there, then the last.
         let lines = [line((0.0, 0.0), (4.0, 0.0)), line((0.0, 3.0), (0.0, 0.0)), line((0.0, 3.0), (4.0, 0.0))];
-        assert_eq!(corners(sketch_outline(&lines).unwrap()), vec![v(0.0, 0.0), v(4.0, 0.0), v(0.0, 3.0)]);
+        assert_eq!(corners(sketch_outline(&lines, &[]).unwrap()), vec![v(0.0, 0.0), v(4.0, 0.0), v(0.0, 3.0)]);
         // Line 1 itself reversed walks the loop the other way round.
         let lines = [line((4.0, 0.0), (0.0, 0.0)), line((0.0, 3.0), (0.0, 0.0)), line((0.0, 3.0), (4.0, 0.0))];
-        assert_eq!(corners(sketch_outline(&lines).unwrap()), vec![v(4.0, 0.0), v(0.0, 0.0), v(0.0, 3.0)]);
+        assert_eq!(corners(sketch_outline(&lines, &[]).unwrap()), vec![v(4.0, 0.0), v(0.0, 0.0), v(0.0, 3.0)]);
     }
 
     #[test]
@@ -424,12 +488,12 @@ mod tests {
         // A triangle whose last line stops short of the start by d.
         let tri = |d: f64| vec![line((0.0, 0.0), (4.0, 0.0)), line((4.0, 0.0), (0.0, 3.0)), line((0.0, 3.0), (d, 0.0))];
         // 0.9 LINEAR: the ends join, and the corner is line 1's start.
-        assert_eq!(corners(sketch_outline(&tri(0.9 * LINEAR)).unwrap())[0], v(0.0, 0.0));
+        assert_eq!(corners(sketch_outline(&tri(0.9 * LINEAR), &[]).unwrap())[0], v(0.0, 0.0));
         // 1.1 LINEAR: a gap; the lowest-numbered loose end is line 1's start.
         assert_eq!(open(&tri(1.1 * LINEAR)), Open::LooseEnd { at: v(0.0, 0.0) });
         // The same along y, so the distance (not just x) decides.
         let tri_y = |d: f64| vec![line((0.0, 0.0), (4.0, 0.0)), line((4.0, 0.0), (0.0, 3.0)), line((0.0, 3.0), (0.0, d))];
-        assert!(matches!(sketch_outline(&tri_y(0.9 * LINEAR)).unwrap(), SketchOutline::Closed(_)));
+        assert!(matches!(sketch_outline(&tri_y(0.9 * LINEAR), &[]).unwrap(), SketchOutline::Closed(_)));
         assert_eq!(open(&tri_y(1.1 * LINEAR)), Open::LooseEnd { at: v(0.0, 0.0) });
         // Diagonal: 0.8 LINEAR in x and in y is 1.13 LINEAR apart.
         let d = 0.8 * LINEAR;
@@ -442,7 +506,7 @@ mod tests {
         // The sweep stops once x is more than LINEAR further on, but an end
         // exactly LINEAR along in x and level is still joined.
         let tri = |d: f64| vec![line((d, 0.0), (4.0, 0.0)), line((4.0, 0.0), (0.0, 3.0)), line((0.0, 3.0), (0.0, 0.0))];
-        assert!(matches!(sketch_outline(&tri(LINEAR)).unwrap(), SketchOutline::Closed(_)));
+        assert!(matches!(sketch_outline(&tri(LINEAR), &[]).unwrap(), SketchOutline::Closed(_)));
         assert_eq!(open(&tri(1.1 * LINEAR)), Open::LooseEnd { at: v(1.1 * LINEAR, 0.0) });
     }
 
@@ -518,21 +582,121 @@ mod tests {
         // 1.1 MIN_FEATURE tall: the tip is 1.1 MIN_FEATURE from the base, so
         // it is accepted.
         let thin = ring(&[(0.0, 0.0), (10.0, 0.0), (5.0, 1.1 * MIN_FEATURE)]);
-        assert!(matches!(sketch_outline(&thin).unwrap(), SketchOutline::Closed(_)));
+        assert!(matches!(sketch_outline(&thin, &[]).unwrap(), SketchOutline::Closed(_)));
     }
 
     #[test]
     fn bad_lines_are_errors_not_open_sketches() {
         let mut lines = ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]);
         lines[1].b.x = f64::NAN;
-        assert_eq!(invalid(sketch_outline(&lines)), "line 2 has an end outside the modelling range");
+        assert_eq!(invalid(sketch_outline(&lines, &[])), "line 2 has an end outside the modelling range");
+    }
+
+    // ---- circles (step 22b)
+
+    #[test]
+    fn one_circle_is_a_closed_outline_worked_by_hand() {
+        // A circle round (3, -4) of radius 5, and nothing else: the outline
+        // is that circle, unchanged (no corners to walk), with no holes.
+        let got = sketch_outline(&[], &[circle(3.0, -4.0, 5.0)]).unwrap();
+        let want = Profile { outer: Boundary::Circle { center: v(3.0, -4.0), radius: 5.0 }, holes: vec![] };
+        assert_eq!(got, SketchOutline::Closed(want.clone()));
+        // It passes the profile rules: one loop, area π·5² = 25π (the
+        // profile's own signed area, counter-clockwise).
+        let loops = check_profile(&want).unwrap();
+        assert_eq!(loops.len(), 1);
+        assert!(crate::tolerance::rel_eq(crate::ops::profile::signed_area(&loops[0]), 25.0 * std::f64::consts::PI, 1e-12));
+    }
+
+    #[test]
+    fn circle_radius_at_0_9_and_1_1_of_the_limits() {
+        // Smallest: MIN_FEATURE. Largest: MAX_SIZE / 2 = 500000 mm, a
+        // diameter of exactly MAX_SIZE, the most a profile may span.
+        let at = |r: f64| sketch_outline(&[], &[circle(0.0, 0.0, r)]);
+        let closed = |r: f64| matches!(at(r), Ok(SketchOutline::Closed(_)));
+        assert!(closed(1.1 * MIN_FEATURE) && closed(MIN_FEATURE));
+        assert!(closed(0.9 * MAX_SIZE / 2.0) && closed(MAX_SIZE / 2.0));
+        for bad in [0.9 * MIN_FEATURE, 1.1 * MAX_SIZE / 2.0, 0.0, -5.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(invalid(at(bad)), format!("circle 1's radius must be between 0.001 and 500000 mm, got {bad}"));
+        }
+        // check_circles names which circle.
+        assert!(invalid(check_circles(&[circle(0.0, 0.0, 1.0), circle(5.0, 0.0, 0.9 * MIN_FEATURE)])).starts_with("circle 2's radius"));
+    }
+
+    #[test]
+    fn a_circle_must_fit_in_the_modelling_range_at_0_9_and_1_1() {
+        // The circle reaches centre ± r along each axis. With its centre
+        // MAX_COORD − 1.1·r from the origin it stops 0.1·r inside the range;
+        // at MAX_COORD − 0.9·r it pokes 0.1·r out. Radii 0.5 and 2 (one
+        // below 1, one above) so c·r or c / r in place of c ± r is caught.
+        for r in [0.5, 2.0] {
+            for (axis, sign) in [(DVec2::X, 1.0), (DVec2::X, -1.0), (DVec2::Y, 1.0), (DVec2::Y, -1.0)] {
+                let at = |k: f64| check_circles(&[Circle { centre: axis * sign * (MAX_COORD - k * r), radius: r }]);
+                assert!(at(1.1).is_ok() && at(1.0).is_ok(), "r {r}, {axis} × {sign}");
+                assert_eq!(invalid(at(0.9)), "circle 1 reaches outside the modelling range", "r {r}, {axis} × {sign}");
+            }
+        }
+        // A centre that isn't a number reaches nowhere in the range.
+        for bad in [circle(f64::NAN, 0.0, 1.0), circle(0.0, f64::INFINITY, 1.0), circle(f64::NEG_INFINITY, 0.0, 1.0)] {
+            assert_eq!(invalid(sketch_outline(&[], &[bad])), "circle 1 reaches outside the modelling range");
+        }
+    }
+
+    #[test]
+    fn a_circle_with_anything_else_is_several_loops() {
+        let square = ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        // Two circles apart, or one inside the other (a washer, a region
+        // at step 26): each circle is a loop.
+        assert_eq!(open_with(&[], &[circle(0.0, 0.0, 1.0), circle(5.0, 0.0, 1.0)]), Open::SeveralLoops { loops: 2 });
+        assert_eq!(open_with(&[], &[circle(0.0, 0.0, 5.0), circle(0.0, 0.0, 2.0)]), Open::SeveralLoops { loops: 2 });
+        // A square and a circle (inside it or not): 1 + 1 loops; with a
+        // second square, 3; with a second circle as well, 4.
+        assert_eq!(open_with(&square, &[circle(5.0, 5.0, 2.0)]), Open::SeveralLoops { loops: 2 });
+        assert_eq!(open_with(&square, &[circle(50.0, 5.0, 2.0)]), Open::SeveralLoops { loops: 2 });
+        let mut two = square.clone();
+        two.extend(ring(&[(20.0, 0.0), (30.0, 0.0), (30.0, 10.0)]));
+        assert_eq!(open_with(&two, &[circle(5.0, 5.0, 2.0)]), Open::SeveralLoops { loops: 3 });
+        assert_eq!(open_with(&two, &[circle(5.0, 5.0, 2.0), circle(50.0, 0.0, 1.0)]), Open::SeveralLoops { loops: 4 });
+        // A loop of lines that would fail the profile rules is still
+        // counted as one loop: the circle makes it several either way.
+        let bow = ring(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]);
+        assert_eq!(open_with(&bow, &[circle(50.0, 0.0, 1.0)]), Open::SeveralLoops { loops: 2 });
+        // The lines' own problems come first: a loose end or a branch is
+        // what to fix, whatever circles there are.
+        assert_eq!(open_with(&square[..3], &[circle(50.0, 0.0, 1.0)]), Open::LooseEnd { at: v(0.0, 0.0) });
+        let mut eight = ring(&[(0.0, 0.0), (4.0, 1.0), (4.0, -1.0)]);
+        eight.extend(ring(&[(0.0, 0.0), (-4.0, 1.0), (-4.0, -1.0)]));
+        assert_eq!(open_with(&eight, &[circle(50.0, 0.0, 1.0)]), Open::Branch { at: v(0.0, 0.0), ends: 4 });
+        // Without the circle the square closes, so the count is the circle's.
+        assert!(matches!(sketch_outline(&square, &[]).unwrap(), SketchOutline::Closed(_)));
+    }
+
+    #[test]
+    fn at_most_max_profile_corners_lines_and_circles_together() {
+        // 2000 in all is allowed, 2001 is not, however they are split.
+        let lines = |n: usize| (0..n).map(|i| line((i as f64, 0.0), (i as f64, 1.0))).collect::<Vec<_>>();
+        let circles = |n: usize| (0..n).map(|i| circle(i as f64 * 3.0, 10.0, 1.0)).collect::<Vec<_>>();
+        assert!(sketch_outline(&lines(MAX_PROFILE_CORNERS - 2), &circles(2)).is_ok());
+        assert!(sketch_outline(&[], &circles(MAX_PROFILE_CORNERS)).is_ok());
+        let want = "a sketch has at most 2000 lines and circles, got 2001";
+        assert_eq!(invalid(sketch_outline(&lines(MAX_PROFILE_CORNERS - 1), &circles(2))), want);
+        assert_eq!(invalid(sketch_outline(&[], &circles(MAX_PROFILE_CORNERS + 1))), want);
+    }
+
+    #[test]
+    fn bad_circles_are_errors_after_bad_lines() {
+        let square = ring(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        assert_eq!(invalid(sketch_outline(&square, &[circle(0.0, 0.0, 1.0), circle(0.0, 0.0, 0.0)])), "circle 2's radius must be between 0.001 and 500000 mm, got 0");
+        let mut bad = square.clone();
+        bad[3].a.y = f64::NAN;
+        assert_eq!(invalid(sketch_outline(&bad, &[circle(0.0, 0.0, 0.0)])), "line 4 has an end outside the modelling range");
     }
 
     #[test]
     fn messages_in_plain_words() {
-        assert_eq!(Open::Empty.to_string(), "the sketch has no lines yet");
+        assert_eq!(Open::Empty.to_string(), "the sketch has no lines or circles yet");
         assert_eq!(Open::LooseEnd { at: v(1.5, -2.0) }.to_string(), "the line end at (1.5, -2) is not joined to another line");
-        assert_eq!(Open::SeveralLoops { loops: 2 }.to_string(), "the lines make 2 separate loops; for now a sketch makes one outline");
+        assert_eq!(Open::SeveralLoops { loops: 2 }.to_string(), "the sketch makes 2 separate loops; for now a sketch makes one outline");
         assert_eq!(
             Open::NotAProfile { reason: "x".into() }.to_string(),
             "the lines close up but are not a valid outline: x"

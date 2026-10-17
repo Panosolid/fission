@@ -5,15 +5,15 @@
 // document's counter and are never reused, even after a delete.
 //
 // The geometry a sketch makes is never stored: its one closed outline is
-// found by the kernel (sketch_outline, step 21a) from the lines rebuilt
-// from point ids, every time it is asked for.
+// found by the kernel (sketch_outline, step 21a; circles from 22b) from
+// the lines and circles rebuilt from point ids, every time it is asked for.
 
-import type { Feature, KernelCalls, Outline, Plane, SketchLine } from "@fission/core";
+import type { Feature, KernelCalls, Outline, Plane, SketchCircle, SketchLine } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
-import { isSketchItem, shown, type DesignDocument, type Sketch, type SketchPlane } from "./document.ts";
+import { curvePoints, isSketchItem, shown, type DesignDocument, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
 
 /** The undo step each sketch edit is recorded as. */
-export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", delete: "Delete line", move: "Move point" } as const;
+export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", delete: "Delete line", move: "Move point" } as const;
 
 /**
  * Each origin plane's frame: the sketch's x along `xAxis`, its y along
@@ -84,25 +84,43 @@ export type LineEnd = string | readonly [number, number];
  * here, since it has no direction at all.
  */
 export function drawLine(doc: DesignDocument, sketchId: string, from: LineEnd, to: LineEnd): { doc: DesignDocument; id: string } {
-  let sketch = sketchIn(doc, sketchId);
-  let next = doc;
-  const end = (e: LineEnd): string => {
-    if (typeof e === "string") {
-      if (!sketch.points.some((p) => p.id === e)) throw new Error(`sketch ${sketchId} has no point ${e}`);
-      return e;
-    }
-    const [x, y] = e;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`a sketch point needs x and y in mm, not ${x}, ${y}`);
-    const [id, after] = take(withSketch(next, sketch), "point");
-    next = after;
-    sketch = { ...sketch, points: [...sketch.points, { id, x, y }] };
-    return id;
-  };
   if (typeof from === "string" && from === to) throw new Error(`a line can't start and end at the same point ${from}`);
-  const start = end(from);
-  const stop = end(to);
-  const [id, after] = take(withSketch(next, sketch), "line");
-  sketch = { ...sketch, curves: [...sketch.curves, { id, kind: "line", start, end: stop }] };
+  const [start, first] = pointFor({ doc, sketch: sketchIn(doc, sketchId) }, from);
+  const [stop, drawn] = pointFor(first, to);
+  const [id, after] = take(withSketch(drawn.doc, drawn.sketch), "line");
+  const sketch: Sketch = { ...drawn.sketch, curves: [...drawn.sketch.curves, { id, kind: "line", start, end: stop }] };
+  return { id, doc: withSketch(after, sketch) };
+}
+
+/**
+ * The point id for a line end or a circle's centre: an existing point of
+ * the sketch, checked, or a new point at x, y taking the next id.
+ */
+function pointFor(drawn: { doc: DesignDocument; sketch: Sketch }, at: LineEnd): [string, { doc: DesignDocument; sketch: Sketch }] {
+  const { doc, sketch } = drawn;
+  if (typeof at === "string") {
+    if (!sketch.points.some((p) => p.id === at)) throw new Error(`sketch ${sketch.id} has no point ${at}`);
+    return [at, drawn];
+  }
+  const [x, y] = at;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`a sketch point needs x and y in mm, not ${x}, ${y}`);
+  const [id, next] = take(withSketch(doc, sketch), "point");
+  return [id, { doc: next, sketch: { ...sketch, points: [...sketch.points, { id, x, y }] } }];
+}
+
+/**
+ * A circle round `centre` with radius `radius` in mm (step 22b). A centre
+ * given as a point id is shared (a circle round a line's corner); one given
+ * as coordinates is a new point, taking its id before the circle's. A
+ * radius that is not a number above 0 is refused here; the kernel holds
+ * the size limits when it looks for the outline, as it does for lines.
+ */
+export function drawCircle(doc: DesignDocument, sketchId: string, centre: LineEnd, radius: number): { doc: DesignDocument; id: string } {
+  const start = { doc, sketch: sketchIn(doc, sketchId) };
+  if (!Number.isFinite(radius) || radius <= 0) throw new Error(`a circle needs a radius in mm above 0, not ${radius}`);
+  const [at, drawn] = pointFor(start, centre);
+  const [id, after] = take(withSketch(drawn.doc, drawn.sketch), "circle");
+  const sketch: Sketch = { ...drawn.sketch, curves: [...drawn.sketch.curves, { id, kind: "circle", centre: at, radius }] };
   return { id, doc: withSketch(after, sketch) };
 }
 
@@ -130,7 +148,7 @@ export function drawRectangle(doc: DesignDocument, sketchId: string, a: readonly
     const drawn = drawLine(next, sketchId, corners[i], corners[(i + 1) % 4]);
     next = drawn.doc;
     ids.push(drawn.id);
-    const line = sketchIn(next, sketchId).curves.find((x) => x.id === drawn.id)!;
+    const line = sketchIn(next, sketchId).curves.find((x) => x.id === drawn.id) as SketchLineCurve;
     corners[i] = line.start;
     corners[(i + 1) % 4] = line.end;
   }
@@ -142,11 +160,11 @@ export function deleteCurve(doc: DesignDocument, sketchId: string, curveId: stri
   const sketch = sketchIn(doc, sketchId);
   if (!sketch.curves.some((c) => c.id === curveId)) throw new Error(`sketch ${sketchId} has no curve ${curveId}`);
   const curves = sketch.curves.filter((c) => c.id !== curveId);
-  const used = new Set(curves.flatMap((c) => [c.start, c.end]));
+  const used = new Set(curves.flatMap(curvePoints));
   return withSketch(doc, { ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) });
 }
 
-/** The sketch with one point moved; every line ending there follows it, since lines name points. */
+/** The sketch with one point moved; every line ending there and circle round it follows, since curves name points. */
 export function movePoint(doc: DesignDocument, sketchId: string, pointId: string, x: number, y: number): DesignDocument {
   const sketch = sketchIn(doc, sketchId);
   if (!sketch.points.some((p) => p.id === pointId)) throw new Error(`sketch ${sketchId} has no point ${pointId}`);
@@ -154,16 +172,32 @@ export function movePoint(doc: DesignDocument, sketchId: string, pointId: string
   return withSketch(doc, { ...sketch, points: sketch.points.map((p) => (p.id === pointId ? { ...p, x, y } : p)) });
 }
 
-/** The sketch's lines as the kernel takes them, rebuilt from point ids. */
+/** The sketch's lines as the kernel takes them, rebuilt from point ids (its circles are in `sketchCurves`). */
 export function sketchLines(sketch: Sketch): SketchLine[] {
+  return sketchCurves(sketch).lines;
+}
+
+/** The sketch's lines and circles as the kernel's sketch_outline takes them, rebuilt from point ids, each in the sketch's order. */
+export function sketchCurves(sketch: Sketch): { lines: SketchLine[]; circles: SketchCircle[] } {
   const at = new Map(sketch.points.map((p) => [p.id, [p.x, p.y] as [number, number]]));
-  return sketch.curves.map((c) => ({ a: at.get(c.start)!, b: at.get(c.end)! }));
+  const lines: SketchLine[] = [];
+  const circles: SketchCircle[] = [];
+  for (const c of sketch.curves) {
+    if (c.kind === "line") lines.push({ a: at.get(c.start)!, b: at.get(c.end)! });
+    else circles.push({ centre: at.get(c.centre)!, radius: c.radius });
+  }
+  return { lines, circles };
+}
+
+/** Asks the kernel what the sketch's lines and circles make. */
+export function askOutline(kernel: KernelCalls, curves: ReturnType<typeof sketchCurves>) {
+  return kernel.call("sketch_outline", curves.lines, curves.circles);
 }
 
 /** The sketch's one closed outline, from the kernel; a sketch that makes none is refused with the kernel's reason. */
 export async function sketchOutline(kernel: KernelCalls, doc: DesignDocument, sketchId: string): Promise<Outline> {
   const sketch = sketchIn(doc, sketchId);
-  const result = await kernel.call("sketch_outline", sketchLines(sketch));
+  const result = await askOutline(kernel, sketchCurves(sketch));
   if ("open" in result) throw new Error(`${sketchItem(doc, sketchId).provenance.self.label} has no closed outline: ${result.open}`);
   return result.closed;
 }

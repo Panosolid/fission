@@ -34,15 +34,15 @@ test("snapping and a triangle's outline, worked by hand", async () => {
   // A 3-4-5 right triangle, its last line drawn backwards: corners in walking
   // order, and ½·4·3 = 6 mm² extruded 2 mm is 12 mm³.
   const lines: SketchLine[] = [{ a: [0, 0], b: [4, 0] }, { a: [4, 0], b: [0, 3] }, { a: [0, 0], b: [0, 3] }];
-  const out = await kernel.call("sketch_outline", lines);
+  const out = await kernel.call("sketch_outline", lines, []);
   assert.ok("closed" in out, JSON.stringify(out));
   assert.deepEqual(corners(out.closed), [[0, 0], [4, 0], [0, 3]]);
   const body = await kernel.call("make_extrude", out.closed, 2);
   assert.ok(Math.abs(body.volume - 12) <= 1e-12 * 12, `${body.volume}`);
 
   // Two lines are open, and say why; a zero-length line is refused.
-  assert.deepEqual(await kernel.call("sketch_outline", lines.slice(0, 2)), { open: "the line end at (0, 0) is not joined to another line" });
-  await assert.rejects(kernel.call("sketch_outline", [{ a: [1, 1], b: [1, 1] }]), /line 1 must be between/);
+  assert.deepEqual(await kernel.call("sketch_outline", lines.slice(0, 2), []), { open: "the line end at (0, 0) is not joined to another line" });
+  await assert.rejects(kernel.call("sketch_outline", [{ a: [1, 1], b: [1, 1] }], []), /line 1 must be between/);
 });
 
 /** Is `got` the loop `want`, starting anywhere, in either direction? */
@@ -96,7 +96,7 @@ test("seeded sketches: snapped polygons in any order and direction close into th
       if (snapped.length < 3) continue;
       cases++;
       const lines = shuffle(r, ring(snapped)).map((l) => (r.next() < 0.5 ? { a: l.b, b: l.a } : l));
-      const out = await kernel.call("sketch_outline", lines);
+      const out = await kernel.call("sketch_outline", lines, []);
       const context = `seed ${seed} case ${c}: ${JSON.stringify(lines)} → ${JSON.stringify(out)}`;
       if ("open" in out) {
         // Snapping can fold a star into a sliver or make two corners meet; nothing else may open it.
@@ -112,7 +112,7 @@ test("seeded sketches: snapped polygons in any order and direction close into th
 
       // Break it: move one line's end by one grid step; the sketch opens.
       const broken = lines.map((l, i) => (i === 0 ? { a: l.a, b: [l.b[0] + spacing, l.b[1]] as [number, number] } : l));
-      const again = await kernel.call("sketch_outline", broken);
+      const again = await kernel.call("sketch_outline", broken, []);
       assert.ok("open" in again, `${context}: still closed after moving an end`);
     }
   }

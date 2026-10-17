@@ -44,9 +44,17 @@ export interface SketchLine {
   b: [number, number];
 }
 
+/** A sketch circle round `centre` with radius `radius`, in the sketch plane's x and y (mm); CircleIn in kernel/src/lib.rs. */
+export interface SketchCircle {
+  centre: [number, number];
+  radius: number;
+}
+
 /**
- * What a sketch's lines make (SketchOutlineOut in kernel/src/lib.rs): the one
- * closed outline, ready for make_extrude, or why there is none yet, in words.
+ * What a sketch's lines and circles make (SketchOutlineOut in
+ * kernel/src/lib.rs): the one closed outline, ready for make_extrude (a
+ * path, or a circle when the sketch is one circle), or why there is none
+ * yet, in words.
  */
 export type SketchOutline = { closed: Outline } | { open: string };
 

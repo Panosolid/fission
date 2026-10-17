@@ -1,12 +1,12 @@
 // Step 21b: sketches saved in the Design document (docs/document-model.md),
 // the edits that change them, the version 1 → 2 migration and the checks
-// a file with sketches must pass when it is opened.
+// a file with sketches must pass when it is opened. Circles from step 22b.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ChangeNotes, DependencyGraph, emptyProject, projectFromJson, projectToJson, type Feature } from "@fission/core";
+import { ChangeNotes, DependencyGraph, emptyProject, projectFromJson, projectToJson, type Feature, type KernelCalls } from "@fission/core";
 import { lastFeature, partDocument, partOf, readDesignDocument, withPart, type DesignDocument } from "../src/document.ts";
-import { addSketch, deleteCurve, drawLine, movePoint, planeOf, sketchLines } from "../src/sketch.ts";
+import { addSketch, deleteCurve, drawCircle, drawLine, movePoint, planeOf, SKETCH_STEPS, sketchCurves, sketchLines, sketchOutline } from "../src/sketch.ts";
 import { PART_VIEW, syncGraph } from "../src/graph.ts";
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
@@ -219,7 +219,7 @@ test("a file with sketches that breaks a rule is refused when it is opened, each
     [(d) => ((d.sketches[0].constraints as unknown[]) = [{ kind: "horizontal" }]), /sketch-2 has constraints, which this Fission can't read yet/],
     [(d) => ((d.sketches[0].points[0] as { x: unknown }).x = "0"), /^Error: Design sketch sketch-2: point point-3 needs x and y in mm$/],
     [(d) => ((d.sketches[0].points[1] as { id: unknown }).id = null), /^Error: Design sketch sketch-2: point 2 has no id$/],
-    [(d) => ((d.sketches[0].curves[0] as { kind: string }).kind = "arc"), /curve line-5 is a arc, which this Fission can't read yet \(only lines\)/],
+    [(d) => ((d.sketches[0].curves[0] as { kind: string }).kind = "arc"), /curve line-5 is a arc, which this Fission can't read yet \(only lines and circles\)/],
     [(d) => (d.sketches[0].curves[1].end = "point-99"), /line line-7 ends at point-99, which is not one of the sketch's points/],
     [(d) => (d.sketches[0].curves[1].end = "point-4"), /line line-7 starts and ends at the same point/],
     [(d) => ((d.sketches[0].curves[0] as { id: unknown }).id = undefined), /^Error: Design sketch sketch-2: curve 1 has no id$/],
@@ -249,6 +249,117 @@ test("version 1 data with a counter-looking id gets a counter above it", () => {
   const doc = readDesignDocument(v1);
   assert.equal(doc.nextId, 8);
   assert.equal(addSketch(doc).id, "sketch-8");
+});
+
+/** lSketch with a circle round a new point (10, 5), radius 3, and one round the L's corner point-4, radius 2.5. */
+function circled() {
+  const { doc, sketch } = lSketch();
+  const one = drawCircle(doc, sketch, [10, 5], 3);
+  const two = drawCircle(one.doc, sketch, "point-4", 2.5);
+  return { doc: two.doc, sketch, circles: [one.id, two.id] };
+}
+
+test("hand-worked: circles round a new point and round a shared corner, ids from the one counter (22b)", () => {
+  // lSketch leaves the counter at 8. The first circle's new centre takes 8,
+  // the circle 9; the second is round point-4 (shared, no new point) and
+  // takes 10. The counter ends at 11.
+  const { doc, circles } = circled();
+  assert.deepEqual(circles, ["circle-9", "circle-10"]);
+  assert.equal(doc.nextId, 11);
+  const s = doc.sketches[0];
+  assert.deepEqual(s.points.map((p) => [p.id, p.x, p.y]), [["point-3", 0, 0], ["point-4", 40, 0], ["point-6", 40, 30], ["point-8", 10, 5]]);
+  assert.deepEqual(s.curves.slice(2), [
+    { id: "circle-9", kind: "circle", centre: "point-8", radius: 3 },
+    { id: "circle-10", kind: "circle", centre: "point-4", radius: 2.5 },
+  ]);
+  // The kernel gets the lines and the circles apart, each in drawing order,
+  // rebuilt from the point ids: point-8 is (10, 5), point-4 is (40, 0).
+  assert.deepEqual(sketchCurves(s), {
+    lines: [{ a: [0, 0], b: [40, 0] }, { a: [40, 0], b: [40, 30] }],
+    circles: [{ centre: [10, 5], radius: 3 }, { centre: [40, 0], radius: 2.5 }],
+  });
+  assert.deepEqual(sketchLines(s), sketchCurves(s).lines);
+  assert.equal(SKETCH_STEPS.circle, "Draw circle");
+});
+
+test("sketchOutline hands the kernel the lines and the circles, and names the sketch when it is open (22b)", async () => {
+  const s = addSketch(partDocument("box", 10, 10, 10));
+  const doc = drawCircle(s.doc, s.id, [1, 2], 4).doc;
+  const asked: unknown[][] = [];
+  const kernel = { call: (async (...args: unknown[]) => (asked.push(args), { closed: { outer: { circle: { center: [1, 2], radius: 4 } }, holes: [] } })) } as unknown as KernelCalls;
+  assert.deepEqual(await sketchOutline(kernel, doc, s.id), { outer: { circle: { center: [1, 2], radius: 4 } }, holes: [] });
+  assert.deepEqual(asked, [["sketch_outline", [], [{ centre: [1, 2], radius: 4 }]]]);
+  const open = { call: (async () => ({ open: "the sketch makes 2 separate loops; for now a sketch makes one outline" })) } as unknown as KernelCalls;
+  await assert.rejects(sketchOutline(open, doc, s.id), /^Error: Sketch 1 has no closed outline: the sketch makes 2 separate loops/);
+});
+
+test("a circle's centre follows its point, and deleting a circle drops a centre only it used (22b)", () => {
+  const { doc, sketch } = circled();
+  // Moving the L's corner moves both lines' ends and the second circle's centre.
+  const moved = movePoint(doc, sketch, "point-4", 41, -1);
+  assert.deepEqual(sketchCurves(moved.sketches[0]).circles, [{ centre: [10, 5], radius: 3 }, { centre: [41, -1], radius: 2.5 }]);
+  assert.deepEqual(sketchCurves(moved.sketches[0]).lines, [{ a: [0, 0], b: [41, -1] }, { a: [41, -1], b: [40, 30] }]);
+  // circle-9 was alone round point-8: both go. The counter stays at 11.
+  const one = deleteCurve(doc, sketch, "circle-9");
+  assert.deepEqual(one.sketches[0].points.map((p) => p.id), ["point-3", "point-4", "point-6"]);
+  assert.equal(one.nextId, 11);
+  // Both lines gone: point-4 stays while circle-10 is round it; point-3 and point-6 go.
+  const noLines = deleteCurve(deleteCurve(one, sketch, "line-5"), sketch, "line-7");
+  assert.deepEqual(noLines.sketches[0].points.map((p) => p.id), ["point-4"]);
+  assert.deepEqual(noLines.sketches[0].curves.map((c) => c.id), ["circle-10"]);
+  assert.deepEqual(deleteCurve(noLines, sketch, "circle-10").sketches[0], { id: sketch, points: [], curves: [], constraints: [] });
+  // A new circle after the deletes takes a new id, never circle-9 again.
+  assert.equal(drawCircle(noLines, sketch, [0, 0], 1).id, "circle-12");
+});
+
+test("drawCircle refuses what makes no sense, each with its own message, and never changes its input (22b)", () => {
+  const { doc, sketch } = lSketch();
+  const before = structuredClone(doc);
+  for (const bad of [0, -0, -2, Number.NaN, Infinity, -Infinity])
+    assert.throws(() => drawCircle(doc, sketch, [0, 0], bad), new RegExp(`^Error: a circle needs a radius in mm above 0, not ${String(bad).replace("-0", "0")}$`));
+  assert.throws(() => drawCircle(doc, sketch, "point-99", 1), /^Error: sketch sketch-2 has no point point-99$/);
+  assert.throws(() => drawCircle(doc, sketch, [Number.NaN, 0], 1), /^Error: a sketch point needs x and y in mm, not NaN, 0$/);
+  assert.throws(() => drawCircle(doc, "sketch-9", [0, 0], 1), /^Error: there is no sketch sketch-9 in the design$/);
+  // The smallest positive radius is the kernel's to refuse (MIN_FEATURE), not the data's.
+  assert.equal(drawCircle(doc, sketch, [0, 0], Number.MIN_VALUE).doc.sketches[0].curves.at(-1)!.kind, "circle");
+  drawCircle(doc, sketch, "point-4", 5);
+  assert.deepEqual(doc, before);
+});
+
+test("a project with circles saves and opens byte-identical, and a broken circle is refused with its message (22b)", () => {
+  const { doc } = circled();
+  const text = projectToJson({ ...emptyProject("Circled"), workspaces: { design: doc } });
+  const opened = projectFromJson(text, DESIGN);
+  assert.deepEqual(opened.workspaces.design, doc);
+  assert.equal(projectToJson(opened), text);
+  // Each case breaks one circle in exactly one way.
+  type Loose = { centre?: unknown; radius?: unknown };
+  const broken = (edit: (c: Loose, d: DesignDocument) => void) => {
+    const d = structuredClone(doc);
+    edit(d.sketches[0].curves[3] as Loose, d);
+    return () => readDesignDocument(d);
+  };
+  assert.doesNotThrow(broken(() => {}));
+  const cases: [(c: Loose, d: DesignDocument) => void, RegExp][] = [
+    [(c) => (c.centre = "point-99"), /^Error: Design sketch sketch-2: circle circle-10 is round point-99, which is not one of the sketch's points$/],
+    [(c) => delete c.centre, /circle circle-10 is round undefined, which is not one of the sketch's points$/],
+    [(c) => (c.centre = { toString: 8 }), /circle circle-10 is round an object, which is not one of the sketch's points$/],
+    [(c) => (c.radius = 0), /^Error: Design sketch sketch-2: circle circle-10 needs a radius in mm above 0, not 0$/],
+    [(c) => (c.radius = -2.5), /circle circle-10 needs a radius in mm above 0, not -2.5$/],
+    [(c) => (c.radius = "2.5"), /circle circle-10 needs a radius in mm above 0, not 2.5$/],
+    [(c) => (c.radius = Infinity), /circle circle-10 needs a radius in mm above 0, not Infinity$/],
+    [(c) => delete c.radius, /circle circle-10 needs a radius in mm above 0, not undefined$/],
+    // The centre point gone from the points list: circle-9 names a point the sketch hasn't got.
+    [(_, d) => (d.sketches[0].points = d.sketches[0].points.filter((p) => p.id !== "point-8")), /^Error: Design sketch sketch-2: circle circle-9 is round point-8, which is not one of the sketch's points$/],
+    [(_, d) => (d.sketches[0].curves[2].id = "circle-10"), /^Error: Design id circle-10 is used twice$/],
+    [(_, d) => (d.nextId = 10), /^Error: Design data's nextId 10 is not above circle-10, so a new id could repeat it$/],
+  ];
+  for (const [edit, message] of cases) assert.throws(broken(edit), message);
+  // A circle round a point of another sketch is refused like a line ending there.
+  const other = addSketch(doc);
+  const elsewhere = drawCircle(other.doc, other.id, [1, 1], 1).doc;
+  (elsewhere.sketches[1].curves[0] as Loose).centre = "point-8";
+  assert.throws(() => readDesignDocument(elsewhere), /circle circle-13 is round point-8, which is not one of the sketch's points$/);
 });
 
 test("a file value whose own toString is broken is named by its kind, not run (found by fuzzing)", () => {
