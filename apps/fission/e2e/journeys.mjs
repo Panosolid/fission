@@ -11,9 +11,9 @@
 // baseline lines there for the nightly summary.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 import { MAGIC_JOURNEYS, baselineLine, compareToBaseline, judge, parseBaselines, reportLine } from "../../../packages/testing/src/magic.ts";
 
@@ -24,8 +24,7 @@ const baselines = parseBaselines(JSON.parse(readFileSync(new URL("../../../tests
 
 const server = await preview({ preview: { port: 4180, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4180/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 
 async function fresh() {

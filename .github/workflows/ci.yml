@@ -173,3 +173,57 @@ jobs:
         working-directory: apps/fission
       - run: npm run e2e
         working-directory: apps/fission
+      # A golden image that no longer matches leaves the actual image and a diff (red where different).
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-screenshots-chromium
+          path: apps/fission/e2e/screenshots/*.*.png
+          if-no-files-found: ignore
+
+  # The sketch browser tests (and, reported only, the smoke test) in the other two engines
+  # people use: Firefox and WebKit (Safari's engine). Pixel probes run in
+  # all three; golden images are Chromium's only (testing catch-up TC4).
+  browsers:
+    name: browsers (${{ matrix.browser }})
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+        working-directory: apps/fission
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+        working-directory: apps/fission
+      # Firefox finds no GL driver headless on CI: it runs with a window on a
+      # virtual screen, drawing with Mesa's software GL (e2e/browser.mjs).
+      - if: matrix.browser == 'firefox'
+        run: sudo apt-get install -y -qq xvfb libgl1-mesa-dri libegl1 && echo "E2E_HEADED=1" >> "$GITHUB_ENV" && echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV" && echo "RUN=xvfb-run -a" >> "$GITHUB_ENV"
+      - run: $RUN npm run e2e:engines
+        working-directory: apps/fission
+        env:
+          E2E_BROWSER: ${{ matrix.browser }}
+      # The whole-app smoke test in this engine, reported but not yet required:
+      # its first run here found engine differences (docs/progress/cad.md, TC4)
+      # that are other workstreams' to fix; this step goes required once they are.
+      - run: $RUN node e2e/smoke.mjs
+        if: always()
+        continue-on-error: true
+        working-directory: apps/fission
+        env:
+          E2E_BROWSER: ${{ matrix.browser }}

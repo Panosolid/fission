@@ -9,9 +9,8 @@
 // image is the right way up and the right shape.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 /** A PNG: 8-bit RGBA, `pixel(x, y)` gives [r, g, b, a]; `ppm` pixels per metre in a pHYs chunk (none if null). */
@@ -71,8 +70,7 @@ const broken = (() => {
 
 const server = await preview({ preview: { port: 4175, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4175/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
 await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
 const errors = [];
