@@ -41,7 +41,7 @@ How Design's document fits together, decided before step 21b saves the first ske
 - 21b saves Design data version 2 (docs/project-format.md, "Planned: Design's data version 2") with a tested migration from version 1: `nextId`, the `sketches` list, sketch items in the timeline, points and curves with ids, `constraints: []`. The browser lists sketches in the timeline and in a Sketches group. Each sketch edit ("Draw line") is one undo step. Ids never reused gets a test that deletes the newest line, draws another and checks the new id differs (and fails when the counter is replaced by "largest id + 1").
 - 21c draws chains whose lines share end points.
 - 21d extrudes a closed sketch as a new extrude feature after the sketch, depending on it. While there is one body (until 32), extruding a sketch replaces the part's current solid feature, as one undo step that says so ("Replace the part with Extrude of Sketch 1").
-- Order (pending the owner's yes): 21, 22, 23, then 32 and 33, then 24 onwards. Sketches on faces (24) and projected edges (25) then refer to faces and edges by stable id from the start, instead of by kernel index "for now" and reworked later.
+- Order (owner's decision, 2026-10-17): 21, 22, 23, then 32 and 33, then 24 onwards. Sketches on faces (24) and projected edges (25) then refer to faces and edges by stable id from the start, instead of by kernel index "for now" and reworked later.
 - After 33: re-check the integration pieces X1–X8, which were built on preset shapes only, against real sketches and timelines (section in docs/roadmap.md, step 33).
 
 ## 7. Tests this model needs
