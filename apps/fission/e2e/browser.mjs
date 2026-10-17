@@ -14,5 +14,9 @@ if (!(browserName in ENGINES)) throw new Error(`E2E_BROWSER must be chromium, fi
 export function launch() {
   const sandboxChromium = "/opt/pw-browsers/chromium";
   const options = browserName === "chromium" && existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {};
+  // Headless Firefox on a CI machine with no graphics card refuses WebGL
+  // ("AllowWebgl2:false restricts context creation"), so nothing would be
+  // drawn; these let it use its software renderer, as Chromium does.
+  if (browserName === "firefox") options.firefoxUserPrefs = { "webgl.force-enabled": true, "webgl.disabled": false, "webgl.enable-webgl2": true };
   return ENGINES[browserName].launch(options);
 }
