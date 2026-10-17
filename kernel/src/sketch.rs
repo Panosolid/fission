@@ -55,9 +55,11 @@ pub fn snap_to_grid(p: DVec2, spacing: f64) -> Result<DVec2, KernelError> {
     }
     let inverse = 1.0 / spacing;
     let decimal = inverse.fract() == 0.0 && 1.0 / inverse == spacing;
+    // Adding +0 turns a −0 node (rounded up from just below zero) into +0,
+    // so the node at zero has one bit pattern however it is reached.
     let node = |v: f64| {
         let k = (v / spacing).round();
-        if decimal { k / inverse } else { k * spacing }
+        (if decimal { k / inverse } else { k * spacing }) + 0.0
     };
     let snapped = DVec2::new(node(p.x), node(p.y));
     if !in_range(snapped) {
@@ -315,6 +317,20 @@ mod tests {
         let b = snap_to_grid(v(0.74, 0.66), 0.1).unwrap();
         assert_eq!(a.x.to_bits(), b.y.to_bits());
         assert_eq!(a.x.to_bits(), 0.7f64.to_bits());
+    }
+
+    #[test]
+    fn the_node_at_zero_is_plus_zero_from_either_side() {
+        // Regression (step 22a): (−0.3 / 10).round() is −0, so a click just
+        // below the x axis snapped to (x, −0) and one just above to (x, +0):
+        // equal as numbers but not bit-identical, against the rule above
+        // (and a saved file writes −0 as 0, so it opened different).
+        for spacing in [10.0, 0.1, 0.3] {
+            for p in [v(-0.03, 0.03), v(0.03, -0.03), v(-0.0, -0.0)] {
+                let s = snap_to_grid(p, spacing).unwrap();
+                assert_eq!((s.x.to_bits(), s.y.to_bits()), (0, 0), "{p} on a {spacing} grid gave {s}");
+            }
+        }
     }
 
     #[test]
