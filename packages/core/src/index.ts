@@ -23,7 +23,7 @@ export { resolveReference } from "./model/references.ts";
 export type { History, Selection } from "./model/session.ts";
 export { createSelection, historyNotBuilt } from "./model/session.ts";
 export { createHistory, MERGE_MS, UNDO_LIMIT, type HistoryOptions } from "./model/history.ts";
-export type { CornerView, Framing, SharedViewport, ViewName, ViewportHighlight, ViewportPick } from "./model/viewport.ts";
+export type { CornerView, Framing, OriginPlane, SharedViewport, SketchDrawing, SketchPointer, SketchXY, ViewName, ViewportHighlight, ViewportPick } from "./model/viewport.ts";
 export { NO_HIGHLIGHT } from "./model/viewport.ts";
 export type { AnalysisOverlay, OverlayMark, OverlaySeverity, OverlayTarget } from "./model/overlay.ts";
 export { SEVERITY_COLOURS, triangleColours } from "./model/overlay.ts";

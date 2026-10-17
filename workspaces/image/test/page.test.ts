@@ -33,6 +33,9 @@ function fake(): Fake {
     clearOverlay() {},
     showSelection() {},
     onPick: () => {},
+    onSketchPointer: null,
+    showSketches() {},
+    showPlanes() {},
     showImage(rep) {
       if (rep === null) return void f.log.push("empty"); // Image's own empty view
       if (f.failShow) throw new Error(f.failShow);

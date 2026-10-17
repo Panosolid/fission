@@ -5,7 +5,7 @@
 
 import type { DisplayMesh } from "../kernel/kernel-types.ts";
 import type { AnalysisOverlay } from "./overlay.ts";
-import type { ImageRep } from "./representation.ts";
+import type { ImageRep, Plane } from "./representation.ts";
 
 /** A sphere around a body: what the camera frames. */
 export interface Framing {
@@ -24,7 +24,37 @@ export interface ViewportPick {
   face: number | null;
   /** Absent or null when no edge was picked. */
   edge?: number | null;
+  /** The offered origin plane clicked (showPlanes), by id; absent or null when none was. A plane wins over the body behind it. */
+  plane?: string | null;
   shift: boolean;
+}
+
+/** A point in a sketch plane's own 2D frame, in mm. */
+export type SketchXY = readonly [number, number];
+
+/**
+ * A sketch as the viewport draws it (step 21c): its lines in its plane's
+ * frame (x along `xAxis`, y along normal × xAxis), drawn over the body.
+ * The sketch being edited also has its grid (spacing in mm), its points
+ * and the rubber-band line from the chain's last point to the pointer.
+ */
+export interface SketchDrawing {
+  plane: Plane;
+  lines: readonly (readonly [SketchXY, SketchXY])[];
+  editing?: { grid: number; points: readonly SketchXY[]; preview: readonly [SketchXY, SketchXY] | null };
+}
+
+/** An origin plane drawn small at the origin to be picked (Create sketch); one not offered is drawn faint and can't be clicked. */
+export interface OriginPlane {
+  id: string;
+  plane: Plane;
+  offered: boolean;
+}
+
+/** The pointer over the sketch being edited: where it meets the sketch's plane in its frame, or null (off the view, or looking along the plane). */
+export interface SketchPointer {
+  kind: "move" | "click";
+  at: SketchXY | null;
 }
 
 /**
@@ -70,6 +100,17 @@ export interface SharedViewport {
    * pointer is drawn hovered.
    */
   onPick: ((pick: ViewportPick) => void) | null;
+  /** Draws these sketches (replacing the ones drawn before); an empty list draws none. While one is being edited the ground grid gives way to its own. */
+  showSketches(drawings: readonly SketchDrawing[]): void;
+  /** Draws the origin planes small at the origin for picking (a click on an offered one picks it); an empty list takes them away. */
+  showPlanes(planes: readonly OriginPlane[]): void;
+  /**
+   * While set and a sketch is being edited (showSketches), clicks and
+   * hovers over the viewport come here instead of onPick, with where they
+   * meet that sketch's plane. The shown workspace sets it and puts back
+   * null on hide.
+   */
+  onSketchPointer: ((pointer: SketchPointer) => void) | null;
   /**
    * Shows an image as a flat sheet at its real size in mm, lying on the XY
    * plane with its centre at the origin and its top towards +Y, in a

@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type ImageRep, type SharedViewport, type ViewportHighlight, type ViewportPick } from "@fission/core";
+import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type ImageRep, type OriginPlane, type Plane, type SharedViewport, type SketchDrawing, type SketchPointer, type SketchXY, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, segmentsNear, unhidden } from "./picking.ts";
 import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
 import { selectionFraming } from "./framing.ts";
 import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
+import { gridLines, rayOnPlane, toWorld } from "./sketch-view.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -25,6 +26,11 @@ interface ViewHost {
   pick(pick: ViewportPick): void;
   setHover(face: number | null, edge: number | null): void;
   bodyFraming(): Framing;
+  /** The plane of the sketch being edited, while a workspace listens to the pointer on it; else null. */
+  sketchPlane(): Plane | null;
+  sketchPointer(pointer: SketchPointer): void;
+  /** The offered origin planes on screen (showPlanes), to be clicked. */
+  planeMeshes(): THREE.Mesh[];
 }
 
 /**
@@ -78,6 +84,11 @@ export class ViewportView {
       const start = down;
       down = null;
       if (!start || start.id !== e.pointerId || !isClick(start, { x: e.clientX, y: e.clientY })) return;
+      // Sketching: a click places a point on the sketch's plane, it picks nothing.
+      const plane = this.host.sketchPlane();
+      if (plane) return this.host.sketchPointer({ kind: "click", at: this.onPlane(e.clientX, e.clientY, plane) });
+      const offered = this.planeAt(e.clientX, e.clientY);
+      if (offered) return this.host.pick({ face: null, edge: null, plane: offered, shift: e.shiftKey });
       const edge = this.edgeAt(e.clientX, e.clientY);
       this.host.pick({ face: edge === null ? this.faceAt(e.clientX, e.clientY) : null, edge, shift: e.shiftKey });
     });
@@ -88,6 +99,8 @@ export class ViewportView {
       if (this.queuedHover) return;
       this.queuedHover = requestAnimationFrame(() => {
         this.queuedHover = 0;
+        const plane = this.host.sketchPlane();
+        if (plane) return this.host.sketchPointer({ kind: "move", at: pointer && this.onPlane(pointer.x, pointer.y, plane) });
         if (!pointer || !this.host.picking()) return this.host.setHover(null, null);
         const edge = this.edgeAt(pointer.x, pointer.y);
         this.host.setHover(edge === null ? this.faceAt(pointer.x, pointer.y) : null, edge);
@@ -96,6 +109,7 @@ export class ViewportView {
     canvas.addEventListener("pointerleave", () => {
       pointer = null;
       this.host.setHover(null, null);
+      if (this.host.sketchPlane()) this.host.sketchPointer({ kind: "move", at: null });
     });
 
     this.resizer = new ResizeObserver(() => this.resize());
@@ -123,6 +137,29 @@ export class ViewportView {
         return li;
       }),
     );
+  }
+
+  /** The camera's ray through a point on screen (client pixels) in the raycaster; false when the view has no size. */
+  private aim(clientX: number, clientY: number): boolean {
+    const ndc = clientToNdc({ x: clientX, y: clientY }, this.renderer.domElement.getBoundingClientRect());
+    if (!ndc) return false;
+    this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
+    return true;
+  }
+
+  /** Where the ray through a point on screen meets a sketch plane, in its frame (null when it doesn't, or under an image). */
+  private onPlane(clientX: number, clientY: number, plane: Plane): SketchXY | null {
+    if (this.image || !this.aim(clientX, clientY)) return null;
+    const { origin, direction } = this.raycaster.ray;
+    return rayOnPlane(origin.toArray(), direction.toArray(), plane);
+  }
+
+  /** The offered origin plane under a point on screen, by id, or null. */
+  private planeAt(clientX: number, clientY: number): string | null {
+    const meshes = this.host.planeMeshes();
+    if (meshes.length === 0 || this.image || !this.aim(clientX, clientY)) return null;
+    const [hit] = this.raycaster.intersectObjects(meshes, false);
+    return hit ? (hit.object.userData.plane as string) : null;
   }
 
   /** The kernel face index under a point on screen (client pixels), or null for empty space. */
@@ -364,6 +401,20 @@ export class ViewportView {
   }
 }
 
+/** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint. */
+const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, point: 0xffffff, grid: 0x262b33, gridMajor: 0x3c4450, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+
+/** Empties a group, freeing its geometry and materials. */
+function clearGroup(group: THREE.Group) {
+  for (const o of group.children) {
+    if (o instanceof THREE.Mesh || o instanceof THREE.Line || o instanceof THREE.Points) {
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+  }
+  group.clear();
+}
+
 /**
  * The one viewport: one scene with the current body, its selection, hover
  * and analysis overlays, seen through one or more views (split view, X3).
@@ -383,6 +434,15 @@ export class Viewer implements SharedViewport {
   private hover: { face: number | null; edge: number | null } = { face: null, edge: null };
   private overlays = new Map<string, AnalysisOverlay>();
   private host: ViewHost;
+  /** The ground grid, hidden while a sketch with its own grid is edited. */
+  private grid: THREE.GridHelper;
+  /** The sketches drawn (showSketches) and the plane of the one being edited. */
+  private sketches = new THREE.Group();
+  private editedPlane: Plane | null = null;
+  private sketchHandler: ((pointer: SketchPointer) => void) | null = null;
+  /** The origin planes drawn for picking (showPlanes). */
+  private planes = new THREE.Group();
+  private planeHits: THREE.Mesh[] = [];
   /** The main view first, then any added ones. */
   private views: ViewportView[] = [];
   readonly element: HTMLElement;
@@ -390,13 +450,13 @@ export class Viewer implements SharedViewport {
   constructor(container: HTMLElement) {
     this.element = container;
     this.scene.background = new THREE.Color(0x14161a);
-    const grid = new THREE.GridHelper(200, 20, 0x3a3f47, 0x2a2e35);
+    const grid = (this.grid = new THREE.GridHelper(200, 20, 0x3a3f47, 0x2a2e35));
     grid.rotation.x = Math.PI / 2; // lay the grid on the XY plane
     const key = new THREE.DirectionalLight(0xffffff, 2.2);
     key.position.set(1, -2, 3);
     const fill = new THREE.DirectionalLight(0xffffff, 0.6);
     fill.position.set(-2, 1, -1);
-    this.scene.add(grid, new THREE.AxesHelper(20), new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body);
+    this.scene.add(grid, new THREE.AxesHelper(20), new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body, this.sketches, this.planes);
 
     this.host = {
       scene: this.scene,
@@ -408,6 +468,9 @@ export class Viewer implements SharedViewport {
       pick: (pick) => this.picker?.(pick),
       setHover: (face, edge) => this.setHover(face, edge),
       bodyFraming: () => this.bodyFraming(),
+      sketchPlane: () => (this.sketchHandler ? this.editedPlane : null),
+      sketchPointer: (pointer) => this.sketchHandler?.(pointer),
+      planeMeshes: () => this.planeHits,
     };
     this.views.push(new ViewportView(this.host, container));
     this.paint();
@@ -479,6 +542,96 @@ export class Viewer implements SharedViewport {
   set onPick(handler: ((pick: ViewportPick) => void) | null) {
     this.picker = handler;
     if (!handler) this.setHover(null, null);
+  }
+
+  get onSketchPointer() {
+    return this.sketchHandler;
+  }
+
+  set onSketchPointer(handler: ((pointer: SketchPointer) => void) | null) {
+    this.sketchHandler = handler;
+    this.labelSketches();
+  }
+
+  /**
+   * Draws the sketches over the body (no depth test, so a sketch on a face
+   * of the body never hides in it): lines, and for the one being edited its
+   * grid, its points and the rubber-band line. Replaces what was drawn.
+   */
+  showSketches(drawings: readonly SketchDrawing[]) {
+    clearGroup(this.sketches);
+    this.editedPlane = null;
+    let lines = 0;
+    for (const d of drawings) {
+      const at = (p: SketchXY) => toWorld(d.plane, p);
+      const segments = (pairs: readonly (readonly [SketchXY, SketchXY])[], colour: number, order: number) => {
+        if (pairs.length === 0) return;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pairs.flatMap(([a, b]) => [...at(a), ...at(b)]), 3));
+        const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: colour, depthTest: false, transparent: true }));
+        l.renderOrder = order;
+        this.sketches.add(l);
+      };
+      lines += d.lines.length;
+      if (!d.editing) {
+        segments(d.lines, SKETCH_COLOURS.finished, 2);
+        continue;
+      }
+      this.editedPlane = d.plane;
+      const grid = gridLines(d.editing.grid);
+      segments(grid.filter((g) => !g.major).map((g) => [g.a, g.b]), SKETCH_COLOURS.grid, 1);
+      segments(grid.filter((g) => g.major).map((g) => [g.a, g.b]), SKETCH_COLOURS.gridMajor, 1);
+      segments(d.lines, SKETCH_COLOURS.line, 3);
+      if (d.editing.preview) segments([d.editing.preview], SKETCH_COLOURS.preview, 4);
+      if (d.editing.points.length > 0) {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(d.editing.points.flatMap((p) => at(p)), 3));
+        const dots = new THREE.Points(g, new THREE.PointsMaterial({ color: SKETCH_COLOURS.point, size: 7, sizeAttenuation: false, depthTest: false, transparent: true }));
+        dots.renderOrder = 5;
+        this.sketches.add(dots);
+      }
+    }
+    this.grid.visible = this.editedPlane === null;
+    // Read by the e2e test: how many lines are drawn, and the edited sketch's points and preview.
+    const edited = drawings.find((d) => d.editing)?.editing;
+    const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
+    this.element.dataset.sketchLines = String(lines);
+    this.element.dataset.sketchPoints = edited ? edited.points.map(xy).join(" ") : "";
+    this.element.dataset.sketchPreview = edited?.preview ? edited.preview.map(xy).join(" ") : "";
+    this.labelSketches();
+  }
+
+  /** Says on the element whether a sketch is being edited with the pointer on it (read by the e2e test). */
+  private labelSketches() {
+    this.element.dataset.sketching = String(this.sketchHandler !== null && this.editedPlane !== null);
+  }
+
+  /**
+   * Draws the origin planes as squares from the origin, as wide as the
+   * 1.6 times the body's framing radius (at least 20 mm), so each sticks out past the
+   * body; an offered one is drawn through the body and is clickable.
+   */
+  showPlanes(planes: readonly OriginPlane[]) {
+    clearGroup(this.planes);
+    this.planeHits = [];
+    const half = Math.max(10, 0.8 * this.bodyFraming().radius);
+    for (const p of planes) {
+      const corners: SketchXY[] = [[0, 0], [2 * half, 0], [2 * half, 2 * half], [0, 2 * half]];
+      const world = corners.map((c) => toWorld(p.plane, c));
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(world.flat(), 3));
+      g.setIndex([0, 1, 2, 0, 2, 3]);
+      const fill = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, transparent: true, opacity: p.offered ? 0.35 : 0.12, side: THREE.DoubleSide, depthWrite: false, depthTest: !p.offered }));
+      fill.renderOrder = 6;
+      fill.userData.plane = p.id;
+      const outline = new THREE.BufferGeometry();
+      outline.setAttribute("position", new THREE.Float32BufferAttribute(world.flat(), 3));
+      const rim = new THREE.LineLoop(outline, new THREE.LineBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, transparent: true, opacity: p.offered ? 1 : 0.4, depthTest: !p.offered }));
+      rim.renderOrder = 6;
+      this.planes.add(fill, rim);
+      if (p.offered) this.planeHits.push(fill);
+    }
+    this.element.dataset.planes = planes.map((p) => `${p.id}${p.offered ? "" : " (not offered)"}`).join(", "); // read by the e2e test
   }
 
   showSelection(highlight: ViewportHighlight) {

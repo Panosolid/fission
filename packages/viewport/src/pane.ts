@@ -3,7 +3,7 @@
 // overlays) go to the viewer, so every view draws the same thing; camera
 // methods (fit, setView, fitSelection) and an image (showImage, clearImage)
 // go to that pane's view only.
-import type { AnalysisOverlay, DisplayMesh, Framing, ImageRep, SharedViewport, ViewName, ViewportHighlight, ViewportPick } from "@fission/core";
+import type { AnalysisOverlay, DisplayMesh, Framing, ImageRep, OriginPlane, SharedViewport, SketchDrawing, SketchPointer, ViewName, ViewportHighlight, ViewportPick } from "@fission/core";
 
 /** What a pane needs of its view: the element it fills and its camera. */
 export interface PaneCamera {
@@ -16,6 +16,7 @@ export interface PaneCamera {
 }
 
 type PickHandler = (pick: ViewportPick) => void;
+type SketchHandler = (pointer: SketchPointer) => void;
 
 /**
  * Returns a maker of panes over `scene` (the Viewer). The viewer has one
@@ -26,8 +27,10 @@ type PickHandler = (pick: ViewportPick) => void;
  */
 export function paneViewports(scene: SharedViewport): (view: PaneCamera) => SharedViewport {
   const pickers = new Map<object, PickHandler>(); // in the order they were set
+  const sketchers = new Map<object, SketchHandler>(); // the same rule for the sketch pointer
   const sync = () => {
     scene.onPick = [...pickers.values()].at(-1) ?? null;
+    scene.onSketchPointer = [...sketchers.values()].at(-1) ?? null;
   };
   return (view) => {
     const key = {};
@@ -43,6 +46,16 @@ export function paneViewports(scene: SharedViewport): (view: PaneCamera) => Shar
       setOverlay: (overlay: AnalysisOverlay) => scene.setOverlay(overlay),
       clearOverlay: (id: string) => scene.clearOverlay(id),
       showSelection: (highlight: ViewportHighlight) => scene.showSelection(highlight),
+      showSketches: (drawings: readonly SketchDrawing[]) => scene.showSketches(drawings),
+      showPlanes: (planes: readonly OriginPlane[]) => scene.showPlanes(planes),
+      get onSketchPointer() {
+        return sketchers.get(key) ?? null;
+      },
+      set onSketchPointer(handler: SketchHandler | null) {
+        sketchers.delete(key);
+        if (handler) sketchers.set(key, handler);
+        sync();
+      },
       get onPick() {
         return pickers.get(key) ?? null;
       },

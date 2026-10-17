@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–31) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import { lastFeature, partOf, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -17,6 +17,10 @@ import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut } from "./shortcuts.ts";
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
+import { addSketch, SKETCH_STEPS, sketchItem, sketchLines } from "./sketch.ts";
+import { clickAt, DEFAULT_GRID, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, type LineTool } from "./sketch-tool.ts";
+import { sketchPanel } from "./sketch-panel.ts";
+import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
 /**
@@ -35,13 +39,36 @@ let framedKind: ShapeKind | null = null;
 let lastBuilt: BodyView | null = null;
 /** Design was put away by an Undo or Redo made in another workspace: the next mount is that restore's, not an opened file's. */
 let putAwayByRestore = false;
+/**
+ * The sketch being edited and its grid, kept across mounts: Undo and Redo
+ * re-mount Design, and you stay in the sketch (the chain in progress ends,
+ * since the point it ran from may be gone). Cleared by Finish sketch.
+ */
+let editingSketch: { id: string; grid: number; typed: string } | null = null;
 /** How many times Design has framed the part, read by the e2e test (an undo must not add one). */
 let fits = 0;
 
 /** Fills the toolbar slot with the command groups; returns each button with its element. */
-function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void): [ToolButton, HTMLButtonElement][] {
+function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: () => void): [ToolButton, HTMLButtonElement][] {
   const made: [ToolButton, HTMLButtonElement][] = [];
   const document = slot.ownerDocument; // the slot's own page, not a global one
+  // The sketch tool is the user's, not a command yet: whether the AI gets
+  // create_sketch and draw_line is the AI workstream's call (docs/ai.md).
+  const sketch = document.createElement("div");
+  sketch.className = "tool-group";
+  sketch.setAttribute("role", "group");
+  sketch.setAttribute("aria-label", "Sketch");
+  const sketchName = document.createElement("span");
+  sketchName.className = "tool-group-name";
+  sketchName.textContent = "Sketch";
+  const create = document.createElement("button");
+  create.type = "button";
+  create.id = "create-sketch";
+  create.textContent = "Create sketch";
+  create.title = "Draw lines on a plane: pick the plane, then click point to point.";
+  create.addEventListener("click", onSketch);
+  sketch.append(sketchName, create);
+  slot.append(sketch);
   for (const group of toolbarGroups()) {
     const div = document.createElement("div");
     div.className = "tool-group";
@@ -153,7 +180,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Mounted by Undo or Redo (step 20c): the first build keeps the camera unless the body no longer fits, even for another shape. */
   let keepCamera = ctx.history.restoring() || putAwayByRestore;
   putAwayByRestore = false;
-  const buttons = toolbar(ctx.toolbar, (b) => run(b.command));
+  const buttons = toolbar(ctx.toolbar, (b) => run(b.command), () => startSketch());
   const { kernel, viewport } = ctx;
   /** On screen (awake); false while asleep (X7) and after unmount. */
   let shown = true;
@@ -254,6 +281,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ctx.project.workspaces.design = doc;
     if (changed) ctx.projectChanged(label, mergeKey); // the shell autosaves (19c) and records the undo step (20b)
     browser(ctx.browser, doc, selectRow);
+    drawSketches();
     showSelection();
     markStale();
     const feature = lastFeature(doc);
@@ -301,10 +329,158 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     }
   }
 
+  // The sketch tool (step 21c, docs/document-model.md section 3).
+  type Mode = { kind: "none" } | { kind: "pick" } | { kind: "edit"; tool: LineTool; grid: number; pointer: SketchXY | null };
+  let mode: Mode = { kind: "none" };
+  const sketchBox = sketchPanel(ctx.properties, {
+    pickPlane: (id) => pickPlane(id),
+    cancel: () => leaveSketch(),
+    grid: (typed) => void setGrid(typed),
+    finish: () => leaveSketch(),
+  });
+  const designDoc = () => ctx.project.workspaces.design as DesignDocument;
+
+  /** Draws every sketch, the edited one with its grid, points and preview. */
+  function drawSketches() {
+    const doc = ctx.project.workspaces.design as DesignDocument | undefined;
+    if (!doc) return;
+    viewport.showSketches(sketchDrawings(doc, mode.kind === "edit" ? mode : null));
+  }
+
+  /**
+   * Applies a sketch edit to the project: one undo step named `label`
+   * (SKETCH_STEPS), the timeline in the graph (a sketch has nothing to
+   * build: its outline is asked of the kernel when read), the browser
+   * and the drawing.
+   */
+  function applySketchEdit(next: DesignDocument, label: string, sketchId: string) {
+    const before = designDoc();
+    syncGraph(ctx.graph, next, before, ctx.changeNotes);
+    ctx.graph.markFresh(sketchId);
+    ctx.project.workspaces.design = next;
+    saved = { doc: next, shape, sizes: inputs.map((i) => i.value) };
+    ctx.projectChanged(label);
+    browser(ctx.browser, next, selectRow);
+    markStale();
+  }
+
+  /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
+  function startSketch() {
+    if (mode.kind === "edit") leaveSketch();
+    mode = { kind: "pick" };
+    viewport.showPlanes(originPlanes());
+    sketchBox.showPick();
+  }
+
+  /** A plane picked: the new sketch (one undo step), looked at straight down, ready to draw on. */
+  function pickPlane(plane: SketchPlane) {
+    if (mode.kind !== "pick" || !ORIGIN_PLANES.some((p) => p.id === plane && p.offered)) return;
+    const made = addSketch(designDoc(), plane);
+    viewport.showPlanes([]);
+    applySketchEdit(made.doc, SKETCH_STEPS.create, made.id);
+    editingSketch = { id: made.id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID) };
+    enterSketch();
+    viewport.setView(PLANE_VIEWS[plane]);
+  }
+
+  /** Edits the sketch named in editingSketch, the chain not started. */
+  function enterSketch() {
+    const doc = designDoc();
+    if (!editingSketch || !doc.sketches.some((s) => s.id === editingSketch!.id)) return void (editingSketch = null);
+    mode = { kind: "edit", tool: { sketch: editingSketch.id, from: null }, grid: editingSketch.grid, pointer: null };
+    sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed);
+    drawSketches();
+    void showOutline();
+  }
+
+  /** Cancel or Finish sketch: back to modelling; the sketch stays as drawn. */
+  function leaveSketch() {
+    mode = { kind: "none" };
+    editingSketch = null;
+    viewport.showPlanes([]);
+    sketchBox.hide();
+    drawSketches();
+  }
+
+  /** A grid size typed: the kernel judges it (snapping 0, 0 to it); a refused one keeps the grid and says why. */
+  async function setGrid(typed: string) {
+    if (mode.kind !== "edit" || !editingSketch) return;
+    const grid = Number(typed);
+    try {
+      if (typed.trim() === "" || !Number.isFinite(grid)) throw new Error("Type the grid size in mm.");
+      await kernel.call("snap_to_grid", 0, 0, grid);
+    } catch (e) {
+      return sketchBox.showError(e instanceof Error ? e.message : String(e));
+    }
+    if (mode.kind !== "edit") return;
+    sketchBox.showError("");
+    mode.grid = editingSketch.grid = grid;
+    editingSketch.typed = typed;
+    drawSketches();
+  }
+
+  /** Says whether the edited sketch's lines close into one outline, or the kernel's reason they don't. */
+  const outlineOf = latestOnly((lines: ReturnType<typeof sketchLines>) => kernel.call("sketch_outline", lines));
+  async function showOutline() {
+    if (mode.kind !== "edit") return;
+    const id = mode.tool.sketch;
+    const sketch = designDoc().sketches.find((s) => s.id === id);
+    if (!sketch) return;
+    if (sketch.curves.length === 0) return sketchBox.showStatus("No lines yet.");
+    const n = `${sketch.curves.length} line${sketch.curves.length === 1 ? "" : "s"}`;
+    try {
+      const { current, value } = await outlineOf(sketchLines(sketch));
+      if (current) sketchBox.showStatus("closed" in value ? `${n}, a closed outline.` : `${n}, not closed: ${value.open}.`);
+    } catch (e) {
+      sketchBox.showStatus(`${n}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  const snapMove = latestOnly((at: SketchXY, grid: number) => kernel.call("snap_to_grid", at[0], at[1], grid));
+  /** Clicks are handled one after another, each on the document the last one left. */
+  let clicks = Promise.resolve();
+  const onSketchPointer = (pointer: SketchPointer) => {
+    if (mode.kind !== "edit") return;
+    const at = pointer.at;
+    if (pointer.kind === "move") {
+      if (!at) {
+        mode.pointer = null;
+        return drawSketches();
+      }
+      // A hover off the modelling range just doesn't move the preview.
+      void snapMove(at, mode.grid).then(({ current, value }) => {
+        if (!current || mode.kind !== "edit") return;
+        mode.pointer = value;
+        drawSketches();
+      }, () => {});
+      return;
+    }
+    if (!at) return;
+    clicks = clicks.then(async () => {
+      if (mode.kind !== "edit") return;
+      let snapped: SketchXY;
+      try {
+        snapped = await kernel.call("snap_to_grid", at[0], at[1], mode.grid);
+      } catch (e) {
+        return sketchBox.showError(e instanceof Error ? e.message : String(e));
+      }
+      if (mode.kind !== "edit") return;
+      sketchBox.showError("");
+      const done = clickAt(designDoc(), mode.tool, snapped);
+      mode.tool = done.tool;
+      mode.pointer = snapped;
+      if (done.drew) applySketchEdit(done.doc, SKETCH_STEPS.draw, done.tool.sketch);
+      drawSketches();
+      if (done.drew) await showOutline();
+    });
+  };
+
   // Picking (17b): a click on a face selects it, Shift adds, empty space or Escape clears.
   const onPick: SharedViewport["onPick"] = (pick) => {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
+    // Choosing a plane for Create sketch: only an offered plane counts.
+    if (mode.kind === "pick") return void (pick.plane && pickPlane(pick.plane as SketchPlane));
     const c = pickChange(pick, lastFeature(doc).id);
     if (c.change === "set") ctx.selection.set([c.item]);
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
@@ -314,6 +490,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Listens to picks and the selection: from mount, and again on each wake. Keys come from the shell (X7b), only while shown. */
   function listen() {
     viewport.onPick = onPick;
+    viewport.onSketchPointer = onSketchPointer;
+    if (mode.kind === "pick") viewport.showPlanes(originPlanes());
+    drawSketches();
     stopWatching = ctx.selection.onChange(() => {
       // The user's next change of selection retires the note about dropped items.
       if (!settling && note) panel.showSelectionNote((note = ""));
@@ -324,6 +503,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!shown) return;
     shown = false;
     viewport.onPick = null;
+    viewport.onSketchPointer = null;
+    // Asleep, the sketches stay drawn as finished ones: no grid, no planes to pick.
+    viewport.showPlanes([]);
+    const doc = ctx.project.workspaces.design as DesignDocument | undefined;
+    viewport.showSketches(doc ? sketchDrawings(doc, null) : []);
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
   }
@@ -332,12 +516,20 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   inputs.forEach((input, i) => input.addEventListener("input", () => update(`Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])));
   listen();
   update();
+  enterSketch(); // after an Undo or Redo inside a sketch: still in it
   return {
     sleep,
     run,
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line being drawn.
+      if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
+      if (id === "clear-selection" && mode.kind === "edit" && mode.tool.from !== null) {
+        mode.tool = { ...mode.tool, from: null };
+        drawSketches();
+        return true;
+      }
       const items = ctx.selection.items;
       const what = designShortcut(id, items);
       if (what === "clear") ctx.selection.clear();
@@ -356,7 +548,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     },
     unmount() {
       putAwayByRestore = ctx.history.restoring();
+      if (!putAwayByRestore) editingSketch = null;
       sleep();
+      viewport.showSketches([]);
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
     },
   };
