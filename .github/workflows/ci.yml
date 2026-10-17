@@ -1,10 +1,21 @@
 name: CI
 
 on:
+  # Branches are tested by their pull request's run: a push run of the same
+  # commit would repeat kernel, app, baseline and both browsers and hold five
+  # of the account's 20 runners for nothing.
   push:
+    branches: [main]
   pull_request:
   # Started by auto-merge.yml after it brings a branch up to date.
   workflow_dispatch:
+
+# A newer commit on the same branch cancels the run still testing an older
+# one: auto-merge only looks at the head's checks, so the old run's answer
+# can't matter, and its runners go to the new run. main's runs always finish.
+concurrency:
+  group: ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   kernel:
@@ -45,11 +56,10 @@ jobs:
   # cargo mutants makes in the changed lines must be caught by a lib test
   # (kernel/CLAUDE.md, Mutation testing). Equivalent mutants, which no test
   # can catch, are excluded in kernel/.cargo/mutants.toml with the reason.
-  # Pushes are tested by the pull request run of the same commit; auto-merge's
-  # workflow_dispatch runs it on the commit it makes.
+  # auto-merge's workflow_dispatch runs it on the commit it makes.
   #
   # Three jobs: mutants-plan lists the mutants (no build) and picks how many
-  # shards to split them across (one per 12 mutants, at most 8, none when no
+  # shards to split them across (one per 30 mutants, at most 8, none when no
   # kernel source changed); mutants-shard runs one share each, in parallel;
   # mutants-in-diff, the check auto-merge requires, fails if any shard failed
   # and lists every survivor in its summary.
@@ -81,7 +91,7 @@ jobs:
             cargo mutants --in-diff "$RUNNER_TEMP/kernel.diff" --list >"$RUNNER_TEMP/mutants.list"
             count=$(grep -c . "$RUNNER_TEMP/mutants.list" || true)
           fi
-          shards=$(( (count + 11) / 12 )); [ $shards -gt 8 ] && shards=8
+          shards=$(( (count + 29) / 30 )); [ $shards -gt 8 ] && shards=8
           echo "$count mutants in the kernel code changed since $base; $shards shards." | tee -a "$GITHUB_STEP_SUMMARY"
           echo "count=$count" >>"$GITHUB_OUTPUT"
           echo "shards=$(python3 -c "import json; print(json.dumps(list(range($shards))))")" >>"$GITHUB_OUTPUT"
@@ -112,7 +122,7 @@ jobs:
           save-if: ${{ matrix.shard == 0 }}
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-mutants@27.1.0
+          tool: cargo-mutants@27.1.0,cargo-nextest@0.9.100
       - uses: actions/download-artifact@v4
         with:
           name: mutants-diff
@@ -125,10 +135,19 @@ jobs:
           # result (kernel/CLAUDE.md, Mutation testing).
           CARGO_PROFILE_DEV_OPT_LEVEL: "0"
           CARGO_PROFILE_DEV_DEBUG: "0"
+        # One mutant at a time, in the checkout itself: each mutant then
+        # rebuilds only the kernel crate (~2 s), where four copies each began
+        # with a full build of every dependency (3-6 minutes). nextest runs
+        # the lib tests on every core and stops at the first failure, so a
+        # caught mutant takes seconds instead of waiting ~50 s for the
+        # slowest test; a survivor still runs every test. The regressions
+        # folder is read-only so proptest can't save a seed found against one
+        # mutant and replay it against the next (it only warns).
         run: |
+          chmod -R a-w tests/regressions
           code=0
           cargo mutants --in-diff "$RUNNER_TEMP/kernel.diff" --shard ${{ matrix.shard }}/$SHARDS --sharding round-robin \
-            -j 4 --output "$RUNNER_TEMP" -- --lib || code=$?
+            --in-place --test-tool nextest --output "$RUNNER_TEMP" -- --lib || code=$?
           out="$RUNNER_TEMP/mutants.out"
           mkdir -p "$RUNNER_TEMP/result"
           for f in caught missed timeout unviable; do cp "$out/$f.txt" "$RUNNER_TEMP/result/" 2>/dev/null || touch "$RUNNER_TEMP/result/$f.txt"; done
