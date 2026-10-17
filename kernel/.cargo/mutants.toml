@@ -2,7 +2,52 @@
 # pull request check, kernel/CLAUDE.md "Mutation testing").
 #
 # exclude_re: mutants that no input can tell apart from the real code
-# (equivalent). Each needs the reason, here and in its file's "Mutation
+# (equivalent), or that no lib test can reach (lib.rs's wasm-bindgen
+# conversions: a JsValue can't be built off wasm; the browser tests named
+# beside them cover those). Each needs the reason, here and in its file's "Mutation
 # testing (...) leaves these survivors" paragraph. Match the mutant's name
-# without line numbers, e.g. "replace < with <= in mass::theta_minus_sine".
-exclude_re = []
+# as cargo-mutants names it, file and position included; use \d+ for
+# the line and column, e.g. '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$'.
+exclude_re = [
+  # Equivalent: an o·o product of 0 with the other negative means the touching end is the crossing point, so the collinear clause already returns true (exact predicates).
+  '^src/tolerance\.rs:\d+:\d+: replace < with <= in segments_touch$',
+  # Equivalent: differs only for an edge from a vertex to itself, which gets the same error either way.
+  '^src/mesh\.rs:\d+:\d+: replace < with <= in Mesh::check_closed$',
+  # Equivalent: every vector the guard rejects (NaN, inf, zero) also fails the final is_finite check.
+  '^src/geom/mod\.rs:\d+:\d+: replace \|\| with && in unit$',
+  # Equivalent up to rounding at a tie: peak ± PI is the same angle mod 2π; differs by an ulp only at an arc end the box already holds. Column-anchored: the name also belongs to two caught mutants.
+  '^src/topology\.rs:\d+:54: replace \+ with - in Edge::widen_by_curve$',
+  # No native test can reach these: a JsValue can't be built off wasm. Covered by packages/testing/journeys/command-fuzz.journey.ts, open-saved-file.journey.ts and the apps/fission/e2e/smoke.mjs shape checks.
+  '^src/lib\.rs:\d+:\d+: replace to_js -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
+  '^src/lib\.rs:\d+:\d+: replace make_box -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
+  '^src/lib\.rs:\d+:\d+: replace make_cylinder -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
+  '^src/lib\.rs:\d+:\d+: replace make_sphere -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
+  '^src/lib\.rs:\d+:\d+: replace make_extrude -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
+  # Not reachable natively; covered by packages/testing/journeys/design-to-stl.journey.ts and the smoke check "the STL button saves the box as a binary STL with hand-worked contents".
+  '^src/lib\.rs:\d+:\d+: replace export_stl -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
+  # intersect.rs / self_intersect.rs (reasons also in each file's top comment)
+  '^src/intersect\.rs:\d+:\d+: replace - with (\+|/) in grid_steps$', # only runs < 63 LEAF_WIDTH change, holding at most one zero: same zeros up to bisection rounding noise (<= 1.3e-14 rad on 20,000 polynomials)
+  '^src/intersect\.rs:\d+:\d+: replace \|\| with && in bisect$', # early stop only: once a, b are neighbouring doubles each step leaves them, the 80-step cap gives the same answer
+  '^src/intersect\.rs:\d+:\d+: replace > with >= in trig1_zeros$', # s = 1 is taken by the |s| <= 1 branch before
+  '^src/self_intersect\.rs:\d+:\d+: replace && with \|\| in along_each_other$', # one-way "along" happens only at slants inside tolerance, where the four end candidates find what the samples would (1200-pair check)
+  '^src/self_intersect\.rs:\d+:\d+: replace <= with > in fewer_edges_first$', # only the order of two pure classify calls that are ANDed
+  '^src/self_intersect\.rs:\d+:\d+: replace < with <= in classify$', # tie between equally near boundary points: either decides the same
+  '^src/self_intersect\.rs:\d+:\d+: replace \* with / in classify$', # * ±1 vs / ±1 is exact (both normal and edge-direction signs)
+  '^src/self_intersect\.rs:\d+:\d+: replace > with >= in classify$', # product is ±|path|; 0 only for inputs callers never pass (q > LINEAR off the surface, or a sphere antipode)
+  '^src/self_intersect\.rs:\d+:\d+: replace > with >= in corner_contains$', # path exactly along a corner edge: classify never asks, the edge's own points would be nearer
+  '^src/self_intersect\.rs:\d+:\d+: replace < with <= in corner_contains$', # same: path exactly along the arriving edge never reaches here
+  '^src/self_intersect\.rs:\d+:\d+: replace \+ with - in short_turn$', # d+pi and d-pi differ by 2pi; after rem_euclid they differ only within an ulp of a half turn, where both ways are shortest
+  # ops/profile.rs, mass.rs, ops/extrude.rs (reasons also in each file's top comment)
+  '^src/ops/profile\.rs:\d+:\d+: replace > with >= in Seg::spans$', # an arc's sweep is never 0 (a zero bulge is a line)
+  '^src/ops/profile\.rs:\d+:\d+: replace \* with / in Seg::tangents$', # s is the sweep's sign, ±1
+  '^src/ops/profile\.rs:\d+:\d+: replace \* with / in half_turn$', # side is ±1; 0 only for a point on the loop, which callers rule out
+  '^src/ops/profile\.rs:\d+:\d+: replace < with <= in winding$', # each tie puts the point on the loop, which callers rule out
+  '^src/ops/profile\.rs:\d+:\d+: replace > with >= in winding$', # the arc's side from its sweep's sign: a sweep is never 0
+  '^src/ops/profile\.rs:\d+:\d+: replace < with <= in doubles_back$', # dot 0 means perpendicular unit tangents, cross ±1, never within ANGULAR
+  '^src/ops/profile\.rs:\d+:\d+: replace < with <= in counter_clockwise$', # a tie is one point found twice; any lowest point gives the answer
+  '^src/ops/profile\.rs:\d+:\d+: replace != with == in counter_clockwise$', # the lowest-leftmost straight corner always turns
+  '^src/ops/profile\.rs:\d+:\d+: replace > with >= in counter_clockwise$', # sweep or turn never 0 there; an ANGULAR tie gives the same answer; t_out.x never 0
+  '^src/ops/profile\.rs:\d+:\d+: replace \+ with - in probe$', # any point of a hole's circle decides
+  '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$', # at exactly 0.1 both forms are within FP_REL; the mutant's series is the more accurate one
+  '^src/ops/extrude\.rs:\d+:\d+: replace > with >= in extrude$', # an arc's sweep is never 0
+]
