@@ -4,13 +4,22 @@
 // request into Design's own command (set_part), shows what would change,
 // and an accepted change is one "AI: …" undo step; a rejected one changes
 // nothing. A remote provider is shown exactly what it will be sent before
-// the first request to it.
+// the first request to it. Opening the panel for the first time picks an
+// AI that runs on this computer if one is found (AI6); options that can't
+// run here are greyed out with the reason, and Ollama is listed only while
+// it is running. Models are chosen from a list (what Ollama has, what the
+// API key's provider offers), with a typed name as the fallback.
 
 import {
   AI_FEATURES,
   askForCommands,
   browserKeyStore,
+  chooseModel,
   createProvider,
+  detectProviders,
+  listModels,
+  pickLocal,
+  vendorFromKey,
   DEFAULT_MODELS,
   IN_BROWSER_MODEL,
   inBrowserDownloadSize,
@@ -22,6 +31,7 @@ import {
   type AIProviderKind,
   type ApiKeyStore,
   type ApiVendor,
+  type Detected,
   type Fetch,
   type Preview,
   type ProviderSettings,
@@ -36,7 +46,10 @@ export interface AssistantHost {
   design(): MountedWorkspace | null;
 }
 
+/** The chosen provider as JSON; "null" when the user chose Off, absent when nothing was ever chosen. */
 const SETTINGS_KEY = "fission.ai.settings";
+/** The model list's "type a name" choice. */
+const TYPED = "";
 const CONSENT_KEY = "fission.ai.consent:";
 /** The AI may only set the part: Design's one modelling command (export_stl downloads, so it stays the user's). */
 const AI_COMMANDS = DESIGN_COMMANDS.filter((c) => c.op === "set_part");
@@ -130,11 +143,17 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
         <option value="">Off</option>
         ${PROVIDERS.map((p) => `<option value="${p.kind}">${escape(p.title)}</option>`).join("")}
       </select></label>
+      <p id="ai-found" class="ai-note"></p>
+      <button id="ai-detect" type="button">Look again</button>
       <label data-for="api-key">Whose API <select id="ai-vendor"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="other">Another (OpenAI-compatible)</option></select></label>
       <label data-for="ollama other">Address <input id="ai-endpoint" type="url" spellcheck="false"></label>
-      <label data-for="in-browser ollama api-key">Model <input id="ai-model" type="text" spellcheck="false"></label>
+      <div data-for="in-browser ollama api-key" class="ai-model">
+        <label id="ai-model-list">Model <select id="ai-model-pick"></select></label>
+        <label id="ai-model-typed">Model name <input id="ai-model" type="text" spellcheck="false"></label>
+        <p id="ai-model-note" class="ai-note"></p>
+      </div>
       <div data-for="api-key" class="ai-key">
-        <label>API key <input id="ai-key" type="password" autocomplete="off" spellcheck="false"></label>
+        <label>API key <input id="ai-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key"></label>
         <button id="ai-key-save" type="button">Save key</button>
         <button id="ai-key-remove" type="button">Remove key</button>
         <p id="ai-key-state" class="ai-note"></p>
@@ -155,6 +174,18 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
   const vendorSel = $<HTMLSelectElement>("ai-vendor");
   const endpoint = $<HTMLInputElement>("ai-endpoint");
   const model = $<HTMLInputElement>("ai-model");
+  const modelPick = $<HTMLSelectElement>("ai-model-pick");
+  /** What this computer can run (null until looked for), and whether the provider was picked for the user. */
+  let found: Detected[] | null = null;
+  let looking = false;
+  let picked = false;
+  /** The models the current settings can choose from, and the settings (less the model) they were listed for. */
+  let models: string[] = [];
+  let modelsFor = "";
+  let modelNote = "";
+  let listing = 0;
+  /** True once the user chose "type a name" while a list is shown. */
+  let typing = false;
   const keyInput = $<HTMLInputElement>("ai-key");
   const result = $("ai-result");
   const say = (text: string, bad = false) => {
@@ -193,8 +224,50 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
       s?.kind === "ollama" ? "qwen2.5:1.5b" : s?.kind === "in-browser" ? IN_BROWSER_MODEL : s?.kind === "api-key" && s.vendor !== "other" ? DEFAULT_MODELS[s.vendor ?? "anthropic"] : "";
     const tags = [s?.kind ?? "off", s?.kind === "api-key" && s.vendor === "other" ? "other" : ""];
     for (const f of el.querySelectorAll<HTMLElement>("[data-for]")) f.hidden = !f.dataset.for!.split(" ").some((t) => tags.includes(t));
+    for (const option of providerSel.options) {
+      const kind = option.value as AIProviderKind | "";
+      const d = found?.find((f) => f.kind === kind);
+      const cant = kind !== "" && kind !== s?.kind && (kind === "ollama" ? !d?.ok : d?.ok === false);
+      // Ollama is listed only while it answers (or while it is the one chosen); the others are greyed out with the reason below.
+      option.hidden = kind === "ollama" && cant;
+      option.disabled = cant;
+      const title = PROVIDERS.find((p) => p.kind === kind)?.title ?? "Off";
+      option.textContent = cant && kind !== "ollama" ? `${title} (can't run here)` : title;
+    }
+    const cannot = (found ?? []).filter((f) => !f.ok && f.kind !== "ollama");
+    $("ai-found").textContent = looking
+      ? "Looking for an AI that runs on this computer…"
+      : !found
+        ? ""
+        : [
+            picked && s ? `Chose ${PROVIDERS.find((p) => p.kind === s.kind)!.title} for you: it runs on this computer. You can change it here.` : "",
+            !s && !pickLocal(found) ? "No AI that runs on this computer was found. In your browser needs WebGPU (a recent Chrome or Edge); Ollama is listed once it is running; or use your own API key." : "",
+            ...cannot.map((f) => `${PROVIDERS.find((p) => p.kind === f.kind)!.title} can't run here: ${f.reason}`),
+          ]
+            .filter(Boolean)
+            .join(" ");
+    const listed = models.length > 0 && (s?.kind === "ollama" || s?.kind === "api-key" || s?.kind === "in-browser");
+    const current = s?.model ?? "";
+    const pickValue = !typing && models.includes(current) ? current : TYPED;
+    modelPick.replaceChildren(
+      ...models.map((m) => new Option(m, m)),
+      new Option("Another (type its name)", TYPED),
+    );
+    modelPick.value = pickValue;
+    $("ai-model-list").hidden = !listed;
+    $("ai-model-typed").hidden = listed && pickValue !== TYPED;
+    $("ai-model-note").textContent = modelNote;
     const origin = keyOrigin(s);
-    $("ai-key-state").textContent = s?.kind !== "api-key" ? "" : !keys ? "This browser can't store a key." : !origin ? "Give the provider's https address first." : keys.get(origin) ? `A key is saved for ${origin}, in this browser only.` : `No key saved for ${origin}.`;
+    $("ai-key-state").textContent =
+      s?.kind !== "api-key"
+        ? ""
+        : !keys
+          ? "This browser can't store a key."
+          : !origin
+            ? "Give the provider's https address first."
+            : keys.get(origin)
+              ? `A key is saved for ${origin}, in this browser only.`
+              : `No key saved for ${origin}. Saving one asks ${origin} which models it can use; only the key is sent, nothing from your project.`;
     const info = s && PROVIDERS.find((p) => p.kind === s.kind)!;
     $("ai-status-detail").textContent = !info
       ? "AI is off. Nothing is sent anywhere, and everything in Fission works without it."
@@ -215,27 +288,121 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
 
   function save(next: ProviderSettings | null) {
     settings = next;
-    store.set(SETTINGS_KEY, next ? JSON.stringify(next) : null);
+    store.set(SETTINGS_KEY, JSON.stringify(next)); // "null" records that the user chose Off
     discard();
     render();
   }
-  for (const input of [providerSel, vendorSel, endpoint, model]) input.addEventListener("change", () => save(fromForm()));
+  for (const input of [providerSel, vendorSel, endpoint]) {
+    input.addEventListener("change", () => {
+      picked = false;
+      typing = false;
+      model.value = ""; // a model of one provider means nothing to another: the new list chooses
+      save(fromForm());
+      void refreshModels();
+    });
+  }
+  model.addEventListener("change", () => save(fromForm()));
+  modelPick.addEventListener("change", () => {
+    typing = modelPick.value === TYPED;
+    if (typing) {
+      model.value = "";
+      save(fromForm());
+      model.focus();
+    } else {
+      model.value = modelPick.value;
+      save(fromForm());
+    }
+  });
 
-  $("ai-key-save").addEventListener("click", () => {
+  /**
+   * Fills the model list for the current settings (once per provider,
+   * vendor and address, unless `again`), and chooses one when none is
+   * chosen yet. A failed list says why and leaves the typed name.
+   */
+  async function refreshModels(again = false) {
+    const s = settings;
+    const key = s ? JSON.stringify({ ...s, model: undefined }) : "";
+    if (key === modelsFor && !again) return render();
+    modelsFor = key;
+    models = [];
+    modelNote = "";
+    const ticket = ++listing;
+    if (!s || s.kind === "browser-built-in" || (s.kind === "api-key" && !(keyOrigin(s) && keys?.get(keyOrigin(s)!)))) return render();
+    modelNote = "Looking for models…";
+    render();
+    try {
+      const list = await listModels(s, { fetch: (url, init) => fetch(url, init), keys: keys ?? undefined });
+      if (ticket !== listing) return;
+      models = list;
+      modelNote = list.length ? "" : s.kind === "ollama" ? "Ollama has no models yet: run `ollama pull qwen2.5:1.5b`, then Look again." : "";
+      const choice = chooseModel(s, list);
+      if (!s.model && choice) return save({ ...s, model: choice });
+    } catch (e) {
+      if (ticket !== listing) return;
+      modelsFor = ""; // try again next time
+      modelNote = `Couldn't list the models (${(e as Error).message}). Type the model's name instead.`;
+    }
+    render();
+  }
+
+  function saveKey() {
     const origin = keyOrigin(fromForm());
     if (!keys || !origin) return render();
     try {
       keys.set(origin, keyInput.value);
       keyInput.value = "";
-      render();
+      void refreshModels(true);
     } catch (e) {
       $("ai-key-state").textContent = (e as Error).message;
     }
+  }
+  $("ai-key-save").addEventListener("click", saveKey);
+  // A pasted key that says whose it is switches to that provider and is saved straight away.
+  keyInput.addEventListener("input", (event) => {
+    const vendor = vendorFromKey(keyInput.value);
+    if (!vendor) return;
+    if (vendorSel.value !== vendor) {
+      vendorSel.value = vendor;
+      model.value = "";
+      save(fromForm());
+    }
+    if ((event as InputEvent).inputType === "insertFromPaste") saveKey();
+    else $("ai-key-state").textContent = `This is ${vendor === "anthropic" ? "an Anthropic" : "an OpenAI"} key: Save key to use it.`;
   });
   $("ai-key-remove").addEventListener("click", () => {
     const origin = keyOrigin(fromForm());
     if (keys && origin) keys.remove(origin);
+    modelsFor = "";
+    void refreshModels();
+  });
+
+  /**
+   * Looks for what can run on this computer (the browser's built-in model,
+   * WebGPU for the in-browser one, Ollama at its usual address; nothing
+   * leaves the machine), and the first time, with nothing ever chosen,
+   * picks the first local one found.
+   */
+  async function lookAround() {
+    if (looking) return;
+    looking = true;
     render();
+    try {
+      found = await detectProviders();
+    } catch {
+      found = [];
+    }
+    looking = false;
+    const choice = pickLocal(found);
+    if (store.get(SETTINGS_KEY) === null && choice) {
+      picked = true;
+      save({ kind: choice });
+    }
+    render();
+    await refreshModels();
+  }
+  $("ai-detect").addEventListener("click", () => {
+    modelsFor = "";
+    void lookAround();
   });
 
   /**
@@ -378,6 +545,10 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
 
   render();
   return {
+    /** The panel was opened: look for what can run here (once per page; Look again repeats it). */
+    opened() {
+      if (!found) void lookAround();
+    },
     /** Points the panel at the active workspace. */
     show(id: WorkspaceId | "community", title: string) {
       if (id !== workspace) discard();
