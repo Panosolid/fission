@@ -1,0 +1,46 @@
+{
+  "seed": 24301,
+  "failure": "step 1 (Add { shape: Extrude { outer: Path { pts: [[0.0, 0.0], [5e-6, 0.0]], bulges: [-399999.9999974999, 0.0] }, holes: [], dist: 0.5, expect: Some(false), sketch: None }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): PANIC: kernel produced an invalid body:\n  edge 0 has zero length\n  edge 2 has zero length\nfailure dump: none written (at src/validate.rs:186:17)",
+  "ops": [
+    {
+      "Add": {
+        "shape": {
+          "Extrude": {
+            "outer": {
+              "Path": {
+                "pts": [
+                  [
+                    "0.0",
+                    "0.0"
+                  ],
+                  [
+                    "5e-6",
+                    "0.0"
+                  ]
+                ],
+                "bulges": [
+                  "-399999.9999974999",
+                  "0.0"
+                ]
+              }
+            },
+            "holes": [],
+            "dist": "0.5",
+            "expect": false
+          }
+        },
+        "axis": [
+          "1.0",
+          "0.0",
+          "0.0"
+        ],
+        "angle": "0.0",
+        "at": [
+          "0.0",
+          "0.0",
+          "0.0"
+        ]
+      }
+    }
+  ]
+}

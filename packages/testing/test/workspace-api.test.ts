@@ -137,6 +137,7 @@ function testContext(): WorkspaceContext {
     fit: () => null,
     setView: () => null,
     fitSelection: () => null,
+    lookAt: () => null,
     setOverlay() {},
     clearOverlay() {},
     showSelection(h) {

@@ -457,7 +457,8 @@ fn reversed(segs: &[Seg]) -> Vec<Seg> {
 /// - circle and arc radii are within [MIN_FEATURE, MAX_SIZE]; arcs and
 ///   circles stay within MAX_COORD; the outer loop spans at most MAX_SIZE;
 /// - every piece's ends (a line's length, an arc's chord) at least
-///   MIN_FEATURE apart, as in a sketch;
+///   MIN_FEATURE apart, as in a sketch (so a loop of two corners has them
+///   at least MIN_FEATURE apart);
 /// - no corner where the outline doubles back on itself (a cusp);
 /// - any two pieces, in any loops, are at least MIN_FEATURE apart, apart
 ///   from where they meet at a shared corner; this also rules out crossings,
@@ -501,16 +502,23 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
                 if n < 2 || (n < 3 && !curved) {
                     return bad(format!("profile loop {k} has {n} corners; at least 3 are needed (2 with an arc)"));
                 }
-                // The clearance rule below can't see a piece shorter than
-                // LINEAR (its ends count as the shared corners), so length
-                // is a rule of its own, the same as for sketch lines and
-                // arc chords.
+                // The clearance rule below ignores where pieces meet, so it
+                // can't see a piece whose ends are close: in a loop of two
+                // corners both pieces end at both corners, and a piece
+                // shorter than LINEAR has its ends within LINEAR of the
+                // corners its neighbours share (a triangle 5 nm across). So
+                // length is a rule of its own, the same as for sketch lines
+                // and arc chords. Closer than MIN_FEATURE, a straight piece
+                // is shorter than a feature may be (under LINEAR, too short
+                // to be an edge at all) or two arcs pinch to a neck.
                 for i in 0..n {
                     let gap = corners[i].distance(corners[(i + 1) % n]);
                     if gap < MIN_FEATURE {
-                        return bad(format!(
-                            "profile loop {k}, piece {i} has its ends {gap} mm apart; they must be at least {MIN_FEATURE} mm apart"
-                        ));
+                        return bad(if n == 2 {
+                            format!("profile loop {k} has its two corners {gap:e} mm apart; features must be at least {MIN_FEATURE} mm")
+                        } else {
+                            format!("profile loop {k}, piece {i} has its ends {gap} mm apart; they must be at least {MIN_FEATURE} mm apart")
+                        });
                     }
                 }
                 let mut segs = Vec::with_capacity(n);
@@ -846,7 +854,7 @@ mod tests {
             let g = k * MIN_FEATURE;
             assert_eq!(check_profile(&keyhole(g)).is_ok(), legal, "closing piece {k}×MIN_FEATURE long");
         }
-        assert!(refused(keyhole(0.9 * MIN_FEATURE)).contains("piece 0 has its ends"));
+        assert!(refused(keyhole(0.9 * MIN_FEATURE)).contains("two corners"));
         // Exactly MIN_FEATURE is allowed: the corners ±MIN_FEATURE/2 are
         // exact, so the length is (a correctly rounded √(x²) is x).
         assert!(check_profile(&keyhole(MIN_FEATURE)).is_ok());
@@ -857,7 +865,7 @@ mod tests {
         // invalid bodies.
         assert!(refused(Profile::polygon(vec![p(1.9375, 1.9375); 3], vec![])).contains("piece 0 has its ends 0 mm apart"));
         assert!(refused(Profile::polygon(vec![p(0.0, 0.0), p(5e-6, 0.0), p(0.0, 5e-6)], vec![])).contains("piece 0 has its ends"));
-        assert!(refused(keyhole(5e-6)).contains("piece 0 has its ends"));
+        assert!(refused(keyhole(5e-6)).contains("two corners"));
     }
 
     #[test]
@@ -933,6 +941,46 @@ mod tests {
         assert!(check_profile(&bowl(-0.5)).is_ok());
         assert!(refused(bowl(-1.0)).contains("doubles back"));
         assert!(refused(bowl(-1.5)).contains("apart"));
+    }
+
+    /// The bulge of an arc of radius `r` on a chord `c`, the long way round:
+    /// from r = c(1 + β²)/(4β), β² − (4r/c)·β + 1 = 0, whose larger root is
+    /// β = (k + √(k² − 4))/2 with k = 4r/c (the smaller, 1/β, is the short
+    /// way round the same circle).
+    fn long_way(r: f64, c: f64) -> f64 {
+        let k = 4.0 * r / c;
+        (k + (k * k - 4.0).sqrt()) / 2.0
+    }
+
+    #[test]
+    fn two_corners_closer_than_min_feature_are_refused() {
+        // Regression (white-box hunt): a loop of two corners c apart, the
+        // long way round a circle of radius 1 and the straight line back
+        // (a "D" with a flat c long). Both pieces end at both corners, so
+        // the clearance check, which ignores where pieces meet, never
+        // measured c: a 0.5 µm flat was accepted, and below LINEAR the
+        // extrude built a body with a too-short edge and panicked.
+        // The flat is a straight piece, so it must be MIN_FEATURE long:
+        // c = 1.1 × and exactly MIN_FEATURE are legal, 0.9 × is not.
+        let d = |c: f64| Profile { outer: path(&[(0.0, 0.0), (c, 0.0)], &[-long_way(1.0, c), 0.0]), holes: vec![] };
+        for (c, legal) in [(1.1 * MIN_FEATURE, true), (MIN_FEATURE, true), (0.9 * MIN_FEATURE, false), (5e-6, false), (1e-150, false)] {
+            match check_profile(&d(c)) {
+                Ok(_) => assert!(legal, "a flat {c:e} mm long was accepted"),
+                Err(KernelError::InvalidInput(m)) => {
+                    assert!(!legal, "a flat {c:e} mm long was refused: {m}");
+                    assert!(m.contains("two corners"), "{m}");
+                }
+                Err(e) => panic!("{e:?}"),
+            }
+        }
+        // Two arcs instead (two circles of radius 1 meeting through a gap
+        // c wide: a figure of eight whose neck is c), and the D as a hole.
+        let eight = |c: f64| Profile { outer: path(&[(0.0, 0.0), (c, 0.0)], &[-long_way(1.0, c), -long_way(1.0, c)]), holes: vec![] };
+        let hole = |c: f64| Profile { outer: Boundary::polygon(square(-5.0, -5.0, 10.0)), holes: vec![d(c).outer] };
+        for make in [&eight as &dyn Fn(f64) -> Profile, &hole] {
+            assert!(check_profile(&make(1.1 * MIN_FEATURE)).is_ok());
+            assert!(refused(make(0.9 * MIN_FEATURE)).contains("two corners"));
+        }
     }
 
     #[test]
