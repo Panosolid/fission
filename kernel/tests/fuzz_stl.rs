@@ -131,7 +131,7 @@ fn starting_files(rng: &mut Rng) -> Vec<(Vec<u8>, bool)> {
                     let body = extrude(&Profile { outer: Boundary::Path { corners, bulges }, holes: vec![] }, size(rng));
                     tries += 1;
                     match body {
-                        Err(KernelError::InvalidInput(_)) if tries < 100 => continue,
+                        Err(KernelError::InvalidInput { .. }) if tries < 100 => continue,
                         other => break other,
                     }
                 }

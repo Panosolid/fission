@@ -11,13 +11,22 @@
 //! "cannot call wasm-bindgen imported functions on non-wasm targets"), so
 //! no lib test can run the conversions themselves.
 //!
+//! Failures cross as `ApiError` (`api_error.rs`): JavaScript gets an
+//! `Error` with the message, plus `kind` and `inputs` (`js_error`).
+//!
 //! Mutation testing (`cargo mutants -f src/lib.rs`) leaves these
 //! survivors, which no native test can reach (they are not equivalent):
-//! each entry point returning `Result<JsValue, JsError>`, and `to_js`,
-//! replaced by `Ok(Default::default())` (an undefined `JsValue`), excluded
-//! in `.cargo/mutants.toml`. The real WebAssembly build covers them, through
+//! each `#[wasm_bindgen]` entry point, and `to_js`, `from_js` and
+//! `js_error`, replaced by a default answer (`Ok(Default::default())`, an
+//! undefined `JsValue`, `Ok(())`, a fixed number), excluded in
+//! `.cargo/mutants.toml`. The real WebAssembly build covers them, through
 //! the kernel bridge (`packages/testing/src/node-kernel.ts`, and the app's
 //! worker in the browser):
+//! - `body_build`, `body_view`, `body_stl`, `body_free`, `body_count`,
+//!   `js_error` and `from_js`: `packages/testing/journeys/body-store.journey.ts`
+//!   (a stored 40 × 30 × 20 box's volume is 24000 and its view and STL are
+//!   `make_box`'s and `export_stl`'s; the count goes up by one and back;
+//!   each refusal's `kind` and `inputs`; seeded sessions against a model).
 //! - `make_box`, `make_cylinder`, `make_sphere`, `make_extrude` and
 //!   `to_js`: `packages/testing/journeys/command-fuzz.journey.ts` (3000
 //!   random commands over every shape; each built view must have
@@ -35,6 +44,7 @@
 //!   5 mm grid snaps to (10, −10)).
 
 pub mod accurate;
+pub mod api_error;
 pub mod geom;
 pub mod intersect;
 pub mod mass;
@@ -48,6 +58,7 @@ pub mod placed;
 pub mod self_intersect;
 pub mod sketch;
 pub mod stl;
+pub mod store;
 pub mod tessellate;
 pub mod tolerance;
 pub mod topology;
@@ -56,8 +67,10 @@ pub mod validate;
 #[cfg(test)]
 pub(crate) mod fixtures;
 
+use api_error::ApiError;
 use display::DisplayMesh;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::cell::RefCell;
 use tessellate::{tessellate, TessOptions};
 use topology::Body;
 use wasm_bindgen::prelude::*;
@@ -94,11 +107,11 @@ pub struct BodyView {
 
 /// The view of any body, validating it first (its `errors` list what is
 /// wrong). Validation tessellates the body anyway, so its mesh is reused.
-pub fn view_body(body: &Body) -> Result<BodyView, String> {
+pub fn view_body(body: &Body) -> Result<BodyView, ApiError> {
     match validate::validate_meshed(body) {
         Ok(mesh) => Ok(view_parts(body, &mesh, vec![])),
         Err(errs) => {
-            let mesh = tessellate(body, &TessOptions::DISPLAY).map_err(|e| format!("face {}: {}", e.face, e.message))?;
+            let mesh = tessellate(body, &TessOptions::DISPLAY).map_err(|e| ApiError::internal(format!("face {}: {}", e.face, e.message)))?;
             Ok(view_parts(body, &mesh, errs.iter().map(|e| e.to_string()).collect()))
         }
     }
@@ -176,27 +189,45 @@ fn curve_type(curve: &geom::Curve) -> &'static str {
     }
 }
 
-/// The view for JavaScript, or the reason there is none as its error.
-fn to_js(view: Result<BodyView, String>) -> Result<JsValue, JsError> {
-    let view = view.map_err(|e| JsError::new(&e))?;
-    serde_wasm_bindgen::to_value(&view).map_err(|e| JsError::new(&e.to_string()))
+/// An answer for JavaScript, or the reason there is none as a thrown error
+/// (`js_error`).
+fn to_js<T: Serialize>(value: Result<T, ApiError>) -> Result<JsValue, JsValue> {
+    let value = value.map_err(js_error)?;
+    serde_wasm_bindgen::to_value(&value).map_err(|e| js_error(ApiError::internal(e.to_string())))
+}
+
+/// An argument from JavaScript, refused as a `BadRequest` naming it when
+/// it isn't of the form `T` (the message is "bad {what}: …").
+fn from_js<T: DeserializeOwned>(value: JsValue, name: &'static str, what: &str) -> Result<T, JsValue> {
+    serde_wasm_bindgen::from_value(value).map_err(|e| js_error(ApiError::bad_argument(name, format!("bad {what}: {e}"))))
+}
+
+/// The error JavaScript sees: an `Error` with the message, plus `kind`
+/// and `inputs` (`ApiError`), so `e.message` reads as it always has.
+fn js_error(e: ApiError) -> JsValue {
+    let err = js_sys::Error::new(&e.message);
+    let field = |value: Result<JsValue, serde_wasm_bindgen::Error>| value.unwrap_or(JsValue::UNDEFINED);
+    // Setting a property on a fresh Error can't fail (it isn't frozen).
+    let _ = js_sys::Reflect::set(&err, &JsValue::from_str("kind"), &field(serde_wasm_bindgen::to_value(&e.kind)));
+    let _ = js_sys::Reflect::set(&err, &JsValue::from_str("inputs"), &field(serde_wasm_bindgen::to_value(&e.inputs)));
+    err.into()
 }
 
 /// Box with one corner at the origin, sizes in millimetres.
 #[wasm_bindgen]
-pub fn make_box(width: f64, depth: f64, height: f64) -> Result<JsValue, JsError> {
+pub fn make_box(width: f64, depth: f64, height: f64) -> Result<JsValue, JsValue> {
     to_js(view_of(BodySpec::Box { width, depth, height }))
 }
 
 /// Sphere centred on the origin, radius in millimetres.
 #[wasm_bindgen]
-pub fn make_sphere(radius: f64) -> Result<JsValue, JsError> {
+pub fn make_sphere(radius: f64) -> Result<JsValue, JsValue> {
     to_js(view_of(BodySpec::Sphere { radius }))
 }
 
 /// Cylinder standing on the origin along +Z, sizes in millimetres.
 #[wasm_bindgen]
-pub fn make_cylinder(radius: f64, height: f64) -> Result<JsValue, JsError> {
+pub fn make_cylinder(radius: f64, height: f64) -> Result<JsValue, JsValue> {
     to_js(view_of(BodySpec::Cylinder { radius, height }))
 }
 
@@ -219,41 +250,41 @@ pub struct ProfileIn {
 }
 
 /// The kernel's profile from the app's form; refuses coordinates that don't
-/// come in pairs. Everything else is checked by the extrude itself.
-pub fn profile_from_input(p: ProfileIn) -> Result<ops::extrude::Profile, String> {
+/// come in pairs (a `BadRequest` naming the loop). Everything else is
+/// checked by the extrude itself.
+pub fn profile_from_input(p: ProfileIn) -> Result<ops::extrude::Profile, ApiError> {
     use ops::extrude::Boundary;
-    let convert = |b: BoundaryIn| match b {
+    let convert = |(boundary, b): (usize, BoundaryIn)| match b {
         BoundaryIn::Path { corners, bulges } => {
             if !corners.len().is_multiple_of(2) {
-                return Err("profile coordinates must come in x, y pairs".to_string());
+                let inputs = vec![ops::Input::Loop { boundary }];
+                return Err(ApiError::new(api_error::ErrorKind::BadRequest, inputs, "profile coordinates must come in x, y pairs".to_string()));
             }
             let corners = corners.as_chunks::<2>().0.iter().map(|&[x, y]| glam::DVec2::new(x, y)).collect();
             Ok(Boundary::Path { corners, bulges })
         }
         BoundaryIn::Circle { center, radius } => Ok(Boundary::Circle { center: center.into(), radius }),
     };
-    Ok(ops::extrude::Profile { outer: convert(p.outer)?, holes: p.holes.into_iter().map(convert).collect::<Result<_, _>>()? })
+    Ok(ops::extrude::Profile { outer: convert((0, p.outer))?, holes: p.holes.into_iter().enumerate().map(|(k, h)| convert((k + 1, h))).collect::<Result<_, _>>()? })
 }
 
 /// Extrudes a profile (see `ProfileIn`) along +Z by `distance`.
 #[wasm_bindgen]
-pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsError> {
-    let profile: ProfileIn = serde_wasm_bindgen::from_value(profile).map_err(|e| JsError::new(&format!("bad profile: {e}")))?;
+pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsValue> {
+    let profile: ProfileIn = from_js(profile, "profile", "profile")?;
     to_js(view_of(BodySpec::Extrude { profile, distance }))
 }
 
 /// The nearest node of a square grid (`sketch::snap_to_grid`), as `[x, y]`.
 #[wasm_bindgen]
-pub fn snap_to_grid(x: f64, y: f64, spacing: f64) -> Result<JsValue, JsError> {
-    let p = sketch::snap_to_grid(glam::DVec2::new(x, y), spacing).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_wasm_bindgen::to_value(&[p.x, p.y]).map_err(|e| JsError::new(&e.to_string()))
+pub fn snap_to_grid(x: f64, y: f64, spacing: f64) -> Result<JsValue, JsValue> {
+    to_js(sketch::snap_to_grid(glam::DVec2::new(x, y), spacing).map(|p| [p.x, p.y]).map_err(ApiError::from))
 }
 
 /// Where a click lands with grid snap off (`sketch::place_freely`): rounded to the largest power of ten no bigger than a pixel (mm), as `[x, y]`.
 #[wasm_bindgen]
-pub fn place_freely(x: f64, y: f64, pixel: f64) -> Result<JsValue, JsError> {
-    let p = sketch::place_freely(glam::DVec2::new(x, y), pixel).map_err(|e| JsError::new(&e.to_string()))?;
-    serde_wasm_bindgen::to_value(&[p.x, p.y]).map_err(|e| JsError::new(&e.to_string()))
+pub fn place_freely(x: f64, y: f64, pixel: f64) -> Result<JsValue, JsValue> {
+    to_js(sketch::place_freely(glam::DVec2::new(x, y), pixel).map(|p| [p.x, p.y]).map_err(ApiError::from))
 }
 
 /// A sketch line as the app sends it: `{ a: [x, y], b: [x, y] }`.
@@ -331,11 +362,11 @@ pub enum SketchOutlineOut {
 
 /// `sketch::sketch_outline` in the app's form; lines, circles or arcs
 /// breaking the sketch rules are an error.
-pub fn sketch_outline_of(lines: &[LineIn], circles: &[CircleIn], arcs: &[ArcIn]) -> Result<SketchOutlineOut, String> {
+pub fn sketch_outline_of(lines: &[LineIn], circles: &[CircleIn], arcs: &[ArcIn]) -> Result<SketchOutlineOut, ApiError> {
     let lines: Vec<sketch::Line> = lines.iter().map(|l| sketch::Line { a: l.a.into(), b: l.b.into() }).collect();
     let circles: Vec<sketch::Circle> = circles.iter().map(|c| sketch::Circle { centre: c.centre.into(), radius: c.radius }).collect();
     let arcs: Vec<sketch::Arc> = arcs.iter().map(|a| sketch::Arc { start: a.start.into(), end: a.end.into(), centre: a.centre.into() }).collect();
-    match sketch::sketch_outline(&lines, &circles, &arcs).map_err(|e| e.to_string())? {
+    match sketch::sketch_outline(&lines, &circles, &arcs)? {
         sketch::SketchOutline::Open(why) => Ok(SketchOutlineOut::Open(why.to_string())),
         sketch::SketchOutline::Closed(profile, sources) => {
             let outer = match profile.outer {
@@ -352,12 +383,11 @@ pub fn sketch_outline_of(lines: &[LineIn], circles: &[CircleIn], arcs: &[ArcIn])
 /// (`[CircleIn, …]`) and arcs (`[ArcIn, …]`) make, or why they make none
 /// (see `SketchOutlineOut`).
 #[wasm_bindgen]
-pub fn sketch_outline(lines: JsValue, circles: JsValue, arcs: JsValue) -> Result<JsValue, JsError> {
-    let lines: Vec<LineIn> = serde_wasm_bindgen::from_value(lines).map_err(|e| JsError::new(&format!("bad sketch lines: {e}")))?;
-    let circles: Vec<CircleIn> = serde_wasm_bindgen::from_value(circles).map_err(|e| JsError::new(&format!("bad sketch circles: {e}")))?;
-    let arcs: Vec<ArcIn> = serde_wasm_bindgen::from_value(arcs).map_err(|e| JsError::new(&format!("bad sketch arcs: {e}")))?;
-    let out = sketch_outline_of(&lines, &circles, &arcs).map_err(|e| JsError::new(&e))?;
-    serde_wasm_bindgen::to_value(&out).map_err(|e| JsError::new(&e.to_string()))
+pub fn sketch_outline(lines: JsValue, circles: JsValue, arcs: JsValue) -> Result<JsValue, JsValue> {
+    let lines: Vec<LineIn> = from_js(lines, "lines", "sketch lines")?;
+    let circles: Vec<CircleIn> = from_js(circles, "circles", "sketch circles")?;
+    let arcs: Vec<ArcIn> = from_js(arcs, "arcs", "sketch arcs")?;
+    to_js(sketch_outline_of(&lines, &circles, &arcs))
 }
 
 /// What to build, in the app's words: the same shapes as `make_box`,
@@ -375,20 +405,20 @@ pub enum BodySpec {
 
 /// Builds the body a spec describes (with the same checks as the make_*
 /// functions).
-pub fn build(spec: BodySpec) -> Result<Body, String> {
+pub fn build(spec: BodySpec) -> Result<Body, ApiError> {
     build_meshed(spec).map(|(body, _)| body)
 }
 
 /// `build`, also handing back the display mesh the operation's validation
 /// made (`ops::finish`).
-pub fn build_meshed(spec: BodySpec) -> Result<ops::Meshed, String> {
+pub fn build_meshed(spec: BodySpec) -> Result<ops::Meshed, ApiError> {
     let made = match spec {
         BodySpec::Box { width, depth, height } => ops::primitives::make_box_meshed(width, depth, height),
         BodySpec::Cylinder { radius, height } => ops::primitives::make_cylinder_meshed(radius, height),
         BodySpec::Sphere { radius } => ops::primitives::make_sphere_meshed(radius),
         BodySpec::Extrude { profile, distance } => ops::extrude::extrude_meshed(&profile_from_input(profile)?, distance),
     };
-    made.map_err(|e| e.to_string())
+    Ok(made?)
 }
 
 /// What the make_* functions give the app: the view of the body a spec
@@ -396,7 +426,7 @@ pub fn build_meshed(spec: BodySpec) -> Result<ops::Meshed, String> {
 /// either way round: a bad profile's, an operation's, or tessellation's).
 /// Validated and tessellated once, by the operation: the body passed
 /// `checked`, so it has no errors to list.
-pub fn view_of(spec: BodySpec) -> Result<BodyView, String> {
+pub fn view_of(spec: BodySpec) -> Result<BodyView, ApiError> {
     let (body, mesh) = build_meshed(spec)?;
     Ok(view_parts(&body, &mesh, vec![]))
 }
@@ -415,7 +445,7 @@ pub struct StlFile {
 
 /// The body as a binary STL, from its display mesh (the same triangles the
 /// viewer shows), with `name` in the file's header.
-pub fn stl_of(spec: BodySpec, name: &str) -> Result<StlFile, String> {
+pub fn stl_of(spec: BodySpec, name: &str) -> Result<StlFile, ApiError> {
     let (_, mesh) = build_meshed(spec)?;
     let out = stl::export(&mesh, name);
     Ok(StlFile { bytes: out.bytes, rounding: out.rounding, warning: out.warning })
@@ -423,10 +453,48 @@ pub fn stl_of(spec: BodySpec, name: &str) -> Result<StlFile, String> {
 
 /// `stl_of` for the app (see `BodySpec`).
 #[wasm_bindgen]
-pub fn export_stl(spec: JsValue, name: &str) -> Result<JsValue, JsError> {
-    let spec: BodySpec = serde_wasm_bindgen::from_value(spec).map_err(|e| JsError::new(&format!("bad body: {e}")))?;
-    let file = stl_of(spec, name).map_err(|e| JsError::new(&e))?;
-    serde_wasm_bindgen::to_value(&file).map_err(|e| JsError::new(&e.to_string()))
+pub fn export_stl(spec: JsValue, name: &str) -> Result<JsValue, JsValue> {
+    let spec: BodySpec = from_js(spec, "spec", "body")?;
+    to_js(stl_of(spec, name))
+}
+
+thread_local! {
+    /// The bodies the app keeps between calls (`store`). One per kernel
+    /// instance: the app's worker has one, each test process its own.
+    static STORE: RefCell<store::BodyStore> = RefCell::new(store::BodyStore::new());
+}
+
+/// Builds the body a `BodySpec` describes and keeps it; returns its handle
+/// (a whole number from 1, never reused). Free it with `body_free`.
+#[wasm_bindgen]
+pub fn body_build(spec: JsValue) -> Result<f64, JsValue> {
+    let spec: BodySpec = from_js(spec, "spec", "body")?;
+    STORE.with_borrow_mut(|s| s.build(spec)).map(|h| h as f64).map_err(js_error)
+}
+
+/// A kept body's view (`BodyView`), the same as the make_* call gives.
+#[wasm_bindgen]
+pub fn body_view(body: f64) -> Result<JsValue, JsValue> {
+    to_js(store::handle_from_js(body).and_then(|h| STORE.with_borrow(|s| s.view(h))))
+}
+
+/// A kept body as binary STL (`StlFile`), the same as `export_stl` gives.
+#[wasm_bindgen]
+pub fn body_stl(body: f64, name: &str) -> Result<JsValue, JsValue> {
+    to_js(store::handle_from_js(body).and_then(|h| STORE.with_borrow(|s| s.stl(h, name))))
+}
+
+/// Lets a kept body go; its handle is refused from then on.
+#[wasm_bindgen]
+pub fn body_free(body: f64) -> Result<(), JsValue> {
+    store::handle_from_js(body).and_then(|h| STORE.with_borrow_mut(|s| s.free(h))).map_err(js_error)
+}
+
+/// How many bodies the kernel keeps (for the app's tests: what they build
+/// they free).
+#[wasm_bindgen]
+pub fn body_count() -> f64 {
+    STORE.with_borrow(|s| s.live()) as f64
 }
 
 #[cfg(test)]
@@ -461,7 +529,14 @@ mod tests {
             SketchOutlineOut::Open("the end at (0, 0) is not joined to another line or arc".into())
         );
         assert_eq!(sketch_outline_of(&[], &[], &[]).unwrap(), SketchOutlineOut::Open("the sketch has no lines, arcs or circles yet".into()));
-        assert_eq!(sketch_outline_of(&[line([0.0, 0.0], [0.0, 0.0])], &[], &[]).unwrap_err(), "line 1 must be between 0.001 and 1000000 mm long, got 0");
+        // The first line (index 0, "line 1" as a person counts) is named.
+        let e = sketch_outline_of(&[line([0.0, 0.0], [0.0, 0.0])], &[], &[]).unwrap_err();
+        assert_eq!(e.message, "line 1 must be between 0.001 and 1000000 mm long, got 0");
+        assert_eq!((e.kind, e.inputs), (api_error::ErrorKind::InvalidInput, vec![ops::Input::Line { index: 0 }]));
+        // The second, "line 2", is index 1.
+        let e = sketch_outline_of(&[line([0.0, 0.0], [1.0, 0.0]), line([1.0, 0.0], [1.0, 0.0])], &[], &[]).unwrap_err();
+        assert!(e.message.starts_with("line 2 must be"), "{e}");
+        assert_eq!(e.inputs, vec![ops::Input::Line { index: 1 }]);
     }
 
     #[test]
@@ -487,7 +562,9 @@ mod tests {
         assert_eq!((v.vertices, v.edges, v.faces), (6, 9, 5));
         // A bad arc is an error naming it.
         let bad = [ArcIn { start: [10.0, 0.0], end: [0.0, 10.0], centre: [1.0, 0.0] }];
-        assert!(sketch_outline_of(&lines, &[], &bad).unwrap_err().starts_with("arc 1 has its centre 0.7071"));
+        let e = sketch_outline_of(&lines, &[], &bad).unwrap_err();
+        assert!(e.message.starts_with("arc 1 has its centre 0.7071"));
+        assert_eq!(e.inputs, vec![ops::Input::Arc { index: 0 }]);
     }
 
     #[test]
@@ -514,7 +591,7 @@ mod tests {
         );
         assert_eq!(
             sketch_outline_of(&[], &[CircleIn { centre: [0.0, 0.0], radius: 0.0 }], &[]).unwrap_err(),
-            "circle 1's radius must be between 0.001 and 500000 mm, got 0"
+            ApiError::new(api_error::ErrorKind::InvalidInput, vec![ops::Input::Circle { index: 0 }], "circle 1's radius must be between 0.001 and 500000 mm, got 0".into())
         );
     }
 
@@ -555,9 +632,12 @@ mod tests {
         assert!(rel_eq(v.volume, 102.0, FP_REL) && v.faces == 8, "{}", v.volume);
         // Failures carry the reason the app shows: the kernel's for a bad
         // size, the profile reader's for odd coordinates.
-        assert!(view_of(BodySpec::Box { width: 1.0, depth: -1.0, height: 1.0 }).err().unwrap().contains("must be"));
+        let e = view_of(BodySpec::Box { width: 1.0, depth: -1.0, height: 1.0 }).err().unwrap();
+        assert!(e.message.contains("must be"));
+        assert_eq!(e.inputs, vec![ops::Input::Param { name: "depth" }]);
         let odd = view_of(BodySpec::Extrude { profile: l(vec![0.0; 5]), distance: 1.0 }).err().unwrap();
-        assert_eq!(odd, "profile coordinates must come in x, y pairs");
+        assert_eq!(odd.message, "profile coordinates must come in x, y pairs");
+        assert_eq!((odd.kind, odd.inputs), (api_error::ErrorKind::BadRequest, vec![ops::Input::Loop { boundary: 0 }]));
     }
 
     #[test]
@@ -754,7 +834,7 @@ mod tests {
             holes: vec![],
         })
         .unwrap();
-        assert!(matches!(ops::extrude::extrude(&p, 1.0), Err(ops::KernelError::InvalidInput(_))));
+        assert!(matches!(ops::extrude::extrude(&p, 1.0), Err(ops::KernelError::InvalidInput { .. })));
     }
 
     #[test]
@@ -780,6 +860,6 @@ mod tests {
         let e = stl_of(BodySpec::Extrude { profile: l, distance: 2.0 }, "L").unwrap();
         assert_eq!((count(&e), size(&e)), (20, 1084));
         // Bad shapes give the kernel's reason, not a file.
-        assert!(stl_of(BodySpec::Box { width: -1.0, depth: 1.0, height: 1.0 }, "bad").unwrap_err().contains("must be"));
+        assert!(stl_of(BodySpec::Box { width: -1.0, depth: 1.0, height: 1.0 }, "bad").unwrap_err().message.contains("must be"));
     }
 }

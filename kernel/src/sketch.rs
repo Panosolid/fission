@@ -75,7 +75,7 @@
 //! pieces and O(n²) at worst (every end within LINEAR in x), with n capped
 //! at MAX_PROFILE_CORNERS, the same bound as the profile check.
 use crate::ops::profile::{bounds, check_profile, Boundary, Profile, Seg};
-use crate::ops::KernelError;
+use crate::ops::{Input, KernelError};
 use crate::tolerance::{LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
 use std::fmt;
@@ -142,12 +142,12 @@ impl Arc {
 /// within MAX_COORD, and the node too.
 pub fn snap_to_grid(p: DVec2, spacing: f64) -> Result<DVec2, KernelError> {
     if !(MIN_FEATURE..=MAX_SIZE).contains(&spacing) {
-        return Err(KernelError::InvalidInput(format!(
+        return Err(KernelError::invalid(Input::Param { name: "spacing" }, format!(
             "grid spacing must be between {MIN_FEATURE} and {MAX_SIZE} mm, got {spacing}"
         )));
     }
     if !in_range(p) {
-        return Err(KernelError::InvalidInput(format!("point ({}, {}) is outside the modelling range", p.x, p.y)));
+        return Err(KernelError::invalid(Input::Param { name: "point" }, format!("point ({}, {}) is outside the modelling range", p.x, p.y)));
     }
     let inverse = 1.0 / spacing;
     let decimal = inverse.fract() == 0.0 && 1.0 / inverse == spacing;
@@ -159,7 +159,7 @@ pub fn snap_to_grid(p: DVec2, spacing: f64) -> Result<DVec2, KernelError> {
     };
     let snapped = DVec2::new(node(p.x), node(p.y));
     if !in_range(snapped) {
-        return Err(KernelError::InvalidInput(format!(
+        return Err(KernelError::invalid(Input::Param { name: "point" }, format!(
             "the grid node nearest ({}, {}) is outside the modelling range",
             p.x, p.y
         )));
@@ -179,7 +179,7 @@ const POWERS_OF_TEN: [f64; 10] = [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5
 /// finite number.
 pub fn free_spacing(pixel: f64) -> Result<f64, KernelError> {
     if !(pixel > 0.0 && pixel.is_finite()) {
-        return Err(KernelError::InvalidInput(format!("the size of a pixel on the sketch plane must be a positive number of mm, got {pixel}")));
+        return Err(KernelError::invalid(Input::Param { name: "pixel" }, format!("the size of a pixel on the sketch plane must be a positive number of mm, got {pixel}")));
     }
     Ok(POWERS_OF_TEN.iter().rev().copied().find(|&s| s <= pixel).unwrap_or(POWERS_OF_TEN[0]))
 }
@@ -202,7 +202,7 @@ fn in_range(p: DVec2) -> bool {
 /// with the line's number (from 1, as a person counts).
 pub fn check_lines(lines: &[Line]) -> Result<(), KernelError> {
     if lines.len() > MAX_PROFILE_CORNERS {
-        return Err(KernelError::InvalidInput(format!(
+        return Err(KernelError::invalid(Input::Sketch, format!(
             "a sketch has at most {MAX_PROFILE_CORNERS} lines, got {}",
             lines.len()
         )));
@@ -210,11 +210,11 @@ pub fn check_lines(lines: &[Line]) -> Result<(), KernelError> {
     for (i, line) in lines.iter().enumerate() {
         let n = i + 1;
         if !in_range(line.a) || !in_range(line.b) {
-            return Err(KernelError::InvalidInput(format!("line {n} has an end outside the modelling range")));
+            return Err(KernelError::invalid(Input::Line { index: i }, format!("line {n} has an end outside the modelling range")));
         }
         let length = line.a.distance(line.b);
         if !(MIN_FEATURE..=MAX_SIZE).contains(&length) {
-            return Err(KernelError::InvalidInput(format!(
+            return Err(KernelError::invalid(Input::Line { index: i }, format!(
                 "line {n} must be between {MIN_FEATURE} and {MAX_SIZE} mm long, got {length}"
             )));
         }
@@ -229,13 +229,13 @@ pub fn check_circles(circles: &[Circle]) -> Result<(), KernelError> {
         let n = i + 1;
         let most = MAX_SIZE / 2.0;
         if !(MIN_FEATURE..=most).contains(&c.radius) {
-            return Err(KernelError::InvalidInput(format!(
+            return Err(KernelError::invalid(Input::Circle { index: i }, format!(
                 "circle {n}'s radius must be between {MIN_FEATURE} and {most} mm, got {}",
                 c.radius
             )));
         }
         if !in_range(c.centre - c.radius) || !in_range(c.centre + c.radius) {
-            return Err(KernelError::InvalidInput(format!("circle {n} reaches outside the modelling range")));
+            return Err(KernelError::invalid(Input::Circle { index: i }, format!("circle {n} reaches outside the modelling range")));
         }
     }
     Ok(())
@@ -246,7 +246,7 @@ pub fn check_circles(circles: &[Circle]) -> Result<(), KernelError> {
 pub fn check_arcs(arcs: &[Arc]) -> Result<(), KernelError> {
     for (i, arc) in arcs.iter().enumerate() {
         let n = i + 1;
-        let bad = |m: String| Err(KernelError::InvalidInput(format!("arc {n} {m}")));
+        let bad = |m: String| Err(KernelError::invalid(Input::Arc { index: i }, format!("arc {n} {m}")));
         if !in_range(arc.start) || !in_range(arc.end) || !in_range(arc.centre) {
             return bad("has a point outside the modelling range".into());
         }
@@ -348,7 +348,7 @@ struct Piece {
 pub fn sketch_outline(lines: &[Line], circles: &[Circle], arcs: &[Arc]) -> Result<SketchOutline, KernelError> {
     let count = lines.len() + circles.len() + arcs.len();
     if count > MAX_PROFILE_CORNERS {
-        return Err(KernelError::InvalidInput(format!(
+        return Err(KernelError::invalid(Input::Sketch, format!(
             "a sketch has at most {MAX_PROFILE_CORNERS} lines, arcs and circles, got {count}"
         )));
     }
@@ -428,7 +428,7 @@ pub fn sketch_outline(lines: &[Line], circles: &[Circle], arcs: &[Arc]) -> Resul
 fn profiled(profile: Profile, sources: Vec<Source>) -> Result<SketchOutline, KernelError> {
     match check_profile(&profile) {
         Ok(_) => Ok(SketchOutline::Closed(profile, sources)),
-        Err(KernelError::InvalidInput(reason)) => Ok(SketchOutline::Open(Open::NotAProfile { reason })),
+        Err(KernelError::InvalidInput { message: reason, .. }) => Ok(SketchOutline::Open(Open::NotAProfile { reason })),
         Err(e) => Err(e),
     }
 }
@@ -539,7 +539,7 @@ mod tests {
 
     fn invalid(r: Result<impl fmt::Debug, KernelError>) -> String {
         match r {
-            Err(KernelError::InvalidInput(m)) => m,
+            Err(KernelError::InvalidInput { message: m, .. }) => m,
             other => panic!("expected InvalidInput, got {other:?}"),
         }
     }

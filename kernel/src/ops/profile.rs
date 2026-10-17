@@ -28,7 +28,7 @@
 //! - probe's `c + X·r` vs `c − X·r`: by the time holes are placed every
 //!   piece is clear of every other, so any point of a hole's circle
 //!   decides whether it is inside a loop.
-use super::KernelError;
+use super::{Input, KernelError};
 use crate::tolerance::{segments_touch, side, twice_area, ANGULAR, LINEAR, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
 use glam::DVec2;
 use std::f64::consts::{PI, TAU};
@@ -476,7 +476,7 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
 /// (given clockwise as the outer loop, or counter-clockwise as a hole): its
 /// piece i is then the given piece n − 1 − i, run the other way.
 pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, KernelError> {
-    let bad = |m: String| Err(KernelError::InvalidInput(m));
+    let bad = |inputs: Vec<Input>, message: String| Err(KernelError::InvalidInput { inputs, message });
     let all: Vec<&Boundary> = std::iter::once(&profile.outer).chain(&profile.holes).collect();
     let total: usize = all
         .iter()
@@ -486,32 +486,34 @@ pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, 
         })
         .sum();
     if total > MAX_PROFILE_CORNERS {
-        return bad(format!("profile has {total} corners; the limit is {MAX_PROFILE_CORNERS}"));
+        return bad(vec![Input::Profile], format!("profile has {total} corners; the limit is {MAX_PROFILE_CORNERS}"));
     }
     let in_space = |p: DVec2| p.is_finite() && p.abs().max_element() <= MAX_COORD;
     let mut loops: Vec<Vec<Seg>> = Vec::new();
     for (k, b) in all.iter().enumerate() {
+        let whole = vec![Input::Loop { boundary: k }];
+        let piece = |i: usize| Input::Piece { boundary: k, piece: i };
         let segs = match b {
             Boundary::Circle { center, radius } => {
                 if !(MIN_FEATURE..=MAX_SIZE).contains(radius) {
-                    return bad(format!("circle radius {radius} must be within [{MIN_FEATURE}, {MAX_SIZE:e}] mm"));
+                    return bad(whole, format!("circle radius {radius} must be within [{MIN_FEATURE}, {MAX_SIZE:e}] mm"));
                 }
                 vec![Seg::Circle { center: *center, radius: *radius, ccw: true }]
             }
             Boundary::Path { corners, bulges } => {
                 let n = corners.len();
                 if !bulges.is_empty() && bulges.len() != n {
-                    return bad(format!("profile loop {k} has {n} corners but {} bulges", bulges.len()));
+                    return bad(whole, format!("profile loop {k} has {n} corners but {} bulges", bulges.len()));
                 }
                 if let Some(p) = corners.iter().find(|p| !in_space(**p)) {
-                    return bad(format!("profile corner {p} is not finite or is beyond {MAX_COORD:e} mm"));
+                    return bad(whole, format!("profile corner {p} is not finite or is beyond {MAX_COORD:e} mm"));
                 }
-                if let Some(x) = bulges.iter().find(|x| !x.is_finite()) {
-                    return bad(format!("profile bulge {x} is not finite"));
+                if let Some(i) = bulges.iter().position(|x| !x.is_finite()) {
+                    return bad(vec![piece(i)], format!("profile bulge {} is not finite", bulges[i]));
                 }
                 let curved = bulges.iter().any(|&x| x != 0.0);
                 if n < 2 || (n < 3 && !curved) {
-                    return bad(format!("profile loop {k} has {n} corners; at least 3 are needed (2 with an arc)"));
+                    return bad(whole, format!("profile loop {k} has {n} corners; at least 3 are needed (2 with an arc)"));
                 }
                 // The clearance rule below ignores where pieces meet, so it
                 // can't see a piece whose ends are close: in a loop of two
@@ -525,7 +527,7 @@ pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, 
                 for i in 0..n {
                     let gap = corners[i].distance(corners[(i + 1) % n]);
                     if gap < MIN_FEATURE {
-                        return bad(if n == 2 {
+                        return bad(if n == 2 { whole } else { vec![piece(i)] }, if n == 2 {
                             format!("profile loop {k} has its two corners {gap:e} mm apart; features must be at least {MIN_FEATURE} mm")
                         } else {
                             format!("profile loop {k}, piece {i} has its ends {gap} mm apart; they must be at least {MIN_FEATURE} mm apart")
@@ -538,7 +540,7 @@ pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, 
                     match Seg::from_bulge(corners[i], corners[(i + 1) % n], bulge) {
                         Some(s) => segs.push(s),
                         None => {
-                            return bad(format!(
+                            return bad(vec![piece(i)], format!(
                                 "profile loop {k}, piece {i}: arc radius must be within [{MIN_FEATURE}, {MAX_SIZE:e}] mm"
                             ))
                         }
@@ -547,17 +549,18 @@ pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, 
                 segs
             }
         };
-        for s in &segs {
+        for (i, s) in segs.iter().enumerate() {
             let (lo, hi) = bounds(s);
             if !in_space(lo) || !in_space(hi) {
-                return bad(format!("profile loop {k} reaches beyond {MAX_COORD:e} mm"));
+                // A circle loop is its one piece.
+                return bad(vec![piece(i)], format!("profile loop {k} reaches beyond {MAX_COORD:e} mm"));
             }
         }
         loops.push(segs);
     }
     let (lo, hi) = loops[0].iter().map(bounds).fold((DVec2::INFINITY, DVec2::NEG_INFINITY), |(lo, hi), (l, h)| (lo.min(l), hi.max(h)));
     if (hi - lo).max_element() > MAX_SIZE {
-        return bad(format!("profile spans {:e} mm; the limit is {MAX_SIZE:e} mm", (hi - lo).max_element()));
+        return bad(vec![Input::Loop { boundary: 0 }], format!("profile spans {:e} mm; the limit is {MAX_SIZE:e} mm", (hi - lo).max_element()));
     }
     // Cusps: arriving at a corner and leaving straight back the way it came.
     for (k, segs) in loops.iter().enumerate() {
@@ -568,7 +571,8 @@ pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, 
             }
             let (t_in, t_out) = (s.tangents().1, t.tangents().0);
             if doubles_back(t_in, t_out) {
-                return bad(format!("profile loop {k} doubles back on itself at {}", s.ends()[1]));
+                let pieces = vec![Input::Piece { boundary: k, piece: i }, Input::Piece { boundary: k, piece: (i + 1) % segs.len() }];
+                return bad(pieces, format!("profile loop {k} doubles back on itself at {}", s.ends()[1]));
             }
         }
     }
@@ -592,7 +596,7 @@ pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, 
             };
             let gap = clearance(s, t, &shared);
             if gap < MIN_FEATURE {
-                return bad(format!(
+                return bad(vec![Input::Piece { boundary: k, piece: i }, Input::Piece { boundary: kk, piece: j }], format!(
                     "profile pieces ({k}, {i}) and ({kk}, {j}) (loop, piece) are {gap:e} mm apart; features must be at least {MIN_FEATURE} mm"
                 ));
             }
@@ -603,10 +607,10 @@ pub fn check_profile_turned(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, 
     for h in 1..loops.len() {
         let p = probe(&loops[h]);
         if winding(&loops[0], p) == 0 {
-            return bad(format!("profile hole {} is not inside the outer loop", h - 1));
+            return bad(vec![Input::Loop { boundary: h }], format!("profile hole {} is not inside the outer loop", h - 1));
         }
         if let Some(o) = (1..loops.len()).find(|&g| g != h && winding(&loops[g], p) != 0) {
-            return bad(format!("profile hole {} is inside hole {}; islands need a separate extrude", h - 1, o - 1));
+            return bad(vec![Input::Loop { boundary: h }, Input::Loop { boundary: o }], format!("profile hole {} is inside hole {}; islands need a separate extrude", h - 1, o - 1));
         }
     }
     Ok(loops
@@ -640,6 +644,51 @@ mod tests {
         DVec2::new(x, y)
     }
 
+    /// The inputs a refusal names, or what it accepted.
+    fn named(profile: &Profile) -> Result<Vec<Input>, String> {
+        match check_profile(profile) {
+            Err(KernelError::InvalidInput { inputs, .. }) => Ok(inputs),
+            other => Err(format!("{other:?}")),
+        }
+    }
+
+    #[test]
+    fn each_refusal_names_the_loops_and_pieces_at_fault() {
+        let sq = |x: f64, y: f64, s: f64| vec![p(x, y), p(x + s, y), p(x + s, y + s), p(x, y + s)];
+        let outer = sq(0.0, 0.0, 10.0);
+        // A clockwise hole 4 mm square whose left side (piece 0, from
+        // (g, 1) up to (g, 5)) is g from the outer square's left side
+        // (piece 3, from (0, 10) down to (0, 0)). Every other pair is at
+        // least 1 mm apart, so at g = 0.9·MIN_FEATURE exactly those two
+        // pieces are named, outer loop first; at 1.1× it is accepted.
+        let hole = |g: f64| vec![p(g, 1.0), p(g, 5.0), p(g + 4.0, 5.0), p(g + 4.0, 1.0)];
+        let near = Profile::polygon(outer.clone(), vec![hole(0.9 * MIN_FEATURE)]);
+        assert_eq!(named(&near).unwrap(), vec![Input::Piece { boundary: 0, piece: 3 }, Input::Piece { boundary: 1, piece: 0 }]);
+        assert!(check_profile(&Profile::polygon(outer.clone(), vec![hole(1.1 * MIN_FEATURE)])).is_ok());
+        // Going 10 along +X then straight back: the cusp is at (10, 0),
+        // between piece 0 (arriving) and piece 1 (leaving).
+        let cusp = Profile::polygon(vec![p(0.0, 0.0), p(10.0, 0.0), p(5.0, 0.0), p(5.0, 5.0)], vec![]);
+        assert_eq!(named(&cusp).unwrap(), vec![Input::Piece { boundary: 0, piece: 0 }, Input::Piece { boundary: 0, piece: 1 }]);
+        // A hole outside the outer loop is hole 0, loop 1.
+        let outside = Profile::polygon(outer.clone(), vec![sq(20.0, 0.0, 4.0).into_iter().rev().collect()]);
+        assert_eq!(named(&outside).unwrap(), vec![Input::Loop { boundary: 1 }]);
+        // A hole inside another hole names both, the inner first.
+        let nested = Profile::polygon(sq(0.0, 0.0, 20.0), vec![sq(2.0, 2.0, 10.0).into_iter().rev().collect(), sq(4.0, 4.0, 2.0).into_iter().rev().collect()]);
+        assert_eq!(named(&nested).unwrap(), vec![Input::Loop { boundary: 2 }, Input::Loop { boundary: 1 }]);
+        // A bad bulge is its piece's; a short piece is its own.
+        let curved = |bulges| Profile { outer: Boundary::Path { corners: outer.clone(), bulges }, holes: vec![] };
+        assert_eq!(named(&curved(vec![0.0, 0.0, f64::NAN, 0.0])).unwrap(), vec![Input::Piece { boundary: 0, piece: 2 }]);
+        assert_eq!(named(&curved(vec![0.0; 3])).unwrap(), vec![Input::Loop { boundary: 0 }]);
+        let short = Profile::polygon(vec![p(0.0, 0.0), p(10.0, 0.0), p(10.0, 0.9 * MIN_FEATURE), p(0.0, 10.0)], vec![]);
+        assert_eq!(named(&short).unwrap(), vec![Input::Piece { boundary: 0, piece: 1 }]);
+        // Too many corners is the whole profile's fault.
+        let many = (0..=MAX_PROFILE_CORNERS).map(|k| DVec2::from_angle(k as f64 * 1e-3)).collect();
+        assert_eq!(named(&Profile::polygon(many, vec![])).unwrap(), vec![Input::Profile]);
+        // A circle hole too small is its loop.
+        let tiny = Profile { outer: Boundary::Path { corners: outer, bulges: vec![] }, holes: vec![Boundary::Circle { center: p(5.0, 5.0), radius: 0.9 * MIN_FEATURE }] };
+        assert_eq!(named(&tiny).unwrap(), vec![Input::Loop { boundary: 1 }]);
+    }
+
     fn square(x0: f64, y0: f64, s: f64) -> Vec<DVec2> {
         vec![p(x0, y0), p(x0 + s, y0), p(x0 + s, y0 + s), p(x0, y0 + s)]
     }
@@ -654,7 +703,7 @@ mod tests {
 
     fn refused(profile: Profile) -> String {
         match check_profile(&profile) {
-            Err(KernelError::InvalidInput(m)) => m,
+            Err(KernelError::InvalidInput { message: m, .. }) => m,
             other => panic!("accepted: {other:?}"),
         }
     }
@@ -977,7 +1026,7 @@ mod tests {
         for (c, legal) in [(1.1 * MIN_FEATURE, true), (MIN_FEATURE, true), (0.9 * MIN_FEATURE, false), (5e-6, false), (1e-150, false)] {
             match check_profile(&d(c)) {
                 Ok(_) => assert!(legal, "a flat {c:e} mm long was accepted"),
-                Err(KernelError::InvalidInput(m)) => {
+                Err(KernelError::InvalidInput { message: m, .. }) => {
                     assert!(!legal, "a flat {c:e} mm long was refused: {m}");
                     assert!(m.contains("two corners"), "{m}");
                 }

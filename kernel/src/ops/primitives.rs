@@ -15,9 +15,9 @@ pub fn make_box(width: f64, depth: f64, height: f64) -> Result<Body, KernelError
 
 /// `make_box`, also handing back the body's display mesh (`ops::finish`).
 pub fn make_box_meshed(width: f64, depth: f64, height: f64) -> Result<Meshed, KernelError> {
-    check_length("width", width)?;
-    check_length("depth", depth)?;
-    check_length("height", height)?;
+    check_length("width", "width", width)?;
+    check_length("depth", "depth", depth)?;
+    check_length("height", "height", height)?;
     let size = DVec3::new(width, depth, height);
 
     let mut b = Body::default();
@@ -64,8 +64,8 @@ pub fn make_cylinder(radius: f64, height: f64) -> Result<Body, KernelError> {
 
 /// `make_cylinder`, also handing back the body's display mesh (`ops::finish`).
 pub fn make_cylinder_meshed(radius: f64, height: f64) -> Result<Meshed, KernelError> {
-    check_length("radius", radius)?;
-    check_length("height", height)?;
+    check_length("radius", "radius", radius)?;
+    check_length("height", "height", height)?;
     let mut b = Body::default();
     let top = DVec3::new(0.0, 0.0, height);
     let circle = |center| Curve::Circle { center, axis: DVec3::Z, x_dir: DVec3::X, radius };
@@ -102,7 +102,7 @@ pub fn make_sphere(radius: f64) -> Result<Body, KernelError> {
 
 /// `make_sphere`, also handing back the body's display mesh (`ops::finish`).
 pub fn make_sphere_meshed(radius: f64) -> Result<Meshed, KernelError> {
-    check_length("radius", radius)?;
+    check_length("radius", "radius", radius)?;
     let mut b = Body::default();
     let v = b.add_vertex(DVec3::new(radius, 0.0, 0.0));
     let equator = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius };
