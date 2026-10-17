@@ -15,3 +15,4 @@ export { designObjects, outlineProducer, registerDesign, type FeatureHandle, typ
 export { designReference, PLACEHOLDER_ID_NOTE, profileReference, readProfileReference } from "./references.ts";
 export { pickChange, type SelectionChange } from "./picking.ts";
 export { COPY_SVG, designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";
+export { rounding, snapOnSketch, SNAP_PIXELS, type Rounding, type Snap } from "./snap.ts";

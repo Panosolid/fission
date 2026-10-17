@@ -23,6 +23,7 @@ export function nodeKernel(): KernelCalls {
     make_extrude: (p, d) => wasm.make_extrude(p, d),
     export_stl: (spec, name) => wasm.export_stl(spec, name),
     snap_to_grid: (x, y, s) => wasm.snap_to_grid(x, y, s),
+    place_freely: (x, y, pixel) => wasm.place_freely(x, y, pixel),
     sketch_outline: (lines, circles, arcs) => wasm.sketch_outline(lines, circles, arcs),
   };
   return {

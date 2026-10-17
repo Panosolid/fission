@@ -1,6 +1,6 @@
 // The sketch tool's panel (step 21c), at the top of the properties: the
 // "Pick a plane" prompt of Create sketch, then while a sketch is edited its
-// name, the tools (Line, Rectangle: step 22a; Circle: 22c; Arc: 23b; Tangent arc: 23c), how to draw, the typeable grid size, whether the lines close,
+// name, the tools (Line, Rectangle: step 22a; Circle: 22c; Arc: 23b; Tangent arc: 23c), how to draw, the typeable grid size and Snap to grid (SF1, off by default), Look at (SF2), whether the lines close,
 // Finish sketch and Extrude (step 21d). The workspace drives it; the panel
 // only shows what it is given and reports clicks. Styles: src/styles/sketch.css.
 
@@ -11,27 +11,34 @@ export interface SketchPanelEvents {
   pickPlane(id: SketchPlane): void;
   cancel(): void;
   grid(typed: string): void;
+  /** Snap to grid ticked (true) or unticked. */
+  gridSnap(on: boolean): void;
   finish(): void;
   /** Extrude this sketch (step 21d): finishes it and opens the Extrude panel. */
   extrude(): void;
   /** A tool chosen. */
   tool(kind: ToolKind): void;
+  /** Look At: the camera square onto the sketch again (SF2). */
+  lookAt(): void;
 }
+
+/** Where clicks land, under every tool's help (sketch feel SF1). */
+export const SNAP_HELP = "Points go where you click, and snap to nearby ends, midpoints and centres, or line up with them.";
 
 /** How to draw with each tool, under the tool buttons. */
 export const TOOL_HELP: Record<ToolKind, string> = {
-  line: "Click to place points: each click draws a line from the last one, snapped to the grid. Click the first point to close the shape. Escape ends the line.",
-  rectangle: "Click one corner, then the opposite corner: four lines, snapped to the grid. Escape drops the first corner.",
-  circle: "Click the centre, then a point on the circle, both snapped to the grid. Escape drops the centre.",
-  arc: "Click the start, then the end, then a point the arc passes through, all snapped to the grid. Escape drops the ends.",
+  line: "Click to place points: each click draws a line from the last one. Click the first point to close the shape. Escape ends the line.",
+  rectangle: "Click one corner, then the opposite corner: four lines. Escape drops the first corner.",
+  circle: "Click the centre, then a point on the circle. Escape drops the centre.",
+  arc: "Click the start, then the end, then a point the arc passes through. Escape drops the ends.",
   tangent: "Click the end of a line or arc, then where the arc ends: it leaves the line smoothly, and the next click carries on from its end. Escape ends it.",
 };
 
 export interface SketchPanel {
   /** The prompt: the offered planes as buttons too (the view's planes are the same choice), and Cancel. */
   showPick(): void;
-  /** The sketch being edited, its grid as typed, the tool in use. */
-  showEditing(name: string, grid: string, tool: ToolKind): void;
+  /** The sketch being edited, its grid as typed, whether points snap to it, the tool in use. */
+  showEditing(name: string, grid: string, gridSnap: boolean, tool: ToolKind): void;
   /** The tool in use: its button pressed, its help shown. */
   showTool(kind: ToolKind): void;
   /** What the sketch holds and whether it makes a closed outline, or why not. */
@@ -93,12 +100,17 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
       box.hidden = false;
     },
     showTool,
-    showEditing(name, grid, tool) {
+    showEditing(name, grid, gridSnap, tool) {
       const input = el("input", { id: "sketch-grid" });
       Object.assign(input, { type: "number", step: "any", min: "0", value: grid });
       input.addEventListener("change", () => on.grid(input.value));
       const label = el("label", { className: "sketch-grid" });
       label.append("Grid ", input, " mm");
+      const snapBox = el("input", { id: "sketch-grid-snap" });
+      Object.assign(snapBox, { type: "checkbox", checked: gridSnap });
+      snapBox.addEventListener("change", () => on.gridSnap(snapBox.checked));
+      const snapLabel = el("label", { className: "sketch-grid-snap" });
+      snapLabel.append(snapBox, " Snap to grid");
       status = el("p", { id: "sketch-status", className: "sketch-status" });
       gridError = el("p", { id: "sketch-grid-error", className: "bad" });
       gridError.hidden = true;
@@ -118,7 +130,10 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
         el("h2", { id: "sketch-name", textContent: name }),
         toolRow,
         help,
+        el("p", { className: "sketch-help", id: "sketch-snap-help", textContent: SNAP_HELP }),
         label,
+        snapLabel,
+        button("Look at", "sketch-look-at", () => on.lookAt(), "sketch-look-at"),
         gridError,
         status,
         el("div", { className: "sketch-buttons" }),
