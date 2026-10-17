@@ -1,5 +1,5 @@
-tested commit 2a47bda on claude/24b-face-roles-wxy6nn, 2026-10-17 16:44 UTC (https://github.com/benpy28/fission/actions/runs/39028741277)
-OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.22 s (baseline 1.23 s)
+tested commit 9c70d1f on claude/24c-design-names-l9qxh7, 2026-10-17 19:29 UTC (https://github.com/benpy28/fission/actions/runs/39060578769)
+OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.97 s (baseline 1.23 s)
 PENDING Box to laser panels: waits for Laser (L1–L3), X13
 PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
 PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)

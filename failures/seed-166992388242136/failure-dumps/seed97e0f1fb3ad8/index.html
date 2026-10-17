@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Failure dump</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#14161a;color:#e6e8eb;font:13px system-ui,sans-serif}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none;cursor:grab}
+  #info{position:absolute;top:0;left:0;max-width:44em;padding:12px;background:#1c1f24e6;max-height:45%;overflow:auto}
+  #info h1{font-size:15px;margin:0 0 6px} .bad{color:#ff6b6b} pre{white-space:pre-wrap;margin:4px 0}
+  #tools{position:absolute;bottom:12px;left:12px;display:flex;gap:6px}
+  button{font:inherit;color:inherit;background:#2a2e35;border:1px solid #444a53;border-radius:4px;padding:4px 10px;cursor:pointer}
+</style>
+</head><body><canvas id="view"></canvas><div id="info"></div>
+<div id="tools"><button id="faces">Hide faces</button><button id="home">Reset view</button></div>
+<script>
+"use strict";
+const note = "step 1 (Add { shape: Extrude { outer: Path { pts: [[-99999998.999989, 0.0], [-99999979.499989, 0.0], [-99999979.499989, 14.5], [-99999998.999989, 14.5]], bulges: [] }, holes: [Path { pts: [[-99999998.998889, 0.0011], [-99999998.998889, 14.4989], [-99999979.501089, 14.4989], [-99999979.501089, 0.0011]], bulges: [] }], dist: 0.5, expect: None, sketch: None }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): Start: centroid [-99999989.249989, 7.250000000003049, 0] but the model says [-99999989.24988757, 7.24999999999981, 0] (1.0143220424652105e-4 off)\n\nChain:\n1. Add { shape: Extrude { outer: Path { pts: [[-99999998.999989, 0.0], [-99999979.499989, 0.0], [-99999979.499989, 14.5], [-99999998.999989, 14.5]], bulges: [] }, holes: [Path { pts: [[-99999998.998889, 0.0011], [-99999998.998889, 14.4989], [-99999979.501089, 14.4989], [-99999979.501089, 0.0011]], bulges: [] }], dist: 0.5, expect: None, sketch: None }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }";
+const scene = [{"label":"primitive","positions":[-9.9999998999989e7,0e0,0e0,-9.9999979499989e7,0e0,0e0,-9.9999979499989e7,1.45e1,0e0,-9.9999998999989e7,1.45e1,0e0,-9.9999998999989e7,0e0,5e-1,-9.9999979499989e7,0e0,5e-1,-9.9999979499989e7,1.45e1,5e-1,-9.9999998999989e7,1.45e1,5e-1,-9.9999998998889e7,1.1e-3,0e0,-9.9999998998889e7,1.44989e1,0e0,-9.9999979501089e7,1.44989e1,0e0,-9.9999979501089e7,1.1e-3,0e0,-9.9999998998889e7,1.1e-3,5e-1,-9.9999998998889e7,1.44989e1,5e-1,-9.9999979501089e7,1.44989e1,5e-1,-9.9999979501089e7,1.1e-3,5e-1],"triangles":[1,8,11,1,11,2,10,2,11,10,9,2,0,8,1,3,2,9,9,8,3,8,0,3,6,13,14,14,15,6,5,6,15,15,12,5,7,13,6,4,5,12,4,12,7,13,7,12,4,1,5,0,1,4,5,2,6,1,2,5,6,3,7,2,3,6,7,0,4,3,0,7,12,9,13,8,9,12,13,10,14,9,10,13,14,11,15,10,11,14,15,8,12,11,8,15],"faces":[0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9],"edges":[[-9.9999998999989e7,0e0,0e0,-9.9999979499989e7,0e0,0e0],[-9.9999979499989e7,0e0,0e0,-9.9999979499989e7,1.45e1,0e0],[-9.9999979499989e7,1.45e1,0e0,-9.9999998999989e7,1.45e1,0e0],[-9.9999998999989e7,1.45e1,0e0,-9.9999998999989e7,0e0,0e0],[-9.9999998999989e7,0e0,5e-1,-9.9999979499989e7,0e0,5e-1],[-9.9999979499989e7,0e0,5e-1,-9.9999979499989e7,1.45e1,5e-1],[-9.9999979499989e7,1.45e1,5e-1,-9.9999998999989e7,1.45e1,5e-1],[-9.9999998999989e7,1.45e1,5e-1,-9.9999998999989e7,0e0,5e-1],[-9.9999998999989e7,0e0,0e0,-9.9999998999989e7,0e0,5e-1],[-9.9999979499989e7,0e0,0e0,-9.9999979499989e7,0e0,5e-1],[-9.9999979499989e7,1.45e1,0e0,-9.9999979499989e7,1.45e1,5e-1],[-9.9999998999989e7,1.45e1,0e0,-9.9999998999989e7,1.45e1,5e-1],[-9.9999998998889e7,1.1e-3,0e0,-9.9999998998889e7,1.44989e1,0e0],[-9.9999998998889e7,1.44989e1,0e0,-9.9999979501089e7,1.44989e1,0e0],[-9.9999979501089e7,1.44989e1,0e0,-9.9999979501089e7,1.1e-3,0e0],[-9.9999979501089e7,1.1e-3,0e0,-9.9999998998889e7,1.1e-3,0e0],[-9.9999998998889e7,1.1e-3,5e-1,-9.9999998998889e7,1.44989e1,5e-1],[-9.9999998998889e7,1.44989e1,5e-1,-9.9999979501089e7,1.44989e1,5e-1],[-9.9999979501089e7,1.44989e1,5e-1,-9.9999979501089e7,1.1e-3,5e-1],[-9.9999979501089e7,1.1e-3,5e-1,-9.9999998998889e7,1.1e-3,5e-1],[-9.9999998998889e7,1.1e-3,0e0,-9.9999998998889e7,1.1e-3,5e-1],[-9.9999998998889e7,1.44989e1,0e0,-9.9999998998889e7,1.44989e1,5e-1],[-9.9999979501089e7,1.44989e1,0e0,-9.9999979501089e7,1.44989e1,5e-1],[-9.9999979501089e7,1.1e-3,0e0,-9.9999979501089e7,1.1e-3,5e-1]],"badEdges":[],"badCurves":[],"badFaces":[],"badVertices":[],"meshProblems":[],"errors":[]}];
+const RED = [255, 59, 59], colours = [[154, 167, 184], [127, 179, 213], [195, 155, 211], [240, 178, 122]];
+const info = document.getElementById("info");
+info.innerHTML = "<h1>Failure dump</h1><pre></pre><div>Drag to turn, wheel to zoom. Red: the problems listed; dashed red: where a named edge's curve really runs.</div>";
+info.querySelector("pre").textContent = note;
+for (const b of scene) {
+  const h = document.createElement("div");
+  h.innerHTML = `<b></b> ${b.errors.length ? `<span class="bad">${b.errors.length} problem(s)</span>` : "valid"}`;
+  h.querySelector("b").textContent = b.label;
+  info.appendChild(h);
+  for (const e of b.errors) { const p = document.createElement("pre"); p.className = "bad"; p.textContent = e; info.appendChild(p); }
+  if (b.meshProblems.length) { const p = document.createElement("pre"); p.className = "bad"; p.textContent = `${b.meshProblems.length / 6} open or flipped mesh edge(s), drawn in red`; info.appendChild(p); }
+}
+// Everything relative to the middle of the scene, in doubles.
+const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+const visit = (a) => { for (let i = 0; i < a.length; i++) if (Number.isFinite(a[i])) { lo[i % 3] = Math.min(lo[i % 3], a[i]); hi[i % 3] = Math.max(hi[i % 3], a[i]); } };
+for (const b of scene) { visit(b.positions); b.edges.forEach(visit); visit(b.badVertices); visit(b.meshProblems); }
+const centre = lo.map((l, i) => (Number.isFinite(l) ? (l + hi[i]) / 2 : 0));
+const radius = Math.max(Number.isFinite(lo[0]) ? Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2 : 1, 1e-9);
+const points = (a) => { const out = []; for (let i = 0; i + 2 < a.length; i += 3) out.push([a[i] - centre[0], a[i + 1] - centre[1], a[i + 2] - centre[2]]); return out; };
+const tris = [], lines = [], dots = [];
+scene.forEach((b, i) => {
+  const p = points(b.positions), bad = new Set(b.badFaces), badE = new Set(b.badEdges);
+  b.faces.forEach((f, t) => tris.push({ v: [0, 1, 2].map((k) => p[b.triangles[3 * t + k]]), colour: bad.has(f) ? RED : colours[i % colours.length], bad: bad.has(f) }));
+  b.edges.forEach((e, k) => lines.push({ v: points(e), bad: badE.has(k) }));
+  for (const c of b.badCurves) lines.push({ v: points(c), bad: true, dashed: true });
+  const m = points(b.meshProblems);
+  for (let k = 0; k + 1 < m.length; k += 2) lines.push({ v: [m[k], m[k + 1]], bad: true });
+  dots.push(...points(b.badVertices));
+});
+lines.sort((a, b) => a.bad - b.bad); // red on top
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const view = { yaw: -1.1, pitch: 0.5, zoom: 1, faces: true };
+const home = () => Object.assign(view, { yaw: -1.1, pitch: 0.5, zoom: 1 });
+const canvas = document.getElementById("view"), ctx = canvas.getContext("2d");
+function draw() {
+  const dpr = devicePixelRatio || 1, W = innerWidth, H = innerHeight;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#14161a"; ctx.fillRect(0, 0, W, H);
+  // Z up: the eye looks back along e; r is screen right, u screen up.
+  const cp = Math.cos(view.pitch), e = [cp * Math.cos(view.yaw), cp * Math.sin(view.yaw), Math.sin(view.pitch)];
+  const r = [-Math.sin(view.yaw), Math.cos(view.yaw), 0], u = cross(e, r);
+  const s = (view.zoom * 0.45 * Math.min(W, H)) / radius;
+  const xy = (p) => [W / 2 + s * dot(p, r), H / 2 - s * dot(p, u)];
+  let drawn = 0;
+  if (view.faces) {
+    const order = tris.map((t) => ({ t, d: dot(t.v[0], e) + dot(t.v[1], e) + dot(t.v[2], e) })).sort((a, b) => a.d - b.d);
+    for (const { t } of order) {
+      if (t.v.some((p) => !p)) continue;
+      const n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0])), len = Math.hypot(...n) || 1;
+      const light = (t.bad ? 0.55 : 0.35) + (t.bad ? 0.45 : 0.65) * Math.abs(dot(n, e) / len);
+      const c = `rgb(${t.colour.map((x) => Math.round(x * light)).join(",")})`;
+      const [a, b, d] = t.v.map(xy);
+      ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...d); ctx.closePath();
+      ctx.fillStyle = c; ctx.strokeStyle = c; ctx.lineWidth = 0.5; ctx.fill(); ctx.stroke();
+      drawn++;
+    }
+  }
+  for (const l of lines) {
+    const pts = l.v.filter((p) => p.every(Number.isFinite));
+    if (pts.length < 2) continue;
+    ctx.beginPath(); ctx.moveTo(...xy(pts[0])); for (const p of pts.slice(1)) ctx.lineTo(...xy(p));
+    ctx.strokeStyle = l.bad ? "rgb(255,59,59)" : view.faces ? "#0b0c0e" : "#9aa7b8"; ctx.lineWidth = l.bad ? 3 : 1;
+    ctx.setLineDash(l.dashed ? [6, 5] : []); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.fillStyle = "rgb(255,59,59)";
+  for (const p of dots) { ctx.beginPath(); ctx.arc(...xy(p), 5, 0, 2 * Math.PI); ctx.fill(); }
+  document.body.dataset.triangles = String(drawn);
+}
+let drag = null;
+canvas.addEventListener("pointerdown", (ev) => { drag = [ev.clientX, ev.clientY]; canvas.setPointerCapture(ev.pointerId); });
+canvas.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  view.yaw -= (ev.clientX - drag[0]) * 0.01;
+  view.pitch = Math.max(-1.55, Math.min(1.55, view.pitch + (ev.clientY - drag[1]) * 0.01));
+  drag = [ev.clientX, ev.clientY]; draw();
+});
+canvas.addEventListener("pointerup", () => { drag = null; });
+canvas.addEventListener("wheel", (ev) => { ev.preventDefault(); view.zoom *= Math.exp(-ev.deltaY * 0.001); draw(); }, { passive: false });
+document.getElementById("faces").onclick = (ev) => { view.faces = !view.faces; ev.target.textContent = view.faces ? "Hide faces" : "Show faces"; draw(); };
+document.getElementById("home").onclick = () => { home(); draw(); };
+addEventListener("resize", draw);
+draw();
+</script></body></html>
