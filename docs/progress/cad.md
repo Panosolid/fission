@@ -24,3 +24,8 @@ Notes from step 23 for later steps:
 Notes from step 22 for later steps:
 - A circle together with any other curve is "the sketch makes n separate loops" until regions (26). The circle tool keeps only the centre as a point; the click on the circle sets the radius (√(dx² + dy²) with Math.sqrt, not Math.hypot, which V8 rounds a unit off for (10, 30)).
 - The viewport draws a circle as `CIRCLE_SEGMENTS` = 64 straight segments (`circleSegments`, drawing only; the sketch and the kernel keep the exact circle), so its `sketchLines` count is 64 per circle.
+
+Kernel crash hunt (2026-10-17, owner's ask: "make the kernel crash as hard as you can"):
+- About 10,000 hand-picked hostile cases (NaN, infinities, sizes at 0.9×/1×/1.1× of every limit, near-collinear corners, slivers, holes 9 nm and 11 nm from walls, near-tangent circles, 2,000-corner outlines, 1,000-move chains, lying STL headers) found nothing; then coverage-guided fuzzing (`kernel/fuzz/`, nightly in `fuzz.yml`, saved inputs replayed by `tests/fuzz_corpus.rs`) found one real bug: a profile piece shorter than LINEAR in a three-piece loop slipped past the clearance rule (all three corners at one point panicked in extrude). Fixed: pieces must be at least MIN_FEATURE long, as sketch lines and arc chords already were (`short_piece_boundary`).
+- The worst legal profile (a 100 m square with 1,996 round holes) takes ~40 s natively to extrude and show (validate and view each tessellate it); being fixed in the thread "Fix slow extrude with many holes".
+- Not yet attacked, because it doesn't exist in the kernel: undo history (it lives in the TypeScript document model, fuzzed by `history-fuzz.test.ts`).
