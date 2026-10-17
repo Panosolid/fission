@@ -19,9 +19,9 @@ import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts";
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
-import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
+import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
-import { clickAt, curveCount, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { clickAt, curveCount, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -364,6 +364,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     finish: () => leaveSketch(),
     extrude: () => startExtrude(),
     tool: (kind) => chooseTool(kind),
+    lookAt: () => lookAtSketch(),
   });
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
   /** Counts tool changes (a tool chosen, Escape, the sketch entered again): a click the kernel was still snapping across one is dropped. */
@@ -374,7 +375,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
     const editing = mode.kind === "edit" ? mode : null;
-    viewport.showSketches(withSnap(sketchDrawings(doc, editing), editing?.snap ?? null, editing?.pixel));
+    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, gridSnap }), editing?.snap ?? null, editing?.pixel));
   }
 
   /**
@@ -413,7 +414,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     applySketchEdit(made.doc, SKETCH_STEPS.create, made.id);
     editingSketch = { id: made.id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID), tool: "line" };
     enterSketch();
-    viewport.setView(PLANE_VIEWS[plane]);
+    lookAtSketch();
+  }
+
+  /** Look At (SF2): the camera square onto the edited sketch's plane, framing the body and what is drawn. */
+  function lookAtSketch() {
+    if (mode.kind !== "edit" || !editingSketch) return;
+    viewport.lookAt(planeOf(sketchPlaneOf(designDoc(), editingSketch.id)));
   }
 
   /** Edits the sketch named in editingSketch with its tool, nothing clicked yet. */

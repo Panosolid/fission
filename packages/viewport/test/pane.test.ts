@@ -13,6 +13,7 @@ function fakeScene() {
     fit: () => (calls.push("scene.fit"), null),
     setView: () => (calls.push("scene.setView"), null),
     fitSelection: () => (calls.push("scene.fitSelection"), null),
+    lookAt: () => (calls.push("scene.lookAt"), null),
     setOverlay: (o) => void calls.push(`setOverlay ${o.id}`),
     clearOverlay: (id) => void calls.push(`clearOverlay ${id}`),
     showSelection: (h) => void calls.push(`showSelection faces ${h.faces.join(",")}`),
@@ -34,6 +35,7 @@ function fakeView(name: string, calls: string[]): PaneCamera {
     fit: () => (calls.push(`${name}.fit`), framed),
     setView: (v) => (calls.push(`${name}.setView ${v}`), framed),
     fitSelection: () => (calls.push(`${name}.fitSelection`), null),
+    lookAt: (p) => (calls.push(`${name}.lookAt ${p.normal.join(",")}`), framed),
     showImage: (image) => void calls.push(`${name}.showImage ${image.width}x${image.height}`),
     clearImage: () => void calls.push(`${name}.clearImage`),
   };
@@ -50,6 +52,7 @@ test("camera calls reach the pane's own view; scene calls reach the one viewer",
   assert.equal(right.setView("top")?.radius, 5);
   left.fit();
   right.fitSelection();
+  assert.equal(left.lookAt({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] })?.radius, 4);
   // The body's framing is the scene's, the same seen from either pane.
   assert.deepEqual(left.bodyFraming(), { centre: [1, 2, 3], radius: 4 });
   assert.deepEqual(right.bodyFraming(), left.bodyFraming());
@@ -58,7 +61,7 @@ test("camera calls reach the pane's own view; scene calls reach the one viewer",
   right.showSelection({ body: false, faces: [2, 5], edges: [] });
   left.showBody({} as never);
   // Never the scene's own camera: a pane must not turn another pane's view.
-  assert.deepEqual(calls, ["right.setView top", "left.fit", "right.fitSelection", "setOverlay stl", "clearOverlay stl", "showSelection faces 2,5", "showBody"]);
+  assert.deepEqual(calls, ["right.setView top", "left.fit", "right.fitSelection", "left.lookAt 0,0,1", "setOverlay stl", "clearOverlay stl", "showSelection faces 2,5", "showBody"]);
   assert.ok(!calls.some((c) => c.startsWith("scene.")));
 });
 

@@ -82,7 +82,9 @@ test("the drawings: the edited sketch with its grid, points and preview; the oth
   const doc = clicks(other.doc, { kind: "line", sketch: other.id, from: null }, [[0, 0], [0, 5]]).doc;
   const [first, second] = sketchDrawings(doc, { tool: drawn.tool, grid: 5, pointer: [20, 10] });
   assert.deepEqual(first.lines, [[[0, 0], [10, 0]], [[10, 0], [10, 10]]]);
-  assert.deepEqual(first.editing, { grid: 5, points: [[0, 0], [10, 0], [10, 10]], preview: [[[10, 10], [20, 10]]] });
+  assert.deepEqual(first.editing, { grid: 5, gridSnap: false, points: [[0, 0], [10, 0], [10, 10]], preview: [[[10, 10], [20, 10]]] });
+  // Grid snap on reaches the viewport, which then draws the snap grid's multiples (SF2).
+  assert.equal(sketchDrawings(doc, { tool: drawn.tool, grid: 5, pointer: null, gridSnap: true })[0].editing!.gridSnap, true);
   assert.deepEqual(first.plane.normal, [0, 0, 1]);
   assert.deepEqual(second, { plane: first.plane, lines: [[[0, 0], [0, 5]]] });
   // The pending first click is drawn as a point before it is one.

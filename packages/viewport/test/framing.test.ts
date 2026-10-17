@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { needsRefit, selectionFraming } from "../src/framing.ts";
+import { LOOK_AT_EMPTY_RADIUS, lookAtFraming, needsRefit, selectionFraming } from "../src/framing.ts";
 
 test("camera re-frames when the body stops fitting or becomes a speck", () => {
   const at = (x: number, y: number, z: number, radius: number) => ({ centre: [x, y, z] as [number, number, number], radius });
@@ -45,4 +45,19 @@ test("the selection is framed by a sphere around its own triangles and segments"
   assert.equal(selectionFraming(mesh, [0], []).centre[2], 0);
   assert.deepEqual(selectionFraming(mesh, [7], [3]), { centre: [0, 0, 0], radius: 0 });
   assert.deepEqual(selectionFraming(mesh, [], []), { centre: [0, 0, 0], radius: 0 });
+});
+
+test("hand-worked: Look At frames the box round the body's corners and the sketch's ends", () => {
+  // Corners (0, 0, 0) and (6, 8, 0): centre (3, 4, 0), diagonal 10, radius 5.
+  assert.deepEqual(lookAtFraming([[0, 0, 0], [6, 8, 0]], [9, 9, 9]), { centre: [3, 4, 0], radius: 5 });
+  // A sketch end out at (−6, 4, 0) widens it: x from −6 to 6, y 0 to 8: centre (0, 4, 0), radius √(144 + 64) / 2 = √52.
+  const wide = lookAtFraming([[0, 0, 0], [6, 8, 0], [-6, 4, 0]], [0, 0, 0]);
+  assert.deepEqual(wide.centre, [0, 4, 0]);
+  assert.ok(Math.abs(wide.radius - Math.sqrt(52)) < 1e-12);
+});
+
+test("Look At with nothing to frame, or one point, frames 50 mm round it; points that aren't numbers are skipped", () => {
+  assert.deepEqual(lookAtFraming([], [1, 2, 3]), { centre: [1, 2, 3], radius: LOOK_AT_EMPTY_RADIUS });
+  assert.deepEqual(lookAtFraming([[4, 4, 0], [4, 4, 0]], [0, 0, 0]), { centre: [4, 4, 0], radius: LOOK_AT_EMPTY_RADIUS });
+  assert.deepEqual(lookAtFraming([[NaN, 0, 0], [0, 0, 0], [6, 8, 0]], [0, 0, 0]), { centre: [3, 4, 0], radius: 5 });
 });
