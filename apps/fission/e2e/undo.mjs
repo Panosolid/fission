@@ -201,7 +201,7 @@ try {
     try {
       await clickCentre(page);
       const picked = await selection(page);
-      assert.match(picked, /^(face|edge):feature-1\/\d+$/, "a face or edge of the box at the centre of the view");
+      assert.match(picked, /^(face|edge):feature-1\/[a-z+:-]+$/, "a face or edge of the box at the centre of the view, by name");
       await page.fill("#width", "50");
       await volume(page, "30,000 mm³");
       assert.equal(await selection(page), picked, "a new width keeps the box's faces (17e)");
@@ -213,28 +213,41 @@ try {
       await page.click("#redo");
       await volume(page, "30,000 mm³");
       assert.equal(await selection(page), picked, "kept through Redo");
-      const [kind, index] = [picked.slice(0, picked.indexOf(":")), picked.split("/")[1]];
-      assert.match(await page.$eval("#viewport", (el) => el.dataset.highlight), new RegExp(`${kind}s ${index}( |$)`), "and drawn");
+      const kind = picked.slice(0, picked.indexOf(":"));
+      assert.match(await page.$eval("#viewport", (el) => el.dataset.highlight), new RegExp(`${kind}s \\d`), "and drawn");
     } finally {
       await page.close();
     }
   });
 
-  await check("undo to a different shape drops a face that is gone, with the note", async () => {
+  await check("undo to a different shape keeps a face of the same name and drops one that is gone, with the note", async () => {
     const page = await fresh();
     try {
       await page.click('[data-shape="cylinder"]');
       await shape(page, "cylinder");
       await clickCentre(page);
-      const picked = await selection(page);
-      assert.match(picked, /^(face|edge):feature-1\/\d+$/, "a face or edge of the cylinder");
-      await page.click("#undo"); // back to the box: 8 V · 12 E · 6 F, not the cylinder's faces
+      // The centre of the view is on the cylinder's top.
+      assert.equal(await selection(page), "face:feature-1/top", "the cylinder's top");
+      await page.click("#undo"); // back to the box: the same feature, which has a top too
       await shape(page, "box");
       await volume(page, "24,000 mm³");
-      // Face indices 0–2 exist on a box too, so only comparing with the cylinder it came from can tell they are other faces.
-      assert.equal(await selection(page), "", "the cylinder's face is not one of the box's");
-      assert.equal(await page.isVisible("#selection-note"), true);
-      assert.match(await page.textContent("#selection-note"), new RegExp(`^Taken out of the selection: ${picked[0].toUpperCase()}${picked.slice(1, picked.indexOf(":"))} ${picked.split("/")[1]}\\.`));
+      assert.equal(await selection(page), "face:feature-1/top", "the top is the box's top now");
+      assert.equal(await page.isVisible("#selection-note"), false);
+      await page.click('[data-shape="sphere"]');
+      await shape(page, "sphere");
+      // A sphere has no top: dropped by the change of shape, with the note.
+      assert.equal(await selection(page), "");
+      assert.equal(await page.textContent("#selection-note"), "Taken out of the selection: Top face. The edit took them off the body, so they could not be followed.");
+      await page.keyboard.press("Escape");
+      await clickCentre(page);
+      const half = await selection(page);
+      assert.match(half, /^face:feature-1\/(upper|lower)$/, "one of the sphere's halves");
+      await page.click("#undo"); // back to the box, which has no halves
+      await shape(page, "box");
+      await volume(page, "24,000 mm³");
+      assert.equal(await selection(page), "", "the sphere's half is not one of the box's faces");
+      const word = half.endsWith("upper") ? "Upper" : "Lower";
+      assert.equal(await page.textContent("#selection-note"), `Taken out of the selection: ${word} face. The edit took them off the body, so they could not be followed.`);
     } finally {
       await page.close();
     }
@@ -259,7 +272,7 @@ try {
       assert.equal(await fits(), before, "undo and redo framed nothing");
       // Still the top view: the centre of the view is the box's centre (20, 15) seen from above, on the +Z face (face 1).
       await clickCentre(page);
-      assert.equal(await selection(page), "face:feature-1/1", "the view is still the top view");
+      assert.equal(await selection(page), "face:feature-1/top", "the view is still the top view");
       // Another shape, undone: the user's shape change is framed (a new part), its undo is not, as long as
       // the box still fits the framing (box and L-bracket sit in the same place; box ↔ cylinder re-frames
       // because the cylinder sits elsewhere, the needsRefit rule edits use).

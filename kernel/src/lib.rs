@@ -102,6 +102,16 @@ pub struct BodyView {
     /// (`face_mass`).
     pub face_areas: Vec<f64>,
     pub face_centroids: Vec<[f64; 3]>,
+    /// The two faces each edge joins, by edge index (`edge_pair`): first the
+    /// face whose boundary runs along the edge's own direction (start to
+    /// end), then the face running it backwards; null for an edge not used
+    /// exactly once each way, which only a body that failed validation has.
+    /// Design names an edge by these faces (step 24c). An extrude's edge
+    /// between two sides runs from the start cap up to the end cap, so its
+    /// first face is the side before it going round the loop with the solid
+    /// on the left: counter-clockwise round the outline seen from the end
+    /// cap, clockwise round a hole.
+    pub edge_faces: Vec<Option<[usize; 2]>>,
     /// Empty when the body passed validation.
     pub errors: Vec<String>,
 }
@@ -134,7 +144,17 @@ fn view_parts(body: &Body, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
         face_roles: body.faces.iter().map(|f| f.role.map(FaceRoleOut::from)).collect(),
         face_areas: faces.iter().map(|m| m.area).collect(),
         face_centroids: faces.iter().map(|m| m.centroid.to_array()).collect(),
+        edge_faces: body.edge_faces().iter().map(|uses| edge_pair(uses)).collect(),
         errors,
+    }
+}
+
+/// The faces of an edge's two uses, the one running it forwards first, or
+/// None unless there are exactly two uses running opposite ways.
+fn edge_pair(uses: &[(topology::FaceId, topology::Coedge)]) -> Option<[usize; 2]> {
+    match uses {
+        [(f, c), (g, d)] if c.reversed != d.reversed => Some(if c.reversed { [*g, *f] } else { [*f, *g] }),
+        _ => None,
     }
 }
 
@@ -805,6 +825,165 @@ mod tests {
         assert_eq!(serde_json::to_string(&v.face_roles[start]).unwrap(), r#"{"role":"start"}"#);
         // A body built by hand has no roles.
         assert!(view_body(&fixtures::hand_cube()).unwrap().face_roles.iter().all(Option::is_none));
+    }
+
+    /// Each edge's two faces as role words ("side" with its loop and piece),
+    /// sorted, for a body the primitives or an extrude made.
+    fn edge_roles(v: &BodyView) -> Vec<[String; 2]> {
+        let word = |f: usize| {
+            let r = v.face_roles[f].as_ref().unwrap();
+            match (r.boundary, r.piece) {
+                (Some(b), Some(p)) => format!("side {b}.{p}"),
+                _ => r.role.to_string(),
+            }
+        };
+        let mut pairs: Vec<[String; 2]> = v.edge_faces.iter().map(|p| p.unwrap()).map(|[f, g]| [word(f), word(g)]).collect();
+        pairs.sort();
+        pairs
+    }
+
+    #[test]
+    fn each_edge_joins_two_faces_worked_by_hand() {
+        // A box's 12 edges each join two faces at right angles: the bottom
+        // and the top with each of front, back, left and right (8), and
+        // front and back with left and right (4); never two opposite faces.
+        // Which comes first depends only on which way the edge runs, so the
+        // check here is on each pair as a set.
+        let v = view_of(BodySpec::Box { width: 40.0, depth: 30.0, height: 20.0 }).unwrap();
+        let mut sets: Vec<[String; 2]> = edge_roles(&v).into_iter().map(|mut p| { p.sort(); p }).collect();
+        sets.sort();
+        let mut want: Vec<[String; 2]> = vec![];
+        for cap in ["bottom", "top"] {
+            for wall in ["back", "front", "left", "right"] {
+                let mut p = [cap.to_string(), wall.to_string()];
+                p.sort();
+                want.push(p);
+            }
+        }
+        for a in ["back", "front"] {
+            for b in ["left", "right"] {
+                want.push([a.to_string(), b.to_string()]);
+            }
+        }
+        want.sort();
+        assert_eq!(sets, want);
+        // A cylinder: its two rims, bottom with the side and the side with
+        // the top (no seam edge). A sphere: one edge, the equator.
+        let v = view_of(BodySpec::Cylinder { radius: 1.0, height: 2.0 }).unwrap();
+        let mut sets: Vec<[String; 2]> = edge_roles(&v).into_iter().map(|mut p| { p.sort(); p }).collect();
+        sets.sort();
+        assert_eq!(sets, [["bottom".to_string(), "side".to_string()], ["side".to_string(), "top".to_string()]]);
+        let v = view_of(BodySpec::Sphere { radius: 3.0 }).unwrap();
+        let mut sets: Vec<[String; 2]> = edge_roles(&v).into_iter().map(|mut p| { p.sort(); p }).collect();
+        sets.sort();
+        assert_eq!(sets, [["lower".to_string(), "upper".to_string()]]);
+    }
+
+    /// An upright edge: the corner it stands on, and its two faces as (loop, piece).
+    type Upright = ([f64; 2], [(usize, usize); 2]);
+
+    /// For an extrude of these loops by 10: each upright edge (from the
+    /// start cap to the end cap) by the corner it stands on, with its two
+    /// faces as (loop, piece), first face first.
+    fn uprights(outer: Vec<f64>, bulges: Vec<f64>, holes: Vec<Vec<f64>>) -> Vec<Upright> {
+        let holes = holes.into_iter().map(|corners| BoundaryIn::Path { corners, bulges: vec![] }).collect();
+        let profile = profile_from_input(ProfileIn { outer: BoundaryIn::Path { corners: outer, bulges }, holes }).unwrap();
+        let body = ops::extrude::extrude(&profile, 10.0).unwrap();
+        let v = view_body(&body).unwrap();
+        let piece = |f: usize| {
+            let r = v.face_roles[f].as_ref().unwrap();
+            (r.boundary.unwrap(), r.piece.unwrap())
+        };
+        let mut out = vec![];
+        for (e, edge) in body.edges.iter().enumerate() {
+            let (a, b) = (body.vertices[edge.start].point, body.vertices[edge.end].point);
+            if a.z == b.z {
+                continue; // on a cap
+            }
+            // Every upright runs up, from the start cap to the end cap.
+            assert_eq!((a.z, b.z, a.x, a.y), (0.0, 10.0, b.x, b.y), "edge {e}");
+            let [f, g] = v.edge_faces[e].unwrap();
+            out.push(([a.x, a.y], [piece(f), piece(g)]));
+        }
+        out.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap());
+        out
+    }
+
+    #[test]
+    fn an_upright_edge_names_the_side_before_it_first_worked_by_hand() {
+        // A 40 × 30 rectangle given counter-clockwise: piece 0 runs (0, 0)
+        // to (40, 0), 1 up the right, 2 back along the top, 3 down the left.
+        // Going round with the solid on the left, seen from the end cap,
+        // the corner (40, 0) comes after piece 0 and before piece 1, and so
+        // on round.
+        let ccw = vec![0.0, 0.0, 40.0, 0.0, 40.0, 30.0, 0.0, 30.0];
+        assert_eq!(
+            uprights(ccw, vec![], vec![]),
+            [([0.0, 0.0], [(0, 3), (0, 0)]), ([0.0, 30.0], [(0, 2), (0, 3)]), ([40.0, 0.0], [(0, 0), (0, 1)]), ([40.0, 30.0], [(0, 1), (0, 2)])]
+        );
+        // The same rectangle given clockwise from (0, 0): piece 0 runs up
+        // the left, 1 along the top, 2 down the right, 3 back along the
+        // bottom. Counter-clockwise, (40, 0) comes after the bottom (piece
+        // 3) and before the right (piece 2): the given order is turned, the
+        // pieces keep their given numbers.
+        let cw = vec![0.0, 0.0, 0.0, 30.0, 40.0, 30.0, 40.0, 0.0];
+        assert_eq!(
+            uprights(cw, vec![], vec![]),
+            [([0.0, 0.0], [(0, 0), (0, 3)]), ([0.0, 30.0], [(0, 1), (0, 0)]), ([40.0, 0.0], [(0, 3), (0, 2)]), ([40.0, 30.0], [(0, 2), (0, 1)])]
+        );
+        // A half disc of radius 5: piece 0 the line (−5, 0) to (5, 0), piece
+        // 1 the arc back over the top (bulge 1, a half turn). Its two sides
+        // meet twice, so only the order tells the uprights apart: at (5, 0)
+        // the line comes first, at (−5, 0) the arc.
+        assert_eq!(
+            uprights(vec![-5.0, 0.0, 5.0, 0.0], vec![0.0, 1.0], vec![]),
+            [([-5.0, 0.0], [(0, 1), (0, 0)]), ([5.0, 0.0], [(0, 0), (0, 1)])]
+        );
+        // A square hole (10, 10) to (20, 20) given counter-clockwise in a 30
+        // × 30 plate: pieces 0 bottom, 1 right, 2 top, 3 left. With the
+        // solid on the left the hole is walked clockwise, every piece
+        // backwards: (10, 10) up the left to (10, 20), along the top to
+        // (20, 20), down the right, back along the bottom. So (10, 20) comes
+        // after piece 3 and before piece 2, and (10, 10) after piece 0 and
+        // before piece 3.
+        let plate = vec![0.0, 0.0, 30.0, 0.0, 30.0, 30.0, 0.0, 30.0];
+        let hole = vec![10.0, 10.0, 20.0, 10.0, 20.0, 20.0, 10.0, 20.0];
+        let got: Vec<_> = uprights(plate, vec![], vec![hole]).into_iter().filter(|(_, p)| p[0].0 == 1).collect();
+        assert_eq!(
+            got,
+            [([10.0, 10.0], [(1, 0), (1, 3)]), ([10.0, 20.0], [(1, 3), (1, 2)]), ([20.0, 10.0], [(1, 1), (1, 0)]), ([20.0, 20.0], [(1, 2), (1, 1)])]
+        );
+    }
+
+    #[test]
+    fn an_edge_not_used_once_each_way_has_no_pair() {
+        // The hand-built cube: every edge used once each way.
+        let cube = fixtures::hand_cube();
+        let pairs = |b: &Body| b.edge_faces().iter().map(|u| edge_pair(u)).collect::<Vec<_>>();
+        assert!(pairs(&cube).iter().all(Option::is_some));
+        // Broken on purpose: a face taken away leaves its four edges used
+        // once; the other eight keep their pairs.
+        let mut open = cube.clone();
+        open.faces.pop();
+        let p = pairs(&open);
+        assert_eq!((p.iter().filter(|x| x.is_none()).count(), p.len()), (4, 12));
+        // One use flipped: that edge is used twice the same way.
+        let mut flipped = cube.clone();
+        let c = &mut flipped.faces[0].loops[0].coedges[0];
+        c.reversed = !c.reversed;
+        let e = c.edge;
+        assert_eq!(pairs(&flipped)[e], None);
+        // A third use: a loop listed twice.
+        let mut thrice = cube.clone();
+        let again = thrice.faces[0].loops[0].clone();
+        thrice.faces[0].loops.push(again);
+        assert_eq!(pairs(&thrice)[e], None);
+        // And the order: the face running the edge forwards comes first,
+        // whichever way round the uses are listed.
+        let fwd = topology::Coedge { edge: 0, reversed: false };
+        let rev = topology::Coedge { edge: 0, reversed: true };
+        assert_eq!(edge_pair(&[(3, fwd), (5, rev)]), Some([3, 5]));
+        assert_eq!(edge_pair(&[(3, rev), (5, fwd)]), Some([5, 3]));
     }
 
     #[test]

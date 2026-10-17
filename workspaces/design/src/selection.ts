@@ -4,30 +4,36 @@
 
 import type { BodyView, GeometryReference, ViewportHighlight } from "@fission/core";
 import { profileLabel, type ReadyProfile } from "./document.ts";
-import { readDesignReference, readProfileReference } from "./references.ts";
+import type { BodyNames } from "./naming.ts";
+import { readDesignReference, readProfileReference, resolveReference } from "./references.ts";
 
 /**
- * The viewport highlight for these items on the body `featureId` built.
- * References to other bodies, or not built by `designReference` (a
- * profile among them: it is not part of the body), draw nothing.
+ * The viewport highlight for these items on the body `featureId` built,
+ * whose faces and edges `names` names (null before one is built). Faces
+ * and edges not on it, other bodies, and references not built by
+ * `designReference` (a profile among them: it is not part of the body),
+ * draw nothing.
  */
-export function highlightOf(items: readonly GeometryReference[], featureId: string): ViewportHighlight {
+export function highlightOf(items: readonly GeometryReference[], featureId: string, names: BodyNames | null): ViewportHighlight {
   const highlight = { body: false, faces: [] as number[], edges: [] as number[] };
   for (const item of items) {
     const r = readDesignReference(item);
-    if (r?.featureId !== featureId) continue;
-    if (r.kind === "body") highlight.body = true;
-    else (r.kind === "face" ? highlight.faces : highlight.edges).push(r.index!);
+    if (r === null) continue;
+    if (r.kind === "body") highlight.body ||= r.featureId === featureId;
+    else {
+      const i = resolveReference(item, names);
+      if (i !== null) (r.kind === "face" ? highlight.faces : highlight.edges).push(i);
+    }
   }
   return highlight;
 }
 
 export interface SelectionRow {
-  /** "Body 1", "Face 3", "Edge 4": the kind and kernel index, numbered from 0 like the ids; a profile's name. */
+  /** "Body 1", "Top face", "Side face of line-4", "Edge of Top and Front": the kind and its name; a profile's name. */
   name: string;
   /** The body's kind, or the face's surface or the edge's curve type, from the last built body. */
   type: string;
-  /** The placeholder id, shown so the user sees what is stored. */
+  /** The stable name, shown so the user sees what is stored. */
   id: string;
 }
 
@@ -36,50 +42,57 @@ export const NOT_ON_BODY = "not on the current body";
 /** Said for a selected outline that is not one of the document's profiles. */
 export const NOT_IN_DESIGN = "not in the design";
 
+/** A face's name part in words: "top" → "Top", "side:line-4" → "Side of line-4". */
+function faceWords(part: string): string {
+  const [role, curve] = part.split(":");
+  const word = role[0].toUpperCase() + role.slice(1);
+  return curve === undefined ? word : `${word} of ${decodeURIComponent(curve)}`;
+}
+
+/** What a face or edge reference is called in the selection list and the note: "Top face", "Edge of Side of line-4 and Start". */
+export function referenceLabel(ref: GeometryReference): string {
+  const r = readDesignReference(ref);
+  if (r === null || r.part === undefined) return ref.kind[0].toUpperCase() + ref.kind.slice(1);
+  if (r.kind === "face") return `${faceWords(r.part)} face`;
+  const [a, b] = r.part.split(/[+>]/);
+  return `Edge of ${faceWords(a)} and ${faceWords(b)}`;
+}
+
 /**
- * One row per selected item, in selection order. `view` is the last built
- * body (null before the first build): a face or edge index it does not
- * have, or a reference to another feature's body, says so instead of a type.
- * A profile is named from `profiles` (the document's), as the browser names
- * it, of type "outline"; one the document no longer has says so.
+ * One row per selected item, in selection order. `view` and `names` are
+ * the last built body's (null before the first build): a face or edge it
+ * does not have, or a reference to another feature's body, says so instead
+ * of a type. A profile is named from `profiles` (the document's), as the
+ * browser names it, of type "outline"; one the document no longer has says so.
  */
-export function selectionRows(items: readonly GeometryReference[], featureId: string, view: BodyView | null, profiles: readonly ReadyProfile[] = []): SelectionRow[] {
+export function selectionRows(items: readonly GeometryReference[], featureId: string, view: BodyView | null, names: BodyNames | null, profiles: readonly ReadyProfile[] = []): SelectionRow[] {
   return items.map((item) => {
     if (item.kind === "outline") {
       const profile = profiles.find((p) => p.id === readProfileReference(item));
       return profile ? { name: profileLabel(profile), type: "outline", id: item.id } : { name: "Outline", type: NOT_IN_DESIGN, id: item.id };
     }
     const r = readDesignReference(item);
-    const kind = item.kind[0].toUpperCase() + item.kind.slice(1);
-    if (!r) return { name: kind, type: NOT_ON_BODY, id: item.id };
+    if (!r) return { name: referenceLabel(item), type: NOT_ON_BODY, id: item.id };
     if (r.kind === "body") return { name: "Body 1", type: r.featureId === featureId ? "solid" : NOT_ON_BODY, id: item.id };
+    const i = resolveReference(item, names);
     const types = r.kind === "face" ? view?.face_types : view?.edge_types;
-    const type = r.featureId === featureId && types ? types[r.index!] : undefined;
-    return { name: `${kind} ${r.index}`, type: type ?? (view ? NOT_ON_BODY : "…"), id: item.id };
+    const type = i !== null && types ? types[i] : undefined;
+    return { name: referenceLabel(item), type: type ?? (view ? NOT_ON_BODY : "…"), id: item.id };
   });
 }
 
 /**
- * What survives a rebuild (17e). Until topological naming (step 24) a face
- * or edge is only its kernel index, so it is kept when the rebuilt body
- * still has that index with the same surface or curve type, on a body with
- * the same numbers of vertices, edges and faces as `before` (a resize keeps
- * them; a change of shape renumbers everything). `before` is null when no
- * earlier body is known (first build, or back from another workspace):
- * then the index and nothing else is checked. Body references to `featureId`
- * stay; references this function cannot read, or to another feature, are
- * left alone (not Design's to judge here). A profile (an outline reference
- * Design built) is kept while `profileIds` has it: a change to a shape
- * with no profile, a box, drops it.
+ * What survives a rebuild (17e, by name from step 24c): a face or edge of
+ * the rebuilt body's feature is kept while the new body has a face or
+ * edge of that name, whatever the kernel now numbers it (a resize, a corner
+ * moved, the outline walked from another line), and dropped when its face
+ * is gone (its sketch curve deleted, a box turned into a cylinder, which
+ * has no front). Body references stay; references this function cannot
+ * read, or to another feature, are left alone (not Design's to judge here).
+ * A profile (an outline reference Design built) is kept while `profileIds`
+ * has it: a change to a shape with no profile, a box, drops it.
  */
-export function survivors(
-  items: readonly GeometryReference[],
-  featureId: string,
-  before: BodyView | null,
-  after: BodyView,
-  profileIds: readonly string[] = [],
-): { kept: GeometryReference[]; dropped: GeometryReference[] } {
-  const sameTopology = before === null || (before.vertices === after.vertices && before.edges === after.edges && before.faces === after.faces);
+export function survivors(items: readonly GeometryReference[], names: BodyNames, profileIds: readonly string[] = []): { kept: GeometryReference[]; dropped: GeometryReference[] } {
   const kept: GeometryReference[] = [];
   const dropped: GeometryReference[] = [];
   for (const item of items) {
@@ -87,11 +100,7 @@ export function survivors(
     let keep = true;
     const profile = readProfileReference(item);
     if (profile !== null) keep = profileIds.includes(profile);
-    else if (r && r.featureId === featureId && r.kind !== "body") {
-      const types = (v: BodyView) => (r.kind === "face" ? v.face_types : v.edge_types);
-      const now = types(after)[r.index!];
-      keep = now !== undefined && sameTopology && (before === null || types(before)[r.index!] === now);
-    }
+    else if (r && r.featureId === names.feature && r.kind !== "body") keep = resolveReference(item, names) !== null;
     (keep ? kept : dropped).push(item);
   }
   return { kept, dropped };
@@ -100,13 +109,9 @@ export function survivors(
 /** The visible note for references a rebuild dropped ("" when none were). */
 export function droppedNote(dropped: readonly GeometryReference[]): string {
   if (dropped.length === 0) return "";
-  const names = dropped.map((d) => {
-    if (readProfileReference(d) !== null) return "the profile";
-    const r = readDesignReference(d);
-    return r ? `${d.kind[0].toUpperCase()}${d.kind.slice(1)} ${r.index}` : d.id;
-  });
+  const names = dropped.map((d) => (readProfileReference(d) !== null ? "the profile" : referenceLabel(d)));
   const why = [
-    ...(dropped.some((d) => d.kind !== "outline") ? ["The edit renumbered the body's faces and edges, so these could not be followed."] : []),
+    ...(dropped.some((d) => d.kind !== "outline") ? ["The edit took them off the body, so they could not be followed."] : []),
     ...(dropped.some((d) => d.kind === "outline") ? ["The part has no profile now."] : []),
   ];
   return `Taken out of the selection: ${names.join(", ")}. ${why.join(" ")}`;

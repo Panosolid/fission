@@ -26,6 +26,15 @@ export interface BodyView {
   /** Each face's exact area (mm²) and centroid [x, y, z] (mm), by kernel face index. */
   face_areas: number[];
   face_centroids: [number, number, number][];
+  /**
+   * The two faces each edge joins, by kernel edge index (step 24c): first
+   * the face running the edge forwards, then the one running it backwards;
+   * null for an edge not used exactly once each way (only in a body that
+   * failed validation). An extrude's edge between two sides lists first the
+   * side before it going round the loop with the solid on the left
+   * (counter-clockwise round the outline seen from the end cap).
+   */
+  edge_faces: ([number, number] | null)[];
   errors: string[];
 }
 

@@ -129,17 +129,17 @@ try {
     const top = screen([20, 15, 20]); // centre of the +Z face: face 1
     const front = screen([20, 0, 10]); // centre of the −Y face: face 2
     await page.mouse.click(top.x, top.y);
-    assert.equal(await selection(), "face:feature-1/1", "a click on the top face selects face 1");
+    assert.equal(await selection(), "face:feature-1/top", "a click on the top face selects face 1");
     await page.keyboard.down("Shift");
     await page.mouse.click(front.x, front.y);
     await page.keyboard.up("Shift");
-    assert.equal(await selection(), "face:feature-1/1 face:feature-1/2", "Shift-click adds the front face");
+    assert.equal(await selection(), "face:feature-1/top face:feature-1/front", "Shift-click adds the front face");
     // A press that moves 30 px is the camera orbiting, not a pick: nothing changes.
     await page.mouse.move(front.x, front.y);
     await page.mouse.down();
     await page.mouse.move(front.x + 30, front.y, { steps: 5 });
     await page.mouse.up();
-    assert.equal(await selection(), "face:feature-1/1 face:feature-1/2", "a drag does not pick");
+    assert.equal(await selection(), "face:feature-1/top face:feature-1/front", "a drag does not pick");
     await page.mouse.click(box.x + 0.02 * box.width, box.y + 0.02 * box.height);
     assert.equal(await selection(), "", "a click on empty space clears");
     await page.mouse.click(top.x, top.y);
@@ -162,19 +162,19 @@ try {
     const topFront = screen([20, 0, 20]);
     const upright = screen([40, 0, 10]);
     await page.mouse.click(topFront.x, topFront.y);
-    assert.equal(await selection(), "edge:feature-1/4", "a click on the top front edge selects edge 4");
+    assert.equal(await selection(), "edge:feature-1/front+top", "a click on the top front edge selects edge 4");
     await page.keyboard.down("Shift");
     await page.mouse.click(upright.x + 2, upright.y); // 2 px off the line still picks it
     await page.keyboard.up("Shift");
-    assert.equal(await selection(), "edge:feature-1/4 edge:feature-1/8", "Shift-click adds the upright");
+    assert.equal(await selection(), "edge:feature-1/front+top edge:feature-1/front+right", "Shift-click adds the upright");
     // 3 px from the top front edge, towards the top face's middle: the edge still wins over the face.
     const inward = { x: top.x - topFront.x, y: top.y - topFront.y };
     const along = (d) => ({ x: topFront.x + (inward.x / Math.hypot(inward.x, inward.y)) * d, y: topFront.y + (inward.y / Math.hypot(inward.x, inward.y)) * d });
     await page.mouse.click(along(3).x, along(3).y);
-    assert.equal(await selection(), "edge:feature-1/4", "3 px off the edge picks the edge");
+    assert.equal(await selection(), "edge:feature-1/front+top", "3 px off the edge picks the edge");
     // 20 px in is well inside the top face.
     await page.mouse.click(along(20).x, along(20).y);
-    assert.equal(await selection(), "face:feature-1/1", "20 px off the edge picks the face");
+    assert.equal(await selection(), "face:feature-1/top", "20 px off the edge picks the face");
     // The back left edge along the floor, corner 0 (0,0,0) to 2 (0,30,0)
     // (edge 0), is hidden: going from its middle (0,15,0) towards the
     // camera, along (0.6,−0.8,0.55), y reaches 0 after 15/0.8 = 18.75 steps,
@@ -182,7 +182,7 @@ try {
     // edges, so the line of sight leaves through the −Y face (face 2).
     const hidden = screen([0, 15, 0]);
     await page.mouse.click(hidden.x, hidden.y);
-    assert.equal(await selection(), "face:feature-1/2", "a hidden edge is not picked; the face in front is");
+    assert.equal(await selection(), "face:feature-1/front", "a hidden edge is not picked; the face in front is");
     await page.keyboard.press("Escape");
     // Put the camera back where fit() left it for the checks below.
     await page.click("#toolbar [data-shape=cylinder]");
@@ -218,7 +218,7 @@ try {
     assert.ok(green(selectedTop) > green(plainTop) + 40, `selected top face ${selectedTop} is green, was ${plainTop}`);
     assert.deepEqual(await colourAt(front), plainFront, "the front face is not selected");
     assert.equal(await viewport("highlight"), "faces 1 edges ");
-    assert.deepEqual(await listed(), ["Face 1 · plane face:feature-1/1"]);
+    assert.deepEqual(await listed(), ["Top face · plane face:feature-1/top"]);
     assert.deepEqual(await lit(), []);
 
     // Hover: the front face lights up less than a selected one, and goes back on leaving.
@@ -234,7 +234,7 @@ try {
     await page.mouse.click(at([20, 0, 20]).x, at([20, 0, 20]).y);
     await away();
     assert.equal(await viewport("highlight"), "faces  edges 4");
-    assert.deepEqual(await listed(), ["Edge 4 · line edge:feature-1/4"]);
+    assert.deepEqual(await listed(), ["Edge of Front and Top · line edge:feature-1/front+top"]);
     assert.deepEqual(await colourAt(top), plainTop, "the face is no longer selected");
 
     // Body 1 in the browser selects the whole body: every face tinted, its row lit.
@@ -247,7 +247,7 @@ try {
     await page.keyboard.down("Shift");
     await page.mouse.click(at(top).x, at(top).y);
     await page.keyboard.up("Shift");
-    assert.deepEqual(await listed(), ["Body 1 · solid body:feature-1", "Face 1 · plane face:feature-1/1"]);
+    assert.deepEqual(await listed(), ["Body 1 · solid body:feature-1", "Top face · plane face:feature-1/top"]);
     await page.mouse.click(at(top).x, at(top).y);
     assert.deepEqual(await lit(), []);
     await page.keyboard.press("Escape");
@@ -259,8 +259,8 @@ try {
     await page.keyboard.press("Escape");
   });
 
-  // 17e: until topological naming (step 24) a face or edge is its kernel
-  // index, kept only while the rebuilt body is numbered the same way.
+  // 17e, by name since step 24c: a face or edge is kept while the rebuilt
+  // body has one of that name, however the kernel numbers it.
   const selected = () => page.evaluate(() => document.body.dataset.selection ?? "");
   const pickTopAndEdge = async () => {
     const box = await page.locator("#viewport canvas").boundingBox();
@@ -271,7 +271,7 @@ try {
     await page.mouse.click(topFront.x, topFront.y);
     await page.keyboard.up("Shift");
     await page.mouse.move(box.x + 2, box.y + 2);
-    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4");
+    assert.equal(await selected(), "face:feature-1/top edge:feature-1/front+top");
   };
 
   await check("the selection survives a resize, and a change of shape drops its faces and edges with a note", async () => {
@@ -279,18 +279,21 @@ try {
     await setSize("width", 44);
     // V = 44·30·20 = 26400: the box rebuilt, still 8 V · 12 E · 6 F.
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "26,400 mm³");
-    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4", "a resize keeps face 1 and edge 4");
+    assert.equal(await selected(), "face:feature-1/top edge:feature-1/front+top", "a resize keeps face 1 and edge 4");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges 4");
     assert.equal(await page.isVisible("#selection-note"), false);
     await page.keyboard.down("Shift");
     await page.click("#browser [data-node=body-1]");
     await page.keyboard.up("Shift");
-    // A cylinder is 2 V · 2 E · 3 F: the box's face 1 and edge 4 cannot be followed; the body can.
+    // A cylinder (the same feature, changed) has a top but no front: the
+    // box's top stays selected, now the cylinder's top (kernel face 1 again),
+    // the top front edge goes with a note; the body stays.
     await page.click("#toolbar [data-shape=cylinder]");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
-    assert.equal(await selected(), "body:feature-1");
+    assert.equal(await selected(), "face:feature-1/top body:feature-1");
+    assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "body faces 1 edges ");
     assert.equal(await page.isVisible("#selection-note"), true);
-    assert.match(await page.textContent("#selection-note"), /^Taken out of the selection: Face 1, Edge 4\./);
+    assert.equal(await page.textContent("#selection-note"), "Taken out of the selection: Edge of Front and Top. The edit took them off the body, so they could not be followed.");
     await page.screenshot({ path: "e2e/selection-dropped.png" });
     await page.keyboard.press("Escape");
     assert.equal(await page.isVisible("#selection-note"), false, "the next change of selection retires the note");
@@ -304,12 +307,12 @@ try {
     await pickTopAndEdge();
     await page.click("[data-workspace=laser]");
     assert.equal(await page.isVisible(".placeholder h2"), true);
-    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4", "kept while Laser is shown");
+    assert.equal(await selected(), "face:feature-1/top edge:feature-1/front+top", "kept while Laser is shown");
     await page.click("[data-workspace=design]");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
-    assert.equal(await selected(), "face:feature-1/1 edge:feature-1/4");
+    assert.equal(await selected(), "face:feature-1/top edge:feature-1/front+top");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges 4");
-    assert.deepEqual(await page.$$eval("#selection-list li", (els) => els.map((e) => e.textContent)), ["Face 1 · plane face:feature-1/1", "Edge 4 · line edge:feature-1/4"]);
+    assert.deepEqual(await page.$$eval("#selection-list li", (els) => els.map((e) => e.textContent)), ["Top face · plane face:feature-1/top", "Edge of Front and Top · line edge:feature-1/front+top"]);
     assert.equal(await page.isVisible("#selection-note"), false);
     await page.keyboard.press("Escape");
   });
@@ -354,7 +357,7 @@ try {
     // ray there passes the box and meets the floor, not the body.
     for (const p of [[-2, 15, 20], [42, 15, 20], [20, 32, 20], [20, -2, 20]]) assert.ok(!isBody(await sample(TOP, p)), `top: ${p} is off the box`);
     await page.screenshot({ path: "e2e/view-top.png" });
-    await pickAt(TOP, [20, 15, 20], "face:feature-1/1");
+    await pickAt(TOP, [20, 15, 20], "face:feature-1/top");
 
     // Front: from −Y with Z up. The camera looks at (20, 15, 10) along +Y,
     // and the front face's centre (20, 0, 10) lies on that line of sight,
@@ -365,20 +368,20 @@ try {
     assert.ok(screenPoint(box, [40, 0, 10], FRONT).x > fc.x && screenPoint(box, [20, 0, 20], FRONT).y < fc.y);
     for (const p of [[1, 0, 10], [39, 0, 10], [20, 0, 19], [20, 0, 1]]) assert.ok(isBody(await sample(FRONT, p)), `front: ${p} is on the face`);
     for (const p of [[-2, 0, 10], [42, 0, 10]]) assert.ok(!isBody(await sample(FRONT, p)), `front: ${p} is off the box`);
-    await pickAt(FRONT, [20, 0, 10], "face:feature-1/2");
-    await pickAt(FRONT, [35, 0, 10], "face:feature-1/2");
+    await pickAt(FRONT, [20, 0, 10], "face:feature-1/front");
+    await pickAt(FRONT, [35, 0, 10], "face:feature-1/front");
 
     // Right: from +X, Z up, +Y to the right: the 30 × 20 +X face (face 5).
     await clickView("right");
     assert.ok(screenPoint(box, [40, 30, 10], RIGHT).x > screenPoint(box, [40, 0, 10], RIGHT).x, "+Y to the right");
     for (const p of [[40, 1, 10], [40, 29, 10]]) assert.ok(isBody(await sample(RIGHT, p)), `right: ${p} is on the face`);
     for (const p of [[40, -2, 10], [40, 32, 10]]) assert.ok(!isBody(await sample(RIGHT, p)), `right: ${p} is off the box`);
-    await pickAt(RIGHT, [40, 15, 10], "face:feature-1/5");
-    await pickAt(RIGHT, [40, 25, 5], "face:feature-1/5");
+    await pickAt(RIGHT, [40, 15, 10], "face:feature-1/right");
+    await pickAt(RIGHT, [40, 25, 5], "face:feature-1/right");
 
     // Home brings back the view every other check's positions assume.
     await clickView("home");
-    await pickAt(HOME, [20, 15, 20], "face:feature-1/1");
+    await pickAt(HOME, [20, 15, 20], "face:feature-1/top");
 
     // Fit with the top face selected frames that face from the current
     // (home) direction: a sphere at (20, 15, 20) with r = √(40² + 30²)/2
@@ -386,7 +389,7 @@ try {
     const TOP_FACE = { ...HOME, centre: [20, 15, 20], radius: 25 };
     const tc = screenPoint(box, [20, 15, 20], HOME);
     await page.mouse.click(tc.x, tc.y);
-    assert.equal(await selection(), "face:feature-1/1");
+    assert.equal(await selection(), "face:feature-1/top");
     await clickView("fit");
     await page.screenshot({ path: "e2e/view-fit-face.png" });
     const fitted = screenPoint(box, [20, 15, 20], TOP_FACE);
@@ -397,13 +400,13 @@ try {
     for (const p of [[20, 15, 20], [39.5, 0.5, 20], [0.5, 29.5, 20]]) assert.ok(isBody(await sample(TOP_FACE, p)), `fit: ${p} is on the face`);
     await page.keyboard.press("Escape");
     await page.mouse.click(fitted.x, fitted.y);
-    assert.equal(await selection(), "face:feature-1/1", "picking works in the fitted view");
+    assert.equal(await selection(), "face:feature-1/top", "picking works in the fitted view");
     // Nothing selected: Fit frames the whole body from home, as fit() does.
     await page.keyboard.press("Escape");
     await clickView("top");
     await clickView("fit");
-    await pickAt(HOME, [20, 15, 20], "face:feature-1/1");
-    await pickAt(HOME, [20, 0, 10], "face:feature-1/2");
+    await pickAt(HOME, [20, 15, 20], "face:feature-1/top");
+    await pickAt(HOME, [20, 0, 10], "face:feature-1/front");
   });
 
   await check("the view cube turns the camera like the View buttons and never picks", async () => {
@@ -435,7 +438,7 @@ try {
     // A face is selected; clicking the cube must not pick (which would change it).
     const top = screenPoint(box, [20, 15, 20]);
     await page.mouse.click(top.x, top.y);
-    assert.equal(await selection(), "face:feature-1/1");
+    assert.equal(await selection(), "face:feature-1/top");
 
     // The screen from the Top button, for comparison (whole canvas, cube included).
     await page.click("#view-controls [data-view=top]");
@@ -455,7 +458,7 @@ try {
     await page.mouse.click(topFace.x, topFace.y);
     await settle();
     assert.ok((await canvasImage()) === fromButton, "the cube's Top gives the Top button's camera");
-    assert.equal(await selection(), "face:feature-1/1", "the cube click did not pick");
+    assert.equal(await selection(), "face:feature-1/top", "the cube click did not pick");
 
     await page.click("#view-controls [data-view=home]");
     await settle();
@@ -468,7 +471,7 @@ try {
     // The camera now looks from (1, −1, 1): the top face and the front face pick where that view puts them.
     const CORNER = { ...HOME, toward: [1, -1, 1] };
     await page.keyboard.press("Escape");
-    for (const [p, expected] of [[[20, 15, 20], "face:feature-1/1"], [[20, 0, 10], "face:feature-1/2"]]) {
+    for (const [p, expected] of [[[20, 15, 20], "face:feature-1/top"], [[20, 0, 10], "face:feature-1/front"]]) {
       const s = screenPoint(box, p, CORNER);
       await page.mouse.click(s.x, s.y);
       assert.equal(await selection(), expected, `corner view: pick at ${p}`);
@@ -516,7 +519,7 @@ try {
     // Still Front: (20, 0, 10) picks the front face.
     const s = screenPoint(box, [20, 0, 10], FRONT);
     await page.mouse.click(s.x, s.y);
-    assert.equal(await page.evaluate(() => document.body.dataset.selection ?? ""), "face:feature-1/2");
+    assert.equal(await page.evaluate(() => document.body.dataset.selection ?? ""), "face:feature-1/front");
     await page.keyboard.press("Escape");
     await page.click("#view-controls [data-view=home]");
     await settle();
@@ -1008,7 +1011,7 @@ try {
       const box = await phone.locator("#viewport canvas").boundingBox();
       const top = screenPoint(box, [20, 15, 20]); // face 1 (framed to the narrower, horizontal fov)
       await phone.touchscreen.tap(top.x, top.y);
-      assert.equal(await phone.evaluate(() => document.body.dataset.selection ?? ""), "face:feature-1/1");
+      assert.equal(await phone.evaluate(() => document.body.dataset.selection ?? ""), "face:feature-1/top");
       await phone.screenshot({ path: "e2e/design-375-tap.png" });
       // A tap on empty space clears, as a click does.
       await phone.touchscreen.tap(box.x + 4, box.y + 4);
@@ -1449,13 +1452,13 @@ try {
       // click in the second view picks the same shared body.
       const topInMain = screenPoint(mainBox, [20, 15, 20]);
       await wide.mouse.click(topInMain.x, topInMain.y);
-      assert.equal(await selected(), "face:feature-1/1");
+      assert.equal(await selected(), "face:feature-1/top");
       assert.equal(await wide.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges ");
       assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.highlight), "faces 1 edges ");
       await wide.keyboard.press("Escape");
       assert.equal(await selected(), "");
       await wide.mouse.click(topInSplit.x, topInSplit.y);
-      assert.equal(await selected(), "face:feature-1/1", "picked through the second view");
+      assert.equal(await selected(), "face:feature-1/top", "picked through the second view");
       assert.equal(await wide.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges ");
       await wide.keyboard.press("Escape");
 
@@ -1477,7 +1480,7 @@ try {
       assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.shape), "box");
       assert.deepEqual(await wide.$$eval("#split-choice option", (os) => os.map((o) => o.value)).then((v) => v.includes("slice")), false);
       await wide.mouse.click(topInMain.x, topInMain.y);
-      assert.equal(await selected(), "face:feature-1/1", "Design picks from either view while it is in the second pane");
+      assert.equal(await selected(), "face:feature-1/top", "Design picks from either view while it is in the second pane");
       await wide.keyboard.press("Escape");
       await wide.click("[data-workspace=design]");
       await wide.waitForFunction(() => document.body.dataset.split === "slice");

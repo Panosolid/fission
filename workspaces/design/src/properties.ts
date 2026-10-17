@@ -6,7 +6,7 @@
 import { describeProvenance, type BodyView, type Feature } from "@fission/core";
 import { downstreamChip, formatQuantity as fmt, type ChipInfo } from "@fission/ui";
 import type { PartKind } from "./document.ts";
-import { PLACEHOLDER_ID_NOTE } from "./references.ts";
+import { NAME_NOTE } from "./references.ts";
 import type { SelectionRow } from "./selection.ts";
 
 export type SizeKey = "width" | "depth" | "height";
@@ -120,7 +120,7 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
           li.dataset.id = r.id; // read by the e2e test
           const id = document.createElement("code");
           id.textContent = r.id;
-          id.title = PLACEHOLDER_ID_NOTE;
+          id.title = NAME_NOTE;
           li.append(`${r.name} · ${r.type} `, id);
           return li;
         }),
