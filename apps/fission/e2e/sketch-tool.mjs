@@ -112,13 +112,13 @@ async function check(name, fn, known) {
 }
 
 /**
- * Found by WebKit (testing catch-up TC4, docs/progress/cad.md): WebKit's
- * number box takes the letter typed into the grid box, so it shows "Type the
+ * Found by WebKit and Firefox (testing catch-up TC4, docs/progress/cad.md):
+ * their number box takes the letter typed into the grid box, so it shows "Type the
  * grid size in mm." when it loses focus, which pushes Extrude down between
  * the press and the release of the click on it, and the click is lost.
  */
 const GRID_ERROR_MOVES_EXTRUDE = {
-  engines: ["webkit"],
+  engines: ["webkit", "firefox"],
   bug: "an invalid grid size's message moves Extrude mid-click (sketch-panel.ts)",
   symptom: /^Extrude's OK on: timed out; the page shows .*grid error "Type the grid size in mm\."$/,
 };
