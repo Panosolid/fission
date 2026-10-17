@@ -10,7 +10,7 @@ Rust geometry kernel, compiled to WebAssembly with wasm-pack. Read with the root
 - `src/validate.rs`: `validate()` and `checked()`; every operation's result goes through `checked()`.
 - `src/self_intersect.rs`: the self-intersection check `validate` runs (edge–edge, edge–face, face–face), measuring candidates from `src/intersect.rs`, which only proposes points, never decides that two things touch.
 - `src/placed.rs`: `Placed` = local geometry plus placement; moves and turns change only the placement; `baked()` gives world geometry where it is needed.
-- `src/tessellate.rs` (watertight mesh, constrained Delaunay in uv via `spade`), `src/mesh.rs` (mesh volume with double-double determinants, area, closed check), `src/accurate.rs` (double-double arithmetic), `src/display.rs` (per-face normals, edge lines for the viewer).
+- `src/tessellate.rs` (watertight mesh, constrained Delaunay in uv via `spade`), `src/mesh.rs` (mesh volume with double-double determinants, area, closed check), `src/accurate.rs` (double-double arithmetic, and `Exact` sums for the exact area sign), `src/display.rs` (per-face normals, edge lines for the viewer).
 - `src/mass.rs`: exact volume and area from the B-rep's edges, keeping digits far away and at huge radii. The app shows these, not mesh values.
 - `src/stl.rs`: binary STL export (reports the largest rounding to single precision, warns past MIN_FEATURE) and reading it back.
 - `src/ops/`: `primitives.rs` (box, cylinder, sphere), `profile.rs` (lines, arcs as bulges, circles, and their validity rules), `extrude.rs`, `transform.rs` (move, rotate on `Placed`; a rotation pivot must lie in model space). Each returns `Result<Body, KernelError>` via `ops::finish`.

@@ -14,6 +14,10 @@
 //! `Exact` goes further for sums whose sign must be right however much
 //! cancels (the area predicates in `tolerance.rs`): it keeps every digit,
 //! as a list of doubles that add up to the exact value (Shewchuk 1997).
+//!
+//! Mutation testing (`cargo mutants -f src/accurate.rs`) leaves one
+//! survivor, equivalent: `>` vs `>=` in `Exact::sign`, which only sees the
+//! largest part, and no part is ever 0 (`add` drops zeros as they appear).
 
 use glam::DVec3;
 

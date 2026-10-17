@@ -44,6 +44,7 @@ exclude_re = [
   '^src/ops/profile\.rs:\d+:\d+: replace < with <= in doubles_back$', # dot 0 means perpendicular unit tangents, cross ±1, never within ANGULAR
   '^src/ops/profile\.rs:\d+:\d+: replace > with >= in counter_clockwise$', # a checked loop's area is never 0 (at least ~span·MIN_FEATURE/2)
   '^src/ops/profile\.rs:\d+:\d+: replace \+ with - in probe$', # any point of a hole's circle decides
+  '^src/accurate\.rs:\d+:\d+: replace > with >= in Exact::sign$', # the largest part is never 0 (zeros are dropped as they appear)
   '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$', # at exactly 0.1 both forms are within FP_REL; the mutant's series is the more accurate one
   '^src/ops/extrude\.rs:\d+:\d+: replace > with >= in extrude$', # an arc's sweep is never 0
   # tessellate.rs (reasons also in its top comment)
