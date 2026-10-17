@@ -4,11 +4,12 @@
 
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
-import { lastFeature, partOf, readDesignDocument, specOf, type DesignDocument } from "./document.ts";
+import type { ShapeKind } from "./profiles.ts";
+import { lastFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
+import { DISTANCE_STEP, featureSpec, setExtrudeDistance } from "./extrude.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
 import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
-import type { ShapeKind } from "./profiles.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
@@ -28,9 +29,9 @@ import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, t
  * shown, with the document it made: when the project holds a different
  * document (a file was opened), the panel shows that one instead.
  */
-let saved: { doc: DesignDocument; shape: ShapeKind; sizes: string[] } | null = null;
+let saved: { doc: DesignDocument; shape: PartKind; sizes: string[] } | null = null;
 let framed: Framing | null = null;
-let framedKind: ShapeKind | null = null;
+let framedKind: PartKind | null = null;
 /**
  * The last body Design built, kept across mounts: Undo and Redo re-mount
  * Design on the restored project (step 20c), and the selection follows
@@ -163,7 +164,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
 function mount(ctx: WorkspaceContext): MountedWorkspace {
   const panel = propertiesPanel(ctx.properties);
   const { inputs } = panel;
-  let shape: ShapeKind = "box";
+  let shape: PartKind = "box";
   const held = ctx.project.workspaces.design as DesignDocument | undefined;
   /** A document the project holds that this panel did not make (an opened file): shown as it is, and framed. */
   let loaded: DesignDocument | undefined;
@@ -220,8 +221,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (shown) panel.showActionNote(outcome.message, outcome.bad);
   }
 
-  // The body is built from the part's feature intent (document.ts).
-  const build = latestOnly((doc: DesignDocument) => buildSpec(kernel, specOf(doc, lastFeature(doc))));
+  // The body is built from the part's feature intent (document.ts); an extrude of a sketch asks the kernel for the outline (extrude.ts).
+  const build = latestOnly(async (doc: DesignDocument) => buildSpec(kernel, await featureSpec(kernel, doc, lastFeature(doc))));
 
   /** Never shows stale numbers unmarked: dims them while out of date, and says so if the rebuild failed. */
   function markStale(failed = false) {
@@ -258,9 +259,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       return runAction(DOWNLOAD_STL, doc ? [partBody(doc)] : []);
     }
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
-    shape = command.shape as ShapeKind;
+    const kind = command.shape as ShapeKind;
+    shape = kind;
     for (const [i, key] of SIZE_KEYS.entries()) if (typeof command[key] === "number") inputs[i].value = String(command[key]);
-    return update(`Change shape to ${SHAPE_LABELS[shape] ?? shape}`);
+    return update(`Change shape to ${SHAPE_LABELS[kind] ?? kind}`);
   }
 
   /** Builds the part from the panel; `label` and `mergeKey` name the undo step when this is a user's edit (none while mounting). */
@@ -270,16 +272,23 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
     // The panel edits the part's one solid feature, keeping the sketches; the
-    // project holds it. An opened file's document is kept as it is until the first edit.
-    const doc = loaded ?? documentFor(partCommand(), ctx.project.workspaces.design as DesignDocument | undefined);
+    // project holds it. An opened file's document is kept as it is until the
+    // first edit. An extrude of a sketch has one size, its distance (the height box).
+    const current = ctx.project.workspaces.design as DesignDocument | undefined;
+    const doc = loaded ?? (kind === "sketch-extrude" && current ? setExtrudeDistance(current, Number(inputs[2].value)) : documentFor(partCommand(), current));
     // An opened document is all new to the graph: out of date until it builds.
-    const before = loaded ? null : ((ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
+    const before = loaded ? null : (current ?? null);
     loaded = undefined;
     saved = { doc, shape, sizes: inputs.map((i) => i.value) };
     syncGraph(ctx.graph, doc, before, ctx.changeNotes);
     const changed = ctx.project.workspaces.design !== doc;
     ctx.project.workspaces.design = doc;
     if (changed) ctx.projectChanged(label, mergeKey); // the shell autosaves (19c) and records the undo step (20b)
+    await show(doc, kind);
+  }
+
+  /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
+  async function show(doc: DesignDocument, kind: PartKind) {
     browser(ctx.browser, doc, selectRow);
     drawSketches();
     showSelection();
@@ -362,6 +371,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ctx.projectChanged(label);
     browser(ctx.browser, next, selectRow);
     markStale();
+    // The part extrudes this sketch: rebuild it from the edited lines (a live link; an open sketch fails with the kernel's reason).
+    if (lastFeature(next).dependsOn.includes(sketchId)) void show(next, shape);
   }
 
   /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
@@ -513,7 +524,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // Typing in one box is one undo step (the merge key), named for the box.
-  inputs.forEach((input, i) => input.addEventListener("input", () => update(`Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])));
+  inputs.forEach((input, i) =>
+    input.addEventListener("input", () => update(shape === "sketch-extrude" && SIZE_KEYS[i] === "height" ? DISTANCE_STEP : `Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])),
+  );
   listen();
   update();
   enterSketch(); // after an Undo or Redo inside a sketch: still in it

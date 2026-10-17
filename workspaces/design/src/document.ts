@@ -113,13 +113,46 @@ const doc = (profiles: ReadyProfile[], feature: Feature): DesignDocument => ({ v
  * features with counter ids). The counter never goes back.
  */
 export function withPart(previous: DesignDocument | null | undefined, kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
-  const fresh = partDocument(kind, w, d, h);
+  let fresh = partDocument(kind, w, d, h);
   if (!previous) return fresh;
-  const part = fresh.timeline.features[0];
+  let nextId = Math.max(fresh.nextId, previous.nextId);
   const old = lastFeature(previous);
+  // A preset edited keeps its feature's id and its profile's (the same
+  // feature, changed). After an extrude of a sketch (step 21d) the preset is
+  // a new feature: it takes new ids from the counter, so a link to the
+  // part's old feature-1 or profile-1 never lands on it. A profile the old
+  // part didn't have is profile-1 on the first part, else new.
+  const oldProfile = previous.profiles.find((p) => old.dependsOn.includes(p.id))?.id;
+  const ids = new Map<string, string>();
+  ids.set("feature-1", isSketchExtrude(old) ? `feature-${nextId++}` : old.id);
+  if (fresh.profiles.length > 0) ids.set("profile-1", oldProfile ?? (old.id === "feature-1" ? "profile-1" : `profile-${nextId++}`));
+  fresh = renamed(fresh, ids);
+  const part = fresh.timeline.features[0];
   const features = previous.timeline.features.filter((f) => f === old || isSketchItem(f)).map((f) => (f === old ? part : f));
-  return { ...fresh, nextId: Math.max(fresh.nextId, previous.nextId), sketches: previous.sketches, timeline: { features } };
+  return { ...fresh, nextId, sketches: previous.sketches, timeline: { features } };
 }
+
+/** A fresh part's document with its ids swapped as `ids` says (feature, profile, and the references between them). */
+function renamed(fresh: DesignDocument, ids: ReadonlyMap<string, string>): DesignDocument {
+  const id = (x: string) => ids.get(x) ?? x;
+  const [f] = fresh.timeline.features;
+  const parameters = typeof f.intent.parameters.profile === "string" ? { ...f.intent.parameters, profile: id(f.intent.parameters.profile) } : f.intent.parameters;
+  const feature: Feature = {
+    ...f,
+    id: id(f.id),
+    intent: { ...f.intent, parameters },
+    provenance: { self: { ...f.provenance.self, id: id(f.id) }, from: f.provenance.from.map((r) => ({ ...r, id: id(r.id) })) },
+    dependsOn: f.dependsOn.map(id),
+  };
+  return { ...fresh, profiles: fresh.profiles.map((p) => ({ ...p, id: id(p.id) })), timeline: { features: [feature] } };
+}
+
+/**
+ * An extrude of a sketch (step 21d): `{ sketch, distance }`, its outline
+ * found by the kernel from the sketch each time it is built. An extrude of
+ * a ready-made profile names a `profile` instead.
+ */
+export const isSketchExtrude = (f: Feature) => f.intent.type === "extrude" && Object.hasOwn(f.intent.parameters, "sketch");
 
 /** A sketch's timeline item: it places the sketch in the build order and names its plane; it builds no solid. */
 export const isSketchItem = (f: Feature) => f.intent.type === "sketch";
@@ -148,6 +181,8 @@ export function specOf(document: DesignDocument, feature: Feature): BodySpec {
     case "sphere":
       return { sphere: { radius: num(feature, "diameter") / 2 } };
     case "extrude": {
+      // Its outline comes from the kernel: featureSpec (extrude.ts) builds it.
+      if (isSketchExtrude(feature)) throw new Error(`${feature.intent.summary}: an extrude of a sketch is built through featureSpec, which asks the kernel for the outline`);
       const profile = document.profiles.find((x) => x.id === p.profile);
       if (!profile) throw new Error(`${feature.intent.summary}: its profile ${shown(p.profile)} is missing`);
       return { extrude: { profile: outline(profile.kind, profile.width, profile.depth), distance: num(feature, "distance") } };
@@ -160,12 +195,15 @@ export function specOf(document: DesignDocument, feature: Feature): BodySpec {
 /** The sizes the panel edits, keyed like its inputs; a shape fills only the ones it uses. */
 export type PartSizes = Partial<Record<"width" | "depth" | "height", number>>;
 
+/** What the part is: a preset shape, or an extrude of a sketch (step 21d), whose one size is its distance (the panel's height box). */
+export type PartKind = ShapeKind | "sketch-extrude";
+
 /**
  * The shape and sizes a document's final feature was made from: the
  * inverse of partDocument, for the panel showing a loaded part. Throws a
  * clear message for a feature the panel can't show.
  */
-export function partOf(document: DesignDocument): { shape: ShapeKind; sizes: PartSizes } {
+export function partOf(document: DesignDocument): { shape: PartKind; sizes: PartSizes } {
   const f = lastFeature(document);
   switch (f.intent.type) {
     case "box":
@@ -175,6 +213,7 @@ export function partOf(document: DesignDocument): { shape: ShapeKind; sizes: Par
     case "sphere":
       return { shape: "sphere", sizes: { width: num(f, "diameter") } };
     case "extrude": {
+      if (isSketchExtrude(f)) return { shape: "sketch-extrude", sizes: { height: num(f, "distance") } };
       const profile = document.profiles.find((x) => x.id === f.intent.parameters.profile);
       if (!profile) throw new Error(`${f.intent.summary}: its profile ${shown(f.intent.parameters.profile)} is missing`);
       if (!Object.hasOwn(profileNames, profile.kind)) throw new Error(`profile ${profile.id} has an unknown kind ${shown(profile.kind)}`);
@@ -259,6 +298,16 @@ export function readDesignDocument(data: unknown): DesignDocument {
     if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Fission knows (XY, XZ or YZ)`);
   }
   for (const s of d.sketches) if (!items.some((f) => f.id === s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
+  // An extrude of a sketch comes after its sketch and depends on it, so a rebuild in order always has the outline.
+  for (const [i, f] of d.timeline.features.entries()) {
+    if (!isSketchExtrude(f)) continue;
+    const p = f.intent.parameters;
+    if (Object.hasOwn(p, "profile")) throw new Error(`Design feature ${f.id} extrudes both a sketch and a profile`);
+    if (!d.timeline.features.slice(0, i).some((x) => x.id === p.sketch && isSketchItem(x)))
+      throw new Error(`Design feature ${f.id} extrudes ${shown(p.sketch)}, which is not a sketch before it in the timeline`);
+    if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(p.sketch as string)) throw new Error(`Design feature ${f.id} extrudes ${p.sketch} but does not depend on it`);
+    if (!isFiniteNumber(p.distance)) throw new Error(`Design feature ${f.id}: distance ${shown(p.distance)} is not a number of mm`);
+  }
   // Ids are unique in the document (a sketch shares its id with its timeline item), and the counter is above all of them.
   const seen = new Set<string>();
   const ids = [

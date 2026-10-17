@@ -4,7 +4,8 @@
 // profile: the verb under a selected profile and Ctrl+C both run it (X6b).
 
 import { outlineToSvg, type Action, type ActionOutcome, type ActionRegistry, type ActionTarget, type RepresentationKind, type Selected, type WorkspaceContext } from "@fission/core";
-import { lastFeature, partOf, profileLabel, specOf, type DesignDocument } from "./document.ts";
+import { lastFeature, partOf, profileLabel, type DesignDocument } from "./document.ts";
+import { featureSpec } from "./extrude.ts";
 import { designReference, readProfileReference } from "./references.ts";
 import { designObjects } from "./representations.ts";
 
@@ -88,9 +89,10 @@ export function designActions(save: SaveFile = download, copy: CopySvg = copyToC
       if (!doc) return { message: "There is no part to download yet.", bad: true };
       if (targets.length !== 1) return { message: `Download STL takes one body, not ${targets.length} things.`, bad: true };
       if (!representationsOf(target, doc).includes("mesh")) return { message: `${target.id} is not a body of the part, so there is nothing to download.`, bad: true };
-      const kind = partOf(doc).shape;
+      const shape = partOf(doc).shape;
+      const kind = shape === "sketch-extrude" ? "extrude" : shape;
       try {
-        const file = await ctx.kernel.call("export_stl", specOf(doc, lastFeature(doc)), kind);
+        const file = await ctx.kernel.call("export_stl", await featureSpec(ctx.kernel, doc, lastFeature(doc)), kind);
         save(file.bytes, `fission-${kind}.stl`);
         // Mark the part on screen too: every face moves in single precision.
         if (file.warning)
