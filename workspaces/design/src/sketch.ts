@@ -14,7 +14,7 @@ import { XY_PLANE } from "@fission/core";
 import { curvePoints, isSketchItem, shown, type DesignDocument, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
 
 /** The undo step each sketch edit is recorded as. */
-export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", delete: "Delete line", move: "Move point" } as const;
+export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", tangent: "Draw tangent arc", delete: "Delete line", move: "Move point" } as const;
 
 /**
  * Each origin plane's frame: the sketch's x along `xAxis`, its y along
@@ -27,7 +27,7 @@ const PLANES: Record<SketchPlane, Plane> = {
   YZ: { origin: [0, 0, 0], xAxis: [0, 1, 0], normal: [1, 0, 0] },
 };
 
-/** Where a sketch plane reference is; a face id joins these at step 32. */
+/** Where a sketch plane reference is; a face id joins these at step 24. */
 export const planeOf = (ref: SketchPlane): Plane => PLANES[ref];
 
 /** The document with the next id taken: "line-4" and the counter moved on. */
@@ -191,7 +191,7 @@ export function deleteCurve(doc: DesignDocument, sketchId: string, curveId: stri
 
 /**
  * The sketch with one point moved; every line ending there and circle or
- * arc using it follows, since curves name points. Until constraints (27)
+ * arc using it follows, since curves name points. Until constraints (29)
  * nothing else moves with it, so moving one end of an arc leaves its
  * centre off the midway line and the kernel then says so.
  */

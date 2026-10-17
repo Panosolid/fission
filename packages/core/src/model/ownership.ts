@@ -187,7 +187,7 @@ export type Transfer = { ok: true; value: LinkedValue; command: Command; inverse
  * so the hand-over and anything it updates are one undo step named
  * `label` ("Hand Hole spacing to Circuit"), and Undo puts the old owner back
  * (step 20c; the history keeps snapshots, so `inverse`, which hands it back
- * as a command, is for the timeline from step 32). Proposals still pending
+ * as a command, is for the timeline from step 24). Proposals still pending
  * for the old owner can no longer be accepted.
  */
 export function transferOwnership(v: LinkedValue, to: WorkspaceId): Transfer {

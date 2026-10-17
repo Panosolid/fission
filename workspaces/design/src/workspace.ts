@@ -1,5 +1,5 @@
 // The Design workspace: the CAD, and the source of truth for all geometry.
-// Until the sketcher (steps 21–31) it builds primitives and ready-made
+// Until the sketcher (steps 21–33) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
@@ -20,7 +20,8 @@ import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts"
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
-import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { snapOnSketch, withSnap, type Snap } from "./snap.ts";
+import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -73,7 +74,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   extrude.type = "button";
   extrude.id = "extrude";
   extrude.textContent = "Extrude";
-  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 32).";
+  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 24).";
   extrude.addEventListener("click", onExtrude);
   sketch.append(sketchName, create, extrude);
   slot.append(sketch);
@@ -124,7 +125,7 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
  * Fills the browser slot with the document's tree: groups fold (native
  * details/summary). A row for selectable geometry (Body 1, a profile) is a button
  * that selects it (Shift adds or takes out); the others are plain rows
- * until features (step 32) and origin planes (step 21) can be selected.
+ * until features (step 24) and origin planes (step 21) can be selected.
  * Rebuilt on every edit; folding is kept by id.
  */
 function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void) {
@@ -350,7 +351,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // The sketch tool (step 21c, docs/document-model.md section 3).
-  type Mode = { kind: "none" } | { kind: "pick" } | { kind: "edit"; tool: SketchTool; grid: number; pointer: SketchXY | null };
+  /** While editing: the tool, the grid, where the pointer landed (snapped) and why, with the pixel size it was snapped at. */
+  type Mode = { kind: "none" } | { kind: "pick" } | { kind: "edit"; tool: SketchTool; grid: number; pointer: SketchXY | null; snap: Snap | null; pixel?: number };
   let mode: Mode = { kind: "none" };
   const sketchBox = sketchPanel(ctx.properties, {
     pickPlane: (id) => pickPlane(id),
@@ -361,12 +363,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     tool: (kind) => chooseTool(kind),
   });
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
+  /** Counts tool changes (a tool chosen, Escape, the sketch entered again): a click the kernel was still snapping across one is dropped. */
+  let toolChanges = 0;
 
   /** Draws every sketch, the edited one with its grid, points and preview. */
   function drawSketches() {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
-    viewport.showSketches(sketchDrawings(doc, mode.kind === "edit" ? mode : null));
+    const editing = mode.kind === "edit" ? mode : null;
+    viewport.showSketches(withSnap(sketchDrawings(doc, editing), editing?.snap ?? null, editing?.pixel));
   }
 
   /**
@@ -412,17 +417,20 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   function enterSketch() {
     const doc = designDoc();
     if (!editingSketch || !doc.sketches.some((s) => s.id === editingSketch!.id)) return void (editingSketch = null);
-    mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null };
+    mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null, snap: null };
+    toolChanges++;
     sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, editingSketch.tool);
     drawSketches();
     void showOutline();
   }
 
-  /** Line, Rectangle, Circle or Arc (the panel's buttons, or L, R, C and A): what was part way through is dropped, as Escape would. */
+  /** Line, Rectangle, Circle, Arc or Tangent arc (the panel's buttons, or L, R, C, A and T): what was part way through is dropped, as Escape would, except that a line chain and a tangent arc carry on from each other's last point (`switchTool`). */
   function chooseTool(kind: ToolKind) {
     if (mode.kind !== "edit" || !editingSketch) return;
     editingSketch.tool = kind;
-    mode.tool = startTool(kind, mode.tool.sketch);
+    mode.tool = switchTool(designDoc(), mode.tool, kind);
+    mode.snap = null;
+    toolChanges++;
     sketchBox.showTool(kind);
     sketchBox.showError("");
     drawSketches();
@@ -558,31 +566,40 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const at = pointer.at;
     if (pointer.kind === "move") {
       if (!at) {
-        mode.pointer = null;
+        mode.pointer = mode.snap = null;
         return drawSketches();
       }
       // A hover off the modelling range just doesn't move the preview.
       void snapMove(at, mode.grid).then(({ current, value }) => {
         if (!current || mode.kind !== "edit") return;
-        mode.pointer = value;
+        mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel);
+        mode.pointer = mode.snap.at;
+        mode.pixel = pointer.pixel;
         drawSketches();
       }, () => {});
       return;
     }
     if (!at) return;
+    const changes = toolChanges;
     clicks = clicks.then(async () => {
       if (mode.kind !== "edit") return;
-      let snapped: SketchXY;
+      let grid: SketchXY;
       try {
-        snapped = await kernel.call("snap_to_grid", at[0], at[1], mode.grid);
+        grid = await kernel.call("snap_to_grid", at[0], at[1], mode.grid);
       } catch (e) {
         return sketchBox.showError(e instanceof Error ? e.message : String(e));
       }
-      if (mode.kind !== "edit") return;
+      // The tool changed while the kernel snapped (L, R, C or Escape): the click was for the old tool, so it is dropped.
+      if (mode.kind !== "edit" || toolChanges !== changes) return;
+      // The click lands where the hover showed it would: on the grid, or on the point or line-up snap.ts finds.
+      const snapped = snapOnSketch(designDoc(), mode.tool, at, grid, pointer.pixel).at;
       const done = clickAt(designDoc(), mode.tool, snapped);
       sketchBox.showError(done.note ?? "");
       mode.tool = done.tool;
-      mode.pointer = snapped;
+      // The pointer is still there: what it snaps to now, with the new point and the tool's next step.
+      mode.snap = snapOnSketch(done.doc, done.tool, at, grid, pointer.pixel);
+      mode.pointer = mode.snap.at;
+      mode.pixel = pointer.pixel;
       if (done.drew) applySketchEdit(done.doc, drawStep(done.tool), done.tool.sketch);
       drawSketches();
       if (done.drew) await showOutline();
@@ -639,16 +656,18 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
-      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle or arc being drawn.
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
         mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
+        mode.snap = null;
+        toolChanges++;
         sketchBox.showError("");
         drawSketches();
         return true;
       }
-      // L, R, C and A choose the line, rectangle, circle and arc tools while a sketch is edited; otherwise the key does what it would.
+      // L, R, C, A and T choose the line, rectangle, circle, arc and tangent arc tools while a sketch is edited; otherwise the key does what it would.
       const kind = sketchToolKey(id);
       if (kind) return mode.kind === "edit" ? (chooseTool(kind), true) : false;
       const items = ctx.selection.items;

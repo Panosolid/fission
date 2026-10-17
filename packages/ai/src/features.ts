@@ -1,7 +1,7 @@
 // What the assistant will do in each workspace (roadmap A7–A8). Shown on
 // the assistant panel's placeholder for the active workspace. A workspace's
 // AI features come after the workspace itself is real; Design's first,
-// after step 32.
+// after step 24.
 
 import type { WorkspaceId } from "@fission/core";
 

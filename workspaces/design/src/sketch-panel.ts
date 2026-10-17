@@ -1,6 +1,6 @@
 // The sketch tool's panel (step 21c), at the top of the properties: the
 // "Pick a plane" prompt of Create sketch, then while a sketch is edited its
-// name, the tools (Line, Rectangle: step 22a; Circle: 22c), how to draw, the typeable grid size, whether the lines close,
+// name, the tools (Line, Rectangle: step 22a; Circle: 22c; Arc: 23b; Tangent arc: 23c), how to draw, the typeable grid size, whether the lines close,
 // Finish sketch and Extrude (step 21d). The workspace drives it; the panel
 // only shows what it is given and reports clicks. Styles: src/styles/sketch.css.
 
@@ -24,6 +24,7 @@ export const TOOL_HELP: Record<ToolKind, string> = {
   rectangle: "Click one corner, then the opposite corner: four lines, snapped to the grid. Escape drops the first corner.",
   circle: "Click the centre, then a point on the circle, both snapped to the grid. Escape drops the centre.",
   arc: "Click the start, then the end, then a point the arc passes through, all snapped to the grid. Escape drops the ends.",
+  tangent: "Click the end of a line or arc, then where the arc ends: it leaves the line smoothly, and the next click carries on from its end. Escape ends it.",
 };
 
 export interface SketchPanel {
@@ -78,7 +79,7 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
       for (const p of ORIGIN_PLANES) {
         const b = button(p.label, `sketch-plane-${p.id}`, () => on.pickPlane(p.id));
         b.disabled = !p.offered;
-        if (!p.offered) b.title = "Sketching on the front and side planes, and on flat faces, comes with step 24.";
+        if (!p.offered) b.title = "Sketching on the front and side planes, and on flat faces, comes with step 26.";
         planes.append(b);
       }
       box.replaceChildren(

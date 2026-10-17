@@ -4,7 +4,7 @@
 // design-rule errors all arrive this way (I16, I17).
 //
 // Overlays are display only; they are never saved. Until stable ids exist
-// (step 32) a mark names a face by its index in the body on screen, or the
+// (step 24) a mark names a face by its index in the body on screen, or the
 // whole body.
 
 export type OverlayTarget = { face: number } | { body: true };

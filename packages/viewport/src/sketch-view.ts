@@ -67,3 +67,17 @@ export function gridLines(spacing: number): { a: SketchXY; b: SketchXY; major: b
   }
   return lines;
 }
+
+/**
+ * How big a screen pixel is on the plane at the pointer (mm), for snapping
+ * within a few pixels: from where the pointer meets the plane to where the
+ * points one pixel right of it and one pixel below it do, the further of
+ * the two (under perspective a pixel is longer one way when the plane is
+ * seen at a slant). Undefined when any of them misses the plane.
+ */
+export function pixelSize(at: SketchXY | null, right: SketchXY | null, down: SketchXY | null): number | undefined {
+  if (!at || !right || !down) return undefined;
+  const far = (p: SketchXY) => Math.sqrt((p[0] - at[0]) ** 2 + (p[1] - at[1]) ** 2);
+  const size = Math.max(far(right), far(down));
+  return size > 0 && Number.isFinite(size) ? size : undefined;
+}

@@ -1,6 +1,6 @@
 // Undo/redo across all workspaces (roadmap step 20): one history of
 // whole-project snapshots, shared by every workspace like the selection.
-// Snapshots for now; from steps 32–33 a step becomes "undo this timeline
+// Snapshots for now; from steps 24–25 a step becomes "undo this timeline
 // edit" behind the same interface.
 //
 // The history never reads the project itself: `capture` gives the project

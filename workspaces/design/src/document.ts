@@ -1,8 +1,8 @@
 // Design's part of the project: profiles, sketches and the timeline
 // (docs/document-model.md).
 //
-// Until the timeline (step 32) a part is ONE solid feature, with exactly
-// the intent, provenance and dependency structures step 32 uses; sketches
+// Until the timeline (step 24) a part is ONE solid feature, with exactly
+// the intent, provenance and dependency structures step 24 uses; sketches
 // are timeline items of their own next to it (step 21b). The body is built
 // from the feature's intent (specOf), so the intent is the source of
 // truth, not a description written next to the geometry.
@@ -67,11 +67,11 @@ export interface Sketch {
   id: string;
   points: SketchPoint[];
   curves: SketchCurve[];
-  /** Empty until the solver (step 27). */
+  /** Empty until the solver (step 29). */
   constraints: never[];
 }
 
-/** The planes a sketch can be on (a stable face id joins these at step 32). */
+/** The planes a sketch can be on (a stable face id joins these at step 24). */
 export const SKETCH_PLANES = ["XY", "XZ", "YZ"] as const;
 export type SketchPlane = (typeof SKETCH_PLANES)[number];
 
@@ -136,7 +136,7 @@ const doc = (profiles: ReadyProfile[], feature: Feature): DesignDocument => ({ v
  * panel and set_part), keeping its sketches where they are in the build
  * order. The part's feature takes the old part feature's place; until step
  * 32 there is only that one, and a preset shape's feature and profile are
- * always "feature-1" and "profile-1" (step 32 turns presets into ordinary
+ * always "feature-1" and "profile-1" (step 24 turns presets into ordinary
  * features with counter ids). The counter never goes back.
  */
 export function withPart(previous: DesignDocument | null | undefined, kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
@@ -372,7 +372,7 @@ export function readDesignDocument(data: unknown): DesignDocument {
 
 /**
  * The part's solid feature: the last timeline item that is not a sketch
- * (the only one until step 32, which builds every solid feature).
+ * (the only one until step 24, which builds every solid feature).
  */
 export function lastFeature(document: DesignDocument): Feature {
   const f = [...document.timeline.features].reverse().find((x) => !isSketchItem(x));

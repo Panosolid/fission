@@ -2,7 +2,7 @@
 //
 // Downstream workspaces never copy geometry. They point at Design's bodies,
 // faces and edges by stable IDs from topological naming (scheme chosen at
-// roadmap step 32, full naming at step 50), and re-resolve those IDs every
+// roadmap step 24, full naming at step 50), and re-resolve those IDs every
 // time the design changes.
 
 /** A topological-naming ID, e.g. "face created by feature X, from profile edge Y, side Z". */
@@ -38,7 +38,7 @@ export type GeometryReference = BodyReference | FaceReference | EdgeReference | 
  */
 export type Resolution = { status: "resolved" } | { status: "unresolved"; reason: string };
 
-/** Re-resolves a reference against the current design. Not implemented until step 32. */
+/** Re-resolves a reference against the current design. Not implemented until step 24. */
 export function resolveReference(_ref: GeometryReference): Resolution {
   throw new Error("not implemented");
 }
