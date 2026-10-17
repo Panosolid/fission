@@ -20,8 +20,8 @@ import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts"
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
-import { snapOnSketch, withSnap, type Snap } from "./snap.ts";
-import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
+import { clickAt, curveCount, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -48,6 +48,8 @@ let putAwayByRestore = false;
  * since the point it ran from may be gone). Cleared by Finish sketch.
  */
 let editingSketch: { id: string; grid: number; typed: string; tool: ToolKind } | null = null;
+/** Grid snap on or off (sketch feel SF1; off by default: points go where you click), kept for every sketch until the page reloads. */
+let gridSnap = DEFAULT_GRID_SNAP;
 /** How many times Design has framed the part, read by the e2e test (an undo must not add one). */
 let fits = 0;
 
@@ -358,6 +360,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     pickPlane: (id) => pickPlane(id),
     cancel: () => leaveSketch(),
     grid: (typed) => void setGrid(typed),
+    gridSnap: (on) => setGridSnap(on),
     finish: () => leaveSketch(),
     extrude: () => startExtrude(),
     tool: (kind) => chooseTool(kind),
@@ -419,16 +422,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!editingSketch || !doc.sketches.some((s) => s.id === editingSketch!.id)) return void (editingSketch = null);
     mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null, snap: null };
     toolChanges++;
-    sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, editingSketch.tool);
+    sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, gridSnap, editingSketch.tool);
     drawSketches();
     void showOutline();
   }
 
-  /** Line, Rectangle, Circle or Arc (the panel's buttons, or L, R, C and A): what was part way through is dropped, as Escape would. */
+  /** Line, Rectangle, Circle, Arc or Tangent arc (the panel's buttons, or L, R, C, A and T): what was part way through is dropped, as Escape would, except that a line chain and a tangent arc carry on from each other's last point (`switchTool`). */
   function chooseTool(kind: ToolKind) {
     if (mode.kind !== "edit" || !editingSketch) return;
     editingSketch.tool = kind;
-    mode.tool = startTool(kind, mode.tool.sketch);
+    mode.tool = switchTool(designDoc(), mode.tool, kind);
     mode.snap = null;
     toolChanges++;
     sketchBox.showTool(kind);
@@ -459,6 +462,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     sketchBox.showError("");
     mode.grid = editingSketch.grid = grid;
     editingSketch.typed = typed;
+    drawSketches();
+  }
+
+  /** Grid snap ticked or unticked: from the next pointer move, points land on the grid or where you click. */
+  function setGridSnap(on: boolean) {
+    gridSnap = on;
+    if (mode.kind === "edit") mode.snap = null;
     drawSketches();
   }
 
@@ -558,7 +568,12 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     await update(extrudeStep(before, id), undefined, made.doc);
   }
 
-  const snapMove = latestOnly((at: SketchXY, grid: number) => kernel.call("snap_to_grid", at[0], at[1], grid));
+  /** The pointer rounded by the kernel: onto the grid with grid snap on, else where it is to within half a pixel (snap.ts `rounding`). */
+  const roundPointer = (at: SketchXY, grid: number, pixel: number | undefined): Promise<SketchXY> => {
+    const r = rounding(at, grid, gridSnap, pixel);
+    return r.op === "snap_to_grid" ? kernel.call("snap_to_grid", ...r.args) : kernel.call("place_freely", ...r.args);
+  };
+  const snapMove = latestOnly(roundPointer);
   /** Clicks are handled one after another, each on the document the last one left. */
   let clicks = Promise.resolve();
   const onSketchPointer = (pointer: SketchPointer) => {
@@ -570,7 +585,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         return drawSketches();
       }
       // A hover off the modelling range just doesn't move the preview.
-      void snapMove(at, mode.grid).then(({ current, value }) => {
+      void snapMove(at, mode.grid, pointer.pixel).then(({ current, value }) => {
         if (!current || mode.kind !== "edit") return;
         mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel);
         mode.pointer = mode.snap.at;
@@ -583,21 +598,21 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const changes = toolChanges;
     clicks = clicks.then(async () => {
       if (mode.kind !== "edit") return;
-      let grid: SketchXY;
+      let rounded: SketchXY;
       try {
-        grid = await kernel.call("snap_to_grid", at[0], at[1], mode.grid);
+        rounded = await roundPointer(at, mode.grid, pointer.pixel);
       } catch (e) {
         return sketchBox.showError(e instanceof Error ? e.message : String(e));
       }
       // The tool changed while the kernel snapped (L, R, C or Escape): the click was for the old tool, so it is dropped.
       if (mode.kind !== "edit" || toolChanges !== changes) return;
-      // The click lands where the hover showed it would: on the grid, or on the point or line-up snap.ts finds.
-      const snapped = snapOnSketch(designDoc(), mode.tool, at, grid, pointer.pixel).at;
+      // The click lands where the hover showed it would: where it was rounded to (free or on the grid), or on the point or line-up snap.ts finds.
+      const snapped = snapOnSketch(designDoc(), mode.tool, at, rounded, pointer.pixel).at;
       const done = clickAt(designDoc(), mode.tool, snapped);
       sketchBox.showError(done.note ?? "");
       mode.tool = done.tool;
       // The pointer is still there: what it snaps to now, with the new point and the tool's next step.
-      mode.snap = snapOnSketch(done.doc, done.tool, at, grid, pointer.pixel);
+      mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel);
       mode.pointer = mode.snap.at;
       mode.pixel = pointer.pixel;
       if (done.drew) applySketchEdit(done.doc, drawStep(done.tool), done.tool.sketch);
@@ -656,7 +671,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
-      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle or arc being drawn.
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
@@ -667,7 +682,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         drawSketches();
         return true;
       }
-      // L, R, C and A choose the line, rectangle, circle and arc tools while a sketch is edited; otherwise the key does what it would.
+      // L, R, C, A and T choose the line, rectangle, circle, arc and tangent arc tools while a sketch is edited; otherwise the key does what it would.
       const kind = sketchToolKey(id);
       if (kind) return mode.kind === "edit" ? (chooseTool(kind), true) : false;
       const items = ctx.selection.items;

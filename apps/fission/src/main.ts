@@ -567,7 +567,9 @@ for (const type of ["pointerdown", "focusin"] as const)
   }, true);
 /** The panes showing a workspace, the one in use first. */
 const panesInUse = (): PaneId[] => (activePane === "split" ? ["split", "main"] : ["main", "split"]).filter((p): p is PaneId => pool.showing(p as PaneId) !== null);
-const inText = (t: EventTarget | null) => t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])") !== null;
+/** Typing in a field: a text box, text area, list or editable text. A tickbox, radio or button takes no letters, so keys still reach the shortcuts after one is clicked (found in SF1: ticking Snap to grid stopped L, R, C and A). */
+const TEXT_FIELDS = "input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=range], [type=color], [type=file]), textarea, select, [contenteditable]:not([contenteditable=false])";
+const inText = (t: EventTarget | null) => t instanceof Element && t.closest(TEXT_FIELDS) !== null;
 const shellShortcuts: Record<string, (e: Event) => boolean> = {
   shortcuts: () => (showShortcuts(), true),
   undo: () => (undoRedo("undo"), true),
