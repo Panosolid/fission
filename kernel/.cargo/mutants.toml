@@ -16,6 +16,7 @@ exclude_re = [
   # journeys` in CI) catch these; lib.rs's top comment names which.
   "-> Result<JsValue, JsError> with Ok\\(Default::default\\(\\)\\)",
   # Equivalent: an o·o product of 0 with the other negative means the touching end is the crossing point, so the collinear clause already returns true (exact predicates).
+  '^src/tolerance\.rs:\d+:\d+: replace < with <= in segments_touch$',
   # Equivalent: differs only for an edge from a vertex to itself, which gets the same error either way.
   '^src/mesh\.rs:\d+:\d+: replace < with <= in Mesh::check_closed$',
   # Equivalent: every vector the guard rejects (NaN, inf, zero) also fails the final is_finite check.
