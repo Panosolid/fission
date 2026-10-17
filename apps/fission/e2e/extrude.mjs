@@ -100,6 +100,9 @@ async function check(name, fn) {
   }
 }
 
+/** The browser's Timeline rows, in build order, as shown. */
+const timelineRows = (page) => page.$$eval('[data-node="timeline"] .tree-row', (rows) => rows.map((r) => r.textContent.trim()));
+
 try {
   await check("Extrude from the sketch panel: a closed rectangle becomes a 40 × 30 × 10 solid, one undo step; a refused distance records nothing", async () => {
     const page = await fresh();
@@ -130,7 +133,9 @@ try {
     assert.equal(await page.textContent("#area"), "3,800 mm²");
     assert.equal(await page.textContent("#topology"), "8 V · 12 E · 6 F");
     assert.equal(await page.isVisible("#extrude-panel"), false);
-    assert.equal(await undoTitle(page), "Undo Replace the part with Extrude of Sketch 1 (Ctrl+Z)");
+    assert.equal(await undoTitle(page), "Undo Extrude Sketch 1 (Ctrl+Z)");
+    // The extrude is a new body (24d1): the box stays in the timeline before it.
+    assert.deepEqual(await timelineRows(page), ["1. Box: 40 × 30 × 20 mm", "2. Sketch 1 on the XY plane", "3. Extrude Sketch 1 by 10 mm"]);
     assert.equal(await page.textContent("#intent"), "Extrude Sketch 1 by 10 mm");
     assert.match(await page.textContent("#provenance"), /Sketch 1/);
     // Only the distance is a parameter: the sketch gives the outline.
@@ -160,11 +165,13 @@ try {
     await page.keyboard.press("Control+Shift+z");
     await volume(page, "12,000 mm³");
     assert.equal(await page.textContent("#height-label"), "Extrude by");
-    // A preset after it replaces it, keeping the sizes in the boxes (the height box held the distance):
-    // a 40 × 30 × 10 box, the same 12,000 mm³ but a box. Undo brings the extrude back.
+    // A preset after it is a new feature after it (24d1: nothing is replaced), keeping the sizes in the boxes
+    // (the height box held the distance): a 40 × 30 × 10 box, the same 12,000 mm³ but a box, shown as the part
+    // until every body is drawn (24d3). Undo takes it out again.
     await page.click('[data-op="set_part"][data-shape="box"]');
     await until(page, () => document.querySelector("#intent")?.textContent === "Box: 40 × 30 × 10 mm", null, "the box");
     assert.equal(await undoTitle(page), "Undo Change shape to Box (Ctrl+Z)");
+    assert.deepEqual(await timelineRows(page), ["1. Box: 40 × 30 × 20 mm", "2. Sketch 1 on the XY plane", "3. Extrude Sketch 1 by 10 mm", "4. Box: 40 × 30 × 10 mm"]);
     assert.equal(await page.isVisible("#width"), true);
     await page.keyboard.press("Control+z");
     await until(page, () => document.querySelector("#intent")?.textContent === "Extrude Sketch 1 by 10 mm", null, "the extrude again");
