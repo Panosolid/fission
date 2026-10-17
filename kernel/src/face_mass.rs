@@ -49,9 +49,12 @@
 //! with its own closed-form model instead).
 //!
 //! Mutation testing (`cargo mutants`) leaves these survivors, equivalent:
-//! - `* → /` before `axis.dot(k)` in the cylinder's swept sum: every
-//!   circle on a cylinder face is coaxial with it, so the dot is ±1 (to an
-//!   ulp), and multiplying or dividing by ±1 gives the same sum.
+//! - `> → >=` in an arc's `left`: an arc on a plane is square to it, so
+//!   `axis.dot(n)` is ±1, never 0, and an edge never has `tb == ta`.
+//!
+//! Each factor that is ±1 (`sign`, `left`, `axis.dot(k)`) comes first in
+//! its product, so `* → /` there changes the answer (±1 / x, not x / ±1)
+//! and the tests see it.
 
 use crate::geom::{any_perpendicular, Curve, Surface};
 use crate::mass::{face_terms, half_moment, theta_minus_sin, travel};
@@ -95,10 +98,10 @@ pub fn face_mass(body: &Body, face: &Face) -> FaceMass {
                 let (curve, ta, tb) = travel(body, c);
                 if let Curve::Circle { center, axis: k, .. } = *curve {
                     let h = axis.dot(center - origin) - hp;
-                    swept += h * h * axis.dot(k) * (tb - ta);
+                    swept += axis.dot(k) * (tb - ta) * h * h;
                 }
             }
-            let height = hp - 0.5 * sign * radius * swept / area;
+            let height = hp - sign * radius * swept / area * 0.5;
             origin + across * (sign * radius / area) + axis * height
         }
         Surface::Plane { normal, .. } => {
@@ -119,7 +122,7 @@ pub fn face_mass(body: &Body, face: &Face) -> FaceMass {
                     let towards = x_dir * mid.cos() + axis.cross(x_dir) * mid.sin();
                     let segment = 0.5 * radius * radius * theta_minus_sin(phi);
                     let about_centre = 2.0 / 3.0 * radius.powi(3) * (0.5 * phi).sin().powi(3);
-                    moment += (segment * (center - p) + towards * about_centre) * left;
+                    moment += left * (segment * (center - p) + towards * about_centre);
                 }
             }
             p + moment / area

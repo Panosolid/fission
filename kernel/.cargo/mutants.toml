@@ -47,7 +47,7 @@ exclude_re = [
   '^src/accurate\.rs:\d+:\d+: replace > with >= in Exact::sign$', # the largest part is never 0 (zeros are dropped as they appear)
   '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$', # at exactly 0.1 both forms are within FP_REL; the mutant's series is the more accurate one
   '^src/ops/extrude\.rs:\d+:\d+: replace > with >= in extrude$', # an arc's sweep is never 0
-  '^src/face_mass\.rs:\d+:36: replace \* with / in face_mass$', # the cylinder's circles are coaxial with it: axis.dot(k) is ±1, and * ±1 equals / ±1 (column-anchored: the other * in face_mass are caught)
+  '^src/face_mass\.rs:\d+:\d+: replace > with >= in face_mass$', # an arc's axis.dot(n) is ±1 and an edge's tb != ta, never a tie
   # tessellate.rs (reasons also in its top comment)
   '^src/tessellate\.rs:\d+:\d+: replace < with <= in segments$', # chord = 2r: sag angle 2π vs no limit (∞); both clamp to the TAU/3 cap
   '^src/tessellate\.rs:\d+:\d+: replace > with >= in periodic_domain$', # a loop's winding is 0 or ±2π up to ~1e-15 rounding, never exactly π
