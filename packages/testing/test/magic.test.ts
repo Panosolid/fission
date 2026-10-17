@@ -137,8 +137,9 @@ test("a ready journey with no baseline or not walked is flagged; a pending one s
 test("the baseline file: tests/baseline.json holds the owner's numbers for every ready journey", () => {
   const file = JSON.parse(readFileSync(new URL("../../../tests/baseline.json", import.meta.url), "utf8"));
   const baselines = parseBaselines(file.journeys);
-  // Confirmed by the owner on 2026-10-16: Design shape to STL, 3 clicks, slowest walk 0.7 s.
-  assert.deepEqual(baselines.get("Design: shape to STL"), { clicks: 3, slowestMs: 700 });
+  // Confirmed by the owner on 2026-10-16: Design shape to STL, 3 clicks; slowest walk re-measured
+  // on GitHub's runners the same day (owner chose "Re-measure"): 1.23 s, the worst of 12 runs.
+  assert.deepEqual(baselines.get("Design: shape to STL"), { clicks: 3, slowestMs: 1230 });
   for (const j of MAGIC_JOURNEYS) assert.equal(baselines.has(j.name), j.status === "ready", j.name);
 });
 
