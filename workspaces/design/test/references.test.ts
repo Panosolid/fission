@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { designReference } from "../src/references.ts";
 
-test("references for a body, a face and an edge of feature #1 (placeholder ids until step 32)", () => {
+test("references for a body, a face and an edge of feature #1 (placeholder ids until step 24)", () => {
   // Worked by hand from the scheme in references.ts: "<kind>:<feature>" for the
   // body, "<kind>:<feature>/<kernel index>" for faces and edges.
   assert.deepEqual(designReference("body", "feature-1"), { kind: "body", id: "body:feature-1" });

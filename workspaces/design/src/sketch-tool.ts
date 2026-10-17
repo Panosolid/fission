@@ -15,7 +15,7 @@
 // equal: snap.ts puts a click near a point exactly on it, and the kernel
 // gives bit-identical nodes for the same node, so a click back on the
 // chain's first point closes it. Keeping points together after that comes
-// with the sketch constraints (27).
+// with the sketch constraints (29).
 
 import type { Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchLineCurve, SketchPlane } from "./document.ts";
@@ -86,7 +86,7 @@ export const DEFAULT_GRID = 10;
 /** Whether points snap to the grid until you tick it (sketch feel SF1): off, so points go where you click, as in other CAD sketchers. */
 export const DEFAULT_GRID_SNAP = false;
 
-/** The origin planes the Create sketch prompt draws; only the ground plane until step 24 brings the other two and flat faces. */
+/** The origin planes the Create sketch prompt draws; only the ground plane until step 26 brings the other two and flat faces. */
 export const ORIGIN_PLANES: readonly { id: SketchPlane; offered: boolean; label: string }[] = [
   { id: "XY", offered: true, label: "Ground plane (XY)" },
   { id: "XZ", offered: false, label: "Front plane (XZ)" },

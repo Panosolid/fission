@@ -1,5 +1,5 @@
 // Sketch snapping: where a click on the sketch plane lands, before the
-// sketch constraints (27) exist. The kernel first rounds the pointer
+// sketch constraints (29) exist. The kernel first rounds the pointer
 // (`rounding`): placed freely where you click by default (place_freely,
 // within half a pixel), or to the grid with grid snap on (snap_to_grid).
 // This then lets nearby sketch geometry win over that point, as pure
@@ -18,7 +18,7 @@
 //
 // Snapping is only where the click lands: nothing is remembered as a rule
 // (a line drawn horizontal is not kept horizontal); that is what the
-// constraints of step 27 add. The reach is in screen pixels, turned into mm
+// constraints of step 29 add. The reach is in screen pixels, turned into mm
 // by the size of a pixel on the plane at the pointer (SketchPointer.pixel),
 // so it feels the same at any zoom. It is a pick radius, not a geometric
 // tolerance: nothing is judged equal by it.

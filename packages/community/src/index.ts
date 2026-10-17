@@ -48,5 +48,5 @@ export const communityPage = {
     "Open a download in any workspace (Design, Render, Slice…) since it is all one project",
     "Remix: your copy links back to the original and credits its author",
   ],
-  startsAfter: "after CAD step 33 (the timeline), with STL/3MF export (73) for meshes; it needs a server first (see docs/community.md)",
+  startsAfter: "after CAD step 25 (the timeline), with STL/3MF export (73) for meshes; it needs a server first (see docs/community.md)",
 };
