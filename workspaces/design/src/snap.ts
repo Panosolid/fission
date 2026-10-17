@@ -1,7 +1,10 @@
 // Sketch snapping: where a click on the sketch plane lands, before the
-// sketch constraints (29) exist. The kernel snaps the pointer to the grid
-// (snap_to_grid); this then lets nearby sketch geometry win over the grid,
-// as pure functions every tool shares:
+// sketch constraints (29) exist. The kernel first rounds the pointer
+// (`rounding`): placed freely where you click by default (place_freely,
+// within half a pixel), or to the grid with grid snap on (snap_to_grid).
+// This then lets nearby sketch geometry win over that point, as pure
+// functions every tool shares (the "grid" snap below is that rounded
+// point, free or on the grid):
 //
 // 1. A point: within SNAP_PIXELS on screen of a sketch point (a line's or
 //    arc's end, a circle's or arc's centre) or a line's midpoint, the
@@ -9,9 +12,9 @@
 //    shares the point (pointAt compares coordinates exactly).
 // 2. Lining up: otherwise, within SNAP_PIXELS of a point's column (same x)
 //    or row (same y), that coordinate is the point's exactly and the other
-//    stays the grid's. Lining up with the tool's own clicks is how a
+//    stays the rounded one. Lining up with the tool's own clicks is how a
 //    line snaps horizontal or vertical.
-// 3. Otherwise the grid point.
+// 3. Otherwise the rounded point.
 //
 // Snapping is only where the click lands: nothing is remembered as a rule
 // (a line drawn horizontal is not kept horizontal); that is what the
@@ -213,4 +216,19 @@ export function snapMarks(snap: Snap, pixel: number): Segment[] {
 export function withSnap(drawings: SketchDrawing[], snap: Snap | null, pixel: number | undefined): SketchDrawing[] {
   if (!snap || snap.kind === "grid" || pixel === undefined || !(pixel > 0)) return drawings;
   return drawings.map((d) => (d.editing ? { ...d, editing: { ...d.editing, snap: { label: snapLabel(snap), marks: snapMarks(snap, pixel) } } } : d));
+}
+
+/**
+ * The kernel call that rounds a pointer at `at` on the plane before the
+ * snaps above (sketch feel SF1). Grid snap on: the nearest node of the
+ * grid (snap_to_grid). Off, the default: placed freely (place_freely),
+ * where you click, rounded to the largest power of ten no bigger than a
+ * pixel there, so it moves by at most half a pixel. A pixel size that is
+ * not a positive number (the viewport can't tell) falls back to the
+ * grid, as snapPointer does.
+ */
+export type Rounding = { op: "snap_to_grid"; args: [x: number, y: number, spacing: number] } | { op: "place_freely"; args: [x: number, y: number, pixel: number] };
+export function rounding(at: SketchXY, grid: number, gridSnap: boolean, pixel: number | undefined): Rounding {
+  if (gridSnap || pixel === undefined || !(pixel > 0) || !Number.isFinite(pixel)) return { op: "snap_to_grid", args: [at[0], at[1], grid] };
+  return { op: "place_freely", args: [at[0], at[1], pixel] };
 }

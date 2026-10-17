@@ -9,6 +9,16 @@
 //!   0.3 exactly as typed, where 3 × 0.1 gives 0.30000000000000004. Either
 //!   way the same k always gives bit-identical nodes, so lines drawn to the
 //!   same node share their end exactly.
+//! - `place_freely` (sketch feel SF1): where a click lands with grid snap
+//!   off. Points go where you click, rounded to `free_spacing(pixel)`, the
+//!   largest power of ten no bigger than one screen pixel on the plane
+//!   (pixel = mm per pixel at the pointer, from the viewport), within
+//!   [MIN_FEATURE, MAX_SIZE]. So the click moves by at most half a pixel,
+//!   which no one can see, and the point is a short decimal (12.37 mm at a
+//!   zoom where a pixel is 0.05 mm, not 12.3681944…) through the same
+//!   decimal rounding as the grid: two clicks rounded to the same node
+//!   are bit-identical, and a typed value of that length is the same
+//!   double.
 //! - `check_lines`: the rules for a sketch's lines (finite, within MAX_COORD,
 //!   length within [MIN_FEATURE, MAX_SIZE], at most MAX_PROFILE_CORNERS).
 //! - `check_circles`: the rules for a sketch's circles (step 22b): radius
@@ -151,6 +161,32 @@ pub fn snap_to_grid(p: DVec2, spacing: f64) -> Result<DVec2, KernelError> {
         )));
     }
     Ok(snapped)
+}
+
+/// Every spacing `free_spacing` can give: the powers of ten from
+/// MIN_FEATURE to MAX_SIZE, written as literals so each is the double
+/// nearest the decimal (10f64.powi(-3) need not be).
+const POWERS_OF_TEN: [f64; 10] = [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6];
+
+/// The spacing a freely placed click is rounded to: the largest power of
+/// ten no bigger than `pixel` (mm per screen pixel), at least MIN_FEATURE
+/// (a pixel finer than a micrometre still rounds to whole micrometres,
+/// the smallest feature) and at most MAX_SIZE. `pixel` must be a positive
+/// finite number.
+pub fn free_spacing(pixel: f64) -> Result<f64, KernelError> {
+    if !(pixel > 0.0 && pixel.is_finite()) {
+        return Err(KernelError::InvalidInput(format!("the size of a pixel on the sketch plane must be a positive number of mm, got {pixel}")));
+    }
+    Ok(POWERS_OF_TEN.iter().rev().copied().find(|&s| s <= pixel).unwrap_or(POWERS_OF_TEN[0]))
+}
+
+/// Where a click at `p` lands placed freely (no grid snap): the nearest
+/// node of a grid of `free_spacing(pixel)`, so at most half that, and at
+/// most half a pixel, from `p` in each coordinate (MIN_FEATURE / 2 when
+/// a pixel is finer than MIN_FEATURE). Errors as `free_spacing` and
+/// `snap_to_grid`.
+pub fn place_freely(p: DVec2, pixel: f64) -> Result<DVec2, KernelError> {
+    snap_to_grid(p, free_spacing(pixel)?)
 }
 
 /// Finite and within MAX_COORD of the origin in both coordinates.
@@ -558,6 +594,59 @@ mod tests {
         // The y coordinate is checked on its own: x snaps to 0.
         let m = invalid(snap_to_grid(v(0.0, -MAX_COORD), 7e5));
         assert!(m.contains("grid node nearest"), "{m}");
+    }
+
+    // ---- free_spacing and place_freely (sketch feel SF1)
+
+    #[test]
+    fn free_spacing_worked_by_hand() {
+        // 0.1 ≤ 0.15 < 1: the largest power of ten not above 0.15 mm is 0.1.
+        assert_eq!(free_spacing(0.15).unwrap(), 0.1);
+        // 0.01 ≤ 0.05 < 0.1.
+        assert_eq!(free_spacing(0.05).unwrap(), 0.01);
+        // 10 ≤ 37 < 100: zoomed far out, a pixel is 37 mm and clicks land on whole tens of mm.
+        assert_eq!(free_spacing(37.0).unwrap(), 10.0);
+        // A pixel of exactly 1 mm is a power of ten itself: 1.
+        assert_eq!(free_spacing(1.0).unwrap(), 1.0);
+        // 1e5 ≤ 999,999 < 1e6.
+        assert_eq!(free_spacing(999_999.0).unwrap(), 1e5);
+        // Finer than MIN_FEATURE (1 µm) still rounds to whole micrometres; past MAX_SIZE, to MAX_SIZE.
+        assert_eq!(free_spacing(1e-7).unwrap(), MIN_FEATURE);
+        assert_eq!(free_spacing(1e9).unwrap(), MAX_SIZE);
+    }
+
+    #[test]
+    fn free_spacing_steps_at_each_power_of_ten_at_0_9_and_1_1() {
+        // The table runs from MIN_FEATURE to MAX_SIZE, each entry the double nearest 10^k.
+        assert_eq!((POWERS_OF_TEN[0], POWERS_OF_TEN[9]), (MIN_FEATURE, MAX_SIZE));
+        for (i, &s) in POWERS_OF_TEN.iter().enumerate() {
+            assert_eq!(s, format!("1e{}", i as i32 - 3).parse::<f64>().unwrap());
+            // At the power and at 1.1× it: that power. Just below it and at 0.9×: the one before (MIN_FEATURE at the bottom).
+            let below = if i == 0 { MIN_FEATURE } else { POWERS_OF_TEN[i - 1] };
+            assert_eq!(free_spacing(s).unwrap(), s, "at {s}");
+            assert_eq!(free_spacing(1.1 * s).unwrap(), s, "at 1.1 × {s}");
+            assert_eq!(free_spacing(0.9 * s).unwrap(), below, "at 0.9 × {s}");
+            assert_eq!(free_spacing(f64::from_bits(s.to_bits() - 1)).unwrap(), below, "just below {s}");
+        }
+    }
+
+    #[test]
+    fn free_spacing_refuses_a_pixel_that_is_not_a_positive_number() {
+        for bad in [0.0, -0.0, -0.15, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(invalid(free_spacing(bad)).contains("size of a pixel"), "{bad}");
+            assert!(invalid(place_freely(v(1.0, 1.0), bad)).contains("size of a pixel"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn place_freely_worked_by_hand() {
+        // A pixel of 0.05 mm: spacing 0.01. 12.3681944 / 0.01 = 1236.8 → 1237 → 12.37;
+        // −7.0449 / 0.01 = −704.49 → −704 → −7.04. Each within 0.005 mm (a tenth of a pixel) of the click.
+        assert_eq!(place_freely(v(12.3681944, -7.0449), 0.05).unwrap(), v(12.37, -7.04));
+        // A pixel of 0.15 mm: spacing 0.1. 123.68 → 124 → 12.4; −70.449 → −70 → −7.0.
+        assert_eq!(place_freely(v(12.3681944, -7.0449), 0.15).unwrap(), v(12.4, -7.0));
+        // Off the modelling range is refused as snap_to_grid refuses it.
+        assert!(invalid(place_freely(v(1.1 * MAX_COORD, 0.0), 0.15)).contains("outside the modelling range"));
     }
 
     // ---- check_lines
@@ -1170,6 +1259,43 @@ mod tests {
             prop_assert!(sweep > 0.0, "{a:?} turns {sweep}");
             let middle = center + DVec2::from_angle((a.start - center).to_angle() + sweep / 2.0) * radius;
             prop_assert!(middle.distance(model_middle) <= slack, "{a:?}: middle {middle} vs {model_middle}");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2000,
+            failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::Direct("tests/regressions/sketch-free.txt"))),
+            ..ProptestConfig::default()
+        })]
+
+        /// Against a simple model: the spacing is 10^k for k the decimal
+        /// exponent of the pixel size as Rust prints it ("1.5e-1" gives
+        /// −1), held within −3..=6; the click then moves by at most half
+        /// that spacing (plus rounding) in each coordinate, to the node a
+        /// grid of that spacing gives. Pixels from a hundredth of
+        /// MIN_FEATURE to ten times MAX_SIZE, clicks anywhere within
+        /// MAX_COORD.
+        #[test]
+        fn place_freely_matches_a_model_of_it(
+            x in -1e8..1e8f64, y in -1e8..1e8f64,
+            log_pixel in -5.0..7.0f64,
+        ) {
+            let pixel = 10f64.powf(log_pixel);
+            let printed = format!("{pixel:e}");
+            let k: i32 = printed.split('e').nth(1).unwrap().parse().unwrap();
+            let model: f64 = format!("1e{}", k.clamp(-3, 6)).parse().unwrap();
+            let spacing = free_spacing(pixel).unwrap();
+            prop_assert_eq!(spacing, model, "pixel {} printed {}", pixel, printed);
+            let p = v(x, y);
+            let Ok(placed) = place_freely(p, pixel) else {
+                // Only a node rounded out past MAX_COORD may be refused.
+                prop_assert!(p.abs().max_element() + spacing / 2.0 > MAX_COORD, "{p} at {pixel}");
+                return Ok(());
+            };
+            prop_assert_eq!(placed, snap_to_grid(p, spacing).unwrap());
+            let slack = spacing / 2.0 + crate::tolerance::rounding_slack(p.abs().max_element());
+            prop_assert!((placed - p).abs().max_element() <= slack, "{p} at {pixel} went to {placed}");
         }
     }
 }
