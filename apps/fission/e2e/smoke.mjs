@@ -1,14 +1,13 @@
 // Browser smoke test: serves the built app, drives it like a user and checks
 // what is on screen. Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4174, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4174/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
 // The app opens the project it autosaved last (19c); the checks on `page`
 // each expect a fresh app, so every load of it forgets what was stored.
@@ -91,7 +90,11 @@ async function check(name, fn) {
 try {
   await page.goto(url);
   // The panel appears once the app has looked for a stored project (19c), so wait for it to exist too.
-  await page.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "…") !== "…");
+  await page.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "…") !== "…").catch(async (e) => {
+    // Say what the page did say, so a browser that never starts (another engine in CI) can be diagnosed from the log.
+    const shown = await page.evaluate(() => ({ status: document.querySelector("#status")?.textContent, file: document.querySelector("#file-status")?.textContent, body: document.body.innerText.slice(0, 300) }));
+    throw new Error(`${e.message}\n  the page shows ${JSON.stringify(shown)}\n  console errors: ${JSON.stringify(consoleErrors)}`);
+  });
 
   await check("default 40×30×20 box shows hand-worked numbers", async () => {
     // V = 40·30·20 = 24000; A = 2(40·30 + 30·20 + 40·20) = 5200.

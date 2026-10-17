@@ -8,9 +8,8 @@
 // a chosen file the same way.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 /** A 200 × 100 RGBA PNG at 10000 px/m (254 DPI, 0.1 mm per pixel), all mid grey. */
@@ -37,8 +36,7 @@ const png = plate();
 
 const server = await preview({ preview: { port: 4176, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4176/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 
 async function fresh(width = 1000) {

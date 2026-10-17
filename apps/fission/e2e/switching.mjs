@@ -5,8 +5,7 @@
 // two slots with one id.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 /** Principle 10's limit, from the click to the painted frame. */
@@ -14,8 +13,7 @@ const LIMIT_MS = 100;
 
 const server = await preview({ preview: { port: 4178, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4178/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 
 async function fresh(width = 1280) {

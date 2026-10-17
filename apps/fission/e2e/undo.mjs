@@ -10,14 +10,12 @@
 // the default depth 30 and height 20.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { browserName, launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4180, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4180/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 
 async function fresh(hash = "#design") {
@@ -150,7 +148,18 @@ try {
       await page.$eval("#width", (el) => (el.dataset.mark = "same"));
       await page.keyboard.press("Control+z");
       assert.equal(await page.$eval("#width", (el) => el.dataset.mark ?? "remounted"), "same", "the shell's undo ran inside the field");
-      assert.notEqual(await width(page), "70", "the browser's own undo took the typing back");
+      // What Ctrl+Z does in a plain field of this browser, away from the app: Chromium takes the
+      // typing back; another engine under test automation may not, and the app's field must then
+      // behave exactly as the plain one does (the shell neither blocks nor fakes the browser's undo).
+      const plain = await page.context().newPage();
+      await plain.setContent('<input id="f">');
+      await plain.click("#f");
+      await plain.keyboard.type("70");
+      await plain.keyboard.press("Control+z");
+      const plainUndoes = (await plain.inputValue("#f")) !== "70";
+      await plain.close();
+      if (browserName === "chromium") assert.equal(plainUndoes, true, "Chromium's own undo takes typing back in a plain field");
+      assert.equal((await width(page)) !== "70", plainUndoes, plainUndoes ? "the browser's own undo took the typing back" : `in ${browserName} a plain field keeps the typing after Ctrl+Z, and so must the app's`);
     } finally {
       await page.close();
     }

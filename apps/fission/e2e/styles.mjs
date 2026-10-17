@@ -3,13 +3,11 @@
 // badge, a downstream chip and a change note placed on the page take their
 // styles. Run with `npm run e2e`, after `npm run build`.
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4175, strictPort: true }, logLevel: "error" });
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 try {
   const page = await browser.newPage();
   await page.goto("http://localhost:4175/");

@@ -9,14 +9,12 @@
 // the kernel's replies are slowed so the key lands while it works. Run with
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4185, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4185/";
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 const errors = [];
 const shots = process.env.E2E_SHOTS;
 

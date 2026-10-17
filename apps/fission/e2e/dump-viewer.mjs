@@ -4,18 +4,17 @@
 // and checks what is drawn. Run with `npm run e2e`.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { chromium } from "playwright";
+import { launch } from "./browser.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "fission-dumps-"));
 const kernel = resolve(import.meta.dirname, "../../../kernel");
 execFileSync("cargo", ["run", "--quiet", "--example", "dump_demo", "--", dir], { cwd: kernel, stdio: "inherit" });
 
-const sandboxChromium = "/opt/pw-browsers/chromium";
-const browser = await chromium.launch(existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {});
+const browser = await launch();
 let passed = 0;
 const check = (name, fn) => {
   fn();
