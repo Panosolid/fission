@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Plane } from "@fission/core";
-import { GRID_REACH, gridLines, MAX_GRID_LINES, rayOnPlane, toWorld, yAxisOf } from "../src/sketch-view.ts";
+import { GRID_REACH, gridLines, MAX_GRID_LINES, pixelSize, rayOnPlane, toWorld, yAxisOf } from "../src/sketch-view.ts";
 
 const XY: Plane = { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] };
 const XZ: Plane = { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, -1, 0] };
@@ -65,4 +65,27 @@ test("the grid's lines, counted by hand", () => {
 
 test("a grid spacing that is not a positive number draws no grid", () => {
   for (const s of [0, -10, NaN, Infinity]) assert.deepEqual(gridLines(s), [], `spacing ${s}`);
+});
+
+test("hand-worked: a pixel's size on the plane is the further of the steps to the pixel right and the pixel below", () => {
+  // From (1, 1): the pixel right lands at (1.3, 1.4), (0.3, 0.4) away, √(0.09 + 0.16) = 0.5; the pixel below at
+  // (1, 0.8), 0.2 away. Seen at a slant the longer step counts: 0.5 mm.
+  assert.ok(Math.abs(pixelSize([1, 1], [1.3, 1.4], [1, 0.8])! - 0.5) < 1e-12);
+  // Looking straight down at 0.25 mm a pixel both ways.
+  assert.equal(pixelSize([0, 0], [0.25, 0], [0, -0.25]), 0.25);
+});
+
+test("a pixel's size is unknown when the pointer or a neighbour misses the plane, or the steps are nothing", () => {
+  assert.equal(pixelSize(null, [1, 0], [0, 1]), undefined);
+  assert.equal(pixelSize([0, 0], null, [0, 1]), undefined);
+  assert.equal(pixelSize([0, 0], [1, 0], null), undefined);
+  assert.equal(pixelSize([0, 0], [0, 0], [0, 0]), undefined);
+  assert.equal(pixelSize([0, 0], [Infinity, 0], [0, 1]), undefined);
+});
+
+test("a pixel's size from real rays: a camera 100 mm above the ground plane, 1 mm right per pixel at the plane", () => {
+  // Rays from (0, 0, 100) through the pixel and its neighbours, aimed so they meet z = 0 at (0, 0), (1, 0) and (0, −1).
+  const from = [0, 0, 100];
+  const hit = (x: number, y: number) => rayOnPlane(from, [x, y, -100], XY);
+  assert.equal(pixelSize(hit(0, 0), hit(1, 0), hit(0, -1)), 1);
 });

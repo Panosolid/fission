@@ -37,12 +37,14 @@ export type SketchXY = readonly [number, number];
  * frame (x along `xAxis`, y along normal × xAxis), drawn over the body.
  * The sketch being edited also has its grid (spacing in mm), its points
  * and what the tool would draw at the pointer (the line tool's rubber
- * band, a rectangle's four sides), empty when it would draw nothing.
+ * band, a rectangle's four sides), empty when it would draw nothing,
+ * and where the pointer snapped (Design's snap.ts): its marks, drawn over
+ * everything, and the snap in words ("endpoint 10,0"), absent on the grid.
  */
 export interface SketchDrawing {
   plane: Plane;
   lines: readonly (readonly [SketchXY, SketchXY])[];
-  editing?: { grid: number; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[] };
+  editing?: { grid: number; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[]; snap?: { label: string; marks: readonly (readonly [SketchXY, SketchXY])[] } };
 }
 
 /** An origin plane drawn small at the origin to be picked (Create sketch); one not offered is drawn faint and can't be clicked. */
@@ -52,10 +54,16 @@ export interface OriginPlane {
   offered: boolean;
 }
 
-/** The pointer over the sketch being edited: where it meets the sketch's plane in its frame, or null (off the view, or looking along the plane). */
+/**
+ * The pointer over the sketch being edited: where it meets the sketch's
+ * plane in its frame, or null (off the view, or looking along the plane),
+ * and how big a screen pixel is on the plane there (mm), for snapping
+ * within a few pixels; absent when the viewport can't tell.
+ */
 export interface SketchPointer {
   kind: "move" | "click";
   at: SketchXY | null;
+  pixel?: number;
 }
 
 /**

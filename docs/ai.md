@@ -66,7 +66,7 @@ export const DESIGN_COMMANDS: readonly CommandSpec[] = [
 ];
 ```
 
-The panel and the assistant reach the same result through these commands (`documentFor`). When the timeline arrives (step 32), Design adds a command per feature type, such as `hole` or `extrude`, using references to faces by stable id.
+The panel and the assistant reach the same result through these commands (`documentFor`). When the timeline arrives (step 24), Design adds a command per feature type, such as `hole` or `extrude`, using references to faces by stable id.
 
 ## One request, start to finish
 
@@ -80,7 +80,7 @@ The panel and the assistant reach the same result through these commands (`docum
 
    The `"small"` level fits small local models. `"large"` gives more.
 2. **Ask** (`commands.ts`). `askForCommands` uses the schema as constrained output where the provider supports it, and otherwise puts the schema in the instructions. It checks the answer. If the answer is bad, it retries once and tells the model what was wrong. After a second bad answer it fails clearly with "… Nothing was changed."
-3. **Preview and decide** (`actions.ts`). `proposeAction(commands, …)` shows what would change (until the timeline, step 32, a diff of parameters before and after; ghosted geometry and highlights come with stable ids), and then either accepts it as one undo step (`acceptCommands`, through the workspace's own `run`) or rejects it, leaving the project unchanged. An accept after the project changed since the preview is refused. The panel (`apps/fission/src/assistant.ts`) does this for Design's `set_part`; `systemPrompt` (`prompt.ts`) is the one instruction text, shared with the evaluation.
+3. **Preview and decide** (`actions.ts`). `proposeAction(commands, …)` shows what would change (until the timeline, step 24, a diff of parameters before and after; ghosted geometry and highlights come with stable ids), and then either accepts it as one undo step (`acceptCommands`, through the workspace's own `run`) or rejects it, leaving the project unchanged. An accept after the project changed since the preview is refused. The panel (`apps/fission/src/assistant.ts`) does this for Design's `set_part`; `systemPrompt` (`prompt.ts`) is the one instruction text, shared with the evaluation.
 
 ## Specialist models (`specialists.ts`)
 
@@ -94,7 +94,7 @@ Each one is downloaded on first use, after its size is shown. They are placehold
 
 ## What the assistant will do in each workspace (`features.ts`)
 
-`AI_FEATURES` lists the plans for each workspace, plus suite-wide ones such as "what breaks if I change this?", which uses the dependency graph. The assistant panel shows the list for the active workspace. A workspace's AI features come after that workspace is real. Design comes first, after step 32.
+`AI_FEATURES` lists the plans for each workspace, plus suite-wide ones such as "what breaks if I change this?", which uses the dependency graph. The assistant panel shows the list for the active workspace. A workspace's AI features come after that workspace is real. Design comes first, after step 24.
 
 ## Testing
 
@@ -102,7 +102,7 @@ Each one is downloaded on first use, after its size is shown. They are placehold
 - **Evaluation** (`packages/testing/src/ai-eval.ts`). `EVAL_CASES` holds fixed prompts, each with a project state and the expected commands. `runEval` scores any provider, and `successRates` gives the rate for each task type, which is tracked over time like the fuzzer's metrics. Cases that need commands not built yet name what they wait for.
 - **Preview and undo.** `packages/ai/test/propose.test.ts` checks that an accepted action is exactly one undo step and a rejected or stale one leaves the project unchanged; `apps/fission/e2e/assistant.mjs` checks the same in the browser, with the model's answers stood in by the test.
 
-## Fission's own model (planned, starts after step 32)
+## Fission's own model (planned, starts after step 24)
 
 Users can bring any provider in the table above. Fission will also ship a model of its own: a small one that runs on the user's device and is held to the rules below. It is one more entry in `PROVIDERS`, so nothing else in the app changes when it arrives.
 
@@ -138,13 +138,13 @@ These rules are in addition to the ones at the top of this page.
 
 The roadmap tracks these as A10 to A13.
 
-- **A10, the gate** (with A7, after step 32). Score two or three off-the-shelf small models through Ollama on the evaluation suite, using constrained output. If one is good enough, it becomes the in-browser default and the phases stop here.
+- **A10, the gate** (with A7, after step 24). Score two or three off-the-shelf small models through Ollama on the evaluation suite, using constrained output. If one is good enough, it becomes the in-browser default and the phases stop here.
 - **A11, the data generator.** Only if A10 falls short.
 - **A12, the training runs.** Free tiers first, with a cap of about 100 US dollars until the model ships.
 - **A13, shipping.** "Fission model" joins `PROVIDERS` and becomes the default only if it wins on the evaluations. From then on, it is retrained as each workspace adds commands (A8). A retrain is a rerun of the scripts, not a new project.
 
 ### Guardrails for the main project
 
-- No work on this starts before step 32. There are no commands worth teaching until then.
+- No work on this starts before step 24. There are no commands worth teaching until then.
 - The CAD roadmap always comes first, and the work runs in one thread at a time.
 - Check the base model's licence and the source of all training data before training, not after.

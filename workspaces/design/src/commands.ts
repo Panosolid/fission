@@ -1,7 +1,7 @@
 // Design's commands, as data (the command API in core). The panel and the
 // AI assistant do the same thing through these: the AI gets schemas
 // generated from them and can't do anything a user couldn't. Until the
-// timeline (step 32) there are two: set the part, and export it.
+// timeline (step 24) there are two: set the part, and export it.
 
 import type { Command, CommandSpec } from "@fission/core";
 import { withPart, type DesignDocument } from "./document.ts";

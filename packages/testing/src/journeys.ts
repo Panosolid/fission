@@ -21,7 +21,7 @@ export const JOURNEYS: Journey[] = [
 
 /** Round trips that must lose nothing; each gets an integration test when both ends are real. */
 export const ROUND_TRIPS: { name: string; waitsFor: string }[] = [
-  { name: "Constrained sketch → Laser → back: still constrained and editable", waitsFor: "the sketcher (21–29) and Laser (L1)" },
+  { name: "Constrained sketch → Laser → back: still constrained and editable", waitsFor: "the sketcher (21–31) and Laser (L1)" },
   { name: "Vector logo → Design → back: still an editable vector", waitsFor: "Vector (V3)" },
   { name: "Image → Vector trace → back: the image is unchanged", waitsFor: "Image (G2) and Vector (V1)" },
 ];

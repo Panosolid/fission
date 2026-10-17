@@ -256,7 +256,7 @@ try {
     await page.keyboard.press("Escape");
   });
 
-  // 17e: until topological naming (step 32) a face or edge is its kernel
+  // 17e: until topological naming (step 24) a face or edge is its kernel
   // index, kept only while the rebuilt body is numbered the same way.
   const selected = () => page.evaluate(() => document.body.dataset.selection ?? "");
   const pickTopAndEdge = async () => {

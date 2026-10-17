@@ -7,8 +7,8 @@
 // from?") and the ids it depends on, which feed the dependency graph
 // (graph.ts).
 //
-// This is the structure the full timeline (step 32) uses. Today Design's
-// one part is feature #1 of a one-step timeline; step 32 appends to the
+// This is the structure the full timeline (step 24) uses. Today Design's
+// one part is feature #1 of a one-step timeline; step 24 appends to the
 // list instead of converting an old format.
 
 import type { WorkspaceId } from "./project.ts";
