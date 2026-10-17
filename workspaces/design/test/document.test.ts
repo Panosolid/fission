@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { RepresentationRegistry, type BodyView, type KernelCalls, type Timeline, XY_PLANE, describeProvenance } from "@fission/core";
 import { lastFeature, partDocument, specOf } from "../src/document.ts";
 import { designObjects, outlineProducer, registerDesign, type OutlineSource } from "../src/representations.ts";
+import { addSketch, drawLine } from "../src/sketch.ts";
 import { outline } from "../src/profiles.ts";
 
 test("a part is feature #1 of a one-step timeline, with its intent", () => {
@@ -62,7 +63,7 @@ test("Design produces exact Solids for its features and Outlines for its profile
   const registry = new RepresentationRegistry();
   registerDesign(registry, fakeKernel);
   const doc = partDocument("star", 40, 30, 20);
-  const [profile, feature] = designObjects(doc);
+  const [profile, feature] = designObjects(doc, fakeKernel);
   assert.deepEqual(await registry.deliver(feature, ["solid", "mesh"]), { representation: { kind: "solid", spec: specOf(doc, lastFeature(doc)) }, note: null });
   const asMesh = await registry.deliver(feature, ["mesh"]);
   assert.equal(asMesh.representation.kind, "mesh");
@@ -74,15 +75,40 @@ test("Design produces exact Solids for its features and Outlines for its profile
 });
 
 test("step 21: a sketch produces Outline through the same registry and producer, with no new path", async () => {
-  // A stand-in for the step-21 sketch: any OutlineSource registered with
-  // the existing generic producer. When the real sketch lands it must
-  // pass this same check (see the roadmap note on step 21).
-  const registry = new RepresentationRegistry();
-  registerDesign(registry, fakeKernel);
-  registry.registerProducer("design.sketch", "outline", outlineProducer);
+  // Any OutlineSource registered with the existing generic producer gives its outline.
+  const stand = new RepresentationRegistry();
+  stand.registerProducer("design.thing", "outline", outlineProducer);
   const triangle = { outer: { path: { corners: [0, 0, 10, 0, 0, 10], bulges: [] } }, holes: [] };
-  const sketch: OutlineSource = { type: "design.sketch", id: "sketch-1", plane: XY_PLANE, outline: () => triangle };
+  const thing: OutlineSource = { type: "design.thing", id: "thing-1", plane: XY_PLANE, outline: () => triangle };
+  assert.deepEqual(await stand.deliver(thing, ["outline", "mesh"]), { representation: { kind: "outline", plane: XY_PLANE, outline: triangle }, note: null });
+
+  // The real sketch (21b): registered by registerDesign as design.sketch with
+  // that same producer, its outline found by the kernel from the lines rebuilt
+  // from point ids. A right triangle (0,0), (10,0), (0,10) drawn as a chain.
+  const s = addSketch(partDocument("box", 40, 30, 20));
+  let d = s.doc;
+  const a = drawLine(d, s.id, [0, 0], [10, 0]);
+  const b = drawLine(a.doc, s.id, a.doc.sketches[0].curves[0].end, [0, 10]);
+  d = drawLine(b.doc, s.id, b.doc.sketches[0].curves[1].end, a.doc.sketches[0].curves[0].start).doc;
+  const asked: unknown[] = [];
+  const kernel: KernelCalls = {
+    call: (async (op: string, lines: unknown) => {
+      asked.push([op, lines]);
+      return { closed: triangle };
+    }) as KernelCalls["call"],
+  };
+  const registry = new RepresentationRegistry();
+  registerDesign(registry, kernel);
+  const sketch = designObjects(d, kernel).find((o) => o.type === "design.sketch")!;
+  assert.equal(sketch.id, s.id);
   assert.deepEqual(await registry.deliver(sketch, ["outline", "mesh"]), { representation: { kind: "outline", plane: XY_PLANE, outline: triangle }, note: null });
+  // The kernel was given the three lines in drawing order, each end at its point's place.
+  assert.deepEqual(asked, [["sketch_outline", [{ a: [0, 0], b: [10, 0] }, { a: [10, 0], b: [0, 10] }, { a: [0, 10], b: [0, 0] }]]]);
+  // A sketch that makes no closed outline is refused with the kernel's reason, named.
+  const open: KernelCalls = { call: (async () => ({ open: "a line ends loose at (0, 10)" })) as unknown as KernelCalls["call"] };
+  const r2 = new RepresentationRegistry();
+  registerDesign(r2, open);
+  await assert.rejects(r2.deliver(designObjects(d, open).find((o) => o.type === "design.sketch")!, ["outline"]), /Sketch 1 has no closed outline: a line ends loose at \(0, 10\)/);
 });
 
 test("Design's saved data reads back, and anything else is refused clearly", async () => {
@@ -90,7 +116,7 @@ test("Design's saved data reads back, and anything else is refused clearly", asy
   const doc = partDocument("slot", 40, 30, 20);
   assert.deepEqual(readDesignDocument(JSON.parse(JSON.stringify(doc))), doc);
   assert.throws(() => readDesignDocument(null), /Design data is missing/);
-  assert.throws(() => readDesignDocument({ ...doc, version: 2 }), /version 2 is not one this Fission reads/);
+  assert.throws(() => readDesignDocument({ ...doc, version: 3 }), /version 3 is not one this Fission reads \(1 or 2\)/);
   assert.throws(() => readDesignDocument({ ...doc, timeline: { features: [] } }), /no timeline/);
 });
 
@@ -133,13 +159,14 @@ test("a hand-written version-2 file opens to its 50 × 30 × 20 box", () => {
   assert.equal(p.name, "Block");
 });
 
-test("a version-1 file with a Design part opens (outer migration, Design untouched)", () => {
+test("a version-1 file with a Design part opens (outer migration, then Design's own: a counter above its ids, no sketches)", () => {
   const v1 = JSON.parse(HAND_WRITTEN);
   v1.formatVersion = 1;
   delete v1.links;
   const p = projectFromJson(JSON.stringify(v1), DESIGN);
   assert.deepEqual(p.links, []);
-  assert.deepEqual(p.workspaces.design, JSON.parse(HAND_WRITTEN).workspaces.design);
+  // Its ids are feature-1 only, so the counter starts at 2.
+  assert.deepEqual(p.workspaces.design, { ...JSON.parse(HAND_WRITTEN).workspaces.design, version: 2, nextId: 2, sketches: [] });
 });
 
 test("partOf undoes partDocument for every shape (self-consistency)", () => {
@@ -164,7 +191,7 @@ test("Design data the panel can't show is refused when the file is opened, each 
   assert.throws(broken((d) => (d.timeline.features[0].intent.parameters.width = "50")), /Box: 50 × 30 × 20 mm: width must be a number/);
   assert.throws(broken((d) => delete d.timeline.features[0].intent), /Design feature 1 has no id or intent/);
   assert.throws(broken((d) => (d.timeline.features = [])), /Design data has no timeline/);
-  assert.throws(broken((d) => (d.version = 2)), /Design data version 2 is not one this Fission reads \(1\)/);
+  assert.throws(broken((d) => ((d as { version: number }).version = 3)), /Design data version 3 is not one this Fission reads \(1 or 2\)/);
   const extrude = (edit: (d: DesignDocument) => void) => {
     const doc = partDocument("slot", 40, 30, 20);
     edit(doc);

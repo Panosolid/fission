@@ -1,10 +1,12 @@
 // Journey: the sketch maths through the real WASM kernel (step 21a), the
 // same calls the sketcher will make: snap pointer positions to the grid,
-// find the outline the lines make, extrude it. Run with `npm run journeys`
+// find the outline the lines make, extrude it; and a saved sketch's
+// outline handed to another workspace (step 21b). Run with `npm run journeys`
 // after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Outline, SketchLine } from "@fission/core";
+import { emptyProject, fetchLinked, linkTo, projectFromJson, projectToJson, RepresentationRegistry, XY_PLANE, type Outline, type SketchLine, type SourceLookup } from "@fission/core";
+import { addSketch, deleteCurve, designObjects, designWorkspace, drawLine, movePoint, partDocument, type DesignDocument } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
@@ -116,4 +118,44 @@ test("seeded sketches: snapped polygons in any order and direction close into th
   }
   // Must not pass by opening everything.
   assert.ok(closed >= 0.8 * cases, `only ${closed} of ${cases} closed`);
+});
+
+test("a saved sketch's outline reaches another workspace through a live link, and follows an edit (step 21b)", async () => {
+  // A Laser cut linked to Sketch 1 by id, through the one registry, with the
+  // outline found by the real kernel from the saved lines each time.
+  const registry = new RepresentationRegistry();
+  designWorkspace.registerRepresentations!(registry, kernel);
+  // A 40 × 30 rectangle drawn as a chain, its last line back to the first point.
+  const s = addSketch(partDocument("box", 10, 10, 10));
+  let doc = s.doc;
+  const first = drawLine(doc, s.id, [0, 0], [40, 0]);
+  doc = first.doc;
+  let end = doc.sketches[0].curves[0].end;
+  for (const p of [[40, 30], [0, 30]] as const) {
+    doc = drawLine(doc, s.id, end, p).doc;
+    end = doc.sketches[0].curves.at(-1)!.end;
+  }
+  doc = drawLine(doc, s.id, end, doc.sketches[0].curves[0].start).doc;
+  // Saved and opened first: the link reads what the file holds.
+  const opened = () => projectFromJson(projectToJson({ ...emptyProject("Sketch"), workspaces: { design: doc } }), [designWorkspace]).workspaces.design as DesignDocument;
+  const lookup: SourceLookup = (src) => designObjects(opened(), kernel).find((o) => o.id === src.origin.id) ?? null;
+  const cut = linkTo("job-1/cut-1", { kind: "object", origin: { workspace: "design", id: s.id, label: "Sketch 1" } }, ["outline"]);
+  const shown = async () => {
+    const { representation } = await fetchLinked(cut, lookup, registry);
+    assert.equal(representation.kind, "outline");
+    return representation.kind === "outline" ? representation : null!;
+  };
+  // Area 40 · 30 = 1200 mm², on the ground plane.
+  let rep = await shown();
+  assert.deepEqual(rep.plane, XY_PLANE);
+  assert.equal(area(corners(rep.outline)), 1200);
+  // Move the corner (40, 30) to (40, 50): a trapezium with parallel sides 30
+  // (x = 0) and 50 (x = 40), 40 apart: ½ (30 + 50) · 40 = 1600 mm².
+  const corner = doc.sketches[0].points.find((p) => p.x === 40 && p.y === 30)!.id;
+  doc = movePoint(doc, s.id, corner, 40, 50);
+  rep = await shown();
+  assert.equal(area(corners(rep.outline)), 1600);
+  // Delete one side: the sketch opens and the link says why, in the kernel's words.
+  doc = deleteCurve(doc, s.id, doc.sketches[0].curves[1].id);
+  await assert.rejects(shown(), /Sketch 1 has no closed outline: /);
 });

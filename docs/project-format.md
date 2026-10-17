@@ -12,7 +12,7 @@ A Fission project is one JSON document. The format is open: anyone may read and 
   "materials": [],
   "links": [],
   "workspaces": {
-    "design": { "version": 1, "profiles": [], "timeline": { "features": [] } }
+    "design": { "version": 2, "nextId": 2, "profiles": [], "sketches": [], "timeline": { "features": [] } }
   }
 }
 ```
@@ -23,7 +23,7 @@ A Fission project is one JSON document. The format is open: anyone may read and 
 - `links`: live links and frozen copies between workspaces. A live link names its source by id (`{"kind": "object", "origin": {...}}`, or `"geometry"` with a stable face or edge id from step 32 on) and the representations the holder accepts. A frozen copy also carries the representation it froze. Nothing else in the file copies another workspace's data.
 - `workspaces`: each workspace's own data under its id, with **its own** `version` inside. A workspace reads and upgrades its own part (`WorkspacePlugin.readData`), so workspaces can change their data without bumping the outer version.
 
-### Design's data (version 1)
+### Design's data (version 1, before step 21b; opened and upgraded to version 2)
 
 - `profiles`: ready-made outlines on a plane: `{ id, kind, width, depth, plane }`. Sketches join these from step 21.
 - `timeline.features`: features in build order. Each feature is `{ id, intent, provenance, dependsOn, suppressed }`:
@@ -33,9 +33,9 @@ A Fission project is one JSON document. The format is open: anyone may read and 
 
 Today a part is feature #1 of a one-step timeline. Step 32 adds features to the same list, so no migration is needed.
 
-### Planned: Design's data version 2 (step 21b)
+### Design's data version 2 (current, from step 21b)
 
-Sketches arrive as timeline items of their own; the rules behind this shape are in docs/document-model.md.
+Sketches are timeline items of their own; the rules behind this shape are in docs/document-model.md. The extrude of a sketch in this example arrives at step 21d; until step 32 the part is one solid feature (the last timeline item that is not a sketch).
 
 ```json
 {
@@ -64,7 +64,8 @@ Sketches arrive as timeline items of their own; the rules behind this shape are 
 - A sketch item's `plane` is a reference (`"XY"`, `"XZ"`, `"YZ"`; a stable face id from step 32), never coordinates.
 - `timeline.marker` (optional, used from step 32): the id of the last item built; absent means all.
 - Nothing the kernel computes (bodies, outlines, profiles) is stored.
-- Migration from version 1: `nextId` is one more than the largest number in any id, `sketches` is empty, the rest is unchanged.
+- Migration from version 1: `nextId` is one more than the largest number in any id, `sketches` is empty, the rest is unchanged. Version 1 data that already holds `nextId` or `sketches` is refused, never half-migrated.
+- Opening refuses, each with its own message: a point without finite `x` and `y`; a curve that is not a line (until steps 22–23), or whose `start` or `end` is not a point of the same sketch, or that starts and ends at one point; constraints (until step 27); a sketch without its timeline item or the other way round; a plane other than the three origin planes; an id used twice; a `nextId` that is not a counting number above every number in an id.
 
 ## Saving and opening
 
