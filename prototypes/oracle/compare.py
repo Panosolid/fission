@@ -41,6 +41,8 @@ from OCP.TopAbs import TopAbs_FACE
 from OCP.TopExp import TopExp_Explorer
 from OCP.gp import gp_Ax2, gp_Circ, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 
+from pieces import pieces, signed_area
+
 try:
     import exact
 except ImportError:  # pip install mpmath
@@ -54,48 +56,6 @@ FACES = {"Box": (6, 6), "Cylinder": (3, 3), "Sphere": (2, 1)}
 REL = 1e-9  # OpenCascade's exact mass properties vs exact-in-theory values
 
 
-def pieces(ring):
-    """A profile loop as pieces, worked out here independently of both
-    kernels: ("line", a, b), ("arc", a, mid, b) or ("circle", centre, r).
-    An arc of bulge b over chord a->b turns phi = 4 atan b; its radius is
-    |ab| / (2 |sin(phi/2)|) and its centre sits on the chord's perpendicular
-    bisector, r cos(phi/2) to the left when phi > 0 (right when phi < 0)."""
-    (kind, p), = ring.items()
-    if kind == "Circle":
-        return [("circle", tuple(float(v) for v in p["c"]), float(p["r"]))]
-    pts = [(float(x), float(y)) for x, y in p["pts"]]
-    bulges = [float(b) for b in p["bulges"]] or [0.0] * len(pts)
-    out = []
-    for i, a in enumerate(pts):
-        b, bulge = pts[(i + 1) % len(pts)], bulges[i]
-        if bulge == 0.0:
-            out.append(("line", a, b))
-            continue
-        phi = 4.0 * math.atan(bulge)
-        dx, dy = b[0] - a[0], b[1] - a[1]
-        chord = math.hypot(dx, dy)
-        r = chord / (2.0 * abs(math.sin(phi / 2.0)))
-        k = r * math.cos(phi / 2.0) * math.copysign(1.0, phi) / chord
-        cx, cy = (a[0] + b[0]) / 2.0 - dy * k, (a[1] + b[1]) / 2.0 + dx * k
-        t = math.atan2(a[1] - cy, a[0] - cx) + phi / 2.0
-        out.append(("arc", a, (cx + r * math.cos(t), cy + r * math.sin(t)), b, r, phi))
-    return out
-
-
-def signed_area(ps):
-    """Twice the signed area: shoelace plus each arc's circular segment."""
-    twice = 0.0
-    for piece in ps:
-        if piece[0] == "circle":
-            return 2.0 * math.pi * piece[2] ** 2
-        a, b = piece[1], piece[-1] if piece[0] == "line" else piece[3]
-        twice += a[0] * b[1] - b[0] * a[1]
-        if piece[0] == "arc":
-            r, phi = piece[4], piece[5]
-            twice += r * r * (phi - math.sin(phi))
-    return twice
-
-
 def wire(ps, ccw):
     """Closed wire at z = 0 from pieces, wound counter-clockwise (outer
     loops) or clockwise (holes), as OpenCascade's face builder expects."""
@@ -106,15 +66,20 @@ def wire(ps, ccw):
         return BRepBuilderAPI_MakeWire(edge).Wire()
     if (signed_area(ps) > 0) != ccw:
         # Run it backwards: pieces in reverse order, each from its end.
-        ps = [(q[0], q[2], q[1]) if q[0] == "line" else (q[0], q[3], q[2], q[1]) for q in reversed(ps)]
+        ps = [(q[0], q[2], q[1]) if q[0] == "line" else (q[0], q[3], q[2], q[1], q[4], -q[5]) for q in reversed(ps)]
     pnt = lambda xy: gp_Pnt(xy[0], xy[1], 0.0)
     w = BRepBuilderAPI_MakeWire()
     for q in ps:
         if q[0] == "line":
             w.Add(BRepBuilderAPI_MakeEdge(pnt(q[1]), pnt(q[2])).Edge())
         else:
-            arc = GC_MakeArcOfCircle(pnt(q[1]), pnt(q[2]), pnt(q[3])).Value()
-            w.Add(BRepBuilderAPI_MakeEdge(arc).Edge())
+            # From its centre and radius, not through three points: for a
+            # nearly whole circle the two ends are close together, and the
+            # circle through them and a far point is ill-conditioned (its
+            # centre slid 0.5 um along the chord for a 60 m arc, issue #73).
+            _, a, (cx, cy), b, r, phi = q
+            circ = gp_Circ(gp_Ax2(gp_Pnt(cx, cy, 0.0), gp_Dir(0.0, 0.0, math.copysign(1.0, phi))), r)
+            w.Add(BRepBuilderAPI_MakeEdge(GC_MakeArcOfCircle(circ, pnt(a), pnt(b), True).Value()).Edge())
     return w.Wire()
 
 
