@@ -8,7 +8,9 @@
 use fission_kernel::ops::extrude::{self as extruding, Boundary, Profile};
 use fission_kernel::ops::{primitives, transform};
 use fission_kernel::placed::Placed;
-use fission_kernel::sketch::{self as sketching, Arc, Circle, Line, SketchOutline};
+use fission_kernel::sketch::{self as sketching, Arc, Circle, Line, SketchCurve, SketchOutline, Source};
+use fission_kernel::tolerance::LINEAR;
+use fission_kernel::topology::{Body, FaceRole, Piece};
 use fission_kernel::tessellate::{tessellate, TessOptions};
 use fission_kernel::validate::validate;
 use fission_kernel::{stl, view_body};
@@ -151,6 +153,8 @@ pub fn extrude(data: &[u8]) {
     let slack = 1e-9 * (2.0 * size + perimeter * d) * shift.abs().max_element().max(1.0);
     assert!((view.area - surface).abs() <= slack, "area {} want {surface} (slack {slack:e})\n{profile:?} d={d}", view.area);
 
+    check_roles(&body, &profile, d, &view);
+
     let mesh = tessellate(&body, &TessOptions::DISPLAY).unwrap();
     assert!(mesh.check_closed().is_ok(), "display mesh not closed\n{profile:?} d={d}");
     let file = stl::export(&mesh, "fuzz");
@@ -202,11 +206,79 @@ pub fn sketch(data: &[u8]) {
         }
     }
     let circles: Vec<Circle> = (0..b.byte() % 3).map(|_| Circle { centre: point(&mut b), radius: b.num() * scale }).collect();
-    if let Ok(SketchOutline::Closed(profile)) = sketching::sketch_outline(&lines, &circles, &arcs) {
-        if let Err(e) = extruding::extrude(&profile, 1.0) {
-            panic!("a closed sketch outline did not extrude: {e}\n{lines:?}\n{circles:?}\n{arcs:?}");
+    if let Ok(SketchOutline::Closed(profile, sources)) = sketching::sketch_outline(&lines, &circles, &arcs) {
+        check_sources(&profile, &sources, &lines, &circles, &arcs);
+        match extruding::extrude(&profile, 1.0) {
+            Ok(body) => check_roles(&body, &profile, 1.0, &view_body(&body).expect("an extruded body always meshes")),
+            Err(e) => panic!("a closed sketch outline did not extrude: {e}\n{lines:?}\n{circles:?}\n{arcs:?}"),
         }
     }
+}
+
+/// Each piece of a closed outline names the sketch curve it came from
+/// (step 24b): every curve drawn is named exactly once, and piece i runs
+/// between the outline's corners i and i + 1 the way `reversed` says
+/// (within LINEAR, as ends are joined), shaped as that curve (a line's
+/// bulge 0; an arc's its own bulge, negated when run backwards).
+fn check_sources(profile: &Profile, sources: &[Source], lines: &[Line], circles: &[Circle], arcs: &[Arc]) {
+    let near = |p: DVec2, q: DVec2| p.distance(q) <= LINEAR;
+    match &profile.outer {
+        Boundary::Circle { .. } => {
+            assert_eq!(sources, [Source { curve: SketchCurve::Circle(0), reversed: false }]);
+            assert!(lines.is_empty() && arcs.is_empty() && circles.len() == 1);
+        }
+        Boundary::Path { corners, bulges } => {
+            let n = corners.len();
+            assert_eq!(sources.len(), n, "{sources:?}");
+            assert_eq!(n, lines.len() + arcs.len(), "every curve is a piece once");
+            assert!(circles.is_empty());
+            let mut used = std::collections::HashSet::new();
+            for (i, s) in sources.iter().enumerate() {
+                assert!(used.insert(s.curve), "{:?} named twice", s.curve);
+                let (a, b, bulge) = match s.curve {
+                    SketchCurve::Line(j) => (lines[j].a, lines[j].b, 0.0),
+                    SketchCurve::Arc(j) => (arcs[j].start, arcs[j].end, arcs[j].bulge()),
+                    SketchCurve::Circle(_) => panic!("a circle in a path: {sources:?}"),
+                };
+                let (from, to, bulge) = if s.reversed { (b, a, -bulge) } else { (a, b, bulge) };
+                assert!(near(from, corners[i]) && near(to, corners[(i + 1) % n]), "piece {i} {s:?} runs {from} → {to}, corners {corners:?}");
+                let got = bulges.get(i).copied().unwrap_or(0.0);
+                assert!(got == bulge + 0.0, "piece {i} {s:?}: bulge {got} vs {bulge}");
+            }
+        }
+    }
+}
+
+/// Every face of an extrude has a role and no two the same: the start and
+/// end caps and one side per piece of each loop, numbered as given (step
+/// 24b). Both caps have the profile's area, the end cap's centroid is the
+/// start's moved up by d, and the faces' areas add up to the body's.
+fn check_roles(body: &Body, profile: &Profile, d: f64, view: &fission_kernel::BodyView) {
+    let mut want = vec![FaceRole::Start, FaceRole::End];
+    for (k, l) in std::iter::once(&profile.outer).chain(&profile.holes).enumerate() {
+        let n = match l {
+            Boundary::Path { corners, .. } => corners.len(),
+            Boundary::Circle { .. } => 1,
+        };
+        want.extend((0..n).map(|piece| FaceRole::Side(Some(Piece { boundary: k, piece }))));
+    }
+    let mut got: Vec<FaceRole> = body.faces.iter().map(|f| f.role.expect("every face has a role")).collect();
+    let key = |r: &FaceRole| format!("{r:?}");
+    got.sort_by_key(key);
+    want.sort_by_key(key);
+    assert_eq!(got, want, "{profile:?} d={d}");
+    let face = |r: FaceRole| body.faces.iter().position(|f| f.role == Some(r)).unwrap();
+    let (s, e) = (face(FaceRole::Start), face(FaceRole::End));
+    let (lo, hi) = body.bounds();
+    let reach = lo.abs().max(hi.abs()).max_element().max(1.0);
+    let size = (hi - lo).length().max(1.0);
+    let total: f64 = view.face_areas.iter().sum();
+    assert!((total - view.area).abs() <= 1e-9 * view.area, "faces {total} vs body {}\n{profile:?} d={d}", view.area);
+    let (a0, a1) = (view.face_areas[s], view.face_areas[e]);
+    assert!((a0 - a1).abs() <= 1e-9 * a0.max(1e-300) + 1e-12 * size * size, "caps {a0} vs {a1}\n{profile:?} d={d}");
+    let rise = DVec3::from(view.face_centroids[e]) - DVec3::from(view.face_centroids[s]);
+    let off = (rise - DVec3::new(0.0, 0.0, d)).length();
+    assert!(off <= 1e-9 * reach + 1e-6 * size, "end cap is {rise} from the start cap, not d = {d}\n{profile:?}");
 }
 
 /// Moves and turns any number of times, then mesh and bake: the body must

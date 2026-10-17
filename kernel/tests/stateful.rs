@@ -9,6 +9,10 @@
 //!   clean `InvalidInput` error, and the error/success matches what the
 //!   inputs predict;
 //! - volume, area and bounds obey the identities of the operation;
+//! - every face has one role, exactly the roles the shape must have, with
+//!   the area and centroid the harness works out from the shape itself
+//!   (step 24b, `face_model`), and moves and turns carry each face's role
+//!   and centroid with it (`check_faces`);
 //! - replaying the same chain gives bit-identical bodies and meshes.
 //!
 //! Values are biased towards coincidences (a 0.5 grid, values reused from
@@ -40,7 +44,8 @@ use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_
 use fission_kernel::placed::Placed;
 use fission_kernel::sketch;
 use fission_kernel::stl;
-use fission_kernel::topology::Body;
+use fission_kernel::face_mass::face_masses;
+use fission_kernel::topology::{Body, FaceRole, Piece as PieceId};
 use fission_kernel::validate::validate;
 use glam::{DVec2, DVec3};
 use proptest::prelude::*;
@@ -434,7 +439,7 @@ impl Shape {
             Shape::Sphere { r } => primitives::make_sphere(r.0),
             Shape::Extrude { dist, .. } if sketched(self).is_some() => {
                 match sketched(self).unwrap().outline()? {
-                    sketch::SketchOutline::Closed(profile) => extrude::extrude(&profile, dist.0),
+                    sketch::SketchOutline::Closed(profile, _) => extrude::extrude(&profile, dist.0),
                     sketch::SketchOutline::Open(why) => Err(KernelError::InvalidInput(why.to_string())),
                 }
             }
@@ -1024,6 +1029,8 @@ struct Slot {
     affine: glam::DAffine3,
     /// Vertex positions of the unplaced primitive.
     start: Vec<DVec3>,
+    /// Face centroids of the unplaced primitive.
+    start_faces: Vec<DVec3>,
     /// Operations applied so far (rounding grows with each).
     steps: u32,
     /// Farthest coordinate the part or its arithmetic has reached: its
@@ -1245,6 +1252,222 @@ fn exact_is(m: &Measure, volume: f64, area: f64, what: &str) -> Result<(), Strin
 }
 
 /// Checks the freshly built, unplaced primitive against hand-derived values.
+/// The faces a shape must have, worked out by the harness from the shape
+/// alone (step 24b): each face's role, area and centroid, before placing.
+/// Box, cylinder and sphere by their closed forms; an extrusion's caps
+/// from its rings (the fan of triangles from one corner plus each arc's
+/// circular segment, whose centroid is 4r sin³(φ/2) / (3(φ − sin φ)) from
+/// its centre towards the arc's middle), and the side of each piece (a
+/// line's is length × d at its midpoint; an arc's r|φ|·d at
+/// r sin(φ/2)/(φ/2) from its centre; a circle's 2πr·d on its axis), half
+/// way up. A drawn sketch names its sides by the outline's pieces, which
+/// `sketch_outline` says came from which drawn curve: the harness maps
+/// each to the line, arc or circle it drew and measures that one.
+fn face_model(shape: &Shape) -> Result<Vec<(FaceRole, f64, DVec3)>, String> {
+    let named = |role, area, (x, y, z): (f64, f64, f64)| (role, area, DVec3::new(x, y, z));
+    Ok(match *shape {
+        Shape::Box { w, d, h } => {
+            let (w, d, h) = (w.0, d.0, h.0);
+            vec![
+                named(FaceRole::Bottom, w * d, (w / 2.0, d / 2.0, 0.0)),
+                named(FaceRole::Top, w * d, (w / 2.0, d / 2.0, h)),
+                named(FaceRole::Front, w * h, (w / 2.0, 0.0, h / 2.0)),
+                named(FaceRole::Back, w * h, (w / 2.0, d, h / 2.0)),
+                named(FaceRole::Left, d * h, (0.0, d / 2.0, h / 2.0)),
+                named(FaceRole::Right, d * h, (w, d / 2.0, h / 2.0)),
+            ]
+        }
+        Shape::Cylinder { r, h } => {
+            let (r, h) = (r.0, h.0);
+            vec![
+                named(FaceRole::Bottom, PI * r * r, (0.0, 0.0, 0.0)),
+                named(FaceRole::Top, PI * r * r, (0.0, 0.0, h)),
+                named(FaceRole::Side(None), 2.0 * PI * r * h, (0.0, 0.0, h / 2.0)),
+            ]
+        }
+        // Each half 2πr², its centroid r/2 from the centre (Archimedes).
+        Shape::Sphere { r } => vec![
+            named(FaceRole::Upper, 2.0 * PI * r.0 * r.0, (0.0, 0.0, r.0 / 2.0)),
+            named(FaceRole::Lower, 2.0 * PI * r.0 * r.0, (0.0, 0.0, -r.0 / 2.0)),
+        ],
+        Shape::Extrude { ref outer, ref holes, dist, .. } => {
+            let d = dist.0;
+            let rings: Vec<Vec<Piece>> = std::iter::once(outer).chain(holes).map(Ring::pieces).collect();
+            // Signed area and first moment of each ring, made positive.
+            let (mut area, mut moment) = (0.0, DVec2::ZERO);
+            for (k, pieces) in rings.iter().enumerate() {
+                let (a, m) = ring_moment(pieces);
+                let sign = if (a > 0.0) == (k == 0) { 1.0 } else { -1.0 };
+                area += sign * a;
+                moment += m * sign;
+            }
+            let c = moment / area;
+            let mut faces = vec![named(FaceRole::Start, area, (c.x, c.y, 0.0)), named(FaceRole::End, area, (c.x, c.y, d))];
+            let side = |boundary, piece, p: &Piece| {
+                let (a, c) = side_of(p);
+                (FaceRole::Side(Some(PieceId { boundary, piece })), a * d, c.extend(d / 2.0))
+            };
+            match sketched(shape) {
+                None => {
+                    for (k, pieces) in rings.iter().enumerate() {
+                        faces.extend(pieces.iter().enumerate().map(|(i, p)| side(k, i, p)));
+                    }
+                }
+                Some(drawn) => {
+                    let Ok(sketch::SketchOutline::Closed(_, sources)) = drawn.outline() else { return Err("a built sketch has no closed outline".into()) };
+                    let (lines, arcs, circles) = match &drawn {
+                        Drawn::Lines(pts, seed) => (sketch_lines(pts, *seed), vec![], vec![]),
+                        Drawn::Pieces(pts, bulges, seed) => {
+                            let (l, a) = sketch_pieces(pts, bulges, *seed);
+                            (l, a, vec![])
+                        }
+                        Drawn::Circle(c) => (vec![], vec![], vec![*c]),
+                    };
+                    for (i, s) in sources.iter().enumerate() {
+                        let p = match s.curve {
+                            sketch::SketchCurve::Line(j) => lines.get(j).map(|l| Piece::Line { a: l.a, b: l.b }),
+                            sketch::SketchCurve::Arc(j) => arcs.get(j).map(|a| {
+                                // Counter-clockwise from start to end.
+                                let (u, w) = (a.start - a.centre, a.end - a.centre);
+                                let phi = u.perp_dot(w).atan2(u.dot(w)).rem_euclid(std::f64::consts::TAU);
+                                Piece::Arc { a: a.start, b: a.end, c: a.centre, r: (u.length() + w.length()) / 2.0, phi }
+                            }),
+                            sketch::SketchCurve::Circle(j) => circles.get(j).map(|c| Piece::Circle { c: c.centre, r: c.radius }),
+                        };
+                        faces.push(side(0, i, &p.ok_or_else(|| format!("outline piece {i} names {s:?}, which was not drawn"))?));
+                    }
+                }
+            }
+            faces
+        }
+    })
+}
+
+/// A ring's signed area and first moment ∬ x dA (positive when it runs
+/// counter-clockwise): the fan of triangles from its first point, each
+/// (o, a, b) with area ½ (a − o) × (b − o) at (o + a + b)/3, plus each
+/// arc's segment beyond its chord, counted positive when the arc turns
+/// counter-clockwise (it then bows out to the right of its chord, out of
+/// a counter-clockwise ring).
+fn ring_moment(pieces: &[Piece]) -> (f64, DVec2) {
+    let o = match pieces[0] {
+        Piece::Line { a, .. } | Piece::Arc { a, .. } => a,
+        Piece::Circle { c, .. } => c,
+    };
+    let (mut area, mut moment) = (0.0, DVec2::ZERO);
+    for p in pieces {
+        match *p {
+            Piece::Line { a, b } | Piece::Arc { a, b, .. } => {
+                let t = 0.5 * (a - o).perp_dot(b - o);
+                area += t;
+                moment += (o + a + b) * (t / 3.0);
+            }
+            Piece::Circle { .. } => {}
+        }
+        let segment = match *p {
+            Piece::Line { .. } => continue,
+            Piece::Arc { a, c, r, phi, .. } => {
+                let mid = a - c;
+                let (s, co) = ((phi / 2.0).sin(), (phi / 2.0).cos());
+                let towards = DVec2::new(mid.x * co - mid.y * s, mid.x * s + mid.y * co) / mid.length();
+                let f = phi.abs();
+                (r * r * (f - f.sin()) / 2.0 * phi.signum(), c + towards * (4.0 * r * (f / 2.0).sin().powi(3) / (3.0 * (f - f.sin()))))
+            }
+            Piece::Circle { c, r } => (PI * r * r, c),
+        };
+        area += segment.0;
+        moment += segment.1 * segment.0;
+    }
+    (area, moment)
+}
+
+/// The side wall a piece sweeps, per unit height: its length and the
+/// centroid of the curve in the plane.
+fn side_of(p: &Piece) -> (f64, DVec2) {
+    match *p {
+        Piece::Line { a, b } => (a.distance(b), (a + b) / 2.0),
+        Piece::Arc { a, c, r, phi, .. } => {
+            let h = phi / 2.0;
+            let u = (a - c) / (a - c).length();
+            let towards = DVec2::new(u.x * h.cos() - u.y * h.sin(), u.x * h.sin() + u.y * h.cos());
+            (r * phi.abs(), c + towards * (r * h.abs().sin() / h.abs()))
+        }
+        Piece::Circle { c, r } => (std::f64::consts::TAU * r, c),
+    }
+}
+
+/// The unplaced body's faces against `face_model`: one role each, none
+/// twice, exactly the model's roles, each face's area and centroid the
+/// model's to 1e-6 of the part's size (the timeline harness's MATCH_REL,
+/// which is MASS_PROPS_REL), and the faces' areas adding up to the body's.
+fn check_face_model(shape: &Shape, body: &Body, m: &Measure) -> Result<(), String> {
+    let model = face_model(shape)?;
+    let got = face_masses(body);
+    let mut seen = std::collections::HashSet::new();
+    for (f, face) in body.faces.iter().enumerate() {
+        let role = face.role.ok_or_else(|| format!("face {f} has no role"))?;
+        if !seen.insert(role) {
+            return Err(format!("two faces are {role:?}"));
+        }
+    }
+    if seen.len() != model.len() {
+        return Err(format!("{} faces with roles, the model has {}", seen.len(), model.len()));
+    }
+    let size = (m.hi - m.lo).length().max(1.0);
+    let tol = tolerance::MASS_PROPS_REL;
+    for (role, area, centroid) in &model {
+        let Some(f) = body.faces.iter().position(|face| face.role == Some(*role)) else {
+            return Err(format!("no face is {role:?}"));
+        };
+        if got[f].area.is_nan() || !tolerance::measure_eq(got[f].area, *area, tol * area.abs().max(size)) {
+            return Err(format!("{role:?}: area {} but the model says {area}", got[f].area));
+        }
+        let off = got[f].centroid.distance(*centroid);
+        if off.is_nan() || off > tol * size {
+            return Err(format!("{role:?}: centroid {} but the model says {centroid} ({off:e} off)", got[f].centroid));
+        }
+    }
+    let total: f64 = got.iter().map(|g| g.area).sum();
+    if !tolerance::measure_eq(total, m.exact.area, 1e-9 * m.exact.area) {
+        return Err(format!("faces' areas add up to {total}, the body's is {}", m.exact.area));
+    }
+    Ok(())
+}
+
+/// The placed body keeps every face's role, and each face's centroid,
+/// measured on the baked body, is where the harness's own matrix puts the
+/// unplaced face's: catches a move or turn that loses or shuffles roles.
+/// Allowed: the rounding `check_position` allows each corner, and
+/// MASS_PROPS_REL of the part's size for computing the centroid itself (a
+/// thin frame's cap is the difference of two large areas, so its centroid
+/// carries their rounding: ~1e-4 mm for a 61 m frame 1.1 µm wide); areas
+/// change by at most the corners' rounding times the part's perimeter.
+fn check_faces(s: &Slot) -> Result<(), String> {
+    let Some(b) = &s.body else { return Ok(()) };
+    let baked = b.baked();
+    let world = face_masses(&baked);
+    let local = face_masses(&b.body);
+    let now = body_reach(b) + s.affine.translation.abs().max_element();
+    let (lo, hi) = baked.bounds();
+    let size = (hi - lo).length();
+    let delta = 4.0 * tolerance::rounding_slack(now.max(s.reach)) * (s.steps as f64 + 1.0);
+    for (f, (w, l)) in world.iter().zip(&local).enumerate() {
+        let role = b.body.faces[f].role;
+        if baked.faces[f].role != role {
+            return Err(format!("face {f} was {role:?} and is now {:?}", baked.faces[f].role));
+        }
+        let expected = s.affine.transform_point3(s.start_faces[f]);
+        let off = expected.distance(w.centroid);
+        if off.is_nan() || off > delta + tolerance::MASS_PROPS_REL * size {
+            return Err(format!("face {f} ({role:?}) centroid is at {} but should be at {expected} ({off:e} off)", w.centroid));
+        }
+        if !tolerance::measure_eq(l.area, w.area, 4.0 * size * delta + 1e-9 * l.area) {
+            return Err(format!("face {f} ({role:?}) area {} became {}", l.area, w.area));
+        }
+    }
+    Ok(())
+}
+
 fn check_primitive(shape: &Shape, m: &Measure) -> Result<(), String> {
     match shape {
         Shape::Box { w, d, h } => {
@@ -1553,7 +1776,7 @@ fn classify_motion(before: &Placed, r: Result<Result<Placed, KernelError>, Strin
 fn check_sketch_pieces(pts: &[DVec2], bulges: &[f64], seed: u64) -> Result<(), String> {
     let (lines, arcs) = sketch_pieces(pts, bulges, seed);
     let (found, found_bulges) = match sketch::sketch_outline(&lines, &[], &arcs) {
-        Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, bulges }, .. })) => (corners, bulges),
+        Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, bulges }, .. }, _)) => (corners, bulges),
         other => return Err(format!("sketched path built, but its outline is {other:?}")),
     };
     let n = pts.len();
@@ -1582,8 +1805,9 @@ fn check_sketch_pieces(pts: &[DVec2], bulges: &[f64], seed: u64) -> Result<(), S
 /// bit for bit, with no holes.
 fn check_sketch_circle(c: sketch::Circle) -> Result<(), String> {
     let want = Profile { outer: Boundary::Circle { center: c.centre, radius: c.radius }, holes: vec![] };
+    let circle_source = sketch::Source { curve: sketch::SketchCurve::Circle(0), reversed: false };
     match sketch::sketch_outline(&[], &[c], &[]) {
-        Ok(sketch::SketchOutline::Closed(p)) if p == want => Ok(()),
+        Ok(sketch::SketchOutline::Closed(p, sources)) if p == want && sources == [circle_source] => Ok(()),
         other => Err(format!("sketched circle {c:?} built, but its outline is {other:?}")),
     }
 }
@@ -1596,7 +1820,7 @@ fn check_sketch_circle(c: sketch::Circle) -> Result<(), String> {
 fn check_sketch_loop(pts: &[DVec2], seed: u64) -> Result<(), String> {
     let lines = sketch_lines(pts, seed);
     let found = match sketch::sketch_outline(&lines, &[], &[]) {
-        Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, .. }, .. })) => corners,
+        Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, .. }, .. }, _)) => corners,
         other => return Err(format!("sketched polygon built, but its outline is {other:?}")),
     };
     let n = pts.len();
@@ -1637,7 +1861,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             }
             let Some(base) = base else {
                 record(op, false);
-                slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
+                slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], start_faces: vec![], steps: 0, reach: 0.0 });
                 return Ok(());
             };
             let drawn = match sketched(shape) {
@@ -1650,6 +1874,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             let built = Placed::new(base.clone());
             let m0 = measure(&built).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             check_primitive(shape, &m0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
+            check_face_model(shape, &base, &m0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
 
             // Place it: rotate about the origin, then move.
             let (ax, an, to) = (v3(axis), angle.0, v3(at));
@@ -1685,9 +1910,11 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             }
             record(op, placed.is_some());
             let affine = glam::DAffine3::from_translation(to) * if rot_ok { rotation(ax, an) } else { glam::DAffine3::IDENTITY };
-            let mut slot = Slot { body: placed, shape: shape.clone(), affine, start: base.vertices.iter().map(|v| v.point).collect(), steps: 1, reach: 0.0 };
+            let start_faces = face_masses(&base).iter().map(|m| m.centroid).collect();
+            let mut slot = Slot { body: placed, shape: shape.clone(), affine, start: base.vertices.iter().map(|v| v.point).collect(), start_faces, steps: 1, reach: 0.0 };
             slot.reach = slot.body.as_ref().map_or(0.0, body_reach).max(to.abs().max_element());
             check_position(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.baked())).collect()))?;
+            check_faces(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.baked())).collect()))?;
             slots.push(slot);
         }
         Op::Move { target, by } => {
@@ -1718,6 +1945,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 s.body = Some(m.clone());
                 s.steps += 1;
                 check_position(s).map_err(|e| fail(e, both()))?;
+                check_faces(s).map_err(|e| fail(e, both()))?;
             }
         }
         Op::Rotate { target, pivot, axis, angle } => {
@@ -1756,6 +1984,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 s.body = Some(t.clone());
                 s.steps += 1;
                 check_position(s).map_err(|e| fail(e, both()))?;
+                check_faces(s).map_err(|e| fail(e, both()))?;
             }
         }
     }
@@ -1772,7 +2001,7 @@ fn replay_op(slots: &mut Vec<Slot>, op: &Op) -> Result<(), Failure> {
             let placed = base
                 .and_then(|b| guarded(|| transform::rotate(&Placed::new(b), DVec3::ZERO, v3(axis), angle.0)).ok().and_then(Result::ok))
                 .and_then(|b| guarded(|| transform::translate(&b, v3(at))).ok().and_then(Result::ok));
-            slots.push(Slot { body: placed, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
+            slots.push(Slot { body: placed, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], start_faces: vec![], steps: 0, reach: 0.0 });
         }
         Op::Move { target, by } => {
             if let Some(b) = slots[*target].body.clone() {

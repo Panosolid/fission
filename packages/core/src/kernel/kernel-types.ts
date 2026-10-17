@@ -21,7 +21,26 @@ export interface BodyView {
   face_types: string[];
   /** Each edge's curve type by kernel edge index: "line", "circle". */
   edge_types: string[];
+  /** What each face is in the operation that made it, by kernel face index (null for a body built by hand). */
+  face_roles: (FaceRole | null)[];
+  /** Each face's exact area (mm²) and centroid [x, y, z] (mm), by kernel face index. */
+  face_areas: number[];
+  face_centroids: [number, number, number][];
   errors: string[];
+}
+
+/**
+ * A face's role (FaceRoleOut in kernel/src/lib.rs): an extrude's "start" and
+ * "end" caps and the "side" of piece `piece` of profile loop `boundary` (0 the
+ * outer loop; numbered as the profile was given, so through Outline.pieces a
+ * side names the sketch curve it came from); a box's "bottom", "top",
+ * "front" (−Y), "back", "left" (−X), "right"; a cylinder's "bottom", "top"
+ * and "side" (no boundary or piece); a sphere's "upper" and "lower".
+ */
+export interface FaceRole {
+  role: "start" | "end" | "side" | "bottom" | "top" | "front" | "back" | "left" | "right" | "upper" | "lower";
+  boundary?: number;
+  piece?: number;
 }
 
 /**
@@ -36,6 +55,19 @@ export type Loop =
 export interface Outline {
   outer: Loop;
   holes: Loop[];
+  /**
+   * From sketch_outline only (make_extrude ignores it): the sketch curve
+   * each piece of `outer` came from, in order, by its index in the list
+   * given, and whether the outline runs it backwards.
+   */
+  pieces?: OutlinePiece[];
+}
+
+/** A piece of an outline's source (PieceOut in kernel/src/lib.rs). */
+export interface OutlinePiece {
+  curve: "line" | "arc" | "circle";
+  index: number;
+  reversed: boolean;
 }
 
 /** A straight sketch line from a to b, in the sketch plane's x and y (mm); LineIn in kernel/src/lib.rs. */

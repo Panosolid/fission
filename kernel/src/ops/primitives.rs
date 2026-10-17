@@ -3,7 +3,7 @@
 use super::{check_length, finish, KernelError, Meshed};
 use crate::geom::{Curve, Surface};
 use std::f64::consts::TAU;
-use crate::topology::{Body, Coedge, Loop, Shell};
+use crate::topology::{Body, Coedge, FaceRole, Loop, Shell};
 use glam::DVec3;
 use std::collections::HashMap;
 
@@ -30,16 +30,16 @@ pub fn make_box_meshed(width: f64, depth: f64, height: f64) -> Result<Meshed, Ke
         .collect();
     // Corners of each face, counter-clockwise seen from outside, and the
     // outward normal.
-    let faces: [([usize; 4], DVec3); 6] = [
-        ([0, 2, 3, 1], DVec3::NEG_Z),
-        ([4, 5, 7, 6], DVec3::Z),
-        ([0, 1, 5, 4], DVec3::NEG_Y),
-        ([2, 6, 7, 3], DVec3::Y),
-        ([0, 4, 6, 2], DVec3::NEG_X),
-        ([1, 3, 7, 5], DVec3::X),
+    let faces: [([usize; 4], DVec3, FaceRole); 6] = [
+        ([0, 2, 3, 1], DVec3::NEG_Z, FaceRole::Bottom),
+        ([4, 5, 7, 6], DVec3::Z, FaceRole::Top),
+        ([0, 1, 5, 4], DVec3::NEG_Y, FaceRole::Front),
+        ([2, 6, 7, 3], DVec3::Y, FaceRole::Back),
+        ([0, 4, 6, 2], DVec3::NEG_X, FaceRole::Left),
+        ([1, 3, 7, 5], DVec3::X, FaceRole::Right),
     ];
     let mut edges = HashMap::new();
-    for (corners, normal) in faces {
+    for (corners, normal, role) in faces {
         let coedges = (0..4)
             .map(|k| {
                 let (a, c) = (v[corners[k]], v[corners[(k + 1) % 4]]);
@@ -50,7 +50,7 @@ pub fn make_box_meshed(width: f64, depth: f64, height: f64) -> Result<Meshed, Ke
             .collect();
         let origin = b.vertices[v[corners[0]]].point;
         let x_dir = crate::geom::any_perpendicular(normal);
-        b.add_face(Surface::Plane { origin, normal, x_dir }, true, vec![Loop { coedges }]);
+        b.add_face_as(role, Surface::Plane { origin, normal, x_dir }, true, vec![Loop { coedges }]);
     }
     b.shells.push(Shell { faces: (0..6).collect() });
     finish(b)
@@ -76,13 +76,15 @@ pub fn make_cylinder_meshed(radius: f64, height: f64) -> Result<Meshed, KernelEr
     let fwd = |edge| Coedge { edge, reversed: false };
     let rev = |edge| Coedge { edge, reversed: true };
     // Bottom cap seen from below runs clockwise from above: the circle reversed.
-    b.add_face(
+    b.add_face_as(
+        FaceRole::Bottom,
         Surface::Plane { origin: DVec3::ZERO, normal: DVec3::NEG_Z, x_dir: DVec3::X },
         true,
         vec![Loop { coedges: vec![rev(bottom_edge)] }],
     );
-    b.add_face(Surface::Plane { origin: top, normal: DVec3::Z, x_dir: DVec3::X }, true, vec![Loop { coedges: vec![fwd(top_edge)] }]);
-    b.add_face(
+    b.add_face_as(FaceRole::Top, Surface::Plane { origin: top, normal: DVec3::Z, x_dir: DVec3::X }, true, vec![Loop { coedges: vec![fwd(top_edge)] }]);
+    b.add_face_as(
+        FaceRole::Side(None),
         Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius },
         true,
         vec![Loop { coedges: vec![fwd(bottom_edge)] }, Loop { coedges: vec![rev(top_edge)] }],
@@ -107,8 +109,8 @@ pub fn make_sphere_meshed(radius: f64) -> Result<Meshed, KernelError> {
     let e = b.add_edge(equator, v, v, 0.0, TAU);
     let s = Surface::Sphere { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius };
     // Upper hemisphere: the equator counter-clockwise seen from above.
-    b.add_face(s.clone(), true, vec![Loop { coedges: vec![Coedge { edge: e, reversed: false }] }]);
-    b.add_face(s, true, vec![Loop { coedges: vec![Coedge { edge: e, reversed: true }] }]);
+    b.add_face_as(FaceRole::Upper, s.clone(), true, vec![Loop { coedges: vec![Coedge { edge: e, reversed: false }] }]);
+    b.add_face_as(FaceRole::Lower, s, true, vec![Loop { coedges: vec![Coedge { edge: e, reversed: true }] }]);
     b.shells.push(Shell { faces: vec![0, 1] });
     finish(b)
 }

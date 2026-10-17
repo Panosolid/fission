@@ -165,6 +165,43 @@ pub struct Face {
     pub sense: bool,
     /// The first loop is the outer boundary when the face has one.
     pub loops: Vec<Loop>,
+    /// What the face is in the operation that made it (`FaceRole`); None
+    /// for bodies built by hand (fixtures).
+    pub role: Option<FaceRole>,
+}
+
+/// What a face is in the operation that made it (step 24b), so a later
+/// feature can find it again after an edit renumbers the faces: the app
+/// names a face by its feature, this role and, for a side, the sketch curve
+/// the piece came from (`sketch::sketch_outline` says which).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FaceRole {
+    /// An extrude's cap on the sketch plane, and the far one.
+    Start,
+    End,
+    /// An extrude's side swept from piece `piece` of profile loop `boundary`
+    /// (0 the outer loop, k the hole k − 1), both numbered as the profile
+    /// was given, whichever way round the kernel runs the loop. A
+    /// cylinder's curved face is `Side(None)`.
+    Side(Option<Piece>),
+    /// A box's faces by outward direction (−Z, +Z, −Y, +Y, −X, +X); a
+    /// cylinder's caps are Bottom and Top.
+    Bottom,
+    Top,
+    Front,
+    Back,
+    Left,
+    Right,
+    /// A sphere's halves, above and below its equator.
+    Upper,
+    Lower,
+}
+
+/// Piece `piece` of profile loop `boundary` (see `FaceRole::Side`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Piece {
+    pub boundary: usize,
+    pub piece: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -200,8 +237,15 @@ impl Body {
     }
 
     pub fn add_face(&mut self, surface: Surface, sense: bool, loops: Vec<Loop>) -> FaceId {
-        self.faces.push(Face { surface, sense, loops });
+        self.faces.push(Face { surface, sense, loops, role: None });
         self.faces.len() - 1
+    }
+
+    /// `add_face` for a face with a role.
+    pub fn add_face_as(&mut self, role: FaceRole, surface: Surface, sense: bool, loops: Vec<Loop>) -> FaceId {
+        let f = self.add_face(surface, sense, loops);
+        self.faces[f].role = Some(role);
+        f
     }
 
     pub fn coedge_start(&self, c: Coedge) -> VertexId {
@@ -277,7 +321,7 @@ impl Body {
             faces: self
                 .faces
                 .iter()
-                .map(|f| Face { surface: f.surface.transformed(tf), sense: f.sense, loops: f.loops.clone() })
+                .map(|f| Face { surface: f.surface.transformed(tf), sense: f.sense, loops: f.loops.clone(), role: f.role })
                 .collect(),
             shells: self.shells.clone(),
         }
