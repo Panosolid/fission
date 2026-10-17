@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CUBE_CORNER, VIEW_NAMES, cubeView, fitDistance, orbitSafeOffset, viewBasis, type ViewBasis } from "../src/views.ts";
+import { CUBE_CORNER, VIEW_NAMES, cubeView, fitDistance, orbitSafeOffset, planeViewBasis, viewBasis, type ViewBasis } from "../src/views.ts";
 
 type Vec3 = [number, number, number];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -203,4 +203,57 @@ test("cubeView: points not on the cube's surface give null", () => {
   assert.equal(cubeView([0, 0, 1.5]), null); // outside
   assert.equal(cubeView([NaN, 0, 1]), null);
   assert.equal(cubeView([0, 1]), null);
+});
+
+test("hand-worked: Look At on the ground plane, a body above it", () => {
+  // fov 60: half-angle 30°, sin 0.5, so a sphere of radius 10 fits from 20 away. Its centre (10, 20, 5) is 5
+  // above the plane: the camera looks at (10, 20, 0), the centre moved down onto the plane, from 20 + 5 = 25 up,
+  // so it is exactly 20 from the sphere's centre. Up on screen is the plane's y axis, Z × X = Y.
+  const b = planeViewBasis({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, { centre: [10, 20, 5], radius: 10 }, 60, 1);
+  const near = (a: number[], e: number[], what: string) => assert.ok(a.every((v, i) => Math.abs(v - e[i]) < 1e-12), `${what}: ${a} not ${e}`); // sin 30° is a hair off 0.5 in doubles
+  near(b.position, [10, 20, 25], "position");
+  near(b.target, [10, 20, 0], "target");
+  near(b.up, [0, 1, 0], "up");
+});
+
+test("hand-worked: Look At on the front plane, a body behind it", () => {
+  // XZ, normal −Y, x along X: up is (−Y) × X = Z. The centre (3, 4, 5) is 4 behind the plane (n·c = −4), so it is
+  // not added: the camera looks at (3, 0, 5) from 20 out along −Y, (3, −20, 5), 24 from the centre (fits with room).
+  const b = planeViewBasis({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, -1, 0] }, { centre: [3, 4, 5], radius: 10 }, 60, 1);
+  const near = (a: number[], e: number[], what: string) => assert.ok(a.every((v, i) => Math.abs(v - e[i]) < 1e-12), `${what}: ${a} not ${e}`);
+  near(b.position, [3, -20, 5], "position");
+  near(b.target, [3, 0, 5], "target");
+  near(b.up, [0, 0, 1], "up");
+});
+
+test("Look At on an origin plane is that plane's standard view when the framed centre is on the plane", () => {
+  // Two code paths agreeing (a self-consistency check): the ground plane is the top view, the front plane the front view.
+  const framing = { centre: [2, 0, 0] as [number, number, number], radius: 7 };
+  const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]) < 1e-12);
+  const top = viewBasis("top", framing, 45, 1.5);
+  const xy = planeViewBasis({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, framing, 45, 1.5);
+  assert.ok(near(xy.position, top.position) && near(xy.target, top.target) && near(xy.up, top.up));
+  const front = viewBasis("front", framing, 45, 1.5);
+  const xz = planeViewBasis({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, -1, 0] }, framing, 45, 1.5);
+  assert.ok(near(xz.position, front.position) && near(xz.target, front.target) && near(xz.up, front.up));
+});
+
+test("seeded: Look At on 500 slanted planes looks straight at the plane, its x axis to the right, and fits the sphere", () => {
+  let a = 99;
+  const rand = () => ((a = (Math.imul(a, 1103515245) + 12345) >>> 0) / 4294967296);
+  for (let i = 0; i < 500; i++) {
+    const normal = unit([rand() - 0.5, rand() - 0.5, rand() - 0.5]);
+    const xAxis = unit(cross(normal, unit([rand() - 0.5, rand() - 0.5, rand() - 0.5])));
+    const origin: Vec3 = [rand() * 100, rand() * 100, rand() * 100];
+    const framing = { centre: [rand() * 200 - 100, rand() * 200 - 100, rand() * 200 - 100] as Vec3, radius: 1 + rand() * 50 };
+    const b = planeViewBasis({ origin, xAxis, normal }, framing, 45, 1);
+    const look = unit(b.target.map((t, k) => t - b.position[k]) as Vec3);
+    assert.ok(Math.abs(dot(look, normal) + 1) < 1e-9, `plane ${i}: not looking straight at it`);
+    assert.ok(Math.abs(dot(b.target.map((t, k) => t - origin[k]) as Vec3, normal)) < 1e-9, `plane ${i}: target off the plane`);
+    // Screen right is look × up; it must be the plane's x axis.
+    const right = cross(look, b.up);
+    assert.ok(right.every((v, k) => Math.abs(v - xAxis[k]) < 1e-9), `plane ${i}: x axis not to the right`);
+    const centreDistance = Math.sqrt(b.position.reduce((s, p, k) => s + (p - framing.centre[k]) ** 2, 0));
+    assert.ok(centreDistance >= fitDistance(framing.radius, 45, 1) * (1 - 1e-12), `plane ${i}: the sphere doesn't fit`);
+  }
 });

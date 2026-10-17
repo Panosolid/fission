@@ -1,4 +1,4 @@
-import type { CornerView, ViewName } from "@fission/core";
+import type { CornerView, Plane, ViewName } from "@fission/core";
 import type { Framing } from "./framing.ts";
 
 type Vec3 = [number, number, number];
@@ -69,6 +69,32 @@ export function viewBasis(name: ViewName, framing: Framing, fovDeg = 45, aspect 
   const target: Vec3 = [...framing.centre];
   const position = target.map((c, i) => c + (towardCamera[i] / n) * dist) as Vec3;
   return { position, target, up: [...up] };
+}
+
+/**
+ * Look At: the camera square onto a plane, on the side its normal points
+ * to, with the plane's y axis (normal × xAxis) up on screen, so its x axis
+ * runs to the right. It looks at the framed sphere's centre moved onto the
+ * plane along the normal (the sphere stays centred on screen), from
+ * fitDistance plus the centre's height d above the plane when it is in
+ * front, so the sphere's centre is at least fitDistance from the camera
+ * and the sphere just fits (exactly when d ≥ 0).
+ */
+export function planeViewBasis(plane: Plane, framing: Framing, fovDeg = 45, aspect = 1): ViewBasis {
+  const unit = (v: readonly number[]) => {
+    const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    return [v[0] / len, v[1] / len, v[2] / len] as Vec3;
+  };
+  const n = unit(plane.normal);
+  const x = unit(plane.xAxis);
+  const up: Vec3 = [n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2], n[0] * x[1] - n[1] * x[0]];
+  const c = framing.centre;
+  const o = plane.origin;
+  const d = (c[0] - o[0]) * n[0] + (c[1] - o[1]) * n[1] + (c[2] - o[2]) * n[2];
+  const target = c.map((v, i) => v - d * n[i]) as Vec3;
+  const dist = fitDistance(framing.radius, fovDeg, aspect) + Math.max(0, d);
+  const position = target.map((v, i) => v + dist * n[i]) as Vec3;
+  return { position, target, up };
 }
 
 /**
