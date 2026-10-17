@@ -242,9 +242,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
-    // The panel edits feature #1 of the one-step timeline; the project holds
-    // it. An opened file's document is kept as it is until the first edit.
-    const doc = loaded ?? documentFor(partCommand());
+    // The panel edits the part's one solid feature, keeping the sketches; the
+    // project holds it. An opened file's document is kept as it is until the first edit.
+    const doc = loaded ?? documentFor(partCommand(), ctx.project.workspaces.design as DesignDocument | undefined);
     // An opened document is all new to the graph: out of date until it builds.
     const before = loaded ? null : ((ctx.project.workspaces.design as DesignDocument | undefined) ?? null);
     loaded = undefined;

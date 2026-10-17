@@ -22,7 +22,7 @@
 // shortest text that fails the same way.
 
 import { FORMAT_VERSION, MAX_NESTING, emptyProject, projectFromJson, projectToJson, type DataReader, type Project } from "@fission/core";
-import { designWorkspace, lastFeature, partDocument, partOf, specOf, type DesignDocument } from "@fission/design";
+import { addSketch, designWorkspace, drawLine, lastFeature, migrateDesignV1, partDocument, partOf, specOf, type DesignDocument } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
@@ -91,11 +91,36 @@ function randomJson(r: SeededRandom, depth = 0): unknown {
   return Object.fromEntries(Array.from({ length: below(r, 4) }, (_, i) => [pick(r, ["a", "id", "version", "items", `k${i}`]), randomJson(r, depth + 1)]));
 }
 
+/**
+ * Design's data as Fission saves it: sometimes with sketches (lines, some
+ * chained, so they share points), sometimes as the version 1 data saved
+ * before step 21b (no sketches, no counter).
+ */
+function designData(r: SeededRandom, part: DesignDocument): unknown {
+  const n = r.next();
+  if (n < 0.15) {
+    const { nextId: _, sketches: __, ...v1 } = part;
+    return { ...v1, version: 1 };
+  }
+  let doc = part;
+  if (n < 0.6) return doc;
+  for (let s = 0; s < 1 + below(r, 2); s++) {
+    const sketch = addSketch(doc);
+    doc = sketch.doc;
+    for (let l = 0; l < below(r, 5); l++) {
+      const points = doc.sketches.find((x) => x.id === sketch.id)!.points;
+      const from = points.length > 0 && r.next() < 0.6 ? pick(r, points).id : ([below(r, 100) - 50, below(r, 100) / 10] as const);
+      doc = drawLine(doc, sketch.id, from, [below(r, 100), -below(r, 1000) / 100]).doc;
+    }
+  }
+  return doc;
+}
+
 /** A real project's text: what Fission saves (sometimes in the old format 1). */
 export function validProjectText(r: SeededRandom): string {
   const size = () => Math.round(10 ** (r.next() * 4 - 1) * 1000) / 1000;
   const p: Project = { ...emptyProject(pick(r, ["Untitled", "Bracket", "Gehäuse 2", "", "a\"quote\\and\nnewline"])), units: { length: pick(r, ["mm", "cm", "m", "in"] as const) } };
-  if (r.next() < 0.9) p.workspaces.design = partDocument(pick(r, SHAPES), size(), size(), size());
+  if (r.next() < 0.9) p.workspaces.design = designData(r, partDocument(pick(r, SHAPES), size(), size(), size()));
   // Workspaces without a reader yet keep their data as it is.
   for (const id of ["render", "image", "layout"] as const) if (r.next() < 0.3) p.workspaces[id] = randomJson(r);
   if (r.next() < 0.3) p.materials = [{ id: "m1", name: "PLA", density: 1.24 } as never];
@@ -262,7 +287,11 @@ export function checkText(text: string, readers: readonly DataReader[] = READERS
   const again = guard("opening the saved project", () => projectToJson(projectFromJson(saved, readers)));
   if (isProblem(again)) return again;
   if (again !== saved) return { kind: "saving, opening and saving again changed the text", detail: "" };
-  if (canonical(JSON.parse(saved)) !== canonical(want.upgraded)) return { kind: "saving lost or changed something the file had", detail: "" };
+  // Design's own upgrade (version 1 → 2, docs/project-format.md) is the one change a save may make.
+  const upgraded = structuredClone(want.upgraded) as { workspaces: Record<string, unknown> };
+  const old = upgraded.workspaces.design;
+  if (isObj(old) && old.version === 1) upgraded.workspaces.design = migrateDesignV1(old);
+  if (canonical(JSON.parse(saved)) !== canonical(upgraded)) return { kind: "saving lost or changed something the file had", detail: "" };
   return null;
 }
 

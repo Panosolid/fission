@@ -9,6 +9,12 @@
 # as cargo-mutants names it, file and position included; use \d+ for
 # the line and column, e.g. '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$'.
 exclude_re = [
+  # lib.rs: the #[wasm_bindgen] wrappers (and to_js) return a JsValue, which
+  # exists only in a WebAssembly build, so lib tests can't call them (their
+  # Rust halves, view_of, stl_of, sketch_outline_of…, are tested). The
+  # journeys on the real kernel (packages/testing/journeys, `npm run
+  # journeys` in CI) catch these; lib.rs's top comment names which.
+  "-> Result<JsValue, JsError> with Ok\\(Default::default\\(\\)\\)",
   # Equivalent: an o·o product of 0 with the other negative means the touching end is the crossing point, so the collinear clause already returns true (exact predicates).
   '^src/tolerance\.rs:\d+:\d+: replace < with <= in segments_touch$',
   # Equivalent: differs only for an edge from a vertex to itself, which gets the same error either way.
@@ -17,14 +23,6 @@ exclude_re = [
   '^src/geom/mod\.rs:\d+:\d+: replace \|\| with && in unit$',
   # Equivalent up to rounding at a tie: peak ± PI is the same angle mod 2π; differs by an ulp only at an arc end the box already holds. Column-anchored: the name also belongs to two caught mutants.
   '^src/topology\.rs:\d+:54: replace \+ with - in Edge::widen_by_curve$',
-  # No native test can reach these: a JsValue can't be built off wasm. Covered by packages/testing/journeys/command-fuzz.journey.ts, open-saved-file.journey.ts and the apps/fission/e2e/smoke.mjs shape checks.
-  '^src/lib\.rs:\d+:\d+: replace to_js -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
-  '^src/lib\.rs:\d+:\d+: replace make_box -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
-  '^src/lib\.rs:\d+:\d+: replace make_cylinder -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
-  '^src/lib\.rs:\d+:\d+: replace make_sphere -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
-  '^src/lib\.rs:\d+:\d+: replace make_extrude -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
-  # Not reachable natively; covered by packages/testing/journeys/design-to-stl.journey.ts and the smoke check "the STL button saves the box as a binary STL with hand-worked contents".
-  '^src/lib\.rs:\d+:\d+: replace export_stl -> Result<JsValue, JsError> with Ok\(Default::default\(\)\)$',
   # intersect.rs / self_intersect.rs (reasons also in each file's top comment)
   '^src/intersect\.rs:\d+:\d+: replace - with (\+|/) in grid_steps$', # only runs < 63 LEAF_WIDTH change, holding at most one zero: same zeros up to bisection rounding noise (<= 1.3e-14 rad on 20,000 polynomials)
   '^src/intersect\.rs:\d+:\d+: replace \|\| with && in bisect$', # early stop only: once a, b are neighbouring doubles each step leaves them, the 80-step cap gives the same answer
