@@ -93,6 +93,6 @@ test("the evaluation asks with Design's own command wording, as the panel does",
   };
   await runEval(provider, HELD_OUT_CASES.slice(0, 1), DESIGN_COMMANDS.filter((c) => c.op === "set_part"));
   // Design's set_part says width is the diameter for cylinders and spheres; the model only learns it from the prompt.
-  assert.match(systems[0], /^ {2}width: width, or diameter for a cylinder or sphere \(millimetres\)$/m);
+  assert.match(systems[0], /^ {2}width: width, or diameter for a cylinder or sphere \(millimetres, more than 0\)$/m);
   assert.doesNotMatch(systems[0], /export/i, "only the offered command is described");
 });
