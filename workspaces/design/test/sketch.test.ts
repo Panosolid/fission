@@ -147,9 +147,17 @@ test("changing the part keeps the sketches where they are, and the counter never
   const bracket = withPart(doc, "l-bracket", 50, 30, 10);
   assert.deepEqual(bracket.timeline.features.map((f) => f.id), ["feature-1", "sketch-2"]);
   assert.deepEqual(bracket.sketches, doc.sketches);
-  assert.equal(bracket.nextId, 8);
+  // The box (feature-1) changed in place keeps its id; the profile it now
+  // needs is new, so it takes the counter's 8 (presets take counter ids
+  // like any feature from step 24d1), and the counter moves to 9.
+  assert.equal(doc.nextId, 8);
+  assert.equal(bracket.nextId, 9);
   assert.deepEqual(partOf(bracket), { shape: "l-bracket", sizes: { width: 50, depth: 30, height: 10 } });
-  assert.deepEqual(bracket.profiles.map((p) => p.id), ["profile-1"]);
+  assert.deepEqual(bracket.profiles.map((p) => p.id), ["profile-8"]);
+  // Changed again, it keeps that profile's id; back to a box, the profile goes with nothing using it.
+  assert.deepEqual(withPart(bracket, "plate", 50, 30, 10).profiles.map((p) => p.id), ["profile-8"]);
+  assert.deepEqual(withPart(bracket, "box", 5, 5, 5).profiles, []);
+  assert.equal(withPart(withPart(bracket, "box", 5, 5, 5), "star", 5, 5, 5).profiles[0].id, "profile-9");
   // With no document before it, the same as a fresh part.
   assert.deepEqual(withPart(null, "box", 1, 2, 3), partDocument("box", 1, 2, 3));
 });
@@ -176,19 +184,20 @@ test("drawing a line changes the sketch in the graph, not the part", () => {
 
 const REAL_V1 = readFileSync(new URL("./files/v1-bracket.fission.json", import.meta.url), "utf8");
 
-test("a real version 1 file (saved by the Fission before 21b) opens as version 2, and saves and reopens unchanged", () => {
+test("a real version 1 file (saved by the Fission before 21b) opens as version 3, and saves and reopens unchanged", () => {
   // v1-bracket.fission.json was saved by main before this step: an
   // L-bracket 40 × 30 extruded 20. Its ids are profile-1 and feature-1, so
-  // the counter starts at 2; there are no sketches; nothing else changes.
+  // the counter starts at 2; there are no sketches; its one solid feature
+  // is not suppressed by the step to version 3; nothing else changes.
   const v1 = JSON.parse(REAL_V1).workspaces.design;
   assert.equal(v1.version, 1);
   const p = projectFromJson(REAL_V1, DESIGN);
   const doc = p.workspaces.design as DesignDocument;
-  assert.deepEqual(doc, { ...v1, version: 2, nextId: 2, sketches: [] });
+  assert.deepEqual(doc, { ...v1, version: 3, nextId: 2, sketches: [] });
   assert.deepEqual(partOf(doc), { shape: "l-bracket", sizes: { width: 40, depth: 30, height: 20 } });
-  // Saved, it is version 2; opened and saved again, byte-identical.
+  // Saved, it is version 3; opened and saved again, byte-identical.
   const saved = projectToJson(p);
-  assert.equal(JSON.parse(saved).workspaces.design.version, 2);
+  assert.equal(JSON.parse(saved).workspaces.design.version, 3);
   assert.equal(projectToJson(projectFromJson(saved, DESIGN)), saved);
 });
 

@@ -116,7 +116,7 @@ test("Design's saved data reads back, and anything else is refused clearly", asy
   const doc = partDocument("slot", 40, 30, 20);
   assert.deepEqual(readDesignDocument(JSON.parse(JSON.stringify(doc))), doc);
   assert.throws(() => readDesignDocument(null), /Design data is missing/);
-  assert.throws(() => readDesignDocument({ ...doc, version: 3 }), /version 3 is not one this Fission reads \(1 or 2\)/);
+  assert.throws(() => readDesignDocument({ ...doc, version: 4 }), /version 4 is not one this Fission reads \(1, 2 or 3\)/);
   assert.throws(() => readDesignDocument({ ...doc, timeline: { features: [] } }), /no timeline/);
 });
 
@@ -165,8 +165,8 @@ test("a version-1 file with a Design part opens (outer migration, then Design's 
   delete v1.links;
   const p = projectFromJson(JSON.stringify(v1), DESIGN);
   assert.deepEqual(p.links, []);
-  // Its ids are feature-1 only, so the counter starts at 2.
-  assert.deepEqual(p.workspaces.design, { ...JSON.parse(HAND_WRITTEN).workspaces.design, version: 2, nextId: 2, sketches: [] });
+  // Its ids are feature-1 only, so the counter starts at 2; then version 2 to 3 changes nothing for one solid feature.
+  assert.deepEqual(p.workspaces.design, { ...JSON.parse(HAND_WRITTEN).workspaces.design, version: 3, nextId: 2, sketches: [] });
 });
 
 test("partOf undoes partDocument for every shape (self-consistency)", () => {
@@ -191,7 +191,7 @@ test("Design data the panel can't show is refused when the file is opened, each 
   assert.throws(broken((d) => (d.timeline.features[0].intent.parameters.width = "50")), /Box: 50 × 30 × 20 mm: width must be a number/);
   assert.throws(broken((d) => delete d.timeline.features[0].intent), /Design feature 1 has no id or intent/);
   assert.throws(broken((d) => (d.timeline.features = [])), /Design data has no timeline/);
-  assert.throws(broken((d) => ((d as { version: number }).version = 3)), /Design data version 3 is not one this Fission reads \(1 or 2\)/);
+  assert.throws(broken((d) => ((d as { version: number }).version = 4)), /Design data version 4 is not one this Fission reads \(1, 2 or 3\)/);
   const extrude = (edit: (d: DesignDocument) => void) => {
     const doc = partDocument("slot", 40, 30, 20);
     edit(doc);

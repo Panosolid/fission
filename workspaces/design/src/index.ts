@@ -6,7 +6,7 @@ export { browserTree, type BrowserNode } from "./browser.ts";
 export { parameterRows, propertiesPanel, SIZE_KEYS, type ParameterRow, type Verb, type PropertiesPanel, type SizeKey } from "./properties.ts";
 export { toolbarGroups, type ToolButton, type ToolGroup } from "./toolbar.ts";
 export { buildSpec, specFor } from "./spec.ts";
-export { curvePoints, idNumber, isSketchExtrude, isSketchItem, lastFeature, migrateDesignV1, partDocument, partOf, profileLabel, readDesignDocument, SKETCH_PLANES, specOf, withPart, type DesignDocument, type PartKind, type PartSizes, type ReadyProfile, type Sketch, type SketchArcCurve, type SketchCircleCurve, type SketchCurve, type SketchLineCurve, type SketchPlane, type SketchPoint } from "./document.ts";
+export { builds, changePreset, curvePoints, idNumber, insertAt, insertItem, insertPreset, isSketchExtrude, isSketchItem, lastFeature, migrateDesignV1, migrateDesignV2, partDocument, partOf, shapeOf, profileLabel, readDesignDocument, SKETCH_PLANES, specOf, withPart, type DesignDocument, type Marker, type PartKind, type PartSizes, type ReadyProfile, type Sketch, type SketchArcCurve, type SketchCircleCurve, type SketchCurve, type SketchLineCurve, type SketchPlane, type SketchPoint } from "./document.ts";
 export { addSketch, askOutline, deleteCurve, drawArc, drawCircle, drawLine, drawRectangle, movePoint, planeOf, pointAt, SKETCH_STEPS, sketchCurves, sketchItem, sketchLines, sketchOutline, type LineEnd } from "./sketch.ts";
 export { clickAt, SKETCH_TOOLS, startTool, switchTool, toolBusy, type LineTool, type RectangleTool, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
