@@ -52,6 +52,7 @@ pub mod mass;
 pub mod debug_dump;
 pub mod display;
 pub mod face_mass;
+pub mod fmath;
 pub mod mesh;
 pub mod ops;
 pub mod placed;
@@ -718,7 +719,7 @@ mod tests {
         // needs ceil(2π / 0.063249) = ceil(99.34) = 100 chords: a 100-sided
         // prism, each cap 100 triangles of ½·r²·sin(2π/100).
         let mesh = tessellate(&body, &TessOptions::DISPLAY).unwrap();
-        let cap = 50.0 * 400.0 * (TAU / 100.0).sin();
+        let cap = 50.0 * 400.0 * fmath::sin(TAU / 100.0);
         assert!(rel_eq(mesh.signed_volume(), cap * 20.0, FP_REL), "{} vs {}", mesh.signed_volume(), cap * 20.0);
         // Bad sizes come back as clean errors.
         assert!(ops::primitives::make_cylinder(-1.0, 1.0).is_err());

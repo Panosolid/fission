@@ -60,6 +60,7 @@
 //! its product, so `* → /` there changes the answer (±1 / x, not x / ±1)
 //! and the tests see it.
 
+use crate::fmath;
 use crate::geom::{any_perpendicular, Curve, Surface};
 use crate::mass::{face_terms, half_moment, theta_minus_sin, travel};
 use crate::mesh::Mesh;
@@ -123,9 +124,10 @@ pub fn face_mass(body: &Body, face: &Face) -> FaceMass {
                     let phi = (tb - ta).abs();
                     let left = if (axis.dot(n) > 0.0) == (tb > ta) { 1.0 } else { -1.0 };
                     let mid = 0.5 * (ta + tb);
-                    let towards = x_dir * mid.cos() + axis.cross(x_dir) * mid.sin();
+                    let (s, c) = fmath::sin_cos(mid);
+                    let towards = x_dir * c + axis.cross(x_dir) * s;
                     let segment = 0.5 * radius * radius * theta_minus_sin(phi);
-                    let about_centre = 2.0 / 3.0 * radius.powi(3) * (0.5 * phi).sin().powi(3);
+                    let about_centre = 2.0 / 3.0 * radius.powi(3) * fmath::sin(0.5 * phi).powi(3);
                     moment += left * (segment * (center - p) + towards * about_centre);
                 }
             }
@@ -317,7 +319,7 @@ mod tests {
             for e in &mut b.edges {
                 if let Curve::Circle { axis, x_dir, .. } = &mut e.curve {
                     let y = axis.cross(*x_dir);
-                    *x_dir = *x_dir * alpha.cos() - y * alpha.sin();
+                    *x_dir = *x_dir * fmath::cos(alpha) - y * fmath::sin(alpha);
                     e.t0 += alpha;
                     e.t1 += alpha;
                 }
@@ -426,8 +428,8 @@ mod tests {
         // which these series give to ~1e-20. The naive ∮ u² dv over the arc
         // cancels terms of R³φ ~ 1e12 and is off by ~1e-4 mm here.
         let r: f64 = 1e6;
-        let h = (0.5 / r).asin();
-        let bulge = (0.5 * h).tan();
+        let h = fmath::asin(0.5 / r);
+        let bulge = fmath::tan(0.5 * h);
         let corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
         let b = extrude(&Profile { outer: path(&corners, &[0.0, 0.0, bulge, 0.0]), holes: vec![] }, 1.0).unwrap();
         let (seg, sag) = (1.0 / (12.0 * r), 1.0 / (8.0 * r));
@@ -554,7 +556,7 @@ mod tests {
                     .enumerate()
                     .map(|(k, &(j, r, _))| {
                         let a = (k as f64 + j) * std::f64::consts::TAU / n as f64;
-                        (r * a.cos(), r * a.sin())
+                        (r * fmath::cos(a), r * fmath::sin(a))
                     })
                     .collect();
                 let mut bulges: Vec<f64> = pts.iter().map(|p| p.2).collect();
@@ -582,14 +584,14 @@ mod tests {
         }
         // Bulge tan(φ/4); positive turns counter-clockwise, so the arc
         // bows to the right of the chord by the sagitta |bulge|·c/2.
-        let phi = 4.0 * bulge.atan();
+        let phi = 4.0 * fmath::atan(bulge);
         let r = c * (1.0 + bulge * bulge) / (4.0 * bulge.abs());
         let right = DVec2::new(chord.y, -chord.x) / c;
         let out = right * bulge.signum();
         let top = mid + out * (bulge.abs() * c * 0.5);
         let centre = top - out * r;
         let h = 0.5 * phi.abs();
-        ((r * phi.abs() * d), (centre + out * (r * h.sin() / h)).extend(0.5 * d))
+        ((r * phi.abs() * d), (centre + out * (r * fmath::sin(h) / h)).extend(0.5 * d))
     }
 
     proptest! {

@@ -22,7 +22,9 @@ const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
 /**
  * The view cube: a small cube in the viewport's corner that turns with the
- * main camera; a click on one of its faces or corners asks for that view.
+ * main camera; a click on one of its faces or corners asks for that view,
+ * and a drag on it orbits (SF3a: the way to orbit from a
+ * trackpad).
  * It is drawn into the main renderer after the main scene (its own scene and
  * camera, scissored to its corner), and its own element over that corner
  * takes the pointer there, so it never picks or orbits the main view.
@@ -35,10 +37,10 @@ export class ViewCube {
   private raycaster = new THREE.Raycaster();
   private hover: ViewName | null = null;
 
-  constructor(onView: (name: ViewName) => void) {
+  constructor(onView: (name: ViewName) => void, onOrbit: (dx: number, dy: number) => void) {
     this.element.className = "view-cube";
     this.element.setAttribute("role", "img");
-    this.element.setAttribute("aria-label", "View cube: click a face or corner to look from there");
+    this.element.setAttribute("aria-label", "View cube: click a face or corner to look from there, drag to orbit");
     for (const face of FACES) {
       const canvas = Object.assign(document.createElement("canvas"), { width: TEXTURE_PX, height: TEXTURE_PX });
       const texture = new THREE.CanvasTexture(canvas);
@@ -55,18 +57,32 @@ export class ViewCube {
     this.scene.add(outline);
     this.paint();
 
-    let down: { x: number; y: number; id: number } | null = null;
+    // A press that stays within the click slop is a click; once it moves
+    // further it is a drag, and every move after that orbits by its step.
+    let down: { x: number; y: number; id: number; last: { x: number; y: number } | null } | null = null;
     this.element.addEventListener("pointerdown", (e) => {
-      down = e.isPrimary && e.button === 0 ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+      down = e.isPrimary && e.button === 0 ? { x: e.clientX, y: e.clientY, id: e.pointerId, last: null } : null;
+      if (down) this.element.setPointerCapture(e.pointerId);
     });
     this.element.addEventListener("pointerup", (e) => {
       const start = down;
       down = null;
-      if (!start || start.id !== e.pointerId || !isClick(start, { x: e.clientX, y: e.clientY })) return;
+      if (!start || start.id !== e.pointerId || start.last || !isClick(start, { x: e.clientX, y: e.clientY })) return;
       const name = this.viewAt(e.clientX, e.clientY);
       if (name) onView(name);
     });
-    this.element.addEventListener("pointermove", (e) => this.setHover(e.buttons === 0 ? this.viewAt(e.clientX, e.clientY) : null));
+    this.element.addEventListener("pointercancel", () => (down = null));
+    this.element.addEventListener("pointermove", (e) => {
+      this.setHover(e.buttons === 0 ? this.viewAt(e.clientX, e.clientY) : null);
+      if (!down || down.id !== e.pointerId) return;
+      const here = { x: e.clientX, y: e.clientY };
+      if (!down.last) {
+        if (isClick(down, here)) return;
+        down.last = { x: down.x, y: down.y };
+      }
+      onOrbit(here.x - down.last.x, here.y - down.last.y);
+      down.last = here;
+    });
     this.element.addEventListener("pointerleave", () => this.setHover(null));
   }
 

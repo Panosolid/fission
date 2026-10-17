@@ -21,6 +21,7 @@
 //!   and the two answers differ by at most the rounding of the end's own
 //!   evaluation (neither is more right).
 
+use crate::fmath;
 use crate::geom::{Curve, Surface, Transform};
 use glam::DVec3;
 
@@ -79,7 +80,7 @@ impl Edge {
                 // r·√(sum of the other two components squared). The
                 // second form keeps its digits when the axis is within
                 // ~1e-8 of k, where 1 − axis_k² rounds to 0.
-                let half = DVec3::new(axis.y.hypot(axis.z), axis.z.hypot(axis.x), axis.x.hypot(axis.y)) * radius;
+                let half = DVec3::new(fmath::hypot(axis.y, axis.z), fmath::hypot(axis.z, axis.x), fmath::hypot(axis.x, axis.y)) * radius;
                 *lo = lo.min(center - half);
                 *hi = hi.max(center + half);
                 return;
@@ -95,8 +96,8 @@ impl Edge {
             let y_dir = axis.cross(x_dir);
             for k in 0..3 {
                 let (xk, yk) = (x_dir[k], y_dir[k]);
-                let reach = radius * xk.hypot(yk);
-                let peak = yk.atan2(xk);
+                let reach = radius * fmath::hypot(xk, yk);
+                let peak = fmath::atan2(yk, xk);
                 for (t, sign) in [(peak, 1.0), (peak + std::f64::consts::PI, -1.0)] {
                     if (t - self.t0).rem_euclid(std::f64::consts::TAU) <= self.t1 - self.t0 {
                         let extreme = center[k] + sign * reach;
@@ -426,7 +427,7 @@ mod tests {
         let r = 101f64.sqrt();
         let v0 = b.add_vertex(DVec3::new(1.0, 10.0, 0.0));
         let v1 = b.add_vertex(DVec3::new(-1.0, 10.0, 0.0));
-        let start = 10f64.atan2(1.0);
+        let start = fmath::atan2(10f64, 1.0);
         let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::new(1.0, 10.0, 0.0) / r, radius: r };
         b.add_edge(c, v0, v1, 0.0, PI - 2.0 * start);
         let (lo, hi) = b.bounds();
@@ -509,7 +510,7 @@ mod tests {
         let v = b.add_vertex(DVec3::NEG_X);
         let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
         let angle = PI - 0.2 * ANGULAR;
-        let p = DVec3::new(angle.cos(), angle.sin(), 0.0);
+        let p = DVec3::new(fmath::cos(angle), fmath::sin(angle), 0.0);
         let e = b.add_edge(c, v, v, -PI, PI - 0.9 * ANGULAR);
         let (t, end) = b.edges[e].closest(p);
         assert!(end.is_none() && angle_eq(t, angle), "{t} {end:?}");
@@ -529,11 +530,11 @@ mod tests {
         let mut b = Body::default();
         let v0 = b.add_vertex(DVec3::new(r, 0.0, 0.0));
         let t1 = std::f64::consts::TAU - 0.9 * ANGULAR;
-        let v1 = b.add_vertex(DVec3::new(r * t1.cos(), r * t1.sin(), 0.0));
+        let v1 = b.add_vertex(DVec3::new(r * fmath::cos(t1), r * fmath::sin(t1), 0.0));
         let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: r };
         let e = b.add_edge(c, v0, v1, 0.0, t1);
         let a = -0.2 * ANGULAR;
-        assert_eq!(b.edges[e].closest(DVec3::new(r * a.cos(), r * a.sin(), 0.0)), (0.0, Some(false)));
+        assert_eq!(b.edges[e].closest(DVec3::new(r * fmath::cos(a), r * fmath::sin(a), 0.0)), (0.0, Some(false)));
     }
 
     #[test]

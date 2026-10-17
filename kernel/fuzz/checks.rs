@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::disallowed_methods)]
 //! The kernel's coverage-guided fuzz checks, one function per target:
 //! each turns fuzzer bytes into hostile input for one entry point and
 //! panics on anything wrong. `fuzz_targets/*.rs` hand them to libFuzzer
@@ -8,9 +8,10 @@
 use fission_kernel::ops::extrude::{self as extruding, Boundary, Profile};
 use fission_kernel::ops::{primitives, transform};
 use fission_kernel::placed::Placed;
+use fission_kernel::topology::{Body, FaceRole, Piece};
+use fission_kernel::ops::KernelError;
 use fission_kernel::sketch::{self as sketching, Arc, Circle, Line, SketchCurve, SketchOutline, Source};
 use fission_kernel::tolerance::LINEAR;
-use fission_kernel::topology::{Body, FaceRole, Piece};
 use fission_kernel::tessellate::{tessellate, TessOptions};
 use fission_kernel::validate::validate;
 use fission_kernel::{stl, view_body};
@@ -123,11 +124,9 @@ pub fn measure(b: &Boundary) -> (f64, f64, f64) {
     }
 }
 
-/// Extrude any profile the bytes describe, then show and export it as the
-/// app does. Fails on a panic (including an invalid result, which panics in
-/// these debug-assertion builds), a body the view reports invalid, or
-/// volume or area off from the profile's own area and perimeter.
-pub fn extrude(data: &[u8]) {
+/// The profile, distance and far-off shift the extrude fuzzer's bytes
+/// describe (also what `answers.rs` replays in every build).
+pub fn extrude_input(data: &[u8]) -> (Profile, f64, DVec2) {
     let mut b = Bytes::new(data);
     let scale = [1.0, 1e-3, 1e3, 1e6, 0.1, 7.0][b.byte() as usize % 6];
     let shift = if b.byte().is_multiple_of(4) { DVec2::new(b.num(), b.num()) * 1e7 } else { DVec2::ZERO };
@@ -135,6 +134,15 @@ pub fn extrude(data: &[u8]) {
     let holes = (0..b.byte() % 4).map(|_| boundary(&mut b, scale, shift)).collect();
     let profile = Profile { outer, holes };
     let d = b.num() * [1.0, 1e3, 1e-3][b.byte() as usize % 3];
+    (profile, d, shift)
+}
+
+/// Extrude any profile the bytes describe, then show and export it as the
+/// app does. Fails on a panic (including an invalid result, which panics in
+/// these debug-assertion builds), a body the view reports invalid, or
+/// volume or area off from the profile's own area and perimeter.
+pub fn extrude(data: &[u8]) {
+    let (profile, d, shift) = extrude_input(data);
     let Ok(body) = extruding::extrude(&profile, d) else { return };
     let view = view_body(&body).expect("an extruded body always meshes");
     assert!(view.errors.is_empty(), "invalid body: {:?}\n{profile:?} d={d}", view.errors);
@@ -165,6 +173,18 @@ pub fn extrude(data: &[u8]) {
 /// outline they make must extrude whenever it is closed (the sketch module's
 /// promise), and nothing may panic.
 pub fn sketch(data: &[u8]) {
+    let (lines, circles, arcs) = sketch_input(data);
+    if let Ok(SketchOutline::Closed(profile, sources)) = sketching::sketch_outline(&lines, &circles, &arcs) {
+        check_sources(&profile, &sources, &lines, &circles, &arcs);
+        match extruding::extrude(&profile, 1.0) {
+            Ok(body) => check_roles(&body, &profile, 1.0, &view_body(&body).expect("an extruded body always meshes")),
+            Err(e) => panic!("a closed sketch outline did not extrude: {e}\n{lines:?}\n{circles:?}\n{arcs:?}"),
+        }
+    }
+}
+
+/// The lines, circles and arcs the sketch fuzzer's bytes describe.
+pub fn sketch_input(data: &[u8]) -> (Vec<Line>, Vec<Circle>, Vec<Arc>) {
     let mut b = Bytes::new(data);
     let scale = [1.0, 1e-3, 1e3, 1e6][b.byte() as usize % 4];
     let grid = if b.byte().is_multiple_of(2) { Some(b.num()) } else { None };
@@ -206,13 +226,7 @@ pub fn sketch(data: &[u8]) {
         }
     }
     let circles: Vec<Circle> = (0..b.byte() % 3).map(|_| Circle { centre: point(&mut b), radius: b.num() * scale }).collect();
-    if let Ok(SketchOutline::Closed(profile, sources)) = sketching::sketch_outline(&lines, &circles, &arcs) {
-        check_sources(&profile, &sources, &lines, &circles, &arcs);
-        match extruding::extrude(&profile, 1.0) {
-            Ok(body) => check_roles(&body, &profile, 1.0, &view_body(&body).expect("an extruded body always meshes")),
-            Err(e) => panic!("a closed sketch outline did not extrude: {e}\n{lines:?}\n{circles:?}\n{arcs:?}"),
-        }
-    }
+    (lines, circles, arcs)
 }
 
 /// Each piece of a closed outline names the sketch curve it came from
@@ -281,31 +295,60 @@ fn check_roles(body: &Body, profile: &Profile, d: f64, view: &fission_kernel::Bo
     assert!(off <= 1e-9 * reach + 1e-6 * size, "end cap is {rise} from the start cap, not d = {d}\n{profile:?}");
 }
 
-/// Moves and turns any number of times, then mesh and bake: the body must
-/// stay valid, in model space, and keep its volume within rounding.
-pub fn placed(data: &[u8]) {
+/// One move of the placed fuzzer: by an offset, or turn about a pivot.
+#[derive(Debug)]
+pub enum Move {
+    Translate(DVec3),
+    Rotate { pivot: DVec3, axis: DVec3, angle: f64 },
+}
+
+/// The body (box, cylinder or sphere) and the moves the placed fuzzer's
+/// bytes describe.
+pub fn placed_input(data: &[u8]) -> (Result<Body, KernelError>, Vec<Move>) {
     let mut b = Bytes::new(data);
     let made = match b.byte() % 3 {
         0 => primitives::make_box(b.num(), b.num(), b.num()),
         1 => primitives::make_cylinder(b.num(), b.num()),
         _ => primitives::make_sphere(b.num()),
     };
-    let Ok(body) = made else { return };
-    let before = fission_kernel::mass::mass_properties(&body);
-    let mut p = Placed::new(body);
+    let mut moves = vec![];
     while !b.empty() {
         let v = |b: &mut Bytes| DVec3::new(b.num(), b.num(), b.num());
-        let next = if b.byte().is_multiple_of(2) {
-            let by = v(&mut b) * 10f64.powi((b.byte() % 9) as i32);
-            transform::translate(&p, by)
+        moves.push(if b.byte().is_multiple_of(2) {
+            Move::Translate(v(&mut b) * 10f64.powi((b.byte() % 9) as i32))
         } else {
             let (pivot, axis, angle) = (v(&mut b) * 1e4, v(&mut b), b.num());
-            transform::rotate(&p, pivot, axis, angle)
+            Move::Rotate { pivot, axis, angle }
+        });
+    }
+    (made, moves)
+}
+
+/// Applies the moves in turn, skipping any the kernel refuses; returns the
+/// placed body and which moves were refused, with why.
+pub fn moved(body: Body, moves: &[Move]) -> (Placed, Vec<(usize, KernelError)>) {
+    let mut p = Placed::new(body);
+    let mut refused = vec![];
+    for (i, m) in moves.iter().enumerate() {
+        let next = match *m {
+            Move::Translate(by) => transform::translate(&p, by),
+            Move::Rotate { pivot, axis, angle } => transform::rotate(&p, pivot, axis, angle),
         };
-        if let Ok(q) = next {
-            p = q;
+        match next {
+            Ok(q) => p = q,
+            Err(e) => refused.push((i, e)),
         }
     }
+    (p, refused)
+}
+
+/// Moves and turns any number of times, then mesh and bake: the body must
+/// stay valid, in model space, and keep its volume within rounding.
+pub fn placed(data: &[u8]) {
+    let (made, moves) = placed_input(data);
+    let Ok(body) = made else { return };
+    let before = fission_kernel::mass::mass_properties(&body);
+    let p = moved(body, &moves).0;
     let (lo, hi) = p.bounds();
     let reach = lo.abs().max(hi.abs()).max_element();
     assert!(reach <= fission_kernel::tolerance::MAX_COORD, "outside model space: {lo} {hi}");

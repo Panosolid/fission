@@ -13,8 +13,8 @@
 import type { Fetch } from "./http.ts";
 import { browserKeyStore, type ApiKeyStore } from "./keys.ts";
 import { builtInProvider, IN_BROWSER_MODEL, inBrowserDownloadBytes, inBrowserProvider, type BuiltInModelLike, type GpuLike, type WebLLMLike } from "./local.ts";
-import { hostedProvider } from "./hosted.ts";
-import { ollamaProvider } from "./ollama.ts";
+import { DEFAULT_MODELS, hostedProvider, listHostedModels } from "./hosted.ts";
+import { hasModel, ollamaModels, ollamaProvider } from "./ollama.ts";
 
 export type AIProviderKind = "in-browser" | "ollama" | "api-key" | "browser-built-in";
 
@@ -148,30 +148,91 @@ export async function inBrowserDownloadSize(model: string = IN_BROWSER_MODEL, de
   return inBrowserDownloadBytes(info, deps.fetch ?? browserFetch);
 }
 
+/** What `detectProviders` says about one provider. */
+export interface Detected {
+  kind: AIProviderKind;
+  ok: boolean;
+  reason?: string;
+}
+
 /**
  * Which providers could run here, each with the reason when one can't:
  * WebGPU and its power for the default in-browser model, Ollama at its
  * usual address, the browser's built-in model. An API key always can (the
- * key is asked for when it is chosen).
+ * key is asked for when it is chosen). The checks run together, so the
+ * slowest one (Ollama's time limit) sets how long it takes. `kinds` limits
+ * which are looked at: the panel leaves Ollama out until the user asks,
+ * because asking an address on this computer from a web page logs an error
+ * when nothing listens there and can make the browser ask the user for
+ * local network access.
  */
-export async function detectProviders(deps: ProviderDeps = {}): Promise<{ kind: AIProviderKind; ok: boolean; reason?: string }[]> {
-  const out: { kind: AIProviderKind; ok: boolean; reason?: string }[] = [];
-  for (const p of PROVIDERS) {
-    if (p.kind === "api-key") {
-      out.push({ kind: p.kind, ok: true });
-      continue;
-    }
-    const r =
-      p.kind === "ollama"
-        ? await ollamaAnswers(deps.fetch ?? browserFetch)
-        : await createProvider({ kind: p.kind }, deps).check().catch((e: Error) => ({ ok: false as const, reason: e.message }));
-    out.push(r.ok ? { kind: p.kind, ok: true } : { kind: p.kind, ok: false, reason: r.reason });
-  }
-  return out;
+export async function detectProviders(deps: ProviderDeps = {}, kinds: readonly AIProviderKind[] = PROVIDERS.map((p) => p.kind)): Promise<Detected[]> {
+  return Promise.all(
+    PROVIDERS.filter((p) => kinds.includes(p.kind)).map(async (p): Promise<Detected> => {
+      if (p.kind === "api-key") return { kind: p.kind, ok: true };
+      const r =
+        p.kind === "ollama"
+          ? await ollamaAnswers(deps.fetch ?? browserFetch)
+          : await Promise.resolve()
+              .then(() => createProvider({ kind: p.kind }, deps).check())
+              .catch((e: Error) => ({ ok: false as const, reason: e.message }));
+      return r.ok ? { kind: p.kind, ok: true } : { kind: p.kind, ok: false, reason: r.reason };
+    }),
+  );
 }
 
 async function ollamaAnswers(fetch: Fetch): Promise<{ ok: true } | { ok: false; reason: string }> {
   // With no model chosen a reachable Ollama always asks for one; anything else means it can't be reached.
   const r = await ollamaProvider({ model: "", fetch }).check();
   return r.ok || /^(choose a model|Ollama has no models yet)/.test(r.reason) ? { ok: true } : r;
+}
+
+/**
+ * The order local providers are picked in when the user hasn't chosen:
+ * the browser's built-in model first (nothing to download), then Ollama
+ * (found running when the user looked for it, so set up on purpose), then
+ * the in-browser model (a
+ * download, confirmed with its size before it starts). An API key is never
+ * picked for the user: it costs them money.
+ */
+export const LOCAL_ORDER: readonly AIProviderKind[] = ["browser-built-in", "ollama", "in-browser"];
+
+/** The first local provider that can run here, or null when none can. */
+export function pickLocal(found: readonly Detected[]): AIProviderKind | null {
+  return LOCAL_ORDER.find((kind) => found.some((d) => d.kind === kind && d.ok)) ?? null;
+}
+
+/**
+ * The models these settings can choose from: what Ollama has pulled, what
+ * the API key's provider lists for it, the in-browser default; none for
+ * the built-in model (it has one). Throws in plain words when the list
+ * can't be had (Ollama not running, no key saved, the key refused).
+ */
+export async function listModels(settings: ProviderSettings, deps: Pick<ProviderDeps, "fetch" | "keys" | "timeoutMs"> = {}): Promise<string[]> {
+  const fetch = deps.fetch ?? browserFetch;
+  switch (settings.kind) {
+    case "ollama":
+      return ollamaModels({ endpoint: settings.endpoint, fetch });
+    case "api-key":
+      return listHostedModels({ vendor: settings.vendor, endpoint: settings.endpoint, keys: deps.keys ?? browserKeyStore(), fetch, timeoutMs: deps.timeoutMs });
+    case "in-browser":
+      return [IN_BROWSER_MODEL];
+    default:
+      return [];
+  }
+}
+
+/** Ollama's suggested model, chosen when it has been pulled. */
+export const OLLAMA_MODEL = "qwen2.5:1.5b";
+
+/**
+ * Which listed model to use: the one already chosen if it is listed, else
+ * the suggested one for these settings if listed, else the first. Null for
+ * an empty list.
+ */
+export function chooseModel(settings: ProviderSettings, models: readonly string[]): string | null {
+  if (models.length === 0) return null;
+  const listed = (m: string | undefined) => (m ? models.find((n) => n === m || (settings.kind === "ollama" && hasModel([n], m))) : undefined);
+  const suggested = settings.kind === "ollama" ? OLLAMA_MODEL : settings.kind === "api-key" && settings.vendor !== "other" ? DEFAULT_MODELS[settings.vendor ?? "anthropic"] : settings.kind === "in-browser" ? IN_BROWSER_MODEL : undefined;
+  return listed(settings.model) ?? listed(suggested) ?? models[0];
 }

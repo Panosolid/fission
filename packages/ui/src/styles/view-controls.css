@@ -1,0 +1,18 @@
+/* The navigation bar along the bottom of each view (sketch feel SF3a):
+   one slim strip of small icon buttons in three groups (what a left-drag
+   does, framing, standard views), centred like a status bar so it never
+   sits on the body. The buttons are named with :not(#…), which counts as an id, so they outweigh
+   the workspace's own "#workspace button" padding and background. */
+.view-controls { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 2px; background: rgba(28, 31, 36, 0.92); border: 1px solid #353a43; border-radius: 6px; max-width: calc(100% - 16px); }
+.view-controls .nav-group { display: flex; gap: 2px; }
+.view-controls .nav-group + .nav-group { border-left: 1px solid #353a43; padding-left: 2px; margin-left: 2px; }
+.view-controls button.nav-button:not(#no-such-id) { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 12px; color: #c9d1d9; }
+.view-controls button.nav-button:not(#no-such-id):hover { background: #2e333b; }
+.view-controls button.nav-button:not(#no-such-id)[aria-pressed="true"] { background: #23384f; border-color: #4aa8ff; color: #fff; }
+.view-controls button.nav-button:not(#no-such-id):disabled { opacity: 0.35; cursor: default; background: transparent; }
+/* Phone width: from the left edge, clear of Undo and Redo docked in the
+   bottom-right corner (44 px wide, 8 px in), wrapping onto a second row
+   when it must; buttons stay at least 30 px to tap. */
+@media (max-width: 640px) {
+  .view-controls { left: 8px; transform: none; flex-wrap: wrap; max-width: calc(100% - 68px); }
+}
