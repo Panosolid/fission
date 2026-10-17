@@ -53,6 +53,10 @@ pub enum ValidationError {
     EdgeMeetsFace { edge: EdgeId, face: FaceId, point: DVec3 },
     /// Two faces cross (or touch) inside both.
     FacesMeet { a: FaceId, b: FaceId, point: DVec3 },
+    /// Some faces say what they are (`Face::role`) but this one doesn't.
+    RoleMissing { face: FaceId },
+    /// Two faces have the same role, so a name could mean either.
+    RoleRepeated { a: FaceId, b: FaceId },
 }
 
 impl fmt::Display for ValidationError {
@@ -88,6 +92,8 @@ impl fmt::Display for ValidationError {
             EdgesMeet { a, b, point } => write!(f, "edges {a} and {b} meet at {point} away from a shared vertex"),
             EdgeMeetsFace { edge, face, point } => write!(f, "edge {edge} meets face {face} at {point}"),
             FacesMeet { a, b, point } => write!(f, "faces {a} and {b} cross at {point}"),
+            RoleMissing { face } => write!(f, "face {face} has no role, though other faces have one"),
+            RoleRepeated { a, b } => write!(f, "faces {a} and {b} have the same role"),
         }
     }
 }
@@ -138,8 +144,9 @@ impl ValidationError {
             | FaceOrientation { face }
             | LoopOrientation { face, .. }
             | Tessellation { face, .. }
-            | EdgeMeetsFace { face, .. } => vec![face],
-            FacesMeet { a, b, .. } => vec![a, b],
+            | EdgeMeetsFace { face, .. }
+            | RoleMissing { face } => vec![face],
+            FacesMeet { a, b, .. } | RoleRepeated { a, b } => vec![a, b],
             _ => vec![],
         }
     }
@@ -154,6 +161,7 @@ pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
         return Err(errs);
     }
     check_loops(body, &mut errs);
+    check_roles(body, &mut errs);
     check_edge_uses(body, &mut errs);
     check_shells(body, &mut errs);
     check_geometry(body, &mut errs);
@@ -228,6 +236,27 @@ fn check_loops(body: &Body, errs: &mut Vec<ValidationError>) {
                 let b = l.coedges[(i + 1) % n];
                 if body.coedge_end(a) != body.coedge_start(b) {
                     errs.push(ValidationError::LoopNotClosed { face: fi, loop_index: li, position: i });
+                }
+            }
+        }
+    }
+}
+
+/// Either no face has a role (a body built by hand) or every face has
+/// one, each different: an operation names all its faces, never two alike.
+fn check_roles(body: &Body, errs: &mut Vec<ValidationError>) {
+    if body.faces.iter().all(|f| f.role.is_none()) {
+        return;
+    }
+    let mut first: std::collections::HashMap<crate::topology::FaceRole, FaceId> = std::collections::HashMap::new();
+    for (fi, f) in body.faces.iter().enumerate() {
+        match f.role {
+            None => errs.push(ValidationError::RoleMissing { face: fi }),
+            Some(role) => {
+                if let Some(&a) = first.get(&role) {
+                    errs.push(ValidationError::RoleRepeated { a, b: fi });
+                } else {
+                    first.insert(role, fi);
                 }
             }
         }
@@ -710,7 +739,7 @@ mod tests {
         let v: Vec<usize> = corners.iter().map(|&p| b.add_vertex(p)).collect();
         let coedges = (0..4).map(|i| crate::topology::Coedge { edge: b.add_line(v[i], v[(i + 1) % 4]), reversed: false }).collect();
         let l = Loop { coedges };
-        let up = Face { surface: Surface::Plane { origin: o, normal: DVec3::Z, x_dir: DVec3::X }, sense: true, loops: vec![] };
+        let up = Face { surface: Surface::Plane { origin: o, normal: DVec3::Z, x_dir: DVec3::X }, sense: true, loops: vec![], role: None };
         assert!(tolerance::eq(planar_loop_area(&b, &up, &l), 6.0));
         let down = Face { sense: false, ..up.clone() };
         assert!(tolerance::eq(planar_loop_area(&b, &down, &l), -6.0));
@@ -786,5 +815,40 @@ mod tests {
         assert_eq!((e.edges(), e.faces(), e.point()), (vec![6], vec![10], Some(p)));
         let e = ValidationError::FacesMeet { a: 1, b: 7, point: p };
         assert_eq!((e.edges(), e.faces(), e.point()), (vec![], vec![1, 7], Some(p)));
+    }
+
+    #[test]
+    fn faces_need_all_or_no_roles_and_each_a_different_one() {
+        use crate::topology::FaceRole;
+        // A box from the operation names all six faces, each differently.
+        let made = crate::ops::primitives::make_box(1.0, 2.0, 3.0).unwrap();
+        assert_eq!(validate(&made), Ok(()));
+        // A hand-built cube names none: also fine.
+        assert!(hand_cube().faces.iter().all(|f| f.role.is_none()));
+        assert_eq!(validate(&hand_cube()), Ok(()));
+        // Broken one way: the box's back face (3) loses its role.
+        let mut b = made.clone();
+        b.faces[3].role = None;
+        assert_eq!(validate(&b), Err(vec![ValidationError::RoleMissing { face: 3 }]));
+        // A hand-built cube with one face named: the other five are missing.
+        let mut b = hand_cube();
+        b.faces[2].role = Some(FaceRole::Top);
+        let missing: Vec<ValidationError> = [0, 1, 3, 4, 5].into_iter().map(|face| ValidationError::RoleMissing { face }).collect();
+        assert_eq!(validate(&b), Err(missing));
+        // Broken the other way: the right face (5) also called the bottom
+        // (face 0's role); then the left face (4) too, each named against
+        // the first face with that role.
+        let mut b = made.clone();
+        b.faces[5].role = Some(FaceRole::Bottom);
+        assert_eq!(validate(&b), Err(vec![ValidationError::RoleRepeated { a: 0, b: 5 }]));
+        b.faces[4].role = Some(FaceRole::Bottom);
+        assert_eq!(validate(&b), Err(vec![ValidationError::RoleRepeated { a: 0, b: 4 }, ValidationError::RoleRepeated { a: 0, b: 5 }]));
+        // The dump highlights the faces named.
+        let e = ValidationError::RoleMissing { face: 3 };
+        assert_eq!((e.edges(), e.faces(), e.point()), (vec![], vec![3], None));
+        let e = ValidationError::RoleRepeated { a: 0, b: 5 };
+        assert_eq!((e.edges(), e.faces(), e.point()), (vec![], vec![0, 5], None));
+        assert_eq!(e.to_string(), "faces 0 and 5 have the same role");
+        assert_eq!(ValidationError::RoleMissing { face: 3 }.to_string(), "face 3 has no role, though other faces have one");
     }
 }

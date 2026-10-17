@@ -227,6 +227,139 @@ fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
     }
 }
 
+/// One face's exact area and centroid (the centre of its area, which a
+/// curved face need not touch).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FaceProps {
+    pub area: f64,
+    pub centroid: DVec3,
+}
+
+/// The area and centroid of every face of a valid body, by face index. The
+/// areas are the ones `mass_properties` adds up.
+///
+/// The centroid is p + M / A, with M = ∬ (x − p) dA the face's first moment
+/// about its first vertex p, from integrals along its edges again:
+/// - Plane. In the plane, Green's theorem gives ∮ y (n·(y × dy)) = 3 ∬ y dA
+///   (y = x − p; for each component i take P = −yᵢ y₂, Q = yᵢ y₁, whose
+///   ∂Q/∂y₁ − ∂P/∂y₂ = 3yᵢ). A straight piece from a to b sweeps the
+///   triangle p, a, b: area T = ½ n·(a × b), moment T (a + b) / 3. An arc
+///   adds the segment between its chord and itself: area (n·k) r²/2 (φ −
+///   sin φ) as in `half_moment`, and its moment about the chord's
+///   midpoint m is along the bisector (from the centre through the arc's
+///   middle), (n·k) sgn(φ) r³ g(|φ|/2) / 6 with g(α) = 4 sin³α −
+///   3 cos α (2α − sin 2α) (`segment_lever`), which is the classical
+///   segment centroid 4r sin³α / (3(2α − sin 2α)) from the centre, times
+///   the area, less r cos α for the chord. Measured from the chord, not
+///   the centre, so a shallow arc of a huge circle loses nothing. A whole
+///   circle is the arc with α = π: g = 6π, and the moment is πr²(centre −
+///   p).
+/// - Cylinder (axis a, radius r, θ round the axis from p, s along it from
+///   p): x − p = s a + r((cos θ − 1) X + sin θ Y), dA = r dθ ds, and the
+///   integrals of s, cos θ − 1 and sin θ over the face in (θ, s) are, by
+///   Green's theorem with P = −s²/2, −s (cos θ − 1) and −s sin θ, sums over
+///   its circles at heights s: −s²/2 Δθ, s Δ(θ − sin θ) and s Δcos θ (lines
+///   run along the axis, dθ = 0). The face's sense orients the boundary,
+///   as for its area.
+/// - Sphere (centre c, radius r): x − c = ±r n, so ∬ (x − c) dA = ±r ∬ n dA,
+///   the face's vector area, which ½ ∮ (x − o) × dx gives (module notes).
+pub fn face_props(body: &Body) -> Vec<FaceProps> {
+    let (lo, hi) = body.bounds();
+    let o = (lo + hi) * 0.5;
+    body.faces
+        .iter()
+        .map(|face| FaceProps { area: face_terms(body, face, o).1, centroid: face_centroid(body, face) })
+        .collect()
+}
+
+/// The centroid of one face (see `face_props`).
+fn face_centroid(body: &Body, face: &Face) -> DVec3 {
+    let sign = if face.sense { 1.0 } else { -1.0 };
+    let coedges = || face.loops.iter().flat_map(|l| l.coedges.iter().copied());
+    let Some(first) = coedges().next() else { return DVec3::ZERO };
+    let p = body.vertices[body.coedge_start(first)].point;
+    let ends = |c: Coedge| (body.vertices[body.coedge_start(c)].point - p, body.vertices[body.coedge_end(c)].point - p);
+    match face.surface {
+        Surface::Plane { normal, .. } => {
+            let n = sign * normal;
+            let (mut area, mut moment) = (0.0, DVec3::ZERO);
+            for c in coedges() {
+                let (curve, ta, tb) = travel(body, c);
+                let (a, b) = ends(c);
+                let triangle = 0.5 * n.dot(a.cross(b));
+                area += triangle;
+                moment += triangle * (a + b) / 3.0;
+                if let Curve::Circle { center, axis, radius, .. } = *curve {
+                    let phi = tb - ta;
+                    let turn = n.dot(axis);
+                    let segment = turn * 0.5 * radius * radius * theta_minus_sin(phi);
+                    let bisector = (curve.eval(0.5 * (ta + tb)) - center) / radius;
+                    area += segment;
+                    moment += segment * 0.5 * (a + b) + bisector * (turn * phi.signum() * radius.powi(3) * segment_lever(0.5 * phi.abs()) / 6.0);
+                }
+            }
+            p + moment / area
+        }
+        Surface::Cylinder { origin, axis, radius, .. } => {
+            let x = crate::geom::unit((p - origin) - axis * axis.dot(p - origin)).unwrap_or(DVec3::X);
+            let y = axis.cross(x);
+            let (mut span, mut along, mut out, mut round) = (0.0, 0.0, 0.0, 0.0);
+            for c in coedges() {
+                let (curve, ta, tb) = travel(body, c);
+                if let Curve::Circle { center, axis: k, .. } = *curve {
+                    let at = curve.eval(ta) - p;
+                    let ua = axis.dot(x.cross(at + p - origin)).atan2(x.dot(at + p - origin));
+                    let ub = ua + axis.dot(k) * (tb - ta);
+                    let s = axis.dot(center - p);
+                    span -= s * (ub - ua);
+                    along -= 0.5 * s * s * (ub - ua);
+                    out += s * (theta_minus_sin(ub) - theta_minus_sin(ua));
+                    round += s * (ub.cos() - ua.cos());
+                }
+            }
+            // `sign` orients all four the same way, so it cancels.
+            p + axis * (along / span) + x * (radius * out / span) + y * (radius * round / span)
+        }
+        Surface::Sphere { center, radius, .. } => {
+            let vector_area: DVec3 = coedges()
+                .map(|c| {
+                    let (curve, ta, tb) = travel(body, c);
+                    let (a, b) = ends(c);
+                    half_moment(curve, ta, tb, a, b, DVec3::ZERO)
+                })
+                .sum();
+            center + sign * radius * vector_area / face_terms(body, face, p).1
+        }
+    }
+}
+
+/// g(α) = 4 sin³α − 3 cos α (2α − sin 2α), for a circular segment of half
+/// angle α in (0, π] (see `face_props`): 6 × its moment about its chord's
+/// midpoint over r³. The two terms agree to O(α³) and g is 4α⁵/5 + …, so
+/// below α = 0.5 it is summed by its series, to α²³: the first term left
+/// out, about 2.7e-14 α²⁵, is below 1e-19 of g there. (Coefficients by
+/// multiplying out the sine and cosine series in exact fractions.)
+fn segment_lever(alpha: f64) -> f64 {
+    if alpha < 0.5 {
+        const SERIES: [f64; 10] = [
+            4.0 / 5.0,
+            -22.0 / 105.0,
+            17.0 / 630.0,
+            -461.0 / 207_900.0,
+            8303.0 / 64_864_800.0,
+            -24_911.0 / 4_540_536_000.0,
+            168_151.0 / 926_269_344_000.0,
+            -1_513_361.0 / 316_784_115_648_000.0,
+            7913.0 / 77_298_084_864_000.0,
+            -98_065_811.0 / 53_858_368_206_010_368_000.0,
+        ];
+        let a2 = alpha * alpha;
+        alpha.powi(5) * SERIES.iter().rev().fold(0.0, |sum, &c| sum * a2 + c)
+    } else {
+        4.0 * alpha.sin().powi(3) - 3.0 * alpha.cos() * (2.0 * alpha - (2.0 * alpha).sin())
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -577,6 +710,157 @@ pub(crate) mod tests {
             assert!(rel_eq(m.volume, v, MASS_PROPS_REL), "{name}: volume {} vs extrapolated {v}", m.volume);
             assert!(rel_eq(m.area, a, MASS_PROPS_REL), "{name}: area {} vs extrapolated {a}", m.area);
         }
+    }
+
+    /// The props of the face with `role`.
+    fn props_of(body: &Body, role: crate::topology::FaceRole) -> FaceProps {
+        let i = body.faces.iter().position(|f| f.role == Some(role)).unwrap_or_else(|| panic!("no face is {role:?}"));
+        face_props(body)[i]
+    }
+
+    /// `got` matches the hand-worked area and centroid, to rounding of a
+    /// part of size `size`.
+    fn check_face(name: &str, got: FaceProps, area: f64, centroid: DVec3, size: f64) {
+        assert!(rel_eq(got.area, area, FP_REL), "{name}: area {} expected {area}", got.area);
+        assert!(got.centroid.distance(centroid) <= FP_REL * size, "{name}: centroid {} expected {centroid}", got.centroid);
+    }
+
+    #[test]
+    fn face_areas_and_centroids_by_hand() {
+        use crate::ops::primitives::*;
+        use crate::topology::{FaceRole::*, Piece};
+        let side = |boundary, index| Side(Some(Piece { boundary, index }));
+        let v = DVec3::new;
+        // A 40 × 30 × 20 box, corner at the origin: each face is a
+        // rectangle, centroid at its middle. Bottom and top 40 × 30 = 1200,
+        // front and back (y = 0, 30) 40 × 20 = 800, left and right (x = 0,
+        // 40) 30 × 20 = 600.
+        let b = make_box(40.0, 30.0, 20.0).unwrap();
+        for (role, area, c) in [
+            (Bottom, 1200.0, v(20.0, 15.0, 0.0)),
+            (Top, 1200.0, v(20.0, 15.0, 20.0)),
+            (Front, 800.0, v(20.0, 0.0, 10.0)),
+            (Back, 800.0, v(20.0, 30.0, 10.0)),
+            (Left, 600.0, v(0.0, 15.0, 10.0)),
+            (Right, 600.0, v(40.0, 15.0, 10.0)),
+        ] {
+            check_face(&format!("box {role:?}"), props_of(&b, role), area, c, 40.0);
+        }
+        // Cylinder r = 5, h = 10 on the Z axis: caps 25π at the centres of
+        // their circles, side 2π·5·10 = 100π, centroid on the axis half way.
+        let c = make_cylinder(5.0, 10.0).unwrap();
+        check_face("cylinder bottom", props_of(&c, Bottom), 25.0 * PI, v(0.0, 0.0, 0.0), 10.0);
+        check_face("cylinder top", props_of(&c, Top), 25.0 * PI, v(0.0, 0.0, 10.0), 10.0);
+        check_face("cylinder side", props_of(&c, Side(None)), 100.0 * PI, v(0.0, 0.0, 5.0), 10.0);
+        // Sphere r = 4: each half 2π·16 = 32π. Archimedes: a band of a
+        // sphere has the area of the same band of its cylinder, so a
+        // hemisphere's area is spread evenly over heights 0 to r and its
+        // centroid is r/2 = 2 above (below) the centre.
+        let s = make_sphere(4.0).unwrap();
+        check_face("upper half", props_of(&s, Upper), 32.0 * PI, v(0.0, 0.0, 2.0), 8.0);
+        check_face("lower half", props_of(&s, Lower), 32.0 * PI, v(0.0, 0.0, -2.0), 8.0);
+        // A slot: two lines 10 long joined by half circles r = 3 (bulge 1,
+        // turning π), from x = 0 to 10, y = ±3, extruded 4. Caps: 10·6 + 9π,
+        // centroid (5, 0) by symmetry. Straight sides 10·4 = 40 at their
+        // middles. A half circle's side is half a cylinder, π·3·4 = 12π;
+        // its points (x, y) = centre + 3(cos θ, sin θ) for θ in a half turn,
+        // and the mean of cos θ over −π/2..π/2 is (sin(π/2) − sin(−π/2))/π
+        // = 2/π: 2r/π = 6/π beyond the centre.
+        let corners = [(0.0, -3.0), (10.0, -3.0), (10.0, 3.0), (0.0, 3.0)];
+        let slot = extrude(&Profile { outer: path(&corners, &[0.0, 1.0, 0.0, 1.0]), holes: vec![] }, 4.0).unwrap();
+        check_face("slot start", props_of(&slot, Start), 60.0 + 9.0 * PI, v(5.0, 0.0, 0.0), 16.0);
+        check_face("slot end", props_of(&slot, End), 60.0 + 9.0 * PI, v(5.0, 0.0, 4.0), 16.0);
+        check_face("slot bottom line", props_of(&slot, side(0, 0)), 40.0, v(5.0, -3.0, 2.0), 16.0);
+        check_face("slot right end", props_of(&slot, side(0, 1)), 12.0 * PI, v(10.0 + 6.0 / PI, 0.0, 2.0), 16.0);
+        check_face("slot top line", props_of(&slot, side(0, 2)), 40.0, v(5.0, 3.0, 2.0), 16.0);
+        check_face("slot left end", props_of(&slot, side(0, 3)), 12.0 * PI, v(-6.0 / PI, 0.0, 2.0), 16.0);
+        // A half disc r = 6 (diameter on the x axis, arc above), extruded 2:
+        // its centroid is 4r/(3π) = 8/π above the diameter (Pappus: turned
+        // about the diameter it sweeps a sphere, 4/3·π·216 = πr²/2 · 2π·ȳ).
+        let half = extrude(&Profile { outer: path(&[(-6.0, 0.0), (6.0, 0.0)], &[0.0, 1.0]), holes: vec![] }, 2.0).unwrap();
+        check_face("half disc", props_of(&half, End), 18.0 * PI, v(0.0, 8.0 / PI, 2.0), 12.0);
+        check_face("half disc's arc side", props_of(&half, side(0, 1)), 12.0 * PI, v(0.0, 12.0 / PI, 1.0), 12.0);
+        // A 10 × 10 plate with a round hole r = 2 at (3, 3), extruded 5. Cap:
+        // 100 − 4π; moment 100·(5, 5) − 4π·(3, 3), so its centroid is
+        // (500 − 12π) / (100 − 4π) along each of x and y. The hole's wall,
+        // 2π·2·5 = 20π, is centred on the hole's axis.
+        let hole = Boundary::Circle { center: DVec2::new(3.0, 3.0), radius: 2.0 };
+        let square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let plate = extrude(&Profile { outer: path(&square, &[]), holes: vec![hole] }, 5.0).unwrap();
+        let k = (500.0 - 12.0 * PI) / (100.0 - 4.0 * PI);
+        check_face("plate start", props_of(&plate, Start), 100.0 - 4.0 * PI, v(k, k, 0.0), 10.0);
+        check_face("plate hole", props_of(&plate, side(1, 0)), 20.0 * PI, v(3.0, 3.0, 2.5), 10.0);
+    }
+
+    #[test]
+    fn face_centroids_agree_with_extrapolated_meshes() {
+        // Self-consistency (a second route, not hand-worked): each face's
+        // area and centroid from two meshes, steps h and h/2, extrapolated
+        // to (4·fine − coarse)/3 (the moment and the area each have an h²
+        // error; see `exact_values_agree_with_extrapolated_meshes`). Shapes
+        // with shallow and deep arcs, bowing in and out, a hole, a tube.
+        let opts = |refine| TessOptions { chord: 1.0, max_angle: MASS_PROPS_ANGLE, refine };
+        let rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)];
+        let hole = Boundary::Circle { center: DVec2::new(5.0, 2.0), radius: 1.0 };
+        for (name, body) in [
+            ("tube", hand_tube(1.0, 2.0, 3.0, 0.3)),
+            ("sphere", crate::ops::primitives::make_sphere(3.0).unwrap()),
+            ("cap", hand_sphere_cap(5.0, 3.0)),
+            ("stadium", extrude(&Profile { outer: path(&rect, &[0.0, 1.0, -0.3, 1.0]), holes: vec![] }, 2.0).unwrap()),
+            ("shallow", extrude(&Profile { outer: path(&rect, &[0.02, -0.01, 0.0, 3.0]), holes: vec![hole] }, 2.0).unwrap()),
+        ] {
+            let props = |refine| tessellate(&body, &opts(refine)).unwrap().face_props(body.faces.len());
+            let (coarse, fine) = (props(1), props(2));
+            for (f, exact) in face_props(&body).iter().enumerate() {
+                let ((ac, cc), (af, cf)) = (coarse[f], fine[f]);
+                let (cc, cf) = (cc.unwrap(), cf.unwrap());
+                let area = (4.0 * af - ac) / 3.0;
+                let centroid = (4.0 * af * cf - ac * cc) / (3.0 * area);
+                assert!(rel_eq(exact.area, area, MASS_PROPS_REL), "{name} face {f}: area {} vs extrapolated {area}", exact.area);
+                let size = body.bounds().1.distance(body.bounds().0);
+                assert!(
+                    exact.centroid.distance(centroid) <= MASS_PROPS_REL * size,
+                    "{name} face {f}: centroid {} vs extrapolated {centroid}",
+                    exact.centroid
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn face_props_move_with_the_body_and_add_up() {
+        // Moving a body 1e7 mm (10 km) along a slanted line moves every
+        // face's centroid by exactly that, to rounding there, and leaves
+        // its area alone; the faces' areas add up to the body's area.
+        let rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)];
+        let hole = Boundary::Circle { center: DVec2::new(5.0, 1.0), radius: 0.5 };
+        let body = extrude(&Profile { outer: path(&rect, &[0.0, 1.0, -0.3, 1.0]), holes: vec![hole] }, 2.0).unwrap();
+        let shift = DVec3::new(1e7, -6e6, 3e6);
+        let moved = body.transformed(&Transform::translation(shift));
+        for (f, (a, b)) in face_props(&body).iter().zip(face_props(&moved)).enumerate() {
+            assert!(rel_eq(a.area, b.area, FP_REL), "face {f}: area {} then {}", a.area, b.area);
+            assert!((a.centroid + shift).distance(b.centroid) <= rounding_slack(1e7) * 4.0, "face {f}: {} then {}", a.centroid, b.centroid);
+        }
+        for b in [body, crate::ops::primitives::make_sphere(2.0).unwrap(), crate::ops::primitives::make_cylinder(1.0, 3.0).unwrap()] {
+            let sum: f64 = face_props(&b).iter().map(|p| p.area).sum();
+            assert!(rel_eq(sum, mass_properties(&b).area, FP_REL), "{sum} vs {}", mass_properties(&b).area);
+        }
+    }
+
+    #[test]
+    fn segment_lever_by_hand() {
+        // g(α) = 4 sin³α − 3 cos α (2α − sin 2α). At α = π/2 (a half
+        // disc): 4 − 0 = 4. At α = π (a whole circle): 0 + 3·2π = 6π. Below
+        // 0.5 the series; its references summed in exact fractions from 30
+        // terms of the sine and cosine series (prototypes, by hand).
+        assert!(rel_eq(segment_lever(FRAC_PI_2), 4.0, FP_REL));
+        assert!(rel_eq(segment_lever(PI), 6.0 * PI, FP_REL));
+        for (alpha, want) in [(1e-3, 7.999997904762175e-16), (0.1, 7.979074581013277e-06), (0.49, 0.021220067345244415)] {
+            assert!(rel_eq(segment_lever(alpha), want, 4.0 * f64::EPSILON), "g({alpha}) = {} expected {want}", segment_lever(alpha));
+        }
+        // Either side of the switch the two forms agree.
+        let (below, above) = (segment_lever(0.5 - 1e-12), segment_lever(0.5));
+        assert!(rel_eq(below, above, 1e-11), "{below} vs {above}");
     }
 
     #[test]

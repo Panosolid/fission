@@ -506,6 +506,12 @@ fn reversed(segs: &[Seg]) -> Vec<Seg> {
 ///   zero-length pieces, slivers and necks;
 /// - every hole is inside the outer loop and outside every other hole.
 pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
+    Ok(check_profile_runs(profile)?.into_iter().map(|(segs, _)| segs).collect())
+}
+
+/// `check_profile`, saying for each loop whether it was turned round: when
+/// true, the loop's piece j is the caller's piece n − 1 − j run backwards.
+pub fn check_profile_runs(profile: &Profile) -> Result<Vec<(Vec<Seg>, bool)>, KernelError> {
     let bad = |m: String| Err(KernelError::InvalidInput(m));
     let all: Vec<&Boundary> = std::iter::once(&profile.outer).chain(&profile.holes).collect();
     let total: usize = all
@@ -623,7 +629,7 @@ pub fn check_profile(profile: &Profile) -> Result<Vec<Vec<Seg>>, KernelError> {
     Ok(loops
         .iter()
         .enumerate()
-        .map(|(k, segs)| if counter_clockwise(segs) == (k == 0) { segs.clone() } else { reversed(segs) })
+        .map(|(k, segs)| if counter_clockwise(segs) == (k == 0) { (segs.clone(), false) } else { (reversed(segs), true) })
         .collect())
 }
 

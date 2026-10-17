@@ -14,18 +14,18 @@
 //! vs `>= 0.0` for an arc's curve axis and its wall's sense (an arc's sweep
 //! is never 0: a zero bulge is a line).
 
-use super::profile::{check_profile, Seg};
+use super::profile::{check_profile_runs, Seg};
 pub use super::profile::{Boundary, Profile};
 use super::{check_length, finish, transform::check_in_model_space, KernelError};
 use crate::geom::{unit, Curve, Surface};
-use crate::topology::{Body, Coedge, Loop, Shell};
+use crate::topology::{Body, Coedge, FaceRole, Loop, Piece, Shell};
 use glam::{DVec2, DVec3};
 use std::f64::consts::TAU;
 
 /// Extrudes `profile` along +Z by `distance`.
 pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
     check_length("extrude distance", distance)?;
-    let loops = check_profile(profile)?;
+    let loops = check_profile_runs(profile)?;
 
     let mut b = Body::default();
     let top = DVec3::new(0.0, 0.0, distance);
@@ -36,8 +36,8 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
     // is on the left of every piece seen from above, outside on its right.
     let mut bottom_loops = vec![];
     let mut top_loops = vec![];
-    let mut side_faces: Vec<(Surface, bool, Vec<Loop>)> = vec![];
-    for segs in &loops {
+    let mut side_faces: Vec<(FaceRole, Surface, bool, Vec<Loop>)> = vec![];
+    for (boundary, (segs, turned)) in loops.iter().enumerate() {
         if let [Seg::Circle { center, radius, ccw }] = segs.as_slice() {
             // Edges run the way the loop does: about +Z when counter-clockwise.
             let axis = if *ccw { DVec3::Z } else { DVec3::NEG_Z };
@@ -53,7 +53,8 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
             // for a hole. As for the cylinder primitive: the bottom circle
             // forwards, the top one backwards.
             let wall = Surface::Cylinder { origin: c0, axis: DVec3::Z, x_dir: DVec3::X, radius: *radius };
-            side_faces.push((wall, *ccw, vec![Loop { coedges: vec![fwd(bottom)] }, Loop { coedges: vec![rev(upper)] }]));
+            let role = FaceRole::Side(Some(Piece { boundary, index: 0 }));
+            side_faces.push((role, wall, *ccw, vec![Loop { coedges: vec![fwd(bottom)] }, Loop { coedges: vec![rev(upper)] }]));
             continue;
         }
         let corners: Vec<DVec2> = segs.iter().map(|s| s.ends()[0]).collect();
@@ -97,13 +98,16 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
                     (Surface::Plane { origin: b.vertices[lo[i]].point, normal: outward, x_dir }, true)
                 }
             };
-            side_faces.push((surface, sense, vec![Loop { coedges }]));
+            // Named by the caller's piece: a loop turned round runs the
+            // caller's pieces backwards (`check_profile_runs`).
+            let index = if *turned { n - 1 - i } else { i };
+            side_faces.push((FaceRole::Side(Some(Piece { boundary, index })), surface, sense, vec![Loop { coedges }]));
         }
     }
-    let mut faces = vec![b.add_face(cap(DVec3::ZERO, DVec3::NEG_Z), true, bottom_loops)];
-    faces.push(b.add_face(cap(top, DVec3::Z), true, top_loops));
-    for (surface, sense, face_loops) in side_faces {
-        faces.push(b.add_face(surface, sense, face_loops));
+    let mut faces = vec![b.add_face_as(FaceRole::Start, cap(DVec3::ZERO, DVec3::NEG_Z), true, bottom_loops)];
+    faces.push(b.add_face_as(FaceRole::End, cap(top, DVec3::Z), true, top_loops));
+    for (role, surface, sense, face_loops) in side_faces {
+        faces.push(b.add_face_as(role, surface, sense, face_loops));
     }
     b.shells.push(Shell { faces });
     check_in_model_space(&b)?;

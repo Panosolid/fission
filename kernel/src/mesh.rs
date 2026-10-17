@@ -82,6 +82,24 @@ impl Mesh {
         (0..self.triangles.len()).map(|t| self.triangle_area(t)).sum()
     }
 
+    /// Each of `faces` faces' area and centroid from its triangles: the
+    /// area-weighted mean of their centroids, measured from the face's
+    /// first triangle corner to keep the digits of a part far out. A face
+    /// with no triangles gets area 0 and no centroid. For checking the
+    /// exact `mass::face_props` (an inscribed mesh is off by O(h²)).
+    pub fn face_props(&self, faces: usize) -> Vec<(f64, Option<DVec3>)> {
+        let mut sums: Vec<(f64, DVec3, Option<DVec3>)> = vec![(0.0, DVec3::ZERO, None); faces];
+        for (t, &face) in self.triangle_face.iter().enumerate() {
+            let [a, b, c] = self.triangle(t);
+            let (area, moment, from) = &mut sums[face];
+            let o = *from.get_or_insert(a);
+            let w = self.triangle_area(t);
+            *area += w;
+            *moment += w * ((a - o) + (b - o) + (c - o)) / 3.0;
+        }
+        sums.into_iter().map(|(area, moment, from)| (area, from.map(|o| o + moment / area))).collect()
+    }
+
     pub fn triangle_area(&self, t: usize) -> f64 {
         let [a, b, c] = short_edge_corner(self.triangle(t));
         (b - a).cross(c - a).length() / 2.0

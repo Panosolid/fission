@@ -60,6 +60,9 @@ pub fn two_shells(a: &Body, b: &Body) -> Body {
         f
     }));
     out.shells.extend(b.shells.iter().map(|s| Shell { faces: s.faces.iter().map(|f| f + nf).collect() }));
+    // Put together by hand, so no operation's roles: two bodies from the
+    // same operation would repeat them.
+    out.faces.iter_mut().for_each(|f| f.role = None);
     out
 }
 

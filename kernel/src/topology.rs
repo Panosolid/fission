@@ -165,6 +165,51 @@ pub struct Face {
     pub sense: bool,
     /// The first loop is the outer boundary when the face has one.
     pub loops: Vec<Loop>,
+    /// What the face is in the operation that made it (`FaceRole`); None
+    /// only on bodies built by hand (`fixtures`). Validation requires all
+    /// or none, and no two the same.
+    pub role: Option<FaceRole>,
+}
+
+/// What a face is in the operation that made it: the meaning a face's
+/// permanent name (step 24) is built from, which survives an edit that
+/// renumbers the body's faces. Each operation gives every face a different
+/// role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FaceRole {
+    /// An extrude's cap on the sketch plane (z = 0).
+    Start,
+    /// An extrude's far cap (z = distance).
+    End,
+    /// A side face. From an extrude, the piece of the profile it was swept
+    /// from; a cylinder's has none.
+    Side(Option<Piece>),
+    /// A box's or cylinder's face on z = 0.
+    Bottom,
+    /// A box's or cylinder's face on z = height.
+    Top,
+    /// A box's face on y = 0.
+    Front,
+    /// A box's face on y = depth.
+    Back,
+    /// A box's face on x = 0.
+    Left,
+    /// A box's face on x = width.
+    Right,
+    /// A sphere's half above its equator (z > 0).
+    Upper,
+    /// A sphere's half below it.
+    Lower,
+}
+
+/// A piece of an extruded profile, numbered as the caller gave it, whichever
+/// way round the extrude runs the loop: `boundary` 0 is the outer loop and
+/// 1, 2, … its holes in order; `index` i of a path is the piece from corner
+/// i to corner i + 1 (the last back to corner 0), and a circle is piece 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Piece {
+    pub boundary: usize,
+    pub index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -200,7 +245,13 @@ impl Body {
     }
 
     pub fn add_face(&mut self, surface: Surface, sense: bool, loops: Vec<Loop>) -> FaceId {
-        self.faces.push(Face { surface, sense, loops });
+        self.faces.push(Face { surface, sense, loops, role: None });
+        self.faces.len() - 1
+    }
+
+    /// `add_face` for an operation's face, with its role.
+    pub fn add_face_as(&mut self, role: FaceRole, surface: Surface, sense: bool, loops: Vec<Loop>) -> FaceId {
+        self.faces.push(Face { surface, sense, loops, role: Some(role) });
         self.faces.len() - 1
     }
 
@@ -277,7 +328,7 @@ impl Body {
             faces: self
                 .faces
                 .iter()
-                .map(|f| Face { surface: f.surface.transformed(tf), sense: f.sense, loops: f.loops.clone() })
+                .map(|f| Face { surface: f.surface.transformed(tf), sense: f.sense, loops: f.loops.clone(), role: f.role })
                 .collect(),
             shells: self.shells.clone(),
         }
