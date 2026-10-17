@@ -334,6 +334,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   update();
   return {
     sleep,
+    run,
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep

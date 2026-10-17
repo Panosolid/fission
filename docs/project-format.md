@@ -33,6 +33,39 @@ A Fission project is one JSON document. The format is open: anyone may read and 
 
 Today a part is feature #1 of a one-step timeline. Step 32 adds features to the same list, so no migration is needed.
 
+### Planned: Design's data version 2 (step 21b)
+
+Sketches arrive as timeline items of their own; the rules behind this shape are in docs/document-model.md.
+
+```json
+{
+  "version": 2,
+  "nextId": 6,
+  "profiles": [],
+  "sketches": [
+    {
+      "id": "sketch-1",
+      "points": [{ "id": "point-2", "x": 0, "y": 0 }, { "id": "point-3", "x": 40, "y": 0 }],
+      "curves": [{ "id": "line-4", "kind": "line", "start": "point-2", "end": "point-3" }],
+      "constraints": []
+    }
+  ],
+  "timeline": {
+    "features": [
+      { "id": "sketch-1", "intent": { "type": "sketch", "parameters": { "plane": "XY" }, "summary": "Sketch 1 on the XY plane" }, "dependsOn": [], "suppressed": false, "provenance": { "…": "…" } },
+      { "id": "feature-5", "intent": { "type": "extrude", "parameters": { "sketch": "sketch-1", "distance": 10 }, "summary": "Extrude: Sketch 1 by 10 mm" }, "dependsOn": ["sketch-1"], "suppressed": false, "provenance": { "…": "…" } }
+    ]
+  }
+}
+```
+
+- `nextId`: the next number for a new id. Ids are never reused, even after a delete.
+- `sketches`: each sketch's points (mm, in the sketch plane's own 2D frame), curves naming point ids, and constraints (empty until step 27). The sketch's place in the build order is its timeline item with the same id.
+- A sketch item's `plane` is a reference (`"XY"`, `"XZ"`, `"YZ"`; a stable face id from step 32), never coordinates.
+- `timeline.marker` (optional, used from step 32): the id of the last item built; absent means all.
+- Nothing the kernel computes (bodies, outlines, profiles) is stored.
+- Migration from version 1: `nextId` is one more than the largest number in any id, `sketches` is empty, the rest is unchanged.
+
 ## Saving and opening
 
 Save writes the project as `<name>.fission.json` (`projectToJson`): keys sorted at every level and two-space indents, so the same project always gives the same bytes. A number JSON can't hold (NaN, Infinity) is refused when saving instead of being written as `null`. Open (`projectFromJson`) parses the text, runs `readProject` (the migrations below), then hands each workspace its own part (`readData`); a part no workspace in this build reads is kept as it is. Bad JSON, a non-project, a newer format or a workspace refusing its part refuses the whole file with one message; the open project stays as it was.

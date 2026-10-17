@@ -10,7 +10,22 @@
 // DRAFT interfaces: will change when the first workspace needs them.
 
 export { JOURNEYS, ROUND_TRIPS, type Journey } from "./journeys.ts";
-export { MAGIC_JOURNEYS, judge, reportLine, type JourneyRun, type JourneyVerdict, type MagicJourney } from "./magic.ts";
+export {
+  MAGIC_JOURNEYS,
+  SLOWEST_MARGIN_PERCENT,
+  baselineLine,
+  compareToBaseline,
+  judge,
+  parseBaselines,
+  reportLine,
+  type BaselineFlag,
+  type JourneyBaseline,
+  type JourneyCheck,
+  type JourneyMeasured,
+  type JourneyRun,
+  type JourneyVerdict,
+  type MagicJourney,
+} from "./magic.ts";
 export { EVAL_CASES, matches, runEval, successRates, type EvalCase, type EvalResult, type TaskType } from "./ai-eval.ts";
 
 /** A random source that gives the same sequence for the same seed. */

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from file_issues import MARK, gather, harness_kinds, key, kinds_of, oracle_kinds, plan, read_folders, texts  # noqa: E402
+from file_issues import MARK, fuzz_kinds, gather, harness_kinds, key, kinds_of, oracle_kinds, plan, read_folders, texts  # noqa: E402
 
 # Lines copied from real reports on the test-results branch.
 ROTATE_A = ("  seed 0x12849982fbf1: step 3 (Rotate { target: 1, pivot: [0.0, 0.0, 0.0], axis: [1.0, 0.0, 0.0], "
@@ -98,6 +98,59 @@ class Plan(unittest.TestCase):
         self.assertIn("and 2 more", body)  # 12 seeds, 10 listed
         self.assertIn("FISSION_SEED=", body)
         self.assertIsNone(texts("comment", self.K, hits, "RUN", "abc1234", "main")[0])
+
+
+# Reports as the fuzzers write them (kernel/tests/fuzz_stl.rs, packages/testing/src/project-fuzz.ts).
+FUZZ_STL_A = """STL reader fuzzing, seed 11, 2000 inputs: 2 kind(s) of failure
+failure: panic in stl::read: range end index 84 out of range for slice of length 83 at src/stl.rs:94 | case 315 | shrunk input: input-315.stl (83 bytes)
+failure: accepted a malformed file | case 3 (model refuses it: WrongLength) | shrunk input: input-3.stl (85 bytes)
+"""
+FUZZ_STL_B = """STL reader fuzzing, seed 12, 2000 inputs: 1 kind(s) of failure
+failure: panic in stl::read: range end index 84 out of range for slice of length 80 at src/stl.rs:95 | case 9 | shrunk input: input-9.stl (80 bytes)
+"""
+FUZZ_PROJECT = """Project loader fuzzing, seed 13, 2000 inputs: 1 kind(s) of failure
+failure: saving lost or changed something the file had | case 34 | shrunk input: input-34.json (307 characters)
+"""
+
+
+class Fuzz(unittest.TestCase):
+    def test_one_kind_per_failure_line_named_by_target(self):
+        # Worked by hand: the target comes from the first line, the kind is
+        # the text after "failure: " up to " | ", with numbers as #.
+        self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_STL_A)], [
+            "fuzzing the STL reader: panic in stl::read: range end index # out of range for slice of length # at src/stl.rs:#",
+            "fuzzing the STL reader: accepted a malformed file",
+        ])
+        # Another round's panic at other numbers is the same kind.
+        self.assertEqual(fuzz_kinds(FUZZ_STL_B)[0][0], fuzz_kinds(FUZZ_STL_A)[0][0])
+        self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_PROJECT)], ["fuzzing the project loader: saving lost or changed something the file had"])
+        # A report with no failure lines has no kinds; an unknown first line still files, as "?".
+        self.assertEqual(fuzz_kinds("STL reader fuzzing, seed 1, 2000 inputs: 0 kind(s) of failure\n"), [])
+        self.assertEqual(fuzz_kinds("something else\nfailure: x | y")[0][0], "fuzzing the ?: x")
+
+    def test_texts_say_how_to_replay_a_fuzzing_round(self):
+        kind = fuzz_kinds(FUZZ_PROJECT)[0][0]
+        title, body = texts("create", kind, [("13", "line")], "RUN", "abc1234", "main")
+        self.assertEqual(title, "Fuzzing: project loader: saving lost or changed something the file had")
+        self.assertIn(MARK.format(key(kind)), body)
+        self.assertIn("npm run fuzz -w @fission/testing", body)
+        self.assertIn("(fuzz/failures/seed-13/)", body)
+        self.assertIn("fuzz/failures/seed-13/", texts("comment", kind, [("13", "line")], "RUN", "abc1234", "main")[1])
+
+    def test_fuzz_folders_are_read_alongside_random_rounds(self):
+        with tempfile.TemporaryDirectory() as d:
+            for job, seed, name, text in (("fuzz-stl", "11", "fuzz-report.txt", FUZZ_STL_A), ("fuzz-stl", "12", "fuzz-report.txt", FUZZ_STL_B),
+                                          ("fuzz-project", "13", "fuzz-report.txt", FUZZ_PROJECT), ("endless-a-0", "22", "report.txt", ROTATE_A)):
+                os.makedirs(os.path.join(d, job, f"seed-{seed}"))
+                with open(os.path.join(d, job, f"seed-{seed}", name), "w") as f:
+                    f.write(text)
+            found = gather(read_folders(d))
+        self.assertEqual(sorted((k.split(":")[0], [s for s, _ in v]) for k, v in found.items()), [
+            ("fuzzing the STL reader", ["11"]),
+            ("fuzzing the STL reader", ["11", "12"]),
+            ("fuzzing the project loader", ["13"]),
+            ("harness, Rotate", ["22"]),
+        ])
 
 
 class Folders(unittest.TestCase):

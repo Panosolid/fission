@@ -10,6 +10,7 @@
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
   },
   "dependencies": {
-    "@fission/core": "*"
+    "@fission/core": "*",
+    "@mlc-ai/web-llm": "0.2.85"
   }
 }

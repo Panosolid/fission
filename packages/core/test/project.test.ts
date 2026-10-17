@@ -23,7 +23,7 @@ test("files from a newer Fission, and things that are not projects, are refused 
 });
 
 // ---- Saving and opening a project file (19a) ----
-import { projectFromJson, projectToJson, type Project } from "../src/model/project.ts";
+import { MAX_NESTING, projectFromJson, projectToJson, type Project } from "../src/model/project.ts";
 
 test("a saved file has sorted keys and two-space indents (worked by hand)", () => {
   // emptyProject("A"): the keys sorted are formatVersion, links, materials,
@@ -112,4 +112,52 @@ test("save then open gives an equal project (self-consistency)", () => {
   };
   // 0.1 + 0.2 = 0.30000000000000004: JSON keeps every digit a double needs.
   assert.deepEqual(projectFromJson(projectToJson(p), [reader("design")]), p);
+});
+
+// ---- Found by fuzzing the loader (packages/testing/src/project-fuzz.ts) ----
+
+test("an outer field of the wrong type is refused, not opened half-broken", () => {
+  const p = emptyProject() as unknown as Record<string, unknown>;
+  assert.throws(() => readProject({ ...p, name: 5 }), /not a Fission project: "name" must be text/);
+  assert.throws(() => readProject({ ...p, units: {} }), /"units" must give a length unit/);
+  assert.throws(() => readProject({ ...p, units: { length: "furlong" } }), /"units" must give a length unit/);
+  assert.throws(() => readProject({ ...p, units: null }), /"units" must give a length unit/);
+  assert.throws(() => readProject({ ...p, materials: "" }), /"materials" must be a list/);
+  assert.throws(() => readProject({ ...p, links: true }), /"links" must be a list/);
+  // Every unit the format lists opens.
+  for (const length of ["mm", "cm", "m", "in"]) assert.equal(readProject({ ...p, units: { length } }).units.length, length);
+});
+
+test('a "__proto__" key in a file is kept when the project is saved again', () => {
+  // JSON.parse keeps "__proto__" as an ordinary key; assigning it to a new
+  // object would set the object's prototype instead, losing the key.
+  const text = `{"formatVersion": 2, "links": [], "materials": [], "name": "P", "units": {"length": "mm"}, "workspaces": {"render": {"__proto__": {"a": 1}, "b": 2}}}`;
+  const saved = projectToJson(projectFromJson(text, []));
+  assert.deepEqual(Object.keys(JSON.parse(saved).workspaces.render), ["__proto__", "b"]);
+  assert.equal(JSON.parse(saved).workspaces.render["__proto__"].a, 1);
+  assert.equal(({} as Record<string, unknown>).a, undefined); // and nothing else changed
+  // The same as a workspace's id, which projectFromJson hands out itself.
+  const asId = `{"formatVersion": 2, "links": [], "materials": [], "name": "P", "units": {"length": "mm"}, "workspaces": {"__proto__": {"a": 1}}}`;
+  assert.deepEqual(Object.keys(JSON.parse(projectToJson(projectFromJson(asId, []))).workspaces), ["__proto__"]);
+});
+
+test("a file nested deeper than MAX_NESTING is refused when opened, since it could not be saved again", () => {
+  // The outer object is level 1 and "workspaces" level 2; each "[" is one
+  // more, so "[" × b reaches level 2 + b: b = MAX_NESTING − 2 is exactly
+  // the most, one more is refused, at the 257th level: render then 254 × [0].
+  const at = (brackets: number) => `{"formatVersion": 2, "links": [], "materials": [], "name": "P", "units": {"length": "mm"}, "workspaces": {"render": ${"[".repeat(brackets)}${"]".repeat(brackets)}}}`;
+  assert.equal(MAX_NESTING, 256);
+  assert.doesNotThrow(() => projectToJson(projectFromJson(at(MAX_NESTING - 2), [])));
+  assert.throws(() => projectFromJson(at(MAX_NESTING - 1), []), /not a Fission project: project\.workspaces\.render(\[0\]){254} is nested more than 256 deep/);
+  // 10,000 deep is past what saving (JSON.stringify) can reach.
+  assert.throws(() => projectFromJson(at(10_000), []), /nested more than 256 deep/);
+});
+
+test("a number too big for a double (read as Infinity) is refused with where it is", () => {
+  // 1e400 > Number.MAX_VALUE ≈ 1.8e308, so JSON.parse gives Infinity, which
+  // no file can hold: opening it would make a project that can't be saved.
+  const text = (n: string) => `{"formatVersion": 2, "links": [], "materials": [], "name": "P", "units": {"length": "mm"}, "workspaces": {"render": {"w": ${n}}}}`;
+  assert.throws(() => projectFromJson(text("1e400"), []), /not a Fission project: project\.workspaces\.render\.w is too big a number/);
+  assert.throws(() => projectFromJson(text("-1e400"), []), /project\.workspaces\.render\.w is too big a number/);
+  assert.equal((projectFromJson(text("1e308"), []).workspaces.render as { w: number }).w, 1e308);
 });
