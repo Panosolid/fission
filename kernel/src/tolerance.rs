@@ -158,7 +158,7 @@ pub fn side(a: DVec2, b: DVec2, c: DVec2) -> i8 {
 /// Whether closed segments ab and cd share any point (exact).
 pub fn segments_touch((a, b): (DVec2, DVec2), (c, d): (DVec2, DVec2)) -> bool {
     let (o1, o2, o3, o4) = (side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b));
-    if o1 * o2 < 0 && o3 * o4 < 0 {
+    if o3 * o4 < 0 && o1 * o2 < 0 {
         return true;
     }
     // Collinear point on the other segment: exact box test.
