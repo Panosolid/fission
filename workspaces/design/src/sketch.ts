@@ -5,15 +5,16 @@
 // document's counter and are never reused, even after a delete.
 //
 // The geometry a sketch makes is never stored: its one closed outline is
-// found by the kernel (sketch_outline, step 21a; circles from 22b) from
-// the lines and circles rebuilt from point ids, every time it is asked for.
+// found by the kernel (sketch_outline, step 21a; circles from 22b, arcs
+// from 23a) from the curves rebuilt from point ids, every time it is asked
+// for.
 
-import type { Feature, KernelCalls, Outline, Plane, SketchCircle, SketchLine } from "@fission/core";
+import type { Feature, KernelCalls, Outline, Plane, SketchArc, SketchCircle, SketchLine } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
 import { curvePoints, isSketchItem, shown, type DesignDocument, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
 
 /** The undo step each sketch edit is recorded as. */
-export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", delete: "Delete line", move: "Move point" } as const;
+export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", delete: "Delete line", move: "Move point" } as const;
 
 /**
  * Each origin plane's frame: the sketch's x along `xAxis`, its y along
@@ -124,6 +125,30 @@ export function drawCircle(doc: DesignDocument, sketchId: string, centre: LineEn
   return { id, doc: withSketch(after, sketch) };
 }
 
+/**
+ * An arc from `start` to `end`, counter-clockwise round `centre` (step
+ * 23a; the tools are 23b and 23c). Each point given as an id is shared (an
+ * arc continuing a line shares its end); one given as coordinates is a new
+ * point, taking ids in the order start, end, centre, before the arc's. The
+ * same point for both ends, or for an end and the centre, is refused here;
+ * the kernel holds the rest (the centre midway between the ends, the
+ * sizes) when it looks for the outline.
+ */
+export function drawArc(doc: DesignDocument, sketchId: string, start: LineEnd, end: LineEnd, centre: LineEnd): { doc: DesignDocument; id: string } {
+  if (typeof start === "string" && start === end) throw new Error(`an arc can't start and end at the same point ${start}`);
+  if (typeof centre === "string" && (centre === start || centre === end)) throw new Error(`an arc can't be round its own end ${centre}`);
+  let drawn = { doc, sketch: sketchIn(doc, sketchId) };
+  const ids: string[] = [];
+  for (const p of [start, end, centre]) {
+    const [id, next] = pointFor(drawn, p);
+    ids.push(id);
+    drawn = next;
+  }
+  const [id, after] = take(withSketch(drawn.doc, drawn.sketch), "arc");
+  const sketch: Sketch = { ...drawn.sketch, curves: [...drawn.sketch.curves, { id, kind: "arc", start: ids[0], end: ids[1], centre: ids[2] }] };
+  return { id, doc: withSketch(after, sketch) };
+}
+
 /** The sketch's point exactly at `at`, by id, or null. */
 export function pointAt(sketch: Sketch, at: readonly [number, number]): string | null {
   return sketch.points.find((p) => p.x === at[0] && p.y === at[1])?.id ?? null;
@@ -164,7 +189,12 @@ export function deleteCurve(doc: DesignDocument, sketchId: string, curveId: stri
   return withSketch(doc, { ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) });
 }
 
-/** The sketch with one point moved; every line ending there and circle round it follows, since curves name points. */
+/**
+ * The sketch with one point moved; every line ending there and circle or
+ * arc using it follows, since curves name points. Until constraints (27)
+ * nothing else moves with it, so moving one end of an arc leaves its
+ * centre off the midway line and the kernel then says so.
+ */
 export function movePoint(doc: DesignDocument, sketchId: string, pointId: string, x: number, y: number): DesignDocument {
   const sketch = sketchIn(doc, sketchId);
   if (!sketch.points.some((p) => p.id === pointId)) throw new Error(`sketch ${sketchId} has no point ${pointId}`);
@@ -172,26 +202,28 @@ export function movePoint(doc: DesignDocument, sketchId: string, pointId: string
   return withSketch(doc, { ...sketch, points: sketch.points.map((p) => (p.id === pointId ? { ...p, x, y } : p)) });
 }
 
-/** The sketch's lines as the kernel takes them, rebuilt from point ids (its circles are in `sketchCurves`). */
+/** The sketch's lines as the kernel takes them, rebuilt from point ids (its circles and arcs are in `sketchCurves`). */
 export function sketchLines(sketch: Sketch): SketchLine[] {
   return sketchCurves(sketch).lines;
 }
 
-/** The sketch's lines and circles as the kernel's sketch_outline takes them, rebuilt from point ids, each in the sketch's order. */
-export function sketchCurves(sketch: Sketch): { lines: SketchLine[]; circles: SketchCircle[] } {
+/** The sketch's lines, circles and arcs as the kernel's sketch_outline takes them, rebuilt from point ids, each in the sketch's order. */
+export function sketchCurves(sketch: Sketch): { lines: SketchLine[]; circles: SketchCircle[]; arcs: SketchArc[] } {
   const at = new Map(sketch.points.map((p) => [p.id, [p.x, p.y] as [number, number]]));
   const lines: SketchLine[] = [];
   const circles: SketchCircle[] = [];
+  const arcs: SketchArc[] = [];
   for (const c of sketch.curves) {
     if (c.kind === "line") lines.push({ a: at.get(c.start)!, b: at.get(c.end)! });
-    else circles.push({ centre: at.get(c.centre)!, radius: c.radius });
+    else if (c.kind === "circle") circles.push({ centre: at.get(c.centre)!, radius: c.radius });
+    else arcs.push({ start: at.get(c.start)!, end: at.get(c.end)!, centre: at.get(c.centre)! });
   }
-  return { lines, circles };
+  return { lines, circles, arcs };
 }
 
-/** Asks the kernel what the sketch's lines and circles make. */
+/** Asks the kernel what the sketch's lines, circles and arcs make. */
 export function askOutline(kernel: KernelCalls, curves: ReturnType<typeof sketchCurves>) {
-  return kernel.call("sketch_outline", curves.lines, curves.circles);
+  return kernel.call("sketch_outline", curves.lines, curves.circles, curves.arcs);
 }
 
 /** The sketch's one closed outline, from the kernel; a sketch that makes none is refused with the kernel's reason. */

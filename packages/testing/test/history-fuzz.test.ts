@@ -7,11 +7,12 @@
 // same session.
 //
 // The part has a sketch (step 21b): its edits (draw a line, draw a circle
-// (22b), delete a curve, move a point) are steps of their own. The model
-// keeps the sketch as its lines' end coordinates and its circles' centre
-// coordinates and radii only, no point ids: every point is at its own
-// place (new points never land on a used one), so a coordinate names a
-// point, and moving one moves every line end and circle centre there.
+// (22b), draw an arc (23a), delete a curve, move a point) are steps of
+// their own. The model keeps the sketch as its lines' end coordinates, its
+// circles' centre coordinates and radii and its arcs' start, end and
+// centre coordinates only, no point ids: every point is at its own place
+// (new points never land on a used one), so a coordinate names a point,
+// and moving one moves every line end, circle centre and arc point there.
 //
 // Extruding the sketch (step 21d) replaces the box with "Extrude of Sketch
 // 1" as one step; its typed distance merges like a size. The model keeps
@@ -20,7 +21,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHistory, emptyProject, projectFromJson, projectToJson, type Project } from "@fission/core";
-import { addSketch, curvePoints, deleteCurve, designWorkspace, DISTANCE_STEP, drawCircle, drawLine, extrudeSketch, extrudeStep, lastFeature, movePoint, partDocument, partOf, setExtrudeDistance, SKETCH_STEPS, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, curvePoints, deleteCurve, designWorkspace, DISTANCE_STEP, drawArc, drawCircle, drawLine, extrudeSketch, extrudeStep, lastFeature, movePoint, partDocument, partOf, setExtrudeDistance, SKETCH_STEPS, withPart, type DesignDocument } from "@fission/design";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
 const SEEDS = [0x5eedn, 1n, 2n, 3n, 0xdeadbeefn];
@@ -38,12 +39,12 @@ const withWidth = (p: Project, w: number): Project => ({ ...p, workspaces: { des
 /**
  * The model's state: the part ("box <feature id> <width>" or "extrude
  * <feature id> <distance>"), and each curve in drawing order, a line as
- * [id, x1, y1, x2, y2], a circle as [id, cx, cy, r]. As text, so states
- * compare with ===.
+ * [id, x1, y1, x2, y2], a circle as [id, cx, cy, r], an arc as [id, sx,
+ * sy, ex, ey, cx, cy]. As text, so states compare with ===.
  */
-type Line = [string, number, number, number, number] | [string, number, number, number];
-/** The places a curve's points are at: a line's two ends, a circle's centre. */
-const placesOf = (c: Line): string[] => (c.length === 5 ? [`${c[1]},${c[2]}`, `${c[3]},${c[4]}`] : [`${c[1]},${c[2]}`]);
+type Line = [string, number, number, number, number] | [string, number, number, number] | [string, number, number, number, number, number, number];
+/** The places a curve's points are at: a line's two ends, a circle's centre, an arc's start, end and centre. */
+const placesOf = (c: Line): string[] => (c.length === 4 ? [`${c[1]},${c[2]}`] : Array.from({ length: (c.length - 1) / 2 }, (_, k) => `${c[1 + 2 * k]},${c[2 + 2 * k]}`));
 const state = (part: string, lines: readonly Line[]) => JSON.stringify({ part, lines });
 const parse = (s: string): { part: string; lines: Line[] } => JSON.parse(s);
 
@@ -52,7 +53,9 @@ function stateOf(p: Project): string {
   const doc = designOf(p);
   const sketch = doc.sketches[0];
   const at = new Map(sketch.points.map((q) => [q.id, [q.x, q.y]]));
-  const lines = sketch.curves.map((c): Line => (c.kind === "line" ? [c.id, ...at.get(c.start)!, ...at.get(c.end)!] : [c.id, ...at.get(c.centre)!, c.radius]) as Line);
+  const lines = sketch.curves.map(
+    (c): Line => (c.kind === "line" ? [c.id, ...at.get(c.start)!, ...at.get(c.end)!] : c.kind === "circle" ? [c.id, ...at.get(c.centre)!, c.radius] : [c.id, ...at.get(c.start)!, ...at.get(c.end)!, ...at.get(c.centre)!]) as Line,
+  );
   // No point is left that no curve uses, and no two points share a place.
   const ends = new Set(sketch.curves.flatMap(curvePoints));
   assert.deepEqual(new Set(sketch.points.map((q) => q.id)), ends, "a point no curve uses");
@@ -120,7 +123,7 @@ function session(seed: bigint, steps: number) {
       if (!used.has(`${xy[0]},${xy[1]}`)) return xy;
     }
   };
-  const counts = { draws: 0, chained: 0, circles: 0, centred: 0, deletes: 0, moves: 0, extrudes: 0, distances: 0, edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0, steps: 0, stepsFailed: 0, stepsEmpty: 0 };
+  const counts = { draws: 0, chained: 0, circles: 0, centred: 0, arcs: 0, arcsChained: 0, deletes: 0, moves: 0, extrudes: 0, distances: 0, edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0, steps: 0, stepsFailed: 0, stepsEmpty: 0 };
 
   for (let i = 0; i < steps; i++) {
     const at = `seed ${seed} step ${i}`;
@@ -164,13 +167,16 @@ function session(seed: bigint, steps: number) {
     } else if (n < 0.18) {
       // A sketch edit, one undo step each, never merged: draw a line (from a
       // new place or chained from a point), draw a circle (round a new place
-      // or a point already there), delete a curve, move a point, or
+      // or a point already there), draw an arc (from a new place or a point
+      // already there, to a new place, round a new place: the kernel judges
+      // whether the centre is midway, which this test doesn't), delete a
+      // curve, move a point, or
       // extrude the sketch (the part becomes the extrude, open or not: the
       // kernel judges the outline when it builds, which this test doesn't).
       const doc = designOf(project);
       const sketch = doc.sketches[0];
       const { lines } = parse(present);
-      const kind = lines.length === 0 ? pick(r, ["draw", "circle"] as const) : pick(r, ["draw", "draw", "circle", "delete", "move", "extrude"] as const);
+      const kind = lines.length === 0 ? pick(r, ["draw", "circle", "arc"] as const) : pick(r, ["draw", "draw", "circle", "arc", "delete", "move", "extrude"] as const);
       let after: Line[];
       let made = parse(present).part;
       let label: string = kind === "extrude" ? extrudeStep(doc, sketch.id) : SKETCH_STEPS[kind];
@@ -203,6 +209,21 @@ function session(seed: bigint, steps: number) {
         after = [...lines, [drawn.id, cx, cy, radius]];
         counts.circles++;
         if (shared) counts.centred++;
+      } else if (kind === "arc") {
+        const shared = sketch.points.length > 0 && r.next() < 0.4 ? pick(r, sketch.points) : null;
+        const start = shared ? shared.id : freePlace();
+        const startXY = shared ? [shared.x, shared.y] : (start as [number, number]);
+        let end = freePlace();
+        let centre = freePlace();
+        while (centre[0] === end[0] && centre[1] === end[1]) centre = freePlace();
+        while (!shared && ((end[0] === startXY[0] && end[1] === startXY[1]) || (centre[0] === startXY[0] && centre[1] === startXY[1]))) [end, centre] = [freePlace(), freePlace()];
+        const drawn = drawArc(doc, sketch.id, start, end, centre);
+        for (const s of [present, ...undos.map((u) => u.before)])
+          assert.ok(!parse(s).lines.some(([id]) => id === drawn.id), `${at}: ${drawn.id} was used before`);
+        project = { ...project, workspaces: { design: drawn.doc } };
+        after = [...lines, [drawn.id, startXY[0], startXY[1], end[0], end[1], centre[0], centre[1]]];
+        counts.arcs++;
+        if (shared) counts.arcsChained++;
       } else if (kind === "delete") {
         const [gone] = pick(r, lines);
         project = { ...project, workspaces: { design: deleteCurve(doc, sketch.id, gone) } };
@@ -223,7 +244,7 @@ function session(seed: bigint, steps: number) {
         const [x, y] = freePlace();
         project = { ...project, workspaces: { design: movePoint(doc, sketch.id, p.id, x, y) } };
         const move = (a: number, b: number) => (a === p.x && b === p.y ? [x, y] : [a, b]);
-        after = lines.map((c) => (c.length === 5 ? [c[0], ...move(c[1], c[2]), ...move(c[3], c[4])] : [c[0], ...move(c[1], c[2]), c[3]]) as Line);
+        after = lines.map((c) => (c.length === 4 ? [c[0], ...move(c[1], c[2]), c[3]] : [c[0], ...Array.from({ length: (c.length - 1) / 2 }, (_, k) => move(c[1 + 2 * k] as number, c[2 + 2 * k] as number)).flat()]) as Line);
         counts.moves++;
       }
       assert.equal(h.record(label), true, at);

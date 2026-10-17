@@ -1,6 +1,6 @@
 // Main-thread side of the kernel worker: every kernel call is an async
 // message, so a slow operation never freezes the UI.
-import type { BodySpec, BodyView, Outline, SketchCircle, SketchLine, SketchOutline, StlFile } from "./kernel-types.ts";
+import type { BodySpec, BodyView, Outline, SketchArc, SketchCircle, SketchLine, SketchOutline, StlFile } from "./kernel-types.ts";
 
 /** Every operation the worker supports, with its arguments and result. */
 export interface KernelOps {
@@ -11,7 +11,7 @@ export interface KernelOps {
   make_extrude: { args: [profile: Outline, distance: number]; result: BodyView };
   export_stl: { args: [spec: BodySpec, name: string]; result: StlFile };
   snap_to_grid: { args: [x: number, y: number, spacing: number]; result: [number, number] };
-  sketch_outline: { args: [lines: SketchLine[], circles: SketchCircle[]]; result: SketchOutline };
+  sketch_outline: { args: [lines: SketchLine[], circles: SketchCircle[], arcs: SketchArc[]]; result: SketchOutline };
 }
 
 export type KernelRequest = {
