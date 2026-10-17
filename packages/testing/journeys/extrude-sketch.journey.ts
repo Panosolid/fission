@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson } from "@fission/core";
-import { addSketch, buildSpec, clickAt, deleteCurve, designWorkspace, drawLine, drawRectangle, extrudeSketch, startTool, featureSpec, lastFeature, movePoint, partDocument, setExtrudeDistance, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, buildSpec, clickAt, deleteCurve, designWorkspace, drawCircle, drawLine, drawRectangle, extrudeSketch, startTool, featureSpec, lastFeature, movePoint, partDocument, setExtrudeDistance, withPart, type DesignDocument } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
@@ -217,6 +217,70 @@ test("seeded: rectangles from random grid corners, clicked in any order, extrude
       const body = await build(reopened(extrudeSketch(second.doc, s.id, d).doc));
       near(body.volume, Math.abs(c[0] - a[0]) * Math.abs(c[1] - a[1]) * d, context);
       assert.deepEqual([body.faces, body.errors], [6, []], context);
+      built++;
+    }
+  }
+  assert.ok(built >= 190, `built ${built}`);
+});
+
+test("hand-worked: a circle of radius 5 extruded 2 mm is πr²h = 50π mm³, and a line beside it makes two loops (22b)", async () => {
+  const s = addSketch(partDocument("box", 10, 10, 10));
+  const circle = drawCircle(s.doc, s.id, [3, -4], 5);
+  const part = extrudeSketch(circle.doc, s.id, 2).doc;
+  // V = π·5²·2 = 50π; A = two discs 2·π·5² = 50π plus the side 2π·5·2 = 20π,
+  // so 70π; a cylinder: one side, two discs, each rim one closed edge with
+  // its one vertex.
+  let body = await build(reopened(part));
+  near(body.volume, 50 * Math.PI, "volume");
+  near(body.area, 70 * Math.PI, "area");
+  assert.deepEqual([body.vertices, body.edges, body.faces, body.errors], [2, 2, 3, []]);
+  // The centre moved to (100, 250): the same cylinder somewhere else.
+  const moved = movePoint(part, s.id, part.sketches[0].points[0].id, 100, 250);
+  near((await build(reopened(moved))).volume, 50 * Math.PI, "volume after the move");
+  // Typed 0.5 mm: 25π · 0.5 = 12.5π.
+  near((await build(setExtrudeDistance(part, 0.5))).volume, 12.5 * Math.PI, "volume at 0.5 mm");
+  // A line beside it: its loose end is what to fix first, in the kernel's words.
+  const withLine = drawLine(part, s.id, [20, 0], [30, 0]);
+  await assert.rejects(build(withLine.doc), /^Error: Sketch 1 has no closed outline: the line end at \(20, 0\) is not joined to another line$/);
+  // A closed rectangle beside it: until regions (step 26) that is two loops.
+  const withSquare = drawRectangle(part, s.id, [20, 0], [30, 10]);
+  await assert.rejects(build(withSquare.doc), /^Error: Sketch 1 has no closed outline: the sketch makes 2 separate loops; for now a sketch makes one outline$/);
+  // Two circles likewise; deleting the line closes the sketch again.
+  await assert.rejects(build(drawCircle(part, s.id, [50, 0], 1).doc), /the sketch makes 2 separate loops/);
+  near((await build(deleteCurve(withLine.doc, s.id, withLine.id))).volume, 50 * Math.PI, "the line deleted");
+});
+
+test("a circle's radius at 0.9× and 1.1× of the kernel's limits (MIN_FEATURE 0.001 mm, MAX_SIZE / 2 = 500000 mm)", async () => {
+  const at = (r: number) => {
+    const s = addSketch(partDocument("box", 10, 10, 10));
+    return extrudeSketch(drawCircle(s.doc, s.id, [0, 0], r).doc, s.id, 1).doc;
+  };
+  // Extruded 1 mm, the volume is πr².
+  near((await build(at(0.0011))).volume, Math.PI * 0.0011 ** 2, "1.1× MIN_FEATURE");
+  near((await build(at(450000))).volume, Math.PI * 450000 ** 2, "0.9× MAX_SIZE / 2");
+  await assert.rejects(build(at(0.0009)), /^Error: circle 1's radius must be between 0\.001 and 500000 mm, got 0\.0009$/);
+  await assert.rejects(build(at(550000)), /^Error: circle 1's radius must be between 0\.001 and 500000 mm, got 550000$/);
+});
+
+test("seeded: circles from two random snapped clicks (centre, then a point on it) extrude to πr²d with 3 faces (22b)", async () => {
+  // What the circle tool (22c) will draw: the radius is the distance
+  // between the two snapped clicks, worked out here independently of Design.
+  let built = 0;
+  for (const seed of [21n, 22n, 23n, 24n, 25n]) {
+    const r = seeded(seed);
+    for (let i = 0; i < 40; i++) {
+      const grid = [0.5, 1, 2.5, 10][Math.floor(r.next() * 4)];
+      const pick = async () => kernel.call("snap_to_grid", (r.next() - 0.5) * 900, (r.next() - 0.5) * 900, grid);
+      const c = await pick();
+      const p = await pick();
+      const radius = Math.hypot(p[0] - c[0], p[1] - c[1]);
+      const d = Math.round((0.5 + r.next() * 99.5) * 10) / 10;
+      const context = `seed ${seed} circle ${i}: round ${c} through ${p} on a ${grid} mm grid, by ${d}`;
+      if (radius === 0) continue;
+      const s = addSketch(partDocument("box", 10, 10, 10));
+      const body = await build(reopened(extrudeSketch(drawCircle(s.doc, s.id, c, radius).doc, s.id, d).doc));
+      near(body.volume, Math.PI * radius * radius * d, context);
+      assert.deepEqual([body.faces, body.errors], [3, []], context);
       built++;
     }
   }

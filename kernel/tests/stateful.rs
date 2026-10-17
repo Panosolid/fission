@@ -1,7 +1,8 @@
 //! Stateful random testing of the kernel.
 //!
 //! Random chains of 1–10 operations (add a placed primitive or extrusion,
-//! some extrusions drawn as shuffled sketch lines first, move, rotate)
+//! some extrusions drawn as shuffled sketch lines or one sketch circle
+//! first, move, rotate)
 //! are run against the kernel. After every step:
 //! - nothing panics;
 //! - the operation either returns a body that passes `validate()`, or a
@@ -102,8 +103,10 @@ enum Shape {
     ///
     /// `sketch`, when set on a straight outline without holes, draws the
     /// outline as sketch lines instead (shuffled and some reversed by that
-    /// seed, `sketch_lines`) and extrudes the loop `sketch::sketch_outline`
-    /// finds; `apply_op` checks it is the loop drawn.
+    /// seed, `sketch_lines`), and on a lone circle draws it as one sketch
+    /// circle (step 22b); either way it extrudes the loop
+    /// `sketch::sketch_outline` finds, and `apply_op` checks it is the loop
+    /// drawn.
     Extrude {
         outer: Ring,
         holes: Vec<Ring>,
@@ -139,11 +142,30 @@ fn sketch_lines(pts: &[DVec2], seed: u64) -> Vec<sketch::Line> {
     lines
 }
 
-/// The polygon a sketched extrusion draws, if it is one (`Shape::Extrude`'s
-/// `sketch` doc).
-fn sketched(shape: &Shape) -> Option<(Vec<DVec2>, u64)> {
+/// What a sketched extrusion draws (`Shape::Extrude`'s `sketch` doc): its
+/// polygon as shuffled lines, or its one circle.
+enum Drawn {
+    Lines(Vec<DVec2>, u64),
+    Circle(sketch::Circle),
+}
+
+impl Drawn {
+    /// What `sketch::sketch_outline` makes of the drawing.
+    fn outline(&self) -> Result<sketch::SketchOutline, KernelError> {
+        match self {
+            Drawn::Lines(pts, seed) => sketch::sketch_outline(&sketch_lines(pts, *seed), &[]),
+            Drawn::Circle(c) => sketch::sketch_outline(&[], &[*c]),
+        }
+    }
+}
+
+/// The drawing a sketched extrusion makes, if it is one.
+fn sketched(shape: &Shape) -> Option<Drawn> {
     match shape {
-        Shape::Extrude { outer, holes, sketch: Some(seed), .. } if holes.is_empty() => outer.polygon().map(|p| (p, *seed)),
+        Shape::Extrude { outer: Ring::Circle { c, r }, holes, sketch: Some(_), .. } if holes.is_empty() => {
+            Some(Drawn::Circle(sketch::Circle { centre: p2(c), radius: r.0 }))
+        }
+        Shape::Extrude { outer, holes, sketch: Some(seed), .. } if holes.is_empty() => outer.polygon().map(|p| Drawn::Lines(p, *seed)),
         _ => None,
     }
 }
@@ -362,8 +384,7 @@ impl Shape {
             Shape::Cylinder { r, h } => primitives::make_cylinder(r.0, h.0),
             Shape::Sphere { r } => primitives::make_sphere(r.0),
             Shape::Extrude { dist, .. } if sketched(self).is_some() => {
-                let (pts, seed) = sketched(self).unwrap();
-                match sketch::sketch_outline(&sketch_lines(&pts, seed))? {
+                match sketched(self).unwrap().outline()? {
                     sketch::SketchOutline::Closed(profile) => extrude::extrude(&profile, dist.0),
                     sketch::SketchOutline::Open(why) => Err(KernelError::InvalidInput(why.to_string())),
                 }
@@ -390,6 +411,7 @@ impl Op {
             Op::Add { shape: Shape::Box { .. }, .. } => "add box",
             Op::Add { shape: Shape::Cylinder { .. }, .. } => "add cylinder",
             Op::Add { shape: Shape::Sphere { .. }, .. } => "add sphere",
+            Op::Add { shape: Shape::Extrude { outer: Ring::Circle { .. }, sketch: Some(_), .. }, .. } => "add sketch circle extrude",
             Op::Add { shape: Shape::Extrude { sketch: Some(_), .. }, .. } => "add sketch extrude",
             Op::Add { shape: Shape::Extrude { .. }, .. } => "add extrude",
             Op::Move { .. } => "move",
@@ -661,18 +683,37 @@ fn polygon_profile(scene: &Scene) -> BoxedStrategy<Shape> {
         .boxed()
 }
 
-/// A random extrusion: half straight outlines (`polygon_profile`), half
-/// curved ones (`curved_profile`).
-/// Half of the straight ones without holes are drawn as sketch lines.
+/// A random extrusion: two fifths straight outlines (`polygon_profile`),
+/// two fifths curved ones (`curved_profile`), a fifth lone circles
+/// (`circle_profile`). Half of the straight ones without holes are drawn as
+/// sketch lines, and half the lone circles as a sketch circle.
 fn extruded(scene: &Scene) -> BoxedStrategy<Shape> {
-    (prop_oneof![polygon_profile(scene), curved_profile(scene)], any::<u64>(), 0..4u8)
+    (prop_oneof![2 => polygon_profile(scene), 2 => curved_profile(scene), 1 => circle_profile(scene)], any::<u64>(), 0..4u8)
         .prop_map(|(mut shape, seed, pick)| {
             if let Shape::Extrude { outer, holes, sketch, .. } = &mut shape {
-                if pick < 2 && holes.is_empty() && outer.polygon().is_some() {
+                if pick < 2 && holes.is_empty() && (outer.polygon().is_some() || matches!(outer, Ring::Circle { .. })) {
                     *sketch = Some(seed);
                 }
             }
             shape
+        })
+        .boxed()
+}
+
+/// A circle on its own (what a sketch of one circle makes, step 22b), its
+/// radius often at 0.9×, 1× or 1.1× of MIN_FEATURE or of MAX_SIZE / 2 (a
+/// diameter of MAX_SIZE, the most a profile may span).
+fn circle_profile(scene: &Scene) -> BoxedStrategy<Shape> {
+    let near = |limit: f64| prop::sample::select(vec![0.9, 1.0, 1.1]).prop_map(move |k| k * limit);
+    let radius = prop_oneof![3 => length(scene), 1 => near(MIN_FEATURE), 1 => near(MAX_SIZE / 2.0)];
+    (coord(scene), coord(scene), radius, length(scene))
+        .prop_map(|(x, y, r, dist)| Shape::Extrude {
+            outer: Ring::Circle { c: [Num(x), Num(y)], r: Num(r) },
+            holes: vec![],
+            dist: Num(dist),
+            // Its thinnest feature is its radius; it spans 2r.
+            expect: verdict(r, 2.0 * r, x.abs().max(y.abs()) + r),
+            sketch: None,
         })
         .boxed()
 }
@@ -1279,9 +1320,10 @@ fn extrude_expect(shape: &Shape) -> Expect {
 /// A sketched extrusion's lines must each be within [MIN_FEATURE, MAX_SIZE]
 /// long (`sketch::check_lines`), which a profile only implies.
 fn sketch_line_out_of_range(shape: &Shape) -> bool {
-    sketched(shape).is_some_and(|(pts, _)| {
-        (0..pts.len()).any(|i| !(MIN_FEATURE..=MAX_SIZE).contains(&pts[i].distance(pts[(i + 1) % pts.len()])))
-    })
+    match sketched(shape) {
+        Some(Drawn::Lines(pts, _)) => (0..pts.len()).any(|i| !(MIN_FEATURE..=MAX_SIZE).contains(&pts[i].distance(pts[(i + 1) % pts.len()]))),
+        _ => false,
+    }
 }
 
 fn profile_expect(loops: &[Vec<DVec2>], dist: f64) -> Expect {
@@ -1423,6 +1465,16 @@ fn classify_motion(before: &Placed, r: Result<Result<Placed, KernelError>, Strin
 
 /// Applies one operation. With `checks` off it only runs the kernel (used
 /// for the determinism replay, whose results are compared bit for bit).
+/// The outline `sketch_outline` found for a sketched circle is that circle,
+/// bit for bit, with no holes.
+fn check_sketch_circle(c: sketch::Circle) -> Result<(), String> {
+    let want = Profile { outer: Boundary::Circle { center: c.centre, radius: c.radius }, holes: vec![] };
+    match sketch::sketch_outline(&[], &[c]) {
+        Ok(sketch::SketchOutline::Closed(p)) if p == want => Ok(()),
+        other => Err(format!("sketched circle {c:?} built, but its outline is {other:?}")),
+    }
+}
+
 /// The loop `sketch_outline` found for a sketched polygon is the polygon
 /// drawn: the same corners, bit for bit (each is a line end, copied), in
 /// order round the loop, either way round, starting where the first line
@@ -1430,7 +1482,7 @@ fn classify_motion(before: &Placed, r: Result<Result<Placed, KernelError>, Strin
 /// not against anything the kernel computed.
 fn check_sketch_loop(pts: &[DVec2], seed: u64) -> Result<(), String> {
     let lines = sketch_lines(pts, seed);
-    let found = match sketch::sketch_outline(&lines) {
+    let found = match sketch::sketch_outline(&lines, &[]) {
         Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, .. }, .. })) => corners,
         other => return Err(format!("sketched polygon built, but its outline is {other:?}")),
     };
@@ -1475,9 +1527,12 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], steps: 0, reach: 0.0 });
                 return Ok(());
             };
-            if let Some((pts, seed)) = sketched(shape) {
-                check_sketch_loop(&pts, seed).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
-            }
+            let drawn = match sketched(shape) {
+                Some(Drawn::Lines(pts, seed)) => check_sketch_loop(&pts, seed),
+                Some(Drawn::Circle(c)) => check_sketch_circle(c),
+                None => Ok(()),
+            };
+            drawn.map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             let built = Placed::new(base.clone());
             let m0 = measure(&built).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             check_primitive(shape, &m0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;

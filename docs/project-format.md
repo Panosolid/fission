@@ -61,11 +61,12 @@ Sketches are timeline items of their own; the rules behind this shape are in doc
 
 - `nextId`: the next number for a new id. Ids are never reused, even after a delete.
 - `sketches`: each sketch's points (mm, in the sketch plane's own 2D frame), curves naming point ids, and constraints (empty until step 27). The sketch's place in the build order is its timeline item with the same id.
+- Curve kinds: a line `{ "id", "kind": "line", "start", "end" }` between two point ids; a circle `{ "id", "kind": "circle", "centre", "radius" }` round a point id, its radius in mm (step 22b). A circle's centre may be a point lines also use. Arcs add a kind at step 23.
 - A sketch item's `plane` is a reference (`"XY"`, `"XZ"`, `"YZ"`; a stable face id from step 32), never coordinates.
 - `timeline.marker` (optional, used from step 32): the id of the last item built; absent means all.
 - Nothing the kernel computes (bodies, outlines, profiles) is stored.
 - Migration from version 1: `nextId` is one more than the largest number in any id, `sketches` is empty, the rest is unchanged. Version 1 data that already holds `nextId` or `sketches` is refused, never half-migrated.
-- Opening refuses, each with its own message: a point without finite `x` and `y`; a curve that is not a line (until steps 22–23), or whose `start` or `end` is not a point of the same sketch, or that starts and ends at one point; constraints (until step 27); a sketch without its timeline item or the other way round; a plane other than the three origin planes; an id used twice; a `nextId` that is not a counting number above every number in an id.
+- Opening refuses, each with its own message: a point without finite `x` and `y`; a curve that is not a line or a circle (arcs from step 23); a line whose `start` or `end` is not a point of the same sketch, or that starts and ends at one point; a circle whose `centre` is not a point of the same sketch, or whose `radius` is not a finite number above 0 (the kernel holds the size limits, MIN_FEATURE to MAX_SIZE / 2, when it finds the outline); constraints (until step 27); a sketch without its timeline item or the other way round; a plane other than the three origin planes; an id used twice; a `nextId` that is not a counting number above every number in an id.
 
 ## Saving and opening
 

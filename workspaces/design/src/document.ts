@@ -27,13 +27,27 @@ export interface SketchPoint {
   y: number;
 }
 
-/** A sketch line between two of its sketch's points, named by id; arcs and circles add kinds at steps 22–23. */
-export interface SketchCurve {
+/** A sketch line between two of its sketch's points, named by id. */
+export interface SketchLineCurve {
   id: string;
   kind: "line";
   start: string;
   end: string;
 }
+
+/** A sketch circle round one of its sketch's points, named by id, with its radius in mm (step 22b). */
+export interface SketchCircleCurve {
+  id: string;
+  kind: "circle";
+  centre: string;
+  radius: number;
+}
+
+/** A sketch's curves: lines and circles (arcs add a kind at step 23). */
+export type SketchCurve = SketchLineCurve | SketchCircleCurve;
+
+/** The points a curve is drawn from: a line's two ends, a circle's centre. */
+export const curvePoints = (c: SketchCurve): string[] => (c.kind === "line" ? [c.start, c.end] : [c.centre]);
 
 /** A sketch's content; its place in the build order and its plane are its timeline item with the same id. */
 export interface Sketch {
@@ -248,7 +262,12 @@ export function idNumber(id: unknown): number | null {
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const isFiniteNumber = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 
-/** A sketch's content, checked: points with finite mm, lines between two different points of the same sketch, no constraints yet. */
+/**
+ * A sketch's content, checked: points with finite mm, lines between two
+ * different points of the same sketch, circles round a point of the same
+ * sketch with a finite positive radius, no constraints yet. The kernel
+ * holds the limits on sizes (sketch_outline), as it does for lines.
+ */
 function checkSketch(s: unknown, i: number): void {
   if (!isRecord(s) || typeof s.id !== "string") throw new Error(`Design sketch ${i + 1} has no id`);
   const at = `Design sketch ${s.id}`;
@@ -262,7 +281,12 @@ function checkSketch(s: unknown, i: number): void {
   }
   for (const [j, c] of s.curves.entries()) {
     if (!isRecord(c) || typeof c.id !== "string") throw new Error(`${at}: curve ${j + 1} has no id`);
-    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Fission can't read yet (only lines)`);
+    if (c.kind === "circle") {
+      if (typeof c.centre !== "string" || !points.has(c.centre)) throw new Error(`${at}: circle ${c.id} is round ${shown(c.centre)}, which is not one of the sketch's points`);
+      if (!isFiniteNumber(c.radius) || c.radius <= 0) throw new Error(`${at}: circle ${c.id} needs a radius in mm above 0, not ${shown(c.radius)}`);
+      continue;
+    }
+    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Fission can't read yet (only lines and circles)`);
     for (const end of [c.start, c.end])
       if (typeof end !== "string" || !points.has(end)) throw new Error(`${at}: line ${c.id} ends at ${shown(end)}, which is not one of the sketch's points`);
     if (c.start === c.end) throw new Error(`${at}: line ${c.id} starts and ends at the same point`);
