@@ -11,7 +11,9 @@ name: Fuzzing
 # (prototypes/oracle/sketch_extrude.py; a disagreement is a failure folder
 # with oracle-disagreements.txt). And the kernel's entry points (extrude,
 # sketch outline, moves and turns) with coverage-guided fuzzing
-# (kernel/fuzz/, cargo-fuzz on nightly Rust).
+# (kernel/fuzz/, cargo-fuzz on nightly Rust), every body their corpus builds
+# then compared with exact values and OpenCascade
+# (prototypes/oracle/fuzz_shapes.py).
 #
 # Nightly at 23:10 UTC (7:10am Perth), after the random testing run
 # (nightly.yml, 15:00 to 22:35 UTC, collected by about 22:50) so the two
@@ -163,6 +165,34 @@ jobs:
         env:
           MINUTES: ${{ inputs.minutes || '45' }}
         run: fuzz/run.sh ${{ matrix.target }} $(( MINUTES * 60 )) "$RUNNER_TEMP/fuzz"
+      - uses: actions/setup-python@v5
+        if: always()
+        with:
+          python-version: "3.12"
+      # Every body the corpus builds (the seeds, the saved crashes and
+      # tonight's finds) and random inputs build, rebuilt in OpenCascade and checked against exact
+      # volume, area and crossings (prototypes/oracle/fuzz_shapes.py); a
+      # disagreement is a failure folder with oracle-disagreements.txt.
+      - name: Compare the fuzzed bodies with exact values and OpenCascade
+        if: always()
+        working-directory: kernel
+        env:
+          FISSION_ORACLE_TARGET: ${{ matrix.target }}
+          FISSION_ORACLE_CORPUS: fuzz/corpus
+          FISSION_ORACLE_OUT: ${{ runner.temp }}/oracle.jsonl
+          # Plus 20,000 random inputs, seeded by the run (replay with the same
+          # FISSION_SEED and FISSION_ORACLE_RANDOM).
+          FISSION_ORACLE_RANDOM: "20000"
+          FISSION_SEED: ${{ github.run_id }}
+        run: |
+          cargo test --test fuzz_corpus oracle_cases
+          pip install -q cadquery-ocp mpmath
+          if ! python3 ../prototypes/oracle/fuzz_shapes.py "$FISSION_ORACLE_OUT" "$RUNNER_TEMP/disagreements.txt"; then
+            dir="$RUNNER_TEMP/fuzz/seed-oracle-${{ matrix.target }}-${{ github.run_id }}"
+            mkdir -p "$dir"
+            mv "$RUNNER_TEMP/disagreements.txt" "$dir/oracle-disagreements.txt"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

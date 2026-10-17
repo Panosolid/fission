@@ -178,7 +178,10 @@ def compare(case):
     if (case["faces"], faces) != FACES[kind]:
         issues.append(f"faces: fission {case['faces']}, occ {faces}, expected {FACES[kind]}")
     reach = max(abs(x) for x in lo + hi) or 1.0
-    for axis, ours, theirs in zip("xyz", case["lo"] + case["hi"], lo + hi):
+    # All six: zipping with "xyz" alone stopped after the lowest three, so
+    # the highest bounds went unchecked until nasty inputs 2b.
+    names = ["lowest x", "lowest y", "lowest z", "highest x", "highest y", "highest z"]
+    for axis, ours, theirs in zip(names, case["lo"] + case["hi"], lo + hi):
         # OCC's optimal box is tight to ~1e-7; ours is exact for these shapes.
         if abs(ours - theirs) > 1e-6 + REL * reach:
             issues.append(f"bounds {axis}: fission {ours}, occ {theirs}")

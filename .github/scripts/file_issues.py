@@ -94,7 +94,8 @@ def oracle_kinds(disagreements):
                 kinds.append(("OpenCascade oracle crashed", line))
         elif line.strip() and shape is not None:
             check = line.strip().split(":", 1)[0]
-            check = re.sub(r"^bounds [xyz]$", "bounds", check)
+            # "bounds x" (older runs) or "bounds highest x": one check.
+            check = re.sub(r"^bounds ((lowest|highest) )?[xyz]$", "bounds", check)
             kinds.append((f"OpenCascade disagrees, {shape}: {check}", f"{first[:300]}\n  {line.strip()}"))
     return kinds
 
