@@ -116,7 +116,7 @@ jobs:
         run: |
           code=0
           cargo mutants --in-diff "$RUNNER_TEMP/kernel.diff" --shard ${{ matrix.shard }}/$SHARDS --sharding round-robin \
-            -j 4 --output "$RUNNER_TEMP" -- --lib -- --skip display::tests::many_faces_and_triangles_cost_one_pass || code=$?
+            -j 4 --output "$RUNNER_TEMP" -- --lib || code=$?
           out="$RUNNER_TEMP/mutants.out"
           mkdir -p "$RUNNER_TEMP/result"
           for f in caught missed timeout unviable; do cp "$out/$f.txt" "$RUNNER_TEMP/result/" 2>/dev/null || touch "$RUNNER_TEMP/result/$f.txt"; done

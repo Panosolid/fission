@@ -227,8 +227,14 @@ mod tests {
         // 2,000-corner prism (2,002 faces) gets a made-up mesh of 1,001,000
         // triangles, 500 per face over the face's own corners: the old scan
         // takes ~2·10⁹ steps (seconds); one pass takes about a million hash
-        // lookups (well under a tenth of a second). The bound leaves ten
-        // times that for a slow machine.
+        // lookups. It is timed against a reference pass in the same build
+        // (one hash lookup and one push per triangle corner, the cost that
+        // one pass has to pay), not against the wall clock, so it holds in
+        // unoptimised mutation builds and on slow machines alike. Measured:
+        // one pass costs 0.8-1.0x the reference (opt-level 0 and 2), the
+        // old scan put back 14x (opt-level 2) and 18x (opt-level 0), so the
+        // bound of 5x leaves room both ways.
+        // The best of three runs of each keeps a stray pause from deciding.
         use crate::ops::extrude::{extrude, Profile};
         let n = 2000;
         let corners = (0..n).map(|i| glam::DVec2::from_angle(std::f64::consts::TAU * i as f64 / n as f64) * 100.0).collect();
@@ -241,10 +247,28 @@ mod tests {
                 m.triangle_face.push(f);
             }
         }
-        let start = std::time::Instant::now();
-        let d = display_mesh(&b, &m);
-        let took = start.elapsed();
-        assert_eq!(d.triangle_faces.len(), 500 * b.faces.len());
-        assert!(took.as_secs_f64() < 1.0, "display_mesh took {took:?}");
+        let best = |f: &dyn Fn() -> usize| {
+            (0..3)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    std::hint::black_box(f());
+                    start.elapsed().as_secs_f64()
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        let reference = best(&|| {
+            let mut seen = std::collections::HashMap::new();
+            let mut out = Vec::with_capacity(3 * m.triangles.len());
+            for (t, tri) in m.triangles.iter().enumerate() {
+                for &i in tri {
+                    let next = seen.len() as u32;
+                    out.push(*seen.entry((m.triangle_face[t], i)).or_insert(next));
+                }
+            }
+            std::hint::black_box(&out).len()
+        });
+        let took = best(&|| display_mesh(&b, &m).triangle_faces.len());
+        assert_eq!(display_mesh(&b, &m).triangle_faces.len(), 500 * b.faces.len());
+        assert!(took < 5.0 * reference, "display_mesh took {took:.4} s, {:.1}x the one-pass reference ({reference:.4} s)", took / reference);
     }
 }
