@@ -52,8 +52,11 @@
 //!   are within LINEAR of each other (a corner); every corner must join
 //!   exactly two ends. The loop is walked from piece 0 in its own
 //!   direction, each piece entered at the end that meets the previous one,
-//!   and each corner is the end of the piece being entered, so the result
-//!   is the same however the pieces are ordered after piece 0, and a line
+//!   and each corner is the end of whichever of its two pieces has the
+//!   larger |bulge| (the one a stretch would move most: a nearly whole arc
+//!   on a short chord scales with its chord), the end of the piece being
+//!   entered between equals, so the result is the same however the pieces
+//!   are ordered after piece 0, and a line
 //!   or arc drawn backwards is simply walked the other way (an arc walked
 //!   from its end gets its bulge negated: the same arc, turning
 //!   clockwise). The loop then goes through the profile rules
@@ -350,19 +353,33 @@ pub fn sketch_outline(lines: &[Line], circles: &[Circle], arcs: &[Arc]) -> Resul
     // Walk from piece 0's start; `end` is 0 for a piece's `a`, 1 for its
     // `b`. A piece entered at its `b` is walked backwards, so its bulge
     // changes sign (+ 0.0 keeps a line's 0 from becoming −0).
-    let mut corners = Vec::with_capacity(pieces.len());
+    let mut walk = Vec::with_capacity(pieces.len());
     let mut bulges = Vec::with_capacity(pieces.len());
     let mut seen = vec![false; pieces.len()];
     let (mut piece, mut entered) = (0, 0);
     while !seen[piece] {
         seen[piece] = true;
-        corners.push(end_point(&pieces, 2 * piece + entered));
+        walk.push(2 * piece + entered);
         let bulge = pieces[piece].bulge;
         bulges.push(if entered == 0 { bulge } else { -bulge + 0.0 });
         let leaving = 2 * piece + 1 - entered;
         let next = partner[leaving];
         (piece, entered) = (next / 2, next % 2);
     }
+    // Each corner is one of the two ends that meet there (within LINEAR),
+    // and the other piece is stretched to it. A line, or an arc kept by its
+    // bulge, moves by about the stretch times the larger of 1 and its bulge
+    // (a nearly whole arc on a short chord scales with the chord: radius
+    // c(1 + β²)/(4β)), so the corner is the end of the piece with the larger
+    // |bulge|; between equals (two lines), the end of the piece entered.
+    let corners: Vec<DVec2> = walk
+        .iter()
+        .map(|&e| {
+            let came = partner[e];
+            let pick = if pieces[came / 2].bulge.abs() > pieces[e / 2].bulge.abs() { came } else { e };
+            end_point(&pieces, pick)
+        })
+        .collect();
     let loops = 1 + count_loops(&partner, seen) + circles.len();
     if loops > 1 {
         return Ok(SketchOutline::Open(Open::SeveralLoops { loops }));
@@ -1007,6 +1024,41 @@ mod tests {
         let (corners, bulges) = path(sketch_outline(&[], &[], &both).unwrap());
         assert_eq!((corners, bulges), (vec![v(5.0, 0.0), v(-5.0, 0.0)], vec![1.0, 1.0]));
         assert!(crate::tolerance::rel_eq(area(sketch_outline(&[], &[], &both).unwrap()), 25.0 * std::f64::consts::PI, 1e-12));
+    }
+
+    #[test]
+    fn a_nearly_whole_arc_keeps_its_own_ends_where_a_line_nearly_meets_it() {
+        // Regression (white-box hunt): a corner was always the end of the
+        // piece the walk entered, so the other piece there was stretched to
+        // it. A line stretched by d moves by at most d, but an arc's bulge
+        // was kept while its chord changed, so the whole arc scaled with the
+        // chord: radius r = c(1 + β²)/(4β) grows by r·d/c.
+        // Drawn: radius 1000 round (0, h), h = √(1000² − 0.5²), from (0.5, 0)
+        // the long way (counter-clockwise, up the right and over the top) to
+        // (−0.5, 0), and a line back whose start is d = 0.9 LINEAR left of
+        // the arc's end. Before the fix the outline's arc had radius
+        // 1000·(1 + d/1) = 1000.009: 9 µm out, 900 LINEAR. Now the corner is
+        // the arc's own end, so the outline's arc is the drawn one: centre
+        // (0, h) and radius 1000, to rounding.
+        let d = 0.9 * LINEAR;
+        let h = (1000.0f64 * 1000.0 - 0.25).sqrt();
+        let arcs = [arc((0.5, 0.0), (-0.5, 0.0), (0.0, h))];
+        for lines in [[line((-0.5 - d, 0.0), (0.5, 0.0))], [line((0.5, 0.0), (-0.5 - d, 0.0))]] {
+            let (corners, bulges) = path(sketch_outline(&lines, &[], &arcs).unwrap());
+            let i = bulges.iter().position(|&b| b != 0.0).unwrap();
+            let (a, b) = (corners[i], corners[(i + 1) % 2]);
+            assert!(a == v(0.5, 0.0) || a == v(-0.5, 0.0), "{corners:?}");
+            assert!(b == v(0.5, 0.0) || b == v(-0.5, 0.0), "{corners:?}");
+            let Some(Seg::Arc { center, radius, .. }) = Seg::from_bulge(a, b, bulges[i]) else { panic!() };
+            assert!((radius - 1000.0).abs() <= LINEAR && center.distance(v(0.0, h)) <= LINEAR, "radius {radius}, centre {center}");
+        }
+        // Two lines meeting within LINEAR still take the entered line's end
+        // (`ends_join_within_linear_at_0_9_and_1_1`); between a line and a
+        // flatter arc the arc's end wins too: the pie slice with its last
+        // line starting d above the arc's end keeps the arc's (0, 10).
+        let lines = [line((0.0, 0.0), (10.0, 0.0)), line((0.0, 10.0 + d), (0.0, 0.0))];
+        let (corners, _) = path(sketch_outline(&lines, &[], &[arc((10.0, 0.0), (0.0, 10.0), (0.0, 0.0))]).unwrap());
+        assert_eq!(corners, vec![v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)]);
     }
 
     #[test]

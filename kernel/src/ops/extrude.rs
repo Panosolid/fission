@@ -398,6 +398,23 @@ mod tests {
     }
 
     #[test]
+    fn a_two_corner_loop_with_a_flat_under_linear_is_refused_not_built() {
+        // Regression (white-box hunt): a "D" whose flat is 5 nm long, half
+        // LINEAR: the long way round a circle of radius 1 from (0, 0) to
+        // (5e-6, 0) (bulge β with 1 = c(1 + β²)/(4β), the larger root), then
+        // straight back. It passed the profile check and the extrude built
+        // a body with 5 nm edges, which `checked` rejected with a panic.
+        let c: f64 = 5e-6;
+        let k = 4.0 / c;
+        let beta = (k + (k * k - 4.0).sqrt()) / 2.0;
+        let d = Profile { outer: path(&[(0.0, 0.0), (c, 0.0)], &[-beta, 0.0]), holes: vec![] };
+        match extrude(&d, 1.0) {
+            Err(KernelError::InvalidInput(m)) => assert!(m.contains("two corners"), "{m}"),
+            other => panic!("expected the profile check's refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn an_arc_walls_seam_is_its_first_upright_edge() {
         // A cylinder's u runs from x_dir. Each arc's wall takes x_dir from
         // the arc's centre to its first corner, so u = 0 is at that corner
