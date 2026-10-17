@@ -13,7 +13,7 @@ import { XY_PLANE } from "@fission/core";
 import { isSketchItem, shown, type DesignDocument, type Sketch, type SketchPlane } from "./document.ts";
 
 /** The undo step each sketch edit is recorded as. */
-export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", delete: "Delete line", move: "Move point" } as const;
+export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", delete: "Delete line", move: "Move point" } as const;
 
 /**
  * Each origin plane's frame: the sketch's x along `xAxis`, its y along
@@ -104,6 +104,37 @@ export function drawLine(doc: DesignDocument, sketchId: string, from: LineEnd, t
   const [id, after] = take(withSketch(next, sketch), "line");
   sketch = { ...sketch, curves: [...sketch.curves, { id, kind: "line", start, end: stop }] };
   return { id, doc: withSketch(after, sketch) };
+}
+
+/** The sketch's point exactly at `at`, by id, or null. */
+export function pointAt(sketch: Sketch, at: readonly [number, number]): string | null {
+  return sketch.points.find((p) => p.x === at[0] && p.y === at[1])?.id ?? null;
+}
+
+/**
+ * A rectangle with opposite corners `a` and `c`, its sides along the
+ * sketch's x and y: four lines a → (c.x, a.y) → c → (a.x, c.y) → a, drawn
+ * as the line tool would draw them click by click, so each corner is one
+ * shared point. A corner landing exactly on a point the sketch already has
+ * shares that point (the line tool's rule). Corners on one row or column
+ * have no width or no height and are refused.
+ */
+export function drawRectangle(doc: DesignDocument, sketchId: string, a: readonly [number, number], c: readonly [number, number]): { doc: DesignDocument; ids: string[] } {
+  const sketch = sketchIn(doc, sketchId);
+  for (const [x, y] of [a, c]) if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`a sketch point needs x and y in mm, not ${x}, ${y}`);
+  if (a[0] === c[0] || a[1] === c[1]) throw new Error(`a rectangle needs a width and a height: its corners (${a[0]}, ${a[1]}) and (${c[0]}, ${c[1]}) are on one ${a[0] === c[0] ? "column" : "row"}`);
+  const corners: LineEnd[] = ([a, [c[0], a[1]], c, [a[0], c[1]]] as const).map((p) => pointAt(sketch, p) ?? p);
+  const ids: string[] = [];
+  let next = doc;
+  for (let i = 0; i < 4; i++) {
+    const drawn = drawLine(next, sketchId, corners[i], corners[(i + 1) % 4]);
+    next = drawn.doc;
+    ids.push(drawn.id);
+    const line = sketchIn(next, sketchId).curves.find((x) => x.id === drawn.id)!;
+    corners[i] = line.start;
+    corners[(i + 1) % 4] = line.end;
+  }
+  return { doc: next, ids };
 }
 
 /** The sketch without this curve, and without the points only it used. The counter stays where it is. */

@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson } from "@fission/core";
-import { addSketch, buildSpec, deleteCurve, designWorkspace, drawLine, extrudeSketch, featureSpec, lastFeature, movePoint, partDocument, setExtrudeDistance, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, buildSpec, clickAt, deleteCurve, designWorkspace, drawLine, drawRectangle, extrudeSketch, startTool, featureSpec, lastFeature, movePoint, partDocument, setExtrudeDistance, withPart, type DesignDocument } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
@@ -162,4 +162,63 @@ test("seeded sessions: sketch edits, extrudes, distances and presets against a m
   }
   // The sessions must reach every outcome, not pass by never building.
   assert.ok(built >= 500 && refused >= 20, `built ${built}, refused ${refused}`);
+});
+
+// Step 22a: the rectangle tool, through the same kernel calls.
+
+test("hand-worked: the rectangle tool's two clicks, extruded 10 mm, make a 40 × 30 × 10 box", async () => {
+  // The clicks are snapped as Design snaps them: (0.4, −0.3) to (0, 0) and
+  // (39.6, 30.2) to (40, 30) on the 10 mm grid. A 40 × 30 rectangle by 10:
+  // 40·30·10 = 12000 mm³, area 2·1200 + 2·400 + 2·300 = 3800 mm², 6 faces.
+  const s = addSketch(partDocument("box", 10, 10, 10));
+  let tool = startTool("rectangle", s.id);
+  let doc = s.doc;
+  for (const [x, y] of [[0.4, -0.3], [39.6, 30.2]]) {
+    const snapped = await kernel.call("snap_to_grid", x, y, 10);
+    ({ doc, tool } = clickAt(doc, tool, snapped));
+  }
+  assert.deepEqual(doc.sketches[0].points.map((p) => [p.x, p.y]), [[0, 0], [40, 0], [40, 30], [0, 30]]);
+  const body = await build(reopened(extrudeSketch(doc, s.id, 10).doc));
+  near(body.volume, 12000, "volume");
+  near(body.area, 3800, "area");
+  assert.deepEqual([body.vertices, body.edges, body.faces, body.errors], [8, 12, 6, []]);
+});
+
+test("a rectangle's sides at 0.9× and 1.1× of the kernel's shortest line (MIN_FEATURE, 0.001 mm)", async () => {
+  // 1.1 µm × 1 mm by 1 mm: 0.0011 mm³. 0.9 µm wide: line 1 (the width) is refused, in the kernel's words.
+  const at = (w: number) => {
+    const s = addSketch(partDocument("box", 10, 10, 10));
+    return extrudeSketch(drawRectangle(s.doc, s.id, [0, 0], [w, 1]).doc, s.id, 1).doc;
+  };
+  near((await build(at(0.0011))).volume, 0.0011, "1.1× wide");
+  await assert.rejects(build(at(0.0009)), /^Error: line 1 must be between 0\.001 and \d+ mm long, got 0\.0009/);
+});
+
+test("seeded: rectangles from random grid corners, clicked in any order, extrude to |dx|·|dy|·d with 6 faces", async () => {
+  let built = 0;
+  for (const seed of [11n, 12n, 13n, 14n, 15n]) {
+    const r = seeded(seed);
+    for (let i = 0; i < 40; i++) {
+      const grid = [0.5, 1, 2.5, 10][Math.floor(r.next() * 4)];
+      const pick = async () => kernel.call("snap_to_grid", (r.next() - 0.5) * 900, (r.next() - 0.5) * 900, grid);
+      const a = await pick();
+      const c = await pick();
+      const d = Math.round((0.5 + r.next() * 99.5) * 10) / 10;
+      const s = addSketch(partDocument("box", 10, 10, 10));
+      const context = `seed ${seed} rectangle ${i}: ${a} to ${c} on a ${grid} mm grid, by ${d}`;
+      let { doc, tool } = { doc: s.doc, tool: startTool("rectangle", s.id) };
+      ({ doc, tool } = clickAt(doc, tool, a));
+      const second = clickAt(doc, tool, c);
+      // The model: on one row or column nothing is drawn; otherwise a closed rectangle.
+      if (a[0] === c[0] || a[1] === c[1]) {
+        assert.equal(second.drew, false, context);
+        continue;
+      }
+      const body = await build(reopened(extrudeSketch(second.doc, s.id, d).doc));
+      near(body.volume, Math.abs(c[0] - a[0]) * Math.abs(c[1] - a[1]) * d, context);
+      assert.deepEqual([body.faces, body.errors], [6, []], context);
+      built++;
+    }
+  }
+  assert.ok(built >= 190, `built ${built}`);
 });

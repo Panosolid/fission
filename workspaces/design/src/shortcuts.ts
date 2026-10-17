@@ -8,7 +8,15 @@ export const DESIGN_SHORTCUTS: readonly ShortcutSpec[] = [
   { id: "clear-selection", keys: "Escape", label: "Clear the selection", inText: true },
   // Copy (the keys or the browser's Edit menu) with one profile selected.
   { id: "copy-svg", keys: "Mod+C", label: "Copy the selected profile as SVG" },
+  // While a sketch is edited (step 22a); outside a sketch the key does what it would.
+  { id: "sketch-line", keys: "L", label: "Line tool (in a sketch)" },
+  { id: "sketch-rectangle", keys: "R", label: "Rectangle tool (in a sketch)" },
 ];
+
+/** The sketch tool a shortcut chooses, or null for any other shortcut. */
+export function sketchToolKey(id: string): "line" | "rectangle" | null {
+  return id === "sketch-line" ? "line" : id === "sketch-rectangle" ? "rectangle" : null;
+}
 
 /**
  * What Design does for shortcut `id` with `items` selected: "clear", "copy"

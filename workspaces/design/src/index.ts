@@ -7,7 +7,8 @@ export { parameterRows, propertiesPanel, SIZE_KEYS, type ParameterRow, type Verb
 export { toolbarGroups, type ToolButton, type ToolGroup } from "./toolbar.ts";
 export { buildSpec, specFor } from "./spec.ts";
 export { idNumber, isSketchExtrude, isSketchItem, lastFeature, migrateDesignV1, partDocument, partOf, profileLabel, readDesignDocument, SKETCH_PLANES, specOf, withPart, type DesignDocument, type PartKind, type PartSizes, type ReadyProfile, type Sketch, type SketchCurve, type SketchPlane, type SketchPoint } from "./document.ts";
-export { addSketch, deleteCurve, drawLine, movePoint, planeOf, SKETCH_STEPS, sketchItem, sketchLines, sketchOutline, type LineEnd } from "./sketch.ts";
+export { addSketch, deleteCurve, drawLine, drawRectangle, movePoint, planeOf, pointAt, SKETCH_STEPS, sketchItem, sketchLines, sketchOutline, type LineEnd } from "./sketch.ts";
+export { clickAt, SKETCH_TOOLS, startTool, toolBusy, type LineTool, type RectangleTool, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
 export { PART_VIEW, syncGraph } from "./graph.ts";
 export { designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";

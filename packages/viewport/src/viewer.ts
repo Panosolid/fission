@@ -582,7 +582,7 @@ export class Viewer implements SharedViewport {
       segments(grid.filter((g) => !g.major).map((g) => [g.a, g.b]), SKETCH_COLOURS.grid, 1);
       segments(grid.filter((g) => g.major).map((g) => [g.a, g.b]), SKETCH_COLOURS.gridMajor, 1);
       segments(d.lines, SKETCH_COLOURS.line, 3);
-      if (d.editing.preview) segments([d.editing.preview], SKETCH_COLOURS.preview, 4);
+      if (d.editing.preview.length > 0) segments(d.editing.preview, SKETCH_COLOURS.preview, 4);
       if (d.editing.points.length > 0) {
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(d.editing.points.flatMap((p) => at(p)), 3));
@@ -597,7 +597,7 @@ export class Viewer implements SharedViewport {
     const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
     this.element.dataset.sketchLines = String(lines);
     this.element.dataset.sketchPoints = edited ? edited.points.map(xy).join(" ") : "";
-    this.element.dataset.sketchPreview = edited?.preview ? edited.preview.map(xy).join(" ") : "";
+    this.element.dataset.sketchPreview = edited ? edited.preview.map((s) => s.map(xy).join(" ")).join(" | ") : "";
     this.labelSketches();
   }
 
