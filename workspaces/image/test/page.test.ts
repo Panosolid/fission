@@ -29,6 +29,7 @@ function fake(): Fake {
     fit: () => (f.log.push("fit"), null),
     setView: () => null,
     fitSelection: () => null,
+    lookAt: () => null,
     setOverlay() {},
     clearOverlay() {},
     showSelection() {},

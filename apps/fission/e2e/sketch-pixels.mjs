@@ -3,7 +3,7 @@
 // this looks at the canvas's pixels.
 //
 // 1. Pixel probes, in every browser: a rectangle, a chain of two lines and
-//    a circle are drawn by clicks; along each, where sketch-view.mjs puts
+//    a circle are drawn by clicks; along each, where sketch-screen.mjs puts
 //    it on screen, there must be sketch-line pixels (blue: blue minus red
 //    at least BLUE, which the line colour 0x6cc4ff and any blend of it at
 //    least a third strong pass, and the grid, box, points and preview
@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { preview } from "vite";
 import { browserName, launch } from "./browser.mjs";
 import { compareImages, decodePng, encodePng } from "./png.mjs";
-import { clickPlane, screenPoint, TOP } from "./sketch-view.mjs";
+import { clickPlane, screenPoint, TOP } from "./sketch-screen.mjs";
 
 const server = await preview({ preview: { port: 4193, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4193/";

@@ -496,7 +496,7 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
  * any) with its grid, its points (and a first click not yet a point) and
  * the preview.
  */
-export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null } | null): SketchDrawing[] {
+export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null): SketchDrawing[] {
   return doc.sketches.map((s) => {
     const plane: Plane = planeOf(sketchPlaneOf(doc, s.id));
     const curves = sketchCurves(s);
@@ -505,7 +505,7 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
     const points: SketchXY[] = s.points.map((p) => [p.x, p.y]);
     const tool = editing.tool;
     for (const at of pendingClicks(tool)) if (!s.points.some((p) => p.x === at[0] && p.y === at[1])) points.push([at[0], at[1]]);
-    return { plane, lines, editing: { grid: editing.grid, points, preview: previewSegments(doc, tool, editing.pointer) } };
+    return { plane, lines, editing: { grid: editing.grid, gridSnap: editing.gridSnap ?? false, points, preview: previewSegments(doc, tool, editing.pointer) } };
   });
 }
 

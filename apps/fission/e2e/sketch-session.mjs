@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { preview } from "vite";
 import { browserName, launch } from "./browser.mjs";
-import { clickPlane, TOP } from "./sketch-view.mjs";
+import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { isClosed, modelOutline, openWords, shoelace } from "../../../packages/testing/src/outline-model.ts";
 
 const server = await preview({ preview: { port: 4196, strictPort: true }, logLevel: "error" });

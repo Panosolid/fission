@@ -2,11 +2,11 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type ImageRep, type OriginPlane, type Plane, type SharedViewport, type SketchDrawing, type SketchPointer, type SketchXY, type ViewportHighlight, type ViewportPick } from "@fission/core";
 import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, segmentsNear, unhidden } from "./picking.ts";
-import { fitDistance, orbitSafeOffset, viewBasis, type ViewName } from "./views.ts";
+import { fitDistance, orbitSafeOffset, planeViewBasis, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
-import { selectionFraming } from "./framing.ts";
+import { lookAtFraming, selectionFraming } from "./framing.ts";
 import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
-import { gridLines, pixelSize, rayOnPlane, toWorld } from "./sketch-view.ts";
+import { pixelSize, rayOnPlane, sketchGrid, toWorld } from "./sketch-view.ts";
 import { BASE_COLOUR, faceMixes, segmentColours, SELECTION_COLOUR, tint, type Rgb } from "./highlight.ts";
 
 // The kernel is Z-up (like most CAD); Three.js defaults to Y-up.
@@ -31,6 +31,10 @@ interface ViewHost {
   sketchPointer(pointer: SketchPointer): void;
   /** The offered origin planes on screen (showPlanes), to be clicked. */
   planeMeshes(): THREE.Mesh[];
+  /** What Look At frames on a plane: the body and the edited sketch. */
+  lookAtFraming(plane: Plane): Framing;
+  /** Called by each view before it draws a frame (the sketch grid follows the main view's camera). */
+  frame(view: ViewportView): void;
 }
 
 /**
@@ -117,6 +121,7 @@ export class ViewportView {
     this.resize();
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
+      this.host.frame(this);
       this.renderer.render(this.host.scene, this.camera);
       if (!this.image) this.cube.render(this.renderer, this.camera);
     });
@@ -159,6 +164,35 @@ export class ViewportView {
     const at = this.onPlane(clientX, clientY, plane);
     const pixel = at ? pixelSize(at, this.onPlane(clientX + 1, clientY, plane), this.onPlane(clientX, clientY + 1, plane)) : undefined;
     return pixel === undefined ? { at } : { at, pixel };
+  }
+
+  /**
+   * Where the middle of this view meets a sketch plane and how big a pixel
+   * is there (mm), and the view's diagonal in pixels, for the sketch grid.
+   * When the middle misses the plane (looking along it or away), the
+   * plane's origin and the pixel size at the camera's distance from it.
+   * Null while the view has no size or shows an image.
+   */
+  planeLook(plane: Plane): { centre: SketchXY; pixel: number; diagonal: number } | null {
+    const size = this.renderer.getSize(new THREE.Vector2());
+    if (this.image || !(size.x > 0 && size.y > 0)) return null;
+    const hit = (dx: number, dy: number) => {
+      this.raycaster.setFromCamera(new THREE.Vector2((2 * dx) / size.x, (2 * dy) / size.y), this.camera);
+      return rayOnPlane(this.raycaster.ray.origin.toArray(), this.raycaster.ray.direction.toArray(), plane);
+    };
+    const diagonal = Math.sqrt(size.x * size.x + size.y * size.y);
+    const centre = hit(0, 0);
+    const pixel = pixelSize(centre, hit(1, 0), hit(0, -1));
+    if (centre && pixel !== undefined) return { centre, pixel, diagonal };
+    const away = this.camera.position.distanceTo(new THREE.Vector3(...plane.origin));
+    const across = (2 * away * Math.tan((this.camera.fov * Math.PI) / 360)) / size.y;
+    return across > 0 && Number.isFinite(across) ? { centre: [0, 0], pixel: across, diagonal } : null;
+  }
+
+  /** A number that changes whenever this view's camera or size does (the sketch grid is worked out again only then). */
+  cameraState(): string {
+    const size = this.renderer.getSize(new THREE.Vector2());
+    return `${this.camera.matrixWorld.elements.join(",")}|${this.camera.projectionMatrix.elements.join(",")}|${size.x}x${size.y}`;
   }
 
   /** The offered origin plane under a point on screen, by id, or null. */
@@ -226,6 +260,15 @@ export class ViewportView {
     const framing = this.host.bodyFraming();
     if (!(framing.radius > 0)) return null;
     const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
+    this.place(position, target, up);
+    return framing;
+  }
+
+  /** Look At (SF2): square onto the plane, its y axis up, framing the body and the edited sketch (planeViewBasis); null while this view shows an image. */
+  lookAt(plane: Plane): Framing | null {
+    if (this.image) return null;
+    const framing = this.host.lookAtFraming(plane);
+    const { position, target, up } = planeViewBasis(plane, framing, this.camera.fov, this.camera.aspect);
     this.place(position, target, up);
     return framing;
   }
@@ -408,8 +451,19 @@ export class ViewportView {
   }
 }
 
-/** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint. */
-const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0x262b33, gridMajor: 0x3c4450, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+/** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint, the axes red (x) and green (y). */
+const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+/**
+ * How opaque the sketch grid's major lines are (minor ones fade in up to
+ * this as they spread apart, sketch-view's minorStrength): light and see-
+ * through, so the grid reads as paper under the sketch, never as the
+ * body's dark edges.
+ */
+export const GRID_OPACITY = 0.16;
+/** How opaque the origin axes are while sketching. */
+export const AXIS_OPACITY = 1;
+/** How opaque the body's faces and edges are while a sketch is edited, so what is drawn shows through it (SF2). */
+export const BODY_FADE = { faces: 0.3, edges: 0.35 };
 
 /** Empties a group, freeing its geometry and materials. */
 function clearGroup(group: THREE.Group) {
@@ -441,8 +495,17 @@ export class Viewer implements SharedViewport {
   private hover: { face: number | null; edge: number | null } = { face: null, edge: null };
   private overlays = new Map<string, AnalysisOverlay>();
   private host: ViewHost;
-  /** The ground grid, hidden while a sketch with its own grid is edited. */
+  /** The ground grid and the model's axes, hidden while a sketch with its own grid and axes is edited. */
   private grid: THREE.GridHelper;
+  private axes = new THREE.AxesHelper(20);
+  /** The edited sketch's grid and axes (redrawn when the main view's camera moves), what it was drawn for, and its minor lines' material (faded by zoom). */
+  private sketchGridGroup = new THREE.Group();
+  private gridFor: { plane: Plane; step: number | null } | null = null;
+  private gridCamera = "";
+  private gridKey = "";
+  private minorMaterial: THREE.LineBasicMaterial | null = null;
+  /** The edited sketch's ends in model space, for Look At. */
+  private editedWorld: number[][] = [];
   /** The sketches drawn (showSketches) and the plane of the one being edited. */
   private sketches = new THREE.Group();
   private editedPlane: Plane | null = null;
@@ -463,7 +526,7 @@ export class Viewer implements SharedViewport {
     key.position.set(1, -2, 3);
     const fill = new THREE.DirectionalLight(0xffffff, 0.6);
     fill.position.set(-2, 1, -1);
-    this.scene.add(grid, new THREE.AxesHelper(20), new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body, this.sketches, this.planes);
+    this.scene.add(grid, this.axes, new THREE.AmbientLight(0xffffff, 0.5), key, fill, this.body, this.sketches, this.sketchGridGroup, this.planes);
 
     this.host = {
       scene: this.scene,
@@ -478,6 +541,8 @@ export class Viewer implements SharedViewport {
       sketchPlane: () => (this.sketchHandler ? this.editedPlane : null),
       sketchPointer: (pointer) => this.sketchHandler?.(pointer),
       planeMeshes: () => this.planeHits,
+      lookAtFraming: (plane) => this.lookAtFraming(plane),
+      frame: (view) => this.frame(view),
     };
     this.views.push(new ViewportView(this.host, container));
     this.paint();
@@ -538,6 +603,7 @@ export class Viewer implements SharedViewport {
     this.faceMesh = new THREE.Mesh(geometry, material);
     this.body.add(this.faceMesh, new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ vertexColors: true })));
     this.hover = { face: null, edge: null }; // indices of the old body
+    this.fadeBody();
     this.paint();
   }
 
@@ -568,6 +634,8 @@ export class Viewer implements SharedViewport {
   showSketches(drawings: readonly SketchDrawing[]) {
     clearGroup(this.sketches);
     this.editedPlane = null;
+    this.gridFor = null;
+    this.editedWorld = [];
     let lines = 0;
     for (const d of drawings) {
       const at = (p: SketchXY) => toWorld(d.plane, p);
@@ -585,9 +653,8 @@ export class Viewer implements SharedViewport {
         continue;
       }
       this.editedPlane = d.plane;
-      const grid = gridLines(d.editing.grid);
-      segments(grid.filter((g) => !g.major).map((g) => [g.a, g.b]), SKETCH_COLOURS.grid, 1);
-      segments(grid.filter((g) => g.major).map((g) => [g.a, g.b]), SKETCH_COLOURS.gridMajor, 1);
+      this.gridFor = { plane: d.plane, step: d.editing.gridSnap ? d.editing.grid : null };
+      this.editedWorld = [...d.lines.flatMap(([a, b]) => [at(a), at(b)]), ...d.editing.points.map(at)];
       segments(d.lines, SKETCH_COLOURS.line, 3);
       if (d.editing.preview.length > 0) segments(d.editing.preview, SKETCH_COLOURS.preview, 4);
       if (d.editing.points.length > 0) {
@@ -599,7 +666,10 @@ export class Viewer implements SharedViewport {
       }
       if (d.editing.snap) segments(d.editing.snap.marks, SKETCH_COLOURS.snap, 7);
     }
-    this.grid.visible = this.editedPlane === null;
+    this.grid.visible = this.axes.visible = this.editedPlane === null;
+    this.gridCamera = this.gridKey = ""; // drawn again on the next frame, for this sketch
+    if (!this.gridFor) this.drawGrid(null);
+    this.fadeBody();
     // Read by the e2e test: how many lines are drawn, and the edited sketch's points and preview.
     const edited = drawings.find((d) => d.editing)?.editing;
     const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
@@ -608,6 +678,82 @@ export class Viewer implements SharedViewport {
     this.element.dataset.sketchPreview = edited ? edited.preview.map((s) => s.map(xy).join(" ")).join(" | ") : "";
     this.element.dataset.sketchSnap = edited?.snap?.label ?? "";
     this.labelSketches();
+  }
+
+  /**
+   * Before each frame of the main view: when its camera or size moved, the
+   * edited sketch's grid for where the view's middle meets the plane and
+   * the pixel size there (sketch-view's sketchGrid), drawn again only when
+   * its spacing or reach changed; the minor lines' strength follows the zoom.
+   */
+  private frame(view: ViewportView) {
+    if (view !== this.main || !this.gridFor) return;
+    const state = view.cameraState();
+    if (state === this.gridCamera) return;
+    this.gridCamera = state;
+    const look = view.planeLook(this.gridFor.plane);
+    if (!look) return;
+    this.drawGrid(sketchGrid(look.centre, look.pixel, look.diagonal, this.gridFor.step));
+  }
+
+  /** Draws the sketch grid and axes (null takes them away); says the spacing on the element (read by the e2e test). */
+  private drawGrid(grid: ReturnType<typeof sketchGrid>) {
+    const plane = this.gridFor?.plane;
+    if (!grid || !plane) {
+      clearGroup(this.sketchGridGroup);
+      this.minorMaterial = null;
+      this.gridKey = "";
+      delete this.element.dataset.sketchGrid;
+      delete this.element.dataset.sketchAxes;
+      return;
+    }
+    if (this.minorMaterial) this.minorMaterial.opacity = GRID_OPACITY * grid.strength;
+    this.element.dataset.sketchGrid = `minor ${grid.minor} major ${grid.major} strength ${grid.strength.toFixed(2)}`;
+    const key = `${grid.minor} ${grid.bounds.join(" ")}`;
+    if (key === this.gridKey) return;
+    this.gridKey = key;
+    clearGroup(this.sketchGridGroup);
+    const at = (p: SketchXY) => toWorld(plane, p);
+    const segments = (pairs: readonly (readonly [SketchXY, SketchXY])[], colour: number, opacity: number, order: number) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pairs.flatMap(([a, b]) => [...at(a), ...at(b)]), 3));
+      const material = new THREE.LineBasicMaterial({ color: colour, depthTest: false, depthWrite: false, transparent: true, opacity });
+      const l = new THREE.LineSegments(g, material);
+      l.renderOrder = order;
+      this.sketchGridGroup.add(l);
+      return material;
+    };
+    this.minorMaterial = segments(grid.lines.filter((l) => !l.major).map((l) => [l.a, l.b]), SKETCH_COLOURS.grid, GRID_OPACITY * grid.strength, 1);
+    segments(grid.lines.filter((l) => l.major).map((l) => [l.a, l.b]), SKETCH_COLOURS.grid, GRID_OPACITY, 1);
+    if (grid.axes.x) segments([grid.axes.x], SKETCH_COLOURS.axisX, AXIS_OPACITY, 2);
+    if (grid.axes.y) segments([grid.axes.y], SKETCH_COLOURS.axisY, AXIS_OPACITY, 2);
+    this.element.dataset.sketchAxes = [grid.axes.x ? "x" : "", grid.axes.y ? "y" : ""].filter(Boolean).join(" ");
+  }
+
+  /** While a sketch is edited the body is drawn see-through (BODY_FADE), so the sketch shows through it; solid again after. */
+  private fadeBody() {
+    const faded = this.editedPlane !== null;
+    for (const o of this.body.children) {
+      if (!(o instanceof THREE.Mesh || o instanceof THREE.LineSegments)) continue;
+      const m = o.material as THREE.Material;
+      if (m.transparent !== faded) m.needsUpdate = true;
+      m.transparent = faded;
+      m.depthWrite = !faded;
+      m.opacity = faded ? (o instanceof THREE.Mesh ? BODY_FADE.faces : BODY_FADE.edges) : 1;
+    }
+    this.element.dataset.bodyFaded = String(faded);
+  }
+
+  /** What Look At frames (framing.ts lookAtFraming): the body's box corners and the edited sketch's ends, else round the plane's origin. */
+  private lookAtFraming(plane: Plane): Framing {
+    const box = new THREE.Box3().setFromObject(this.body);
+    const corners = box.isEmpty() ? [] : [box.min.toArray(), box.max.toArray()];
+    return lookAtFraming([...corners, ...this.editedWorld], plane.origin);
+  }
+
+  /** Look At in the main view. */
+  lookAt(plane: Plane): Framing | null {
+    return this.main.lookAt(plane);
   }
 
   /** Says on the element whether a sketch is being edited with the pointer on it (read by the e2e test). */
