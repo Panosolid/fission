@@ -19,7 +19,7 @@ import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts";
 import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
-import { addSketch, SKETCH_STEPS, sketchItem, sketchLines } from "./sketch.ts";
+import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { clickAt, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
@@ -455,7 +455,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   /** Says whether the edited sketch's lines close into one outline, or the kernel's reason they don't. */
-  const outlineOf = latestOnly((lines: ReturnType<typeof sketchLines>) => kernel.call("sketch_outline", lines));
+  const outlineOf = latestOnly((curves: ReturnType<typeof sketchCurves>) => askOutline(kernel, curves));
   async function showOutline() {
     if (mode.kind !== "edit") return;
     const id = mode.tool.sketch;
@@ -464,7 +464,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (sketch.curves.length === 0) return sketchBox.showStatus("No lines yet.");
     const n = `${sketch.curves.length} line${sketch.curves.length === 1 ? "" : "s"}`;
     try {
-      const { current, value } = await outlineOf(sketchLines(sketch));
+      const { current, value } = await outlineOf(sketchCurves(sketch));
       if (current) sketchBox.showStatus("closed" in value ? `${n}, a closed outline.` : `${n}, not closed: ${value.open}.`);
     } catch (e) {
       sketchBox.showStatus(`${n}: ${e instanceof Error ? e.message : String(e)}`);
@@ -506,7 +506,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   /** Says whether the chosen sketch makes a closed outline (OK on) or the kernel's reason it doesn't (OK off). */
-  const extrudeOutline = latestOnly((lines: ReturnType<typeof sketchLines>) => kernel.call("sketch_outline", lines));
+  const extrudeOutline = latestOnly((curves: ReturnType<typeof sketchCurves>) => askOutline(kernel, curves));
   async function checkExtrude(id: string) {
     const doc = designDoc();
     const sketch = doc.sketches.find((s) => s.id === id);
@@ -515,7 +515,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     extrudeBox.showStatus(sketch.curves.length === 0 ? `${name} has no lines yet.` : `Checking ${name}…`, false);
     if (sketch.curves.length === 0) return;
     try {
-      const { current, value } = await extrudeOutline(sketchLines(sketch));
+      const { current, value } = await extrudeOutline(sketchCurves(sketch));
       if (!current || extruding?.sketch !== id) return;
       if ("closed" in value) extrudeBox.showStatus(`${name} makes a closed outline.`, true);
       else extrudeBox.showStatus(`${name} can't be extruded: its lines don't close (${value.open}).`, false);

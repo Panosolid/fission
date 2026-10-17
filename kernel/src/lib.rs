@@ -201,26 +201,31 @@ pub struct LineIn {
     pub b: [f64; 2],
 }
 
-/// A straight-edged outline in the form `make_extrude` takes:
-/// `{ outer: { path: { corners: [x0, y0, …], bulges: [] } }, holes: [] }`.
+/// A sketch circle as the app sends it: `{ centre: [x, y], radius }`.
+#[derive(Debug, Deserialize)]
+pub struct CircleIn {
+    pub centre: [f64; 2],
+    pub radius: f64,
+}
+
+/// An outline in the form `make_extrude` takes (`ProfileIn`):
+/// `{ outer: loop, holes: [] }`.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct ProfileOut {
-    pub outer: PathOut,
-    pub holes: Vec<PathOut>,
+    pub outer: LoopOut,
+    pub holes: Vec<LoopOut>,
 }
 
+/// One loop: `{ path: { corners: [x0, y0, …], bulges: [] } }` or
+/// `{ circle: { center: [x, y], radius } }`, as `BoundaryIn`.
 #[derive(Debug, Serialize, PartialEq)]
-pub struct PathOut {
-    pub path: CornersOut,
+#[serde(rename_all = "lowercase")]
+pub enum LoopOut {
+    Path { corners: Vec<f64>, bulges: Vec<f64> },
+    Circle { center: [f64; 2], radius: f64 },
 }
 
-#[derive(Debug, Serialize, PartialEq)]
-pub struct CornersOut {
-    pub corners: Vec<f64>,
-    pub bulges: Vec<f64>,
-}
-
-/// What a sketch's lines make: `{ closed: profile }` or `{ open: "why, in words" }`.
+/// What a sketch makes: `{ closed: profile }` or `{ open: "why, in words" }`.
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SketchOutlineOut {
@@ -228,28 +233,30 @@ pub enum SketchOutlineOut {
     Open(String),
 }
 
-/// `sketch::sketch_outline` in the app's form; lines breaking the sketch
-/// rules are an error.
-pub fn sketch_outline_of(lines: &[LineIn]) -> Result<SketchOutlineOut, String> {
+/// `sketch::sketch_outline` in the app's form; lines or circles breaking
+/// the sketch rules are an error.
+pub fn sketch_outline_of(lines: &[LineIn], circles: &[CircleIn]) -> Result<SketchOutlineOut, String> {
     let lines: Vec<sketch::Line> = lines.iter().map(|l| sketch::Line { a: l.a.into(), b: l.b.into() }).collect();
-    match sketch::sketch_outline(&lines).map_err(|e| e.to_string())? {
+    let circles: Vec<sketch::Circle> = circles.iter().map(|c| sketch::Circle { centre: c.centre.into(), radius: c.radius }).collect();
+    match sketch::sketch_outline(&lines, &circles).map_err(|e| e.to_string())? {
         sketch::SketchOutline::Open(why) => Ok(SketchOutlineOut::Open(why.to_string())),
         sketch::SketchOutline::Closed(profile) => {
-            let ops::profile::Boundary::Path { corners, bulges } = profile.outer else {
-                return Err("internal error: a sketch outline is a path".to_string());
+            let outer = match profile.outer {
+                ops::profile::Boundary::Path { corners, bulges } => LoopOut::Path { corners: corners.iter().flat_map(|p| [p.x, p.y]).collect(), bulges },
+                ops::profile::Boundary::Circle { center, radius } => LoopOut::Circle { center: center.into(), radius },
             };
-            let corners = corners.iter().flat_map(|p| [p.x, p.y]).collect();
-            Ok(SketchOutlineOut::Closed(ProfileOut { outer: PathOut { path: CornersOut { corners, bulges } }, holes: vec![] }))
+            Ok(SketchOutlineOut::Closed(ProfileOut { outer, holes: vec![] }))
         }
     }
 }
 
-/// The one closed outline a sketch's lines (`[LineIn, …]`) make, or why
-/// they make none (see `SketchOutlineOut`).
+/// The one closed outline a sketch's lines (`[LineIn, …]`) and circles
+/// (`[CircleIn, …]`) make, or why they make none (see `SketchOutlineOut`).
 #[wasm_bindgen]
-pub fn sketch_outline(lines: JsValue) -> Result<JsValue, JsError> {
+pub fn sketch_outline(lines: JsValue, circles: JsValue) -> Result<JsValue, JsError> {
     let lines: Vec<LineIn> = serde_wasm_bindgen::from_value(lines).map_err(|e| JsError::new(&format!("bad sketch lines: {e}")))?;
-    let out = sketch_outline_of(&lines).map_err(|e| JsError::new(&e))?;
+    let circles: Vec<CircleIn> = serde_wasm_bindgen::from_value(circles).map_err(|e| JsError::new(&format!("bad sketch circles: {e}")))?;
+    let out = sketch_outline_of(&lines, &circles).map_err(|e| JsError::new(&e))?;
     serde_wasm_bindgen::to_value(&out).map_err(|e| JsError::new(&e.to_string()))
 }
 
@@ -326,23 +333,49 @@ mod tests {
         // corners come out as flat pairs in walking order, no bulges, no holes.
         let line = |a: [f64; 2], b: [f64; 2]| LineIn { a, b };
         let lines = [line([0.0, 0.0], [4.0, 0.0]), line([4.0, 0.0], [0.0, 3.0]), line([0.0, 0.0], [0.0, 3.0])];
-        let want = ProfileOut {
-            outer: PathOut { path: CornersOut { corners: vec![0.0, 0.0, 4.0, 0.0, 0.0, 3.0], bulges: vec![] } },
-            holes: vec![],
-        };
-        assert_eq!(sketch_outline_of(&lines).unwrap(), SketchOutlineOut::Closed(want));
+        let want = ProfileOut { outer: LoopOut::Path { corners: vec![0.0, 0.0, 4.0, 0.0, 0.0, 3.0], bulges: vec![] }, holes: vec![] };
+        assert_eq!(sketch_outline_of(&lines, &[]).unwrap(), SketchOutlineOut::Closed(want));
         // Its closed outline extrudes: area ½·4·3 = 6, so 2 mm deep is 12 mm³.
-        let SketchOutlineOut::Closed(p) = sketch_outline_of(&lines).unwrap() else { panic!() };
-        let profile = ops::profile::Profile::polygon(p.outer.path.corners.chunks(2).map(|c| glam::DVec2::new(c[0], c[1])).collect(), vec![]);
+        let SketchOutlineOut::Closed(p) = sketch_outline_of(&lines, &[]).unwrap() else { panic!() };
+        let LoopOut::Path { corners, .. } = p.outer else { panic!() };
+        let profile = ops::profile::Profile::polygon(corners.chunks(2).map(|c| glam::DVec2::new(c[0], c[1])).collect(), vec![]);
         let body = ops::extrude::extrude(&profile, 2.0).unwrap();
         assert!(rel_eq(view_body(&body).unwrap().volume, 12.0, FP_REL));
         // Open sketches say why in words; bad lines are errors.
         assert_eq!(
-            sketch_outline_of(&lines[..2]).unwrap(),
+            sketch_outline_of(&lines[..2], &[]).unwrap(),
             SketchOutlineOut::Open("the line end at (0, 0) is not joined to another line".into())
         );
-        assert_eq!(sketch_outline_of(&[]).unwrap(), SketchOutlineOut::Open("the sketch has no lines yet".into()));
-        assert_eq!(sketch_outline_of(&[line([0.0, 0.0], [0.0, 0.0])]).unwrap_err(), "line 1 must be between 0.001 and 1000000 mm long, got 0");
+        assert_eq!(sketch_outline_of(&[], &[]).unwrap(), SketchOutlineOut::Open("the sketch has no lines or circles yet".into()));
+        assert_eq!(sketch_outline_of(&[line([0.0, 0.0], [0.0, 0.0])], &[]).unwrap_err(), "line 1 must be between 0.001 and 1000000 mm long, got 0");
+    }
+
+    #[test]
+    fn a_sketched_circle_in_the_apps_form_extrudes_to_pi_r_squared_h() {
+        // One circle round (3, -4), radius 5: the outline is that circle in
+        // make_extrude's form, the same numbers back.
+        let c = CircleIn { centre: [3.0, -4.0], radius: 5.0 };
+        let out = sketch_outline_of(&[], &[c]).unwrap();
+        assert_eq!(out, SketchOutlineOut::Closed(ProfileOut { outer: LoopOut::Circle { center: [3.0, -4.0], radius: 5.0 }, holes: vec![] }));
+        // Extruded 2 mm: V = πr²h = π·25·2 = 50π; A = two discs 2πr² = 50π
+        // plus the side 2πr·h = 20π, so 70π. One cylinder side, two discs;
+        // each rim is one closed circle edge starting and ending at its one
+        // vertex, as the cylinder primitive's are.
+        let SketchOutlineOut::Closed(ProfileOut { outer: LoopOut::Circle { center, radius }, .. }) = out else { panic!() };
+        let profile = profile_from_input(ProfileIn { outer: BoundaryIn::Circle { center, radius }, holes: vec![] }).unwrap();
+        let v = view_body(&ops::extrude::extrude(&profile, 2.0).unwrap()).unwrap();
+        assert!(rel_eq(v.volume, 50.0 * PI, FP_REL) && rel_eq(v.area, 70.0 * PI, FP_REL), "{} {}", v.volume, v.area);
+        assert_eq!((v.vertices, v.edges, v.faces), (2, 2, 3));
+        // A circle with a line, two circles: several loops; a bad circle is an error.
+        let two = [CircleIn { centre: [0.0, 0.0], radius: 1.0 }, CircleIn { centre: [9.0, 0.0], radius: 1.0 }];
+        assert_eq!(
+            sketch_outline_of(&[], &two).unwrap(),
+            SketchOutlineOut::Open("the sketch makes 2 separate loops; for now a sketch makes one outline".into())
+        );
+        assert_eq!(
+            sketch_outline_of(&[], &[CircleIn { centre: [0.0, 0.0], radius: 0.0 }]).unwrap_err(),
+            "circle 1's radius must be between 0.001 and 500000 mm, got 0"
+        );
     }
 
     #[test]
