@@ -24,6 +24,7 @@ import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem 
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { clickAt, curveCount, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
+import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
@@ -66,6 +67,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   create.id = "create-sketch";
   create.textContent = "Create sketch";
   create.title = "Draw lines, rectangles, circles and arcs on a plane: pick the plane, then click.";
+  create.dataset.modelling = ""; // hidden while a sketch is edited (SF3b): the sketch's toolbar stands in
   create.addEventListener("click", onSketch);
   const extrude = document.createElement("button");
   extrude.type = "button";
@@ -78,6 +80,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   for (const group of toolbarGroups()) {
     const div = document.createElement("div");
     div.className = "tool-group";
+    div.dataset.modelling = "";
     div.setAttribute("role", "group");
     div.setAttribute("aria-label", group.name);
     const name = document.createElement("span");
@@ -365,11 +368,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     cancel: () => leaveSketch(),
     grid: (typed) => void setGrid(typed),
     gridSnap: (on) => setGridSnap(on),
-    finish: () => leaveSketch(),
+    finish: () => finishSketch(),
     extrude: () => startExtrude(),
-    tool: (kind) => chooseTool(kind),
     lookAt: () => lookAtSketch(),
   });
+  /** The sketch's own toolbar (SF3b), standing in for the modelling buttons while a sketch is edited; Extrude stays. */
+  const sketchBar = sketchToolbar(ctx.toolbar, { tool: (kind) => chooseTool(kind), finish: () => finishSketch() });
+  /** Shows the modelling buttons (true) or the sketch's toolbar in their place (false). */
+  function modelling(on: boolean) {
+    for (const el of ctx.toolbar.querySelectorAll<HTMLElement>("[data-modelling]")) el.hidden = !on;
+  }
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
   /** Counts tool changes (a tool chosen, Escape, the sketch entered again): a click the kernel was still snapping across one is dropped. */
   let toolChanges = 0;
@@ -434,6 +442,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null, snap: null };
     toolChanges++;
     sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, gridSnap, editingSketch.tool);
+    modelling(false);
+    sketchBar.show(editingSketch.tool);
     drawSketches();
     void showOutline();
   }
@@ -446,17 +456,27 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     mode.snap = null;
     toolChanges++;
     sketchBox.showTool(kind);
+    sketchBar.showTool(kind);
     sketchBox.showError("");
     drawSketches();
   }
 
-  /** Cancel or Finish sketch: back to modelling; the sketch stays as drawn. */
+  /** Cancel, Finish sketch or Extrude: back to modelling; the sketch stays as drawn. */
   function leaveSketch() {
     mode = { kind: "none" };
     editingSketch = null;
     viewport.showPlanes([]);
     sketchBox.hide();
+    sketchBar.hide();
+    modelling(true);
     drawSketches();
+  }
+
+  /** Finish Sketch (the toolbar's or the panel's): back to modelling, the camera at the home view (as the owner's CAD suite does, not the view from before the sketch). */
+  function finishSketch() {
+    if (mode.kind !== "edit") return leaveSketch();
+    leaveSketch();
+    viewport.setView("home");
   }
 
   /** A grid size typed: the kernel judges it (snapping 0, 0 to it); a refused one keeps the grid and says why. */
@@ -661,6 +681,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shown = false;
     viewport.onPick = null;
     viewport.onSketchPointer = null;
+    sketchBar.closeMenu();
     // Asleep, the sketches stay drawn as finished ones: no grid, no planes to pick.
     viewport.showPlanes([]);
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
@@ -682,6 +703,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
+      // Escape with the Create menu open closes the menu, and only that.
+      if (id === "clear-selection" && sketchBar.menuOpen) return sketchBar.closeMenu(), true;
       // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
