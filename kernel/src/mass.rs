@@ -46,12 +46,14 @@
 //! shallow cap). Only whole hemispheres exist until booleans (steps 46–47),
 //! which must replace this with a stable form before making such faces.
 //!
-//! Mutation testing (`cargo mutants -f src/mass.rs`) leaves these
-//! survivors, all equivalent: `* s` vs `/ s` with s = ±1 (directions of
-//! travel); `< 0.1` vs `<= 0.1` for switching θ − sin θ to its series (both
-//! forms are accurate at 0.1); and removing the axial part of a cylinder
-//! face's vector area (`−` vs `+`), which is zero in exact arithmetic and
-//! only kept to drop rounding.
+//! Mutation testing (`cargo mutants -f src/mass.rs`) leaves one survivor:
+//! `|t| < 0.1` vs `<= 0.1` in theta_minus_sin, which picks the series
+//! instead of t − sin t at exactly ±0.1. Not strictly equivalent: the two
+//! differ in the last bits there (the series is 1.7 ulps from the true
+//! value, t − sin t 115 ulps, both far inside FP_REL), and a test that
+//! told them apart would have to demand the less accurate one. Directions
+//! of travel are written s·v (not v·s) for s = ±1, so that `/` there gives
+//! s/v, which the sphere tests catch, rather than an equivalent v/s.
 
 use crate::geom::{Curve, Surface};
 use crate::topology::{Body, Coedge, Face};
@@ -160,7 +162,7 @@ fn geodesic_turn(curve: &Curve, ta: f64, tb: f64, n: impl Fn(DVec3) -> DVec3) ->
         Curve::Line { .. } => 0.0,
         Curve::Circle { center, radius, .. } => {
             let x = curve.eval(ta);
-            let dx = curve.derivative(ta) * (tb - ta).signum();
+            let dx = (tb - ta).signum() * curve.derivative(ta);
             -(x - center).dot(n(x).cross(dx)) / (radius * radius) * (tb - ta).abs()
         }
     }
@@ -212,8 +214,8 @@ fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
                     // The corner at this coedge's end, into the next one.
                     let next = l.coedges[(i + 1) % l.coedges.len()];
                     let (next_curve, na, nb) = travel(body, next);
-                    let t_in = curve.derivative(tb) * (tb - ta).signum();
-                    let t_out = next_curve.derivative(na) * (nb - na).signum();
+                    let t_in = (tb - ta).signum() * curve.derivative(tb);
+                    let t_out = (nb - na).signum() * next_curve.derivative(na);
                     let corner = body.vertices[body.coedge_end(c)].point;
                     turn += corner_turn(t_in, t_out, n(corner));
                 }
@@ -468,6 +470,44 @@ pub(crate) mod tests {
             let slack = m.area * rounding_slack(lo.abs().max(hi.abs()).max_element());
             assert!(measure_eq(m.volume, volume, slack), "volume {} expected {volume} ± {slack}", m.volume);
         }
+    }
+
+    #[test]
+    fn a_tube_far_up_its_own_axis_keeps_its_digits() {
+        // The tube of `planar_and_cylindrical_bodies_by_hand` (r 1 to 2, h =
+        // 3, V = 9π, A = 24π) moved 2^26 = 67108864 up its own axis. Every
+        // coordinate stays exact (2^26 and 2^26 + 3 are doubles; x and y
+        // don't change), so it is the same body and must give the same
+        // numbers to FP_REL. Each wall's circles sit at heights ±1.5 from
+        // the body's centre o; measured from a point ~1.3e8 away instead,
+        // the walls' terms ∓s·2πr² would be ~1.3e8·2πr² each, cancelling
+        // to 2πr²·3 and leaving ~1e-8 of it to rounding.
+        let up = Transform::translation(DVec3::new(0.0, 0.0, 67108864.0));
+        check(&hand_tube(1.0, 2.0, 3.0, 0.3).transformed(&up), 9.0 * PI, 24.0 * PI);
+    }
+
+    #[test]
+    fn a_long_half_round_bar_turned_keeps_its_volume() {
+        // A half disc of r = 1 (the chord (−1, 0)→(1, 0), then the upper
+        // half circle back) extruded h = 1e5 and turned about an odd axis:
+        // V = (π/2)·h; A = two half discs π + the flat side 2h + the curved
+        // side πh. Turning rounds each coordinate by up to
+        // rounding_slack(reach), which may move the true volume by area ×
+        // that (≈ 7e-4 here). The curved wall's vector area is square to
+        // its axis in exact arithmetic, but the computed one has an
+        // along-axis part of rounding: chord terms ~h² = 1e10 rounded at
+        // ~1e-16, ~1e-6. That part is dropped; kept or doubled, times the
+        // wall's corner ~h/2 from the centre along the axis, it adds ~0.1.
+        let half = Profile { outer: path(&[(-1.0, 0.0), (1.0, 0.0)], &[0.0, 1.0]), holes: vec![] };
+        let h = 1e5;
+        let turn = Transform::rotation(DVec3::new(0.3, -0.8, 0.5), 1.1);
+        let body = extrude(&half, h).unwrap().transformed(&turn);
+        let (volume, area) = (PI / 2.0 * h, PI + (2.0 + PI) * h);
+        let (lo, hi) = body.bounds();
+        let slack = area * rounding_slack(lo.abs().max(hi.abs()).max_element());
+        let m = mass_properties(&body);
+        assert!(measure_eq(m.volume, volume, slack), "volume {} expected {volume} ± {slack}", m.volume);
+        assert!(measure_eq(m.area, area, slack), "area {} expected {area} ± {slack}", m.area);
     }
 
     /// The square frame with 1 µm walls the random tester found (seed

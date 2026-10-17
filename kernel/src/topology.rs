@@ -10,6 +10,16 @@
 //! - Every edge is used by exactly two coedges, once in each direction.
 //! - An edge runs from `start` to `end` along its curve over `t0 < t1`.
 //!   Closed edges (full circles) have `start == end`.
+//!
+//! Mutation testing (`cargo mutants -f src/topology.rs`) leaves these
+//! survivors, all equivalent (no input can tell them apart):
+//! - `peak + PI` vs `peak - PI` for the angle of an arc's least point in
+//!   `widen_by_curve`: the two differ by exactly 2π, and the angle is only
+//!   used reduced mod 2π (`rem_euclid(TAU)`), so it is the same point.
+//!   Rounding can tip the reduced angle by an ulp only when that point is
+//!   exactly at one of the arc's ends; the box then holds that end anyway,
+//!   and the two answers differ by at most the rounding of the end's own
+//!   evaluation (neither is more right).
 
 use crate::geom::{Curve, Surface, Transform};
 use glam::DVec3;
@@ -296,8 +306,8 @@ impl Body {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tolerance::{eq, points_eq};
-    use std::f64::consts::{FRAC_PI_2, PI};
+    use crate::tolerance::{angle_eq, eq, points_eq, ANGULAR, MAX_SIZE};
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
     fn quarter_arc_edge() -> (Body, EdgeId) {
         // Unit circle about +Z, edge from t = π/2 to t = π: (0,1,0) → (-1,0,0).
@@ -350,6 +360,119 @@ mod tests {
         b.add_edge(c, v0, v1, 0.0, PI - 2.0 * start);
         let (lo, hi) = b.bounds();
         assert!(points_eq(lo, DVec3::new(-1.0, 10.0, 0.0)) && points_eq(hi, DVec3::new(1.0, r, 0.0)), "{lo} {hi}");
+    }
+
+    #[test]
+    fn edge_bounds_by_hand() {
+        // A line from (1, 2, 3) to (4, −1, 5): its box is its ends' box.
+        let mut b = Body::default();
+        let v0 = b.add_vertex(DVec3::new(1.0, 2.0, 3.0));
+        let v1 = b.add_vertex(DVec3::new(4.0, -1.0, 5.0));
+        let line = b.add_line(v0, v1);
+        let (lo, hi) = b.edges[line].bounds();
+        assert!(points_eq(lo, DVec3::new(1.0, -1.0, 3.0)) && points_eq(hi, DVec3::new(4.0, 2.0, 5.0)), "{lo} {hi}");
+        // Arcs of the unit circle about +Z centred at (5, 0, 2).
+        let c = Curve::Circle { center: DVec3::new(5.0, 0.0, 2.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let arc = |t0: f64, t1: f64| Edge { curve: c.clone(), start: 0, end: 1, t0, t1 }.bounds();
+        // The left half, t ∈ [π/2, 3π/2]: from (5, 1) through (4, 0) at
+        // t = π to (5, −1). Its ends span only x = 5; the least x, 4, is
+        // where it passes t = π, half a turn from the greatest (t = 0).
+        let (lo, hi) = arc(FRAC_PI_2, 3.0 * FRAC_PI_2);
+        assert!(points_eq(lo, DVec3::new(4.0, -1.0, 2.0)) && points_eq(hi, DVec3::new(5.0, 1.0, 2.0)), "{lo} {hi}");
+        // The third quarter, t ∈ [π, 3π/2], from (4, 0) to (5, −1): x ∈
+        // [4, 5], y ∈ [−1, 0]. Its span is π/2, a quarter of a circle, even
+        // though t0 + t1 = 5π/2 is more than a whole turn.
+        let (lo, hi) = arc(PI, 3.0 * FRAC_PI_2);
+        assert!(points_eq(lo, DVec3::new(4.0, -1.0, 2.0)) && points_eq(hi, DVec3::new(5.0, 0.0, 2.0)), "{lo} {hi}");
+    }
+
+    #[test]
+    fn whole_circle_box_does_not_depend_on_its_seam() {
+        // Radius 2 about the axis (0, 0.6, 0.8), centred at (1, 2, 3). A
+        // whole circle reaches r·√(1 − a_k²) along axis k: 2·(1, 0.8, 0.6)
+        // = (2, 1.6, 1.2), so x ∈ [−1, 3], y ∈ [0.4, 3.6], z ∈ [1.8, 4.2].
+        let axis = DVec3::new(0.0, 0.6, 0.8);
+        let center = DVec3::new(1.0, 2.0, 3.0);
+        let circle = |x_dir: DVec3| {
+            let e = Edge { curve: Curve::Circle { center, axis, x_dir, radius: 2.0 }, start: 0, end: 0, t0: 0.0, t1: std::f64::consts::TAU };
+            e.bounds()
+        };
+        let x0 = DVec3::X;
+        let (lo, hi) = circle(x0);
+        assert!(points_eq(lo, DVec3::new(-1.0, 0.4, 1.8)) && points_eq(hi, DVec3::new(3.0, 3.6, 4.2)), "{lo} {hi}");
+        // The same circle with its seam (x_dir) anywhere round it is the
+        // same set of points, so it gets the same box, to the last bit: it
+        // comes from the centre, axis and radius only. (Boxed through x_dir
+        // like an arc, each seam would round differently.)
+        for k in 1..12 {
+            let x_dir = Transform::rotation(axis, 0.5 * k as f64).dir(x0);
+            assert_eq!(circle(x_dir), (lo, hi), "seam {k}");
+        }
+    }
+
+    #[test]
+    fn closest_point_of_an_arc_by_hand() {
+        // The quarter arc from (0, 1, 0) (t = π/2) to (−1, 0, 0) (t = π).
+        let (b, e) = quarter_arc_edge();
+        let e = &b.edges[e];
+        // (−2, 2, 0) is at angle 3π/4, which the arc passes: that point.
+        let (t, end) = e.closest(DVec3::new(-2.0, 2.0, 0.0));
+        assert!(angle_eq(t, 3.0 * FRAC_PI_4) && end.is_none(), "{t} {end:?}");
+        // (1, 1, 0), at π/4, is short of the arc: of its ends, (0, 1) is 1
+        // away and (−1, 0) is √(2² + 1²) = √5, so the start.
+        assert_eq!(e.closest(DVec3::new(1.0, 1.0, 0.0)), (FRAC_PI_2, Some(false)));
+        // (−1, −1, 0), at 5π/4, is past it: the start is √(1² + 2²) = √5
+        // away and the end 1, so the end.
+        assert_eq!(e.closest(DVec3::new(-1.0, -1.0, 0.0)), (PI, Some(true)));
+    }
+
+    #[test]
+    fn a_whole_circle_a_hair_short_of_a_turn_still_has_no_ends() {
+        // A closed edge (start == end) from t0 = −π whose span came out
+        // short of 2π by less than ANGULAR is a whole circle: a point at
+        // angle π − 0.2·ANGULAR, in the sliver between t1 and t0 + 2π, is
+        // on it (s ≈ π − 0.2·ANGULAR, no end). At 1.1·ANGULAR short it is
+        // an arc with a gap, and the same point's nearest end is the start
+        // (0.2·ANGULAR away, against 0.9·ANGULAR to the end).
+        let mut b = Body::default();
+        let v = b.add_vertex(DVec3::NEG_X);
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let angle = PI - 0.2 * ANGULAR;
+        let p = DVec3::new(angle.cos(), angle.sin(), 0.0);
+        let e = b.add_edge(c, v, v, -PI, PI - 0.9 * ANGULAR);
+        let (t, end) = b.edges[e].closest(p);
+        assert!(end.is_none() && angle_eq(t, angle), "{t} {end:?}");
+        b.edges[e].t1 = PI - 1.1 * ANGULAR;
+        assert_eq!(b.edges[e].closest(p), (-PI, Some(false)));
+    }
+
+    #[test]
+    fn a_nearly_whole_arc_still_has_ends() {
+        // An open arc (two vertices) of radius 1 km short of a whole turn by
+        // 0.9·ANGULAR: its ends are r·0.9e-9 = 9e-4 mm apart, 90 LINEAR,
+        // so two distinct points. A point at angle −0.2·ANGULAR is in the
+        // gap, so its nearest point is an end: the start, 1e6·0.2e-9 =
+        // 2e-4 away, against 7e-4 to the end. Being within ANGULAR of a
+        // whole turn makes only a closed edge whole.
+        let r = MAX_SIZE;
+        let mut b = Body::default();
+        let v0 = b.add_vertex(DVec3::new(r, 0.0, 0.0));
+        let t1 = std::f64::consts::TAU - 0.9 * ANGULAR;
+        let v1 = b.add_vertex(DVec3::new(r * t1.cos(), r * t1.sin(), 0.0));
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: r };
+        let e = b.add_edge(c, v0, v1, 0.0, t1);
+        let a = -0.2 * ANGULAR;
+        assert_eq!(b.edges[e].closest(DVec3::new(r * a.cos(), r * a.sin(), 0.0)), (0.0, Some(false)));
+    }
+
+    #[test]
+    fn sphere_bounds_by_hand() {
+        // A ball of radius 2 moved to (1, 2, 3): its one vertex and its
+        // equator lie at z = 3, so z ∈ [1, 5] comes from the sphere faces
+        // alone: (−1, 0, 1) to (3, 4, 5).
+        let ball = crate::ops::primitives::make_sphere(2.0).unwrap().transformed(&Transform::translation(DVec3::new(1.0, 2.0, 3.0)));
+        let (lo, hi) = ball.bounds();
+        assert!(points_eq(lo, DVec3::new(-1.0, 0.0, 1.0)) && points_eq(hi, DVec3::new(3.0, 4.0, 5.0)), "{lo} {hi}");
     }
 
     #[test]
@@ -464,6 +587,7 @@ impl EulerCounts {
     /// non-negative number (which means the topology is broken).
     pub fn genus(&self) -> Option<i64> {
         let chi = self.characteristic();
-        if chi > 2 || (2 - chi) % 2 != 0 { None } else { Some((2 - chi) / 2) }
+        // 2 − χ is even exactly when χ is.
+        if chi > 2 || chi % 2 != 0 { None } else { Some((2 - chi) / 2) }
     }
 }
