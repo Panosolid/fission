@@ -21,7 +21,7 @@ import { designReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { snapOnSketch, withSnap, type Snap } from "./snap.ts";
-import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, sketchDrawings, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
@@ -421,15 +421,18 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     void showOutline();
   }
 
-  /** Line, Rectangle, Circle or Arc (the panel's buttons, or L, R, C and A): what was part way through is dropped, as Escape would. */
+  /** Line, Rectangle, Circle, Arc or Tangent arc (the panel's buttons, or L, R, C, A and T): what was part way through is dropped, as Escape would, except that a line chain and a tangent arc carry on from each other's last point (`switchTool`). */
   function chooseTool(kind: ToolKind) {
-    if (mode.kind !== "edit" || !editingSketch) return;
-    editingSketch.tool = kind;
-    mode.tool = startTool(kind, mode.tool.sketch);
-    mode.snap = null;
-    sketchBox.showTool(kind);
-    sketchBox.showError("");
-    drawSketches();
+    // After any click still waiting on the kernel's snap: that click came first, so the switch applies to what it left.
+    clicks = clicks.then(() => {
+      if (mode.kind !== "edit" || !editingSketch) return;
+      editingSketch.tool = kind;
+      mode.tool = switchTool(designDoc(), mode.tool, kind);
+      mode.snap = null;
+      sketchBox.showTool(kind);
+      sketchBox.showError("");
+      drawSketches();
+    });
   }
 
   /** Cancel or Finish sketch: back to modelling; the sketch stays as drawn. */
@@ -650,17 +653,21 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
-      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle or arc being drawn.
+      // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
-        mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
-        mode.snap = null;
-        sketchBox.showError("");
-        drawSketches();
+        // Like a tool switch, after any click still waiting on the kernel.
+        clicks = clicks.then(() => {
+          if (mode.kind !== "edit") return;
+          mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
+          mode.snap = null;
+          sketchBox.showError("");
+          drawSketches();
+        });
         return true;
       }
-      // L, R, C and A choose the line, rectangle, circle and arc tools while a sketch is edited; otherwise the key does what it would.
+      // L, R, C, A and T choose the line, rectangle, circle, arc and tangent arc tools while a sketch is edited; otherwise the key does what it would.
       const kind = sketchToolKey(id);
       if (kind) return mode.kind === "edit" ? (chooseTool(kind), true) : false;
       const items = ctx.selection.items;

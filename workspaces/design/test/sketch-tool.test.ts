@@ -335,7 +335,8 @@ test("tools: Escape ends what is part way, switching starts afresh, L, R, C and 
   assert.equal(toolBusy(freshCircle().tool), false);
   assert.equal(toolBusy(clickAt(freshCircle().doc, freshCircle().tool, [0, 0]).tool), true, "a centre down");
   assert.deepEqual(startTool("arc", "sketch-2"), { kind: "arc", sketch: "sketch-2", start: null, end: null });
-  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"]]);
+  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"], ["tangent", "T"]]);
+  assert.deepEqual(startTool("tangent", "sketch-2"), { kind: "tangent", sketch: "sketch-2", from: null });
   // The keys in Design's table are the ones the panel's buttons name, and they choose those tools.
   for (const t of SKETCH_TOOLS) {
     const spec = DESIGN_SHORTCUTS.find((s) => s.keys === t.key)!;
