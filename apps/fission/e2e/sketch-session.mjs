@@ -171,12 +171,16 @@ const YS = [-10, 0, 10, 20, 30, 40];
  * can't be waited for, and the app hands a click to the tool that is
  * current when the kernel's snap comes back, not the one current when it
  * was clicked; so a key or an undo after such a click waits a moment
- * first, as a person always does. (Found by this test; reported, not
- * fixed here: the click handling is the tool threads' code.)
+ * first, as a person always does. An undo always waits that moment: a
+ * hover answered after Undo redraws the sketch as it was before it (the
+ * known bug HOVER_REDRAWS_AFTER_UNDO, pinned in sketch-tool.mjs). (Both
+ * found by this test; reported, not fixed here: the click handling is the
+ * tool threads' code.)
  */
 async function randomStep(page, m, r) {
   const roll = r();
-  if (roll < 0.26 && m.unseen) await page.waitForTimeout(300);
+  const undoing = roll >= 0.18 && roll < 0.26 && m.undo.length > 0;
+  if ((roll < 0.26 && m.unseen) || undoing) await page.waitForTimeout(300);
   m.unseen = false;
   if (roll < 0.12) {
     const tool = ["line", "rectangle", "circle"][Math.floor(r() * 3)];
@@ -252,7 +256,7 @@ async function session(seed) {
       await agree(page, one, where());
     }
     // Half of what is there undone, a few redone, then a few more drawn (which ends the redo).
-    if (one.unseen) await page.waitForTimeout(300);
+    await page.waitForTimeout(300); // as before every undo (randomStep)
     const half = Math.floor(one.undo.length / 2);
     for (let i = 0; i < half; i++) {
       await page.keyboard.press("Control+z");

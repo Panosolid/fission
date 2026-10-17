@@ -28,6 +28,15 @@ async function fresh(width = 1280, touch = false) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
+  // window.kernelDelay (ms) holds back every pointer rounding (snap_to_grid, place_freely), so a key can be pressed while the kernel rounds a hover.
+  await page.addInitScript(() => {
+    const send = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (message, ...rest) {
+      const wait = window.kernelDelay ?? 0;
+      if (wait > 0 && (message?.op === "snap_to_grid" || message?.op === "place_freely")) return void setTimeout(() => send.call(this, message, ...rest), wait);
+      return send.call(this, message, ...rest);
+    };
+  });
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
@@ -122,6 +131,20 @@ const GRID_ERROR_MOVES_EXTRUDE = {
   engines: ["webkit", "firefox"],
   bug: "an invalid grid size's message moves Extrude mid-click (sketch-panel.ts)",
   symptom: /^Extrude's OK on: timed out; the page shows .*grid error "Type the grid size in mm\."$/,
+};
+
+/**
+ * Found by the long session (sketch-session.mjs, TC2) in CI: Undo puts the
+ * Design workspace away and mounts it again, but a hover the kernel was
+ * still rounding is answered to the one put away, which draws its own
+ * sketch state over the new one: the click the undo dropped is back on
+ * screen until the pointer moves (workspace.ts: its hover and click replies
+ * don't check that it is still mounted).
+ */
+const HOVER_REDRAWS_AFTER_UNDO = {
+  engines: ["chromium", "firefox", "webkit"],
+  bug: "a hover answered after Undo redraws the put-away sketch state (workspace.ts)",
+  symptom: /^after Ctrl\+Z the sketch shows points "-10,10", not none$/,
 };
 
 try {
@@ -329,6 +352,35 @@ try {
     await until(page, () => document.querySelector("#extrude-ok")?.disabled === false, null, "Extrude's OK on");
     await page.context().close();
   }, { ...GRID_ERROR_MOVES_EXTRUDE, engines: ["chromium", "firefox", "webkit"] });
+
+  await check("a hover still being rounded when Ctrl+Z is pressed doesn't bring back the click the undo dropped", async () => {
+    const page = await fresh();
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1
+    await page.mouse.move(0, 0);
+    // A line, then Escape and a first click of a new one: (-10, 10) is shown as the click waiting for its other end.
+    await at(page, [0, 0], TOP);
+    await at(page, [20, 0], TOP);
+    await points(page, "0,0 20,0");
+    await page.keyboard.press("Escape");
+    await at(page, [-10, 10], TOP);
+    await points(page, "0,0 20,0 -10,10");
+    // The pointer moves 3 px and Ctrl+Z is pressed while the kernel (held back 400 ms) rounds that hover.
+    // Undo takes the line away and drops the waiting click: nothing is left, and the sketch stays open.
+    await page.evaluate(() => (window.kernelDelay = 400));
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const p = screenPoint(box, [-10, 10, 0], TOP);
+    await page.mouse.move(p.x + 3, p.y + 3);
+    await page.keyboard.press("Control+z");
+    await until(page, () => document.getElementById("undo").title === "Undo Create sketch (Ctrl+Z)", null, "the line undone");
+    await page.waitForTimeout(1000); // the hover's answer has come back by now
+    assert.equal(await data(page, "sketching"), "true");
+    const left = await data(page, "sketchPoints");
+    if (left !== "") assert.fail(`after Ctrl+Z the sketch shows points "${left}", not none`);
+    await page.context().close();
+  }, HOVER_REDRAWS_AFTER_UNDO);
 
   await check("the rectangle tool at 375 px with taps: the tool buttons fit and are 44 px, two taps make a closed rectangle", async () => {
     const page = await fresh(375, true);
