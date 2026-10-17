@@ -1,5 +1,15 @@
 //! Triangle meshes produced by tessellation, with the checks and measures
 //! that only make sense on triangles.
+//!
+//! Mutation testing (`cargo mutants -f src/mesh.rs`) leaves these
+//! survivors, all equivalent (no input can tell them apart):
+//! - `a < b` vs `a <= b` for an edge's direction in `check_closed`: they
+//!   differ only for an edge from a vertex to itself (a triangle naming
+//!   one index twice). All uses of that edge then get the same flag
+//!   (all "down", or all "up" in the mutant), so the group reports the
+//!   same thing either way: FlippedTriangles { a, a } for two or more
+//!   uses, and for one use OpenEdge { a, a, 1 }, whose two ends are the
+//!   same vertex whichever way round they are named.
 
 use crate::topology::FaceId;
 use glam::DVec3;
@@ -218,6 +228,20 @@ mod tests {
         assert_eq!(short_edge_corner([p, q, r]), [p, q, r]); // longest is b–c
         assert_eq!(short_edge_corner([q, r, p]), [p, q, r]); // longest is a–b
         assert_eq!(short_edge_corner([r, p, q]), [p, q, r]); // longest is c–a
+        // The same triangle moved away from the origin: edge lengths come
+        // from differences of corners, so the answer doesn't change. (A
+        // sum of corners would: at (20, 20, 20), |p + q|² = 50² + 40² + 40²
+        // = 5700 would beat |q − r|² = 101.)
+        let o = DVec3::splat(20.0);
+        let (p, q, r) = (p + o, q + o, r + o);
+        assert_eq!(short_edge_corner([p, q, r]), [p, q, r]);
+        assert_eq!(short_edge_corner([q, r, p]), [p, q, r]);
+        assert_eq!(short_edge_corner([r, p, q]), [p, q, r]);
+        // Its area, from the two short edges at p: |(10,0,0) × (0,1,0)|/2 = 5.
+        let m = Mesh { positions: vec![p, q, r], triangles: vec![[0, 1, 2], [1, 2, 0], [2, 0, 1]], ..Default::default() };
+        for t in 0..3 {
+            assert!(crate::tolerance::rel_eq(m.triangle_area(t), 5.0, crate::tolerance::FP_REL), "{}", m.triangle_area(t));
+        }
     }
 
     #[test]
@@ -250,6 +274,25 @@ mod tests {
         let errs = m.check_closed().unwrap_err();
         assert_eq!(errs.len(), 3, "{errs:?}");
         assert!(errs.iter().all(|e| matches!(e, MeshError::OpenEdge { uses: 1, .. })), "{errs:?}");
+    }
+
+    #[test]
+    fn open_edges_are_named_in_the_direction_they_run() {
+        // A lone triangle 0 → 1 → 2 → 0: every edge is used once, so all
+        // three are open, each named the way its one use runs. Reported in
+        // order of (low, high) vertex: (0,1) runs 0→1; (0,2) runs 2→0;
+        // (1,2) runs 1→2.
+        let m = Mesh { positions: vec![DVec3::ZERO, DVec3::X, DVec3::Y], triangles: vec![[0, 1, 2]], ..Default::default() };
+        let open = |a, b| MeshError::OpenEdge { a, b, uses: 1 };
+        assert_eq!(m.check_closed(), Err(vec![open(0, 1), open(2, 0), open(1, 2)]));
+        // Turned over (0 → 2 → 1), each edge runs the other way.
+        let m = Mesh { triangles: vec![[0, 2, 1]], ..m };
+        assert_eq!(m.check_closed(), Err(vec![open(1, 0), open(0, 2), open(2, 1)]));
+        // The tetrahedron missing its base 0 → 2 → 1: the base's edges are
+        // left used once each, by the side faces, running 0→1, 1→2, 2→0.
+        let mut t = tetra();
+        t.triangles.remove(0);
+        assert_eq!(t.check_closed(), Err(vec![open(0, 1), open(2, 0), open(1, 2)]));
     }
 
     #[test]

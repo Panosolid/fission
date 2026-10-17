@@ -29,41 +29,35 @@
 //! - A shell wholly inside another (a body inside a body, not touching)
 //!   meets nothing, so it passes; voids come with booleans.
 //!
-//! Mutation testing (`cargo mutants`, lib tests) leaves these survivors,
-//! all equivalent or ties at exactly a threshold:
-//! - `check`, the sphere face box, `- pad` → `/ pad`: by precedence that is
-//!   centre − r/LINEAR, a far bigger box, so it only stops pruning; so does
-//!   `&&` → `||` in `overlapping`'s box test.
-//! - `edges_meet`, `along_each_other`'s `&&` → `||`: one edge within LINEAR
-//!   of the other's whole line or circle but not the reverse happens only
-//!   at slants inside tolerance, and there the four ends (always candidates)
-//!   find what the samples would. Checked: 1200 pairs of star prisms (with
-//!   and without arcs), cubes and half cylinders turned by 1e-6, 1e-3 and
-//!   1 rad and moved by as much gave identical reports.
-//! - `> LINEAR` → `>= LINEAR` from a known vertex in `edge_meets_face`: a
-//!   candidate exactly LINEAR from a shared vertex. (The same tie in
-//!   `edges_meet` is killed by
-//!   `validate::tests::vertex_exactly_linear_off_its_edges_is_on`.)
-//! - `edge_meets_face`, the `==` in the `known` dedup → `!=`: drops the
-//!   second shared vertex when both ends are f's vertices. That vertex is on
-//!   f's boundary, so `classify` never calls it inside; only dividing out
-//!   its root could matter, at an edge tangent there. Checked: 1200 edges
-//!   tangent to balls of radius 100 mm to 1 km, 10 mm to 10 m long, in 100
-//!   turns, arriving at the vertex with it left out of `known` altogether,
-//!   report nothing (rounding splits the root only where the edge starts,
-//!   `a_tangent_edge_at_a_shared_vertex_is_not_a_meeting`).
-//! - `faces_meet`, `size(i) <= size(j)` → `>`: only the order of two
-//!   `classify` calls that must both say inside.
-//! - `classify`, `d < best` → `<=`: a tie between equally near edges; the
-//!   path from either nearest point crosses no edge, so either decides the
-//!   same. `* ±1` → `/ ±1` (normal, edge direction): exact. `> 0.0` →
-//!   `>= 0.0`: the path is perpendicular to the edge at an inner nearest
-//!   point, so the product is 0 only for a path of length 0, already the
-//!   boundary.
-//! - `corner_contains`, `a > 0.0` → `>=`, `a < angle(..)` → `<=`: a path
-//!   leaving exactly along one of the corner's edges.
-//! - `along_surface`, `+ PI` → `- PI` in the cylinder's turn: d − π and
-//!   d + π differ by 2π, the same after `rem_euclid(TAU)`.
+//! Mutation testing (`cargo mutants -f src/self_intersect.rs`) leaves these
+//! survivors, all equivalent (no input can tell them apart):
+//! - `&&` → `||` in `along_each_other`: one edge within LINEAR of the
+//!   other's whole line or circle but not the reverse happens only at
+//!   slants inside tolerance, and there the four ends (always candidates)
+//!   find what the samples would, at most naming another point of the same
+//!   meeting. Checked: 1200 pairs of star prisms (with and without arcs),
+//!   cubes and half cylinders turned by 1e-6, 1e-3 and 1 rad and moved by
+//!   as much gave identical reports.
+//! - `<=` → `>` in `fewer_edges_first`: only the order of the two
+//!   `classify` calls in `faces_meet`, which must both say inside.
+//! - In `classify`: `d < best` → `<=`, a tie between equally near boundary
+//!   points: the shortest path from either crosses no edge (anything it
+//!   crossed would be nearer), so either decides the same. `* ±1` → `/ ±1`
+//!   (normal, edge direction): exact. `> 0.0` → `>= 0.0` at an inner
+//!   nearest point p: the path from p is in the surface and perpendicular
+//!   to the edge, so the product is ±|path|, 0 only for q − p along the
+//!   surface's normal at p. On a plane or cylinder q is then more than
+//!   LINEAR off the surface (it is more than LINEAR from p), which callers
+//!   never pass; on a sphere q is p's antipode, from which every other
+//!   point of the edge is nearer than p.
+//! - `a > 0.0` → `>=`, `a < angle(..)` → `<=` in `corner_contains`: a path
+//!   leaving the corner exactly along one of its edges. `classify` never
+//!   asks that: the edge's own points just past the corner would be nearer
+//!   to q than the corner is.
+//! - `+ PI` → `- PI` in `short_turn`: d − π and d + π differ by 2π, so
+//!   after `rem_euclid(TAU)` they agree but for rounding, which shows only
+//!   at half a turn (d within an ulp of ±π), where both ways round are the
+//!   short way to within that ulp, and the two answers are as right.
 
 use crate::geom::{Curve, Surface};
 use crate::intersect::{closed_meetings, curve_curve, curve_surface};
@@ -84,28 +78,8 @@ const ALONG: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 type Bounds = (DVec3, DVec3);
 
 pub(crate) fn check(body: &Body, errs: &mut Vec<ValidationError>) {
-    let pad = DVec3::splat(LINEAR);
-    let edge_boxes: Vec<Bounds> = body.edges.iter().map(|e| e.bounds()).map(|(lo, hi)| (lo - pad, hi + pad)).collect();
-    let face_boxes: Vec<Bounds> = body
-        .faces
-        .iter()
-        .map(|f| {
-            let (mut lo, mut hi) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
-            for c in f.loops.iter().flat_map(|l| &l.coedges) {
-                let (a, b) = edge_boxes[c.edge];
-                lo = lo.min(a);
-                hi = hi.max(b);
-            }
-            // A sphere face bulges past its edges (a hemisphere past its
-            // equator); planar and cylinder faces lie within their edges'
-            // box (every point is between edge points along a line).
-            if let Surface::Sphere { center, radius, .. } = f.surface {
-                lo = lo.min(center - DVec3::splat(radius) - pad);
-                hi = hi.max(center + DVec3::splat(radius) + pad);
-            }
-            (lo, hi)
-        })
-        .collect();
+    let edge_boxes = edge_boxes(body);
+    let face_boxes = face_boxes(body, &edge_boxes);
     let face_vertices: Vec<Vec<VertexId>> = body
         .faces
         .iter()
@@ -162,6 +136,38 @@ pub(crate) fn check(body: &Body, errs: &mut Vec<ValidationError>) {
     }
 }
 
+/// Each edge's box, padded by LINEAR, so parts within LINEAR of each other
+/// have overlapping boxes.
+fn edge_boxes(body: &Body) -> Vec<Bounds> {
+    let pad = DVec3::splat(LINEAR);
+    body.edges.iter().map(|e| e.bounds()).map(|(lo, hi)| (lo - pad, hi + pad)).collect()
+}
+
+/// Each face's box, padded by LINEAR: round its edges' (padded) boxes,
+/// and for a sphere face round its whole ball too.
+fn face_boxes(body: &Body, edge_boxes: &[Bounds]) -> Vec<Bounds> {
+    let pad = DVec3::splat(LINEAR);
+    body.faces
+        .iter()
+        .map(|f| {
+            let (mut lo, mut hi) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
+            for c in f.loops.iter().flat_map(|l| &l.coedges) {
+                let (a, b) = edge_boxes[c.edge];
+                lo = lo.min(a);
+                hi = hi.max(b);
+            }
+            // A sphere face bulges past its edges (a hemisphere past its
+            // equator); planar and cylinder faces lie within their edges'
+            // box (every point is between edge points along a line).
+            if let Surface::Sphere { center, radius, .. } = f.surface {
+                lo = lo.min(center - DVec3::splat(radius) - pad);
+                hi = hi.max(center + DVec3::splat(radius) + pad);
+            }
+            (lo, hi)
+        })
+        .collect()
+}
+
 /// Pairs (i, j) whose boxes overlap, i from `a` and j from `b`; with
 /// `same`, a and b are one list and each pair comes once with i ≠ j.
 /// Sweep along x: sorted by their low x, a box only meets boxes whose low
@@ -198,9 +204,7 @@ fn edges_meet(body: &Body, i: EdgeId, j: EdgeId) -> Option<DVec3> {
     let mut shared: Vec<VertexId> = [a.start, a.end].into_iter().filter(|v| *v == b.start || *v == b.end).collect();
     shared.dedup();
     let known: Vec<DVec3> = shared.iter().map(|&v| body.vertices[v].point).collect();
-    let along_each_other = ALONG.iter().all(|&s| a.curve.distance(b.point_at(s)) <= LINEAR)
-        && ALONG.iter().all(|&s| b.curve.distance(a.point_at(s)) <= LINEAR);
-    let candidates: Vec<DVec3> = if along_each_other {
+    let candidates: Vec<DVec3> = if along_each_other(a, b) {
         // On one line or circle: they overlap if an end or a sample of one
         // lies inside the other (an overlap's ends are ends of one of them).
         ALONG.iter().flat_map(|&s| [a.point_at(s), b.point_at(s)]).collect()
@@ -213,6 +217,12 @@ fn edges_meet(body: &Body, i: EdgeId, j: EdgeId) -> Option<DVec3> {
     candidates
         .into_iter()
         .find(|&p| a.distance(p) <= LINEAR && b.distance(p) <= LINEAR && known.iter().all(|k| k.distance(p) > LINEAR))
+}
+
+/// Whether each edge's samples lie within LINEAR of the other's line or
+/// circle: the two lie on one curve.
+fn along_each_other(a: &Edge, b: &Edge) -> bool {
+    ALONG.iter().all(|&s| a.curve.distance(b.point_at(s)) <= LINEAR) && ALONG.iter().all(|&s| b.curve.distance(a.point_at(s)) <= LINEAR)
 }
 
 /// A point where edge e meets face f other than at a vertex they share.
@@ -248,16 +258,25 @@ fn edge_meets_face(body: &Body, ei: EdgeId, fi: FaceId, face_vertices: &[VertexI
 /// A point inside both faces i and j where their surfaces cross.
 fn faces_meet(body: &Body, i: FaceId, j: FaceId) -> Option<DVec3> {
     let (fa, fb) = (&body.faces[i], &body.faces[j]);
-    // Classify against the face with fewer edges first: most candidates
-    // are outside it, and that settles them cheaply.
-    let size = |f: FaceId| body.faces[f].loops.iter().map(|l| l.coedges.len()).sum::<usize>();
-    let (first, second) = if size(i) <= size(j) { (i, j) } else { (j, i) };
+    let (first, second) = fewer_edges_first(body, i, j);
     closed_meetings(&fa.surface, &fb.surface).into_iter().find(|&p| {
         fa.surface.distance(p) <= LINEAR
             && fb.surface.distance(p) <= LINEAR
             && classify(body, first, p) == Where::Inside
             && classify(body, second, p) == Where::Inside
     })
+}
+
+/// Faces i and j, the one with fewer edges first: `faces_meet` classifies
+/// against it first, since most candidates are outside it and that
+/// settles them cheaply.
+fn fewer_edges_first(body: &Body, i: FaceId, j: FaceId) -> (FaceId, FaceId) {
+    let size = |f: FaceId| body.faces[f].loops.iter().map(|l| l.coedges.len()).sum::<usize>();
+    if size(i) <= size(j) {
+        (i, j)
+    } else {
+        (j, i)
+    }
 }
 
 /// Where a point of a face's surface lies relative to the face.
@@ -409,11 +428,16 @@ fn along_surface(surface: &Surface, p: DVec3, q: DVec3) -> DVec3 {
         }
         Surface::Cylinder { axis, x_dir, radius, .. } => {
             let (up, uq) = (surface.project(p), surface.project(q));
-            let turn = (uq.x - up.x + PI).rem_euclid(TAU) - PI;
+            let turn = short_turn(up.x, uq.x);
             let round = (x_dir * -up.x.sin() + axis.cross(x_dir) * up.x.cos()) * radius;
             round * turn + axis * (uq.y - up.y)
         }
     }
+}
+
+/// The angle from `from` round to `to` the short way, in [−π, π).
+fn short_turn(from: f64, to: f64) -> f64 {
+    (to - from + PI).rem_euclid(TAU) - PI
 }
 
 #[cfg(test)]
@@ -805,6 +829,24 @@ mod tests {
     }
 
     #[test]
+    fn two_lines_crossing_away_from_their_samples_meet_where_they_cross() {
+        // a runs (0,0,0) → (3,0,0) and b runs (1,−1,0) → (1,2,0): they cross
+        // at (1, 0, 0), a third of the way along each (1/3 of a's length 3,
+        // and 1 of b's length 3). No sample at 0, ¼, ½, ¾ or 1 of either is
+        // there, so only the crossing search finds it: they are not along
+        // each other (a's middle (1.5,0,0) is ½ from b's line).
+        let mut b = Body::default();
+        let v: Vec<VertexId> = [(0.0, 0.0), (3.0, 0.0), (1.0, -1.0), (1.0, 2.0)].iter().map(|&(x, y)| b.add_vertex(DVec3::new(x, y, 0.0))).collect();
+        let (e, f) = (b.add_line(v[0], v[1]), b.add_line(v[2], v[3]));
+        assert!(!along_each_other(&b.edges[e], &b.edges[f]));
+        let p = edges_meet(&b, e, f).expect("they cross");
+        assert!(p.distance(DVec3::X) <= LINEAR, "{p}");
+        // A second line over a, end to end, is along it.
+        let h = b.add_line(v[0], v[1]);
+        assert!(along_each_other(&b.edges[e], &b.edges[h]));
+    }
+
+    #[test]
     fn a_diagonal_across_a_face_meets_it_between_its_vertices() {
         // An edge from cube vertex 0 (0, 0, 0) to vertex 3 (1, 1, 0) runs
         // across the bottom (face 0, vertices 0, 1, 2, 3), in its plane. Its
@@ -983,6 +1025,87 @@ mod tests {
             let mut errs = vec![ValidationError::EdgesMeet { a: 0, b: 1, point: DVec3::ZERO }; already];
             check(&body, &mut errs);
             assert_eq!(errs.len(), already + MAX_REPORTED, "{already} found before");
+        }
+    }
+
+    #[test]
+    fn face_boxes_by_hand() {
+        // The unit cube's top (face 1: z = 1, x and y in [0, 1]) lies
+        // within its edges, so its box is theirs, [0, 1] × [0, 1] × [1, 1],
+        // padded by LINEAR. Each half of a unit ball about (3, 3, 3) bulges
+        // past its equator (z = 3) to a pole: its box is the ball's, [2, 4]³,
+        // padded by LINEAR, and no bigger.
+        let l = DVec3::splat(LINEAR);
+        let near = |got: Bounds, want: Bounds| got.0.distance(want.0) <= 1e-12 && got.1.distance(want.1) <= 1e-12;
+        let cube = hand_cube();
+        let top = face_boxes(&cube, &edge_boxes(&cube))[1];
+        assert!(near(top, (DVec3::new(0.0, 0.0, 1.0) - l, DVec3::ONE + l)), "{top:?}");
+        let ball = moved(hand_sphere(1.0), DVec3::splat(3.0));
+        let halves = face_boxes(&ball, &edge_boxes(&ball));
+        assert_eq!(halves.len(), 2);
+        for half in halves {
+            assert!(near(half, (DVec3::splat(2.0) - l, DVec3::splat(4.0) + l)), "{half:?}");
+        }
+    }
+
+    #[test]
+    fn overlapping_pairs_by_hand() {
+        // Boxes pair up when they overlap, or touch, along all three axes.
+        // A = [0, 1]³; B = [½, 3/2]² × [2, 3] is over A in x and y but
+        // above it; C = [½, 3/2]² × [1, 1.9] rests on A's top (z = 1) and
+        // is below B (1.9 < 2); E = [2, 3] × [0, 1]² is beside A in x. So
+        // the one pair is A with C.
+        let bx = |lo: [f64; 3], hi: [f64; 3]| (DVec3::from(lo), DVec3::from(hi));
+        let a = bx([0.0; 3], [1.0; 3]);
+        let b = bx([0.5, 0.5, 2.0], [1.5, 1.5, 3.0]);
+        let c = bx([0.5, 0.5, 1.0], [1.5, 1.5, 1.9]);
+        let e = bx([2.0, 0.0, 0.0], [3.0, 1.0, 1.0]);
+        assert_eq!(overlapping(&[a, b, c, e], &[a, b, c, e], true), vec![(0, 2)]);
+        // A against the others as a second list: C is its index 1 there.
+        assert_eq!(overlapping(&[a], &[b, c, e], false), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn a_closed_edge_through_a_face_s_corner_meets_it_across() {
+        // A circle edge whose one vertex is the cube's corner 0 (the
+        // origin), in the upright plane through the bottom face's diagonal:
+        // centre (¼, ¼, 0), radius √(1/8) = |centre|, so it passes through
+        // the origin and, diametrically opposite, through 2·centre =
+        // (½, ½, 0), on the bottom face (face 0), ½ from its edges. The
+        // vertex it starts and ends at is shared with the face (known once,
+        // dividing out one crossing); the other crossing is a meeting.
+        let mut b = hand_cube();
+        let s = 0.5f64.sqrt();
+        let circle = Curve::Circle { center: DVec3::new(0.25, 0.25, 0.0), axis: DVec3::new(s, -s, 0.0), x_dir: DVec3::new(-s, -s, 0.0), radius: 0.125f64.sqrt() };
+        let e = b.add_edge(circle, 0, 0, 0.0, TAU);
+        let p = edge_meets_face(&b, e, 0, &[0, 1, 2, 3]).expect("it crosses the bottom");
+        assert!(p.distance(DVec3::new(0.5, 0.5, 0.0)) <= LINEAR, "{p}");
+    }
+
+    #[test]
+    fn an_edge_starting_within_linear_of_a_shared_vertex_starts_at_it() {
+        // The cube's corner 0 stored at v = (0.6, 0.6, 0)·LINEAR, within
+        // LINEAR of its three edges (0.6, 0.6 and 0.85·LINEAR away). A new
+        // edge from it straight up starts at v + k·(0.6, 0.8, 0)·LINEAR:
+        // k·LINEAR from v, and (0.6 + 0.6k)·LINEAR and (0.6 + 0.8k)·LINEAR
+        // from the bottom face's edges x = 0 and y = 0, so for k ≥ 0.9 more
+        // than LINEAR (at least 1.14·LINEAR): inside the bottom face.
+        // Within LINEAR of v (0.9×, and exactly 1×) that start is the shared
+        // vertex: no meeting. At 1.1× it is a point of the bottom face off
+        // the vertex: a meeting, there.
+        for (k, meets) in [(0.9, false), (1.0, false), (1.1, true)] {
+            let mut b = hand_cube();
+            let v = DVec3::new(0.6, 0.6, 0.0) * LINEAR;
+            b.vertices[0].point = v;
+            let start = v + DVec3::new(0.6, 0.8, 0.0) * (k * LINEAR);
+            if k == 1.0 {
+                assert_eq!(start.distance(v), LINEAR, "exactly LINEAR");
+            }
+            let top = b.add_vertex(start + DVec3::Z);
+            let e = b.add_edge(Curve::Line { origin: start, dir: DVec3::Z }, 0, top, 0.0, 1.0);
+            let got = edge_meets_face(&b, e, 0, &[0, 1, 2, 3]);
+            assert_eq!(got.is_some(), meets, "{k}× LINEAR: {got:?}");
+            assert!(got.is_none_or(|p| p.distance(start) <= 1e-12), "{got:?}");
         }
     }
 }
