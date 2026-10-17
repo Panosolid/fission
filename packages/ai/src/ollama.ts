@@ -36,6 +36,13 @@ export function hasModel(names: readonly string[], model: string): boolean {
   return names.some((n) => n === model || n === want);
 }
 
+/** The models Ollama has pulled (its /api/tags), or a thrown error when it can't be reached. */
+export async function ollamaModels(o: { endpoint?: string; fetch: Fetch }): Promise<string[]> {
+  const endpoint = ollamaEndpoint(o.endpoint);
+  const reply = await requestJson({ fetch: o.fetch, url: `${endpoint}/api/tags`, timeoutMs: CHECK_TIMEOUT_MS, who: `Ollama at ${endpoint}` });
+  return ((reply as { models?: { name?: unknown }[] }).models ?? []).map((m) => m?.name).filter((n): n is string => typeof n === "string");
+}
+
 const UNREACHABLE = "Is Ollama running, and does OLLAMA_ORIGINS allow this page? (see the Ollama notes in the provider list)";
 
 export function ollamaProvider(o: { model?: string; endpoint?: string; fetch: Fetch; timeoutMs?: number }): AIProvider {
@@ -46,13 +53,12 @@ export function ollamaProvider(o: { model?: string; endpoint?: string; fetch: Fe
     kind: "ollama",
     structuredOutput: true,
     async check() {
-      let reply: unknown;
+      let names: string[];
       try {
-        reply = await requestJson({ fetch: o.fetch, url: `${endpoint}/api/tags`, timeoutMs: CHECK_TIMEOUT_MS, who });
+        names = await ollamaModels({ endpoint, fetch: o.fetch });
       } catch (e) {
         return { ok: false, reason: `${(e as Error).message}. ${UNREACHABLE}`, suggest: "api-key" };
       }
-      const names = ((reply as { models?: { name?: unknown }[] }).models ?? []).map((m) => m.name).filter((n): n is string => typeof n === "string");
       if (model === "") return { ok: false, reason: names.length ? `choose a model: Ollama has ${names.join(", ")}` : "Ollama has no models yet: run `ollama pull qwen2.5:1.5b` first" };
       if (!hasModel(names, model)) return { ok: false, reason: `Ollama doesn't have ${model} yet: run \`ollama pull ${model}\`` };
       return { ok: true };
