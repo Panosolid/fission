@@ -3,6 +3,31 @@
 //! Pure Rust lives in the modules; the `#[wasm_bindgen]` functions below are the
 //! thin layer the browser app calls. Vectors cross the boundary as flat
 //! `[x, y, z]` arrays (`Float64Array` in JavaScript).
+//!
+//! Each entry point only converts: the work is in a plain Rust function
+//! (`view_of`, `stl_of`) that the lib tests call. A `JsValue` can't be made
+//! or read outside WebAssembly (natively every wasm-bindgen import panics:
+//! "cannot call wasm-bindgen imported functions on non-wasm targets"), so
+//! no lib test can run the conversions themselves.
+//!
+//! Mutation testing (`cargo mutants -f src/lib.rs`) leaves these
+//! survivors, which no native test can reach (they are not equivalent):
+//! each entry point, and `to_js`, replaced by `Ok(Default::default())` (an
+//! undefined `JsValue`). The real WebAssembly build covers them, through
+//! the kernel bridge (`packages/testing/src/node-kernel.ts`, and the app's
+//! worker in the browser):
+//! - `make_box`, `make_cylinder`, `make_sphere`, `make_extrude` and
+//!   `to_js`: `packages/testing/journeys/command-fuzz.journey.ts` (3000
+//!   random commands over every shape; each built view must have
+//!   `errors: []`), `open-saved-file.journey.ts` (a 50 × 30 × 20 box's
+//!   volume is 30000), and the e2e checks in `apps/fission/e2e/smoke.mjs`
+//!   ("default 40×30×20 box shows hand-worked numbers", "cylinder
+//!   primitive: diameter from the width", "sphere primitive: diameter from
+//!   the width", "L-bracket extrusion shows hand-worked numbers").
+//! - `export_stl`: `packages/testing/journeys/design-to-stl.journey.ts`
+//!   (the STL's volume is 24000, then 30000 after an edit) and the e2e
+//!   check "the STL button saves the box as a binary STL with hand-worked
+//!   contents".
 
 pub mod accurate;
 pub mod geom;
@@ -90,29 +115,28 @@ fn curve_type(curve: &geom::Curve) -> &'static str {
     }
 }
 
-fn to_js(view: BodyView) -> Result<JsValue, JsError> {
+/// The view for JavaScript, or the reason there is none as its error.
+fn to_js(view: Result<BodyView, String>) -> Result<JsValue, JsError> {
+    let view = view.map_err(|e| JsError::new(&e))?;
     serde_wasm_bindgen::to_value(&view).map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Box with one corner at the origin, sizes in millimetres.
 #[wasm_bindgen]
 pub fn make_box(width: f64, depth: f64, height: f64) -> Result<JsValue, JsError> {
-    let body = ops::primitives::make_box(width, depth, height).map_err(|e| JsError::new(&e.to_string()))?;
-    to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
+    to_js(view_of(BodySpec::Box { width, depth, height }))
 }
 
 /// Sphere centred on the origin, radius in millimetres.
 #[wasm_bindgen]
 pub fn make_sphere(radius: f64) -> Result<JsValue, JsError> {
-    let body = ops::primitives::make_sphere(radius).map_err(|e| JsError::new(&e.to_string()))?;
-    to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
+    to_js(view_of(BodySpec::Sphere { radius }))
 }
 
 /// Cylinder standing on the origin along +Z, sizes in millimetres.
 #[wasm_bindgen]
 pub fn make_cylinder(radius: f64, height: f64) -> Result<JsValue, JsError> {
-    let body = ops::primitives::make_cylinder(radius, height).map_err(|e| JsError::new(&e.to_string()))?;
-    to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
+    to_js(view_of(BodySpec::Cylinder { radius, height }))
 }
 
 /// One loop of a profile as the app sends it: corners as flat
@@ -153,10 +177,8 @@ pub fn profile_from_input(p: ProfileIn) -> Result<ops::extrude::Profile, String>
 /// Extrudes a profile (see `ProfileIn`) along +Z by `distance`.
 #[wasm_bindgen]
 pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsError> {
-    let input: ProfileIn = serde_wasm_bindgen::from_value(profile).map_err(|e| JsError::new(&format!("bad profile: {e}")))?;
-    let profile = profile_from_input(input).map_err(|e| JsError::new(&e))?;
-    let body = ops::extrude::extrude(&profile, distance).map_err(|e| JsError::new(&e.to_string()))?;
-    to_js(view_body(&body).map_err(|e| JsError::new(&e))?)
+    let profile: ProfileIn = serde_wasm_bindgen::from_value(profile).map_err(|e| JsError::new(&format!("bad profile: {e}")))?;
+    to_js(view_of(BodySpec::Extrude { profile, distance }))
 }
 
 /// What to build, in the app's words: the same shapes as `make_box`,
@@ -182,6 +204,13 @@ pub fn build(spec: BodySpec) -> Result<Body, String> {
         BodySpec::Extrude { profile, distance } => ops::extrude::extrude(&profile_from_input(profile)?, distance),
     };
     made.map_err(|e| e.to_string())
+}
+
+/// What the make_* functions give the app: the view of the body a spec
+/// describes, or the kernel's reason it can't be built (the same message
+/// either way round: a bad profile's, an operation's, or tessellation's).
+pub fn view_of(spec: BodySpec) -> Result<BodyView, String> {
+    view_body(&build(spec)?)
 }
 
 /// An STL file for the app to download.
@@ -234,6 +263,31 @@ mod tests {
         assert!(rel_eq(v.area, 2200.0, FP_REL));
         assert_eq!((v.vertices, v.edges, v.faces), (8, 12, 6));
         assert!(v.errors.is_empty());
+    }
+
+    #[test]
+    fn view_of_each_spec_by_hand() {
+        // What make_box, make_cylinder, make_sphere and make_extrude hand
+        // to JavaScript. Box 10 × 20 × 30: V = 6000, A = 2(200 + 600 +
+        // 300) = 2200. Cylinder r = 1, h = 2: V = π·1²·2 = 2π, A = two
+        // caps 2π + side 2π·1·2 = 6π (swapping r and h would give 4π, 12π).
+        // Sphere r = 3: V = 4/3·π·27 = 36π. The L of
+        // l_bracket_view_reports_hand_worked_numbers extruded 2: V = 102.
+        let v = view_of(BodySpec::Box { width: 10.0, depth: 20.0, height: 30.0 }).unwrap();
+        assert!(rel_eq(v.volume, 6000.0, FP_REL) && rel_eq(v.area, 2200.0, FP_REL) && v.errors.is_empty(), "{} {}", v.volume, v.area);
+        let v = view_of(BodySpec::Cylinder { radius: 1.0, height: 2.0 }).unwrap();
+        assert!(rel_eq(v.volume, 2.0 * PI, FP_REL) && rel_eq(v.area, 6.0 * PI, FP_REL), "{} {}", v.volume, v.area);
+        let v = view_of(BodySpec::Sphere { radius: 3.0 }).unwrap();
+        assert!(rel_eq(v.volume, 36.0 * PI, FP_REL) && v.face_types == ["sphere"; 2], "{}", v.volume);
+        let outer = vec![0.0, 0.0, 10.0, 0.0, 10.0, 3.0, 3.0, 3.0, 3.0, 10.0, 0.0, 10.0];
+        let l = |outer: Vec<f64>| ProfileIn { outer: BoundaryIn::Path { corners: outer, bulges: vec![] }, holes: vec![] };
+        let v = view_of(BodySpec::Extrude { profile: l(outer), distance: 2.0 }).unwrap();
+        assert!(rel_eq(v.volume, 102.0, FP_REL) && v.faces == 8, "{}", v.volume);
+        // Failures carry the reason the app shows: the kernel's for a bad
+        // size, the profile reader's for odd coordinates.
+        assert!(view_of(BodySpec::Box { width: 1.0, depth: -1.0, height: 1.0 }).err().unwrap().contains("must be"));
+        let odd = view_of(BodySpec::Extrude { profile: l(vec![0.0; 5]), distance: 1.0 }).err().unwrap();
+        assert_eq!(odd, "profile coordinates must come in x, y pairs");
     }
 
     #[test]
