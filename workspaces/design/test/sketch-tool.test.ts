@@ -323,7 +323,7 @@ test("hand-worked: the sketch status counts lines and circles apart", () => {
   assert.equal(curveCount(sketch(clicks(f.doc, { kind: "rectangle", sketch: f.tool.sketch, corner: null } as RectangleTool, [[20, 20], [40, 40]]).doc)), "4 lines");
 });
 
-test("tools: Escape ends what is part way, switching starts afresh, L, R and C choose them", () => {
+test("tools: Escape ends what is part way, switching starts afresh, L, R, C and A choose them", () => {
   const f = freshRectangle();
   assert.equal(toolBusy(f.tool), false);
   assert.equal(toolBusy(clickAt(f.doc, f.tool, [0, 0]).tool), true, "a first corner down");
@@ -334,7 +334,8 @@ test("tools: Escape ends what is part way, switching starts afresh, L, R and C c
   assert.deepEqual(startTool("circle", "sketch-2"), { kind: "circle", sketch: "sketch-2", centre: null });
   assert.equal(toolBusy(freshCircle().tool), false);
   assert.equal(toolBusy(clickAt(freshCircle().doc, freshCircle().tool, [0, 0]).tool), true, "a centre down");
-  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"]]);
+  assert.deepEqual(startTool("arc", "sketch-2"), { kind: "arc", sketch: "sketch-2", start: null, end: null });
+  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"]]);
   // The keys in Design's table are the ones the panel's buttons name, and they choose those tools.
   for (const t of SKETCH_TOOLS) {
     const spec = DESIGN_SHORTCUTS.find((s) => s.keys === t.key)!;
