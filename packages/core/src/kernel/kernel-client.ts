@@ -1,6 +1,6 @@
 // Main-thread side of the kernel worker: every kernel call is an async
 // message, so a slow operation never freezes the UI.
-import type { BodySpec, BodyView, Outline, SketchArc, SketchCircle, SketchLine, SketchOutline, StlFile } from "./kernel-types.ts";
+import type { BodyHandle, BodySpec, BodyView, KernelErrorKind, KernelFailure, KernelInput, Outline, SketchArc, SketchCircle, SketchLine, SketchOutline, StlFile } from "./kernel-types.ts";
 
 /** Every operation the worker supports, with its arguments and result. */
 export interface KernelOps {
@@ -13,13 +13,50 @@ export interface KernelOps {
   snap_to_grid: { args: [x: number, y: number, spacing: number]; result: [number, number] };
   place_freely: { args: [x: number, y: number, pixel: number]; result: [number, number] };
   sketch_outline: { args: [lines: SketchLine[], circles: SketchCircle[], arcs: SketchArc[]]; result: SketchOutline };
+  /** The body store (kernel/src/store.rs): build and keep a body, read it by handle, free it. */
+  body_build: { args: [spec: BodySpec]; result: BodyHandle };
+  body_view: { args: [body: BodyHandle]; result: BodyView };
+  body_stl: { args: [body: BodyHandle, name: string]; result: StlFile };
+  body_free: { args: [body: BodyHandle]; result: void };
+  /** How many bodies the kernel keeps: tests check what they build they free. */
+  body_count: { args: []; result: number };
 }
 
 export type KernelRequest = {
   [K in keyof KernelOps]: { id: number; op: K; args: KernelOps[K]["args"] };
 }[keyof KernelOps];
 
-export type KernelResponse = { id: number; ok: true; value: unknown } | { id: number; ok: false; error: string };
+export type KernelResponse = { id: number; ok: true; value: unknown } | { id: number; ok: false; error: KernelFailure };
+
+const KINDS: readonly KernelErrorKind[] = ["invalid-input", "invalid-result", "bad-request", "unknown-body", "too-many-bodies", "internal"];
+
+/**
+ * A failed kernel call: `message` to show the user, `kind` and `inputs` for
+ * the app to decide by (never parse the message).
+ */
+export class KernelError extends Error {
+  readonly kind: KernelErrorKind;
+  readonly inputs: KernelInput[];
+  constructor(failure: KernelFailure) {
+    // Its name stays "Error", so String(e) reads as it always has.
+    super(failure.message);
+    this.kind = failure.kind;
+    this.inputs = failure.inputs;
+  }
+}
+
+/**
+ * Anything a kernel call threw, as plain data: the WASM kernel throws an
+ * Error carrying `kind` and `inputs`; anything else (a crash, a worker bug)
+ * is "internal" with no inputs.
+ */
+export function kernelFailure(e: unknown): KernelFailure {
+  const message = e instanceof Error ? e.message : String(e);
+  const fields = (typeof e === "object" && e !== null ? e : {}) as { kind?: unknown; inputs?: unknown };
+  const kind = KINDS.includes(fields.kind as KernelErrorKind) ? (fields.kind as KernelErrorKind) : "internal";
+  const inputs = kind !== "internal" && Array.isArray(fields.inputs) ? (fields.inputs as KernelInput[]) : [];
+  return { kind, inputs, message };
+}
 
 /** Anything that answers kernel calls: the worker client in the app, the WASM module directly in tests. */
 export interface KernelCalls {
@@ -38,10 +75,10 @@ export class KernelClient implements KernelCalls {
       if (!p) return;
       this.pending.delete(reply.id);
       if (reply.ok) p.resolve(reply.value);
-      else p.reject(new Error(reply.error));
+      else p.reject(new KernelError(reply.error));
     };
     this.worker.onerror = (event) => {
-      const err = new Error(`kernel worker crashed: ${event.message}`);
+      const err = new KernelError({ kind: "internal", inputs: [], message: `kernel worker crashed: ${event.message}` });
       this.pending.forEach((p) => p.reject(err));
       this.pending.clear();
     };

@@ -5,7 +5,7 @@
 // Node-only, like the tests, so the type check (browser types) skips it.
 
 import { readFileSync } from "node:fs";
-import type { KernelCalls, KernelOps } from "@fission/core";
+import { KernelError, kernelFailure, type KernelCalls, type KernelOps } from "@fission/core";
 import * as wasm from "../../core/src/kernel/wasm/fission_kernel.js";
 
 let loaded = false;
@@ -25,9 +25,21 @@ export function nodeKernel(): KernelCalls {
     snap_to_grid: (x, y, s) => wasm.snap_to_grid(x, y, s),
     place_freely: (x, y, pixel) => wasm.place_freely(x, y, pixel),
     sketch_outline: (lines, circles, arcs) => wasm.sketch_outline(lines, circles, arcs),
+    body_build: (spec) => wasm.body_build(spec),
+    body_view: (body) => wasm.body_view(body),
+    body_stl: (body, name) => wasm.body_stl(body, name),
+    body_free: (body) => wasm.body_free(body),
+    body_count: () => wasm.body_count(),
   };
   return {
-    // Async like the worker, and errors become rejections with the kernel's message.
-    call: (async (op: keyof KernelOps, ...args: unknown[]) => (ops[op] as (...a: unknown[]) => unknown)(...args)) as KernelCalls["call"],
+    // Async like the worker, and errors become KernelError rejections as
+    // the app's client gives them (through the same plain-data form).
+    call: (async (op: keyof KernelOps, ...args: unknown[]) => {
+      try {
+        return (ops[op] as (...a: unknown[]) => unknown)(...args);
+      } catch (e) {
+        throw new KernelError(kernelFailure(e));
+      }
+    }) as KernelCalls["call"],
   };
 }

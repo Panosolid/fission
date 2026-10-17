@@ -442,7 +442,7 @@ impl Shape {
             Shape::Extrude { dist, .. } if sketched(self).is_some() => {
                 match sketched(self).unwrap().outline()? {
                     sketch::SketchOutline::Closed(profile, _) => extrude::extrude(&profile, dist.0),
-                    sketch::SketchOutline::Open(why) => Err(KernelError::InvalidInput(why.to_string())),
+                    sketch::SketchOutline::Open(why) => Err(KernelError::InvalidInput { inputs: vec![], message: why.to_string() }),
                 }
             }
             Shape::Extrude { outer, holes, dist, .. } => {
@@ -1748,7 +1748,7 @@ fn classify(r: Result<Result<Body, KernelError>, String>) -> Result<Option<Body>
             Ok(()) => Ok(Some(b)),
             Err(errs) => Err(format!("returned an invalid body: {}", errs[0])),
         },
-        Ok(Err(KernelError::InvalidInput(_))) => Ok(None),
+        Ok(Err(KernelError::InvalidInput { .. })) => Ok(None),
         Ok(Err(KernelError::InvalidResult(errs))) => Err(format!("InvalidResult: {}", errs[0])),
     }
 }
@@ -1761,7 +1761,7 @@ fn classify_motion(before: &Placed, r: Result<Result<Placed, KernelError>, Strin
         Err(panic) => Err(panic),
         Ok(Ok(p)) if p.body != before.body => Err("moving or turning changed the body's geometry, not just its placement".into()),
         Ok(Ok(p)) => Ok(Some(p)),
-        Ok(Err(KernelError::InvalidInput(_))) => Ok(None),
+        Ok(Err(KernelError::InvalidInput { .. })) => Ok(None),
         Ok(Err(KernelError::InvalidResult(errs))) => Err(format!("InvalidResult: {}", errs[0])),
     }
 }
@@ -2342,7 +2342,7 @@ fn huge_bulge_is_not_a_coordinate_by_hand() {
     // A corner at the same 1.1e8 is a coordinate: out of range, both ways.
     let far = strip_with_bulges(&[(1.1e8, 0.0), (1.1e8, 0.002), (1.1e8 + 0.5, 0.002), (1.1e8 + 0.5, 0.0)], &[0.0; 4], 0.5);
     assert_eq!(extrude_expect(&far), Expect::Invalid);
-    assert!(matches!(far.make(), Err(KernelError::InvalidInput(_))));
+    assert!(matches!(far.make(), Err(KernelError::InvalidInput { .. })));
 }
 
 #[test]

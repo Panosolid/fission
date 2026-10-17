@@ -50,4 +50,5 @@ Two rules hold everywhere:
 
 - The main thread never loads the WASM module; every kernel call goes through `KernelClient` to the worker (the e2e test checks this).
 - Wrap UI-driven kernel calls in `latestOnly` so a late reply to an old request never overwrites a newer result.
-- Kernel errors arrive as rejected promises with the kernel's message; show them, never swallow them.
+- Kernel errors arrive as rejected promises (`KernelError`) with the kernel's message; show them, never swallow them. Decide by their `kind` and `inputs`, never by reading the message.
+- Bodies kept in the kernel (`body_build`) are freed (`body_free`) when nothing needs them; tests check `body_count` comes back to where it started.

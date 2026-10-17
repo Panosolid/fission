@@ -37,7 +37,7 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
 
 /// `extrude`, also handing back the body's display mesh (`ops::finish`).
 pub fn extrude_meshed(profile: &Profile, distance: f64) -> Result<Meshed, KernelError> {
-    check_length("extrude distance", distance)?;
+    check_length("distance", "extrude distance", distance)?;
     let loops = check_profile_turned(profile)?;
 
     let mut b = Body::default();
@@ -228,11 +228,11 @@ mod tests {
             ("overlapping holes", Profile::polygon(ok_outer.clone(), vec![square(1.0, 1.0, 3.0), square(2.0, 2.0, 3.0)])),
         ];
         for (name, p) in cases {
-            assert!(matches!(extrude(&p, 1.0), Err(KernelError::InvalidInput(_))), "{name} was accepted");
+            assert!(matches!(extrude(&p, 1.0), Err(KernelError::InvalidInput { .. })), "{name} was accepted");
         }
-        assert!(matches!(extrude(&Profile::polygon(ok_outer, vec![]), 0.0), Err(KernelError::InvalidInput(_))));
+        assert!(matches!(extrude(&Profile::polygon(ok_outer, vec![]), 0.0), Err(KernelError::InvalidInput { .. })));
         let many = (0..=MAX_PROFILE_CORNERS).map(|k| DVec2::from_angle(k as f64 * 1e-3)).collect();
-        assert!(matches!(extrude(&Profile::polygon(many, vec![]), 1.0), Err(KernelError::InvalidInput(_))));
+        assert!(matches!(extrude(&Profile::polygon(many, vec![]), 1.0), Err(KernelError::InvalidInput { .. })));
     }
 
     #[test]
@@ -385,7 +385,7 @@ mod tests {
         let disc = |c: f64| Profile { outer: Boundary::Circle { center: DVec2::new(c, 0.0), radius: 5.0 }, holes: vec![] };
         assert!(extrude(&disc(MAX_COORD - 5.0 - 0.9 * crate::tolerance::LINEAR), 1.0).is_ok());
         match extrude(&disc(MAX_COORD - 5.0 + 1.1 * crate::tolerance::LINEAR), 1.0) {
-            Err(KernelError::InvalidInput(m)) => assert!(m.contains("reaches beyond"), "{m}"),
+            Err(KernelError::InvalidInput { message: m, .. }) => assert!(m.contains("reaches beyond"), "{m}"),
             other => panic!("expected the model-space refusal, got {other:?}"),
         }
     }
@@ -413,7 +413,7 @@ mod tests {
         let (x0, y0, y1, beta) = (99768654.06094639, -415441.7399314088, 414323.0454353704, 0.5576181181305714);
         let d = Profile { outer: path(&[(x0, y0), (x0, y1)], &[beta, 0.0]), holes: vec![] };
         match extrude(&d, 1.0) {
-            Err(KernelError::InvalidInput(m)) => assert!(m.contains("reach"), "{m}"),
+            Err(KernelError::InvalidInput { message: m, .. }) => assert!(m.contains("reach"), "{m}"),
             other => panic!("expected the model-space refusal, got {other:?}"),
         }
     }
@@ -430,7 +430,7 @@ mod tests {
         let beta = (k + (k * k - 4.0).sqrt()) / 2.0;
         let d = Profile { outer: path(&[(0.0, 0.0), (c, 0.0)], &[-beta, 0.0]), holes: vec![] };
         match extrude(&d, 1.0) {
-            Err(KernelError::InvalidInput(m)) => assert!(m.contains("two corners"), "{m}"),
+            Err(KernelError::InvalidInput { message: m, .. }) => assert!(m.contains("two corners"), "{m}"),
             other => panic!("expected the profile check's refusal, got {other:?}"),
         }
     }
@@ -657,7 +657,7 @@ mod tests {
                 Profile { outer: path(&[place(len, 0.0), place(0.0, 0.0), place(x, g * height(x))], &[bulge, 0.0, 0.0]), holes: vec![] }
             };
             match extrude(&profile, d) {
-                Err(KernelError::InvalidInput(_)) => {}
+                Err(KernelError::InvalidInput { .. }) => {}
                 Err(e) => prop_assert!(false, "{e:?} for {profile:?}"),
                 Ok(b) => {
                     let m = tessellate(&b, &TessOptions::DISPLAY).unwrap();
