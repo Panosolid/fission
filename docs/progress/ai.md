@@ -24,5 +24,5 @@ The AI workstream: `packages/ai`, the assistant panel (`apps/fission/src/assista
   v1: qwen2.5:1.5b 6/12, 4/14; llama3.2:3b 11/12, 8/14; gemma2:2b 3/12, 3/14.
   v2: qwen2.5:1.5b 6/12, 2/14; llama3.2:3b 11/12, 8/14; gemma2:2b 3/12, 4/14.
   llama3.2:3b gains on both sets, so the gain is not fitted to the 12. qwen2.5:1.5b (the in-browser default) gets worse: once told depth is "ignored by cylinders and spheres" it answers depth or height 0, which set_part refuses, and the v2 rule didn't stop it (two tries, so stopped here per the root rules). Units in edits ("2 cm taller" gave +2 mm) and inches/metres are still missed by every model.
-  Known gap in the scoring: `matches` ignores commands after the expected ones, so an answer whose last set_part is wrong could still pass; none of the passes above has a second command.
+  Known gap in the scoring: `matches` ignores commands after the expected ones, so an answer whose last set_part is wrong could still pass (not yet checked against these runs; fix: judge the final state).
   Next: Ben's call on the zero sizes (make the sizes a shape ignores optional in set_part, or switch the default to llama3.2:3b); the PR stays a draft until then.
