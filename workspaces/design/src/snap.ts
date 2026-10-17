@@ -9,7 +9,7 @@
 //    shares the point (pointAt compares coordinates exactly).
 // 2. Lining up: otherwise, within SNAP_PIXELS of a point's column (same x)
 //    or row (same y), that coordinate is the point's exactly and the other
-//    stays the grid's. Lining up with the tool's own first click is how a
+//    stays the grid's. Lining up with the tool's own clicks is how a
 //    line snaps horizontal or vertical.
 // 3. Otherwise the grid point.
 //
@@ -42,8 +42,8 @@ export interface SnapTargets {
   columns: SketchXY[];
   /** Points whose row (y) the pointer may line up with: a horizontal guide from them. */
   rows: SketchXY[];
-  /** The tool's own first click, never landed on by lining up (a click there draws nothing), or null. */
-  own: SketchXY | null;
+  /** The tool's own clicks so far, never landed on by lining up (a click there draws nothing). */
+  own: SketchXY[];
 }
 
 /** Where the pointer landed and why: on the grid, on a point, or lined up with a point's column, row or both. */
@@ -54,30 +54,32 @@ export type Snap =
 
 const same = (a: SketchXY, b: SketchXY) => a[0] === b[0] && a[1] === b[1];
 
-/** The tool's own first click (a chain's last point, a first corner, a centre), or null before it. A kind it does not know has none. */
-function ownClick(sketch: Sketch, tool: SketchTool): SketchXY | null {
+/** The tool's own clicks so far (a chain's last point, a first corner, a centre, an arc's start and end); none before them. A kind it does not know has none. */
+function ownClicks(sketch: Sketch, tool: SketchTool): SketchXY[] {
   if (tool.kind === "line") {
-    if (tool.from === null || typeof tool.from !== "string") return tool.from;
+    if (tool.from === null) return [];
+    if (typeof tool.from !== "string") return [tool.from];
     const p = sketch.points.find((x) => x.id === tool.from);
-    return p ? [p.x, p.y] : null;
+    return p ? [[p.x, p.y]] : [];
   }
-  if (tool.kind === "rectangle") return tool.corner;
-  if (tool.kind === "circle") return tool.centre;
-  return null;
+  if (tool.kind === "arc") return [tool.start, tool.end].filter((p) => p !== null);
+  const at = tool.kind === "rectangle" ? tool.corner : tool.kind === "circle" ? tool.centre : null;
+  return at ? [at] : [];
 }
 
 /**
  * What the pointer may snap to on `sketch` while `tool` is used. Points:
  * every sketch point, then every line's midpoint ((a + b) / 2), leaving
- * out the tool's own first click: a click there draws nothing. Columns
- * and rows: every sketch point and the tool's own first click (lining up
- * with it is horizontal or vertical), except for the rectangle, where a
+ * out the tool's own clicks: a click there draws nothing (an arc's end on
+ * its start, its third point on an end). Columns and rows: every sketch
+ * point and the tool's own clicks (lining up with one is horizontal or
+ * vertical), except for the rectangle, where a
  * second corner on the first corner's column or row draws nothing, so
  * neither the first corner nor any point on its column (or row) is
  * offered as a column (or row).
  */
 export function snapTargets(sketch: Sketch, tool: SketchTool): SnapTargets {
-  const own = ownClick(sketch, tool);
+  const own = ownClicks(sketch, tool);
   const isEnd = new Set(sketch.curves.flatMap((c) => (c.kind === "circle" ? [] : [c.start, c.end])));
   const at = new Map(sketch.points.map((p) => [p.id, [p.x, p.y] as SketchXY]));
   const points: SnapTarget[] = sketch.points.map((p) => ({ at: [p.x, p.y], kind: isEnd.has(p.id) ? "endpoint" : "centre" }));
@@ -88,10 +90,10 @@ export function snapTargets(sketch: Sketch, tool: SketchTool): SnapTargets {
     points.push({ at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], kind: "midpoint" });
   }
   const refs: SketchXY[] = sketch.points.map((p) => [p.x, p.y]);
-  if (own && !refs.some((r) => same(r, own))) refs.push(own);
-  const corner = tool.kind === "rectangle" ? own : null;
+  for (const o of own) if (!refs.some((r) => same(r, o))) refs.push(o);
+  const corner = tool.kind === "rectangle" ? (own[0] ?? null) : null;
   return {
-    points: own ? points.filter((t) => !same(t.at, own)) : points,
+    points: points.filter((t) => !own.some((o) => same(t.at, o))),
     columns: corner ? refs.filter((r) => r[0] !== corner[0]) : refs,
     rows: corner ? refs.filter((r) => r[1] !== corner[1]) : refs,
     own,
@@ -118,7 +120,7 @@ function nearest(refs: readonly SketchXY[], off: (r: SketchXY) => number, reach:
  * each; else the grid point. A pixel size that is not a positive number
  * (unknown) snaps to the grid only. Lining up with one point's column and
  * row both lands on that point, and is called that point; lining up onto
- * the tool's own first click (not a target) gives the grid point instead.
+ * one of the tool's own clicks (not a target) gives the grid point instead.
  */
 export function snapPointer(raw: SketchXY, grid: SketchXY, targets: SnapTargets, pixel: number | undefined): Snap {
   if (pixel === undefined || !(pixel > 0) || !Number.isFinite(pixel)) return { kind: "grid", at: grid };
@@ -134,8 +136,8 @@ export function snapPointer(raw: SketchXY, grid: SketchXY, targets: SnapTargets,
   const row = nearest(targets.rows, (r) => Math.abs(r[1] - raw[1]), reach);
   if (!column && !row) return { kind: "grid", at: grid };
   const at: SketchXY = [column ? column[0] : grid[0], row ? row[1] : grid[1]];
-  // Lined up onto the tool's own first click is being on it, not lined up with anything.
-  if (targets.own && same(at, targets.own)) return { kind: "grid", at: grid };
+  // Lined up onto one of the tool's own clicks is being on it, not lined up with anything.
+  if (targets.own.some((o) => same(at, o))) return { kind: "grid", at: grid };
   const on = targets.points.find((t) => same(t.at, at));
   return on ? { kind: on.kind, at: on.at } : { kind: "aligned", at, column, row };
 }
