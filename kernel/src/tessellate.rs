@@ -5,6 +5,19 @@
 //! Faces are triangulated in their surface's (u, v) parameter space with a
 //! constrained Delaunay triangulation, keeping the triangles inside the
 //! face's loops.
+//!
+//! Mutation testing (`cargo mutants -f src/tessellate.rs`) leaves these
+//! survivors, all equivalent (no input can tell them apart):
+//! - `<` vs `<=` on `chord < 2r` in segments: at chord = 2r the sag rule
+//!   gives θ = 2·acos(−1) = 2π instead of no limit (∞), and both are above
+//!   the third-of-a-turn cap the step is clamped to (f64::min drops a NaN
+//!   angle limit, so it can't choose between them either).
+//! - `> π` vs `>= π` on a loop's winding in periodic_domain: unwrap_loop's
+//!   winding is a sum of wrapped steps round a closed loop, a whole number
+//!   of turns (0, ±2π) up to rounding of ~1e-15 per point, never π.
+//! - `<` vs `<=` on ANGULAR in slerp: the angle is acos of a double, which
+//!   is 0 at 1 and already √(2·2⁻⁵³) ≈ 1.49e-8 at the next double below 1,
+//!   so it is never exactly ANGULAR = 1e-9.
 
 use crate::geom::{Curve, Surface};
 use crate::mesh::Mesh;
@@ -145,15 +158,28 @@ fn conform_planar_faces(body: &Body, params: &mut [Vec<f64>]) -> Result<(), Tess
         if split.is_empty() {
             return Ok(());
         }
-        split.sort_unstable_by(|x, y| y.cmp(x)); // high k first, so earlier indices stay valid
+        split.sort_unstable();
         split.dedup();
-        for (e, k) in split {
-            let (lo, hi) = (params[e][k], params[e][k + 1]);
-            let mid = 0.5 * (lo + hi);
-            if !(lo < mid && mid < hi) {
-                return Err(TessError { face: 0, message: "boundary curves touch: chords can't be split further".into() });
+        // Each edge's list is rebuilt once per pass (O(n)); inserting the
+        // midpoints one at a time cost O(n) each, ~10¹² steps near the budget.
+        let mut i = 0;
+        while i < split.len() {
+            let e = split[i].0;
+            let old = std::mem::take(&mut params[e]);
+            let mut new = Vec::with_capacity(old.len() + split.len() - i);
+            for (k, &t) in old.iter().enumerate() {
+                new.push(t);
+                if i < split.len() && split[i] == (e, k) {
+                    let (lo, hi) = (t, old[k + 1]);
+                    let mid = 0.5 * (lo + hi);
+                    if !(lo < mid && mid < hi) {
+                        return Err(TessError { face: 0, message: "boundary curves touch: chords can't be split further".into() });
+                    }
+                    new.push(mid);
+                    i += 1;
+                }
             }
-            params[e].insert(k + 1, mid);
+            params[e] = new;
         }
         if params.iter().map(Vec::len).sum::<usize>() > MAX_MESH_POINTS {
             return Err(TessError { face: 0, message: format!("more than {MAX_MESH_POINTS} mesh points needed") });
@@ -177,7 +203,12 @@ fn touching_pairs(chords: &[Chord]) -> Vec<(&Chord, &Chord)> {
         for &j in &active {
             let t = &chords[j];
             let (tlo, thi) = (t.a.min(t.b), t.a.max(t.b));
-            if thi.y < lo.y || tlo.y > hi.y {
+            // Chords can only touch where their y ranges overlap: skip t if
+            // it lies wholly below s, or wholly above it.
+            if thi.y < lo.y {
+                continue;
+            }
+            if tlo.y > hi.y {
                 continue;
             }
             let shared: Vec<usize> = (0..2).filter(|&m| s.ends.contains(&t.ends[m])).collect();
@@ -300,7 +331,7 @@ fn snapped_loop_uv(body: &Body, mesh: &Mesh, fi: FaceId, li: usize) -> Vec<DVec2
         let e = &body.edges[c.edge];
         let count = mesh.edge_polylines[c.edge].len() - 1;
         let positions: Vec<usize> = (0..=count).map(|k| (end + k) % n).collect();
-        end = (end + count) % n;
+        end = positions[count];
         match e.curve {
             Curve::Circle { center, axis: ca, .. } if ca.cross(axis).length() <= tolerance::ANGULAR => {
                 let radial = (center - origin) - axis * (center - origin).dot(axis);
@@ -1036,5 +1067,384 @@ mod tests {
         assert!(segments(&small, std::f64::consts::TAU, &opts) as f64 >= std::f64::consts::TAU / opts.max_angle);
         let twice = TessOptions { refine: 2, ..opts };
         assert_eq!(segments(&c, 1.0, &twice), 2 * segments(&c, 1.0, &opts));
+    }
+
+    #[test]
+    fn a_nan_angle_limit_leaves_the_chord_rule_in_charge() {
+        // f64::min skips a NaN, so an unset angle limit is simply ignored.
+        let c = Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
+        let opts = |chord| TessOptions { chord, max_angle: f64::NAN, refine: 1 };
+        // By hand: chord 0.01 on r = 1 allows 2·acos(0.99) ≈ 0.28308 rad per
+        // chord; 2π / 0.28308 ≈ 22.2, so 23 chords.
+        assert_eq!(segments(&c, TAU, &opts(0.01)), 23);
+        // Chord 2.5 ≥ 2r: the sag rule sets no limit at all, so the
+        // third-of-a-turn cap decides: 2π / (2π/3) = 3 chords. (The sag
+        // formula itself would be 2·acos(1 − 2.5) = NaN here.)
+        assert_eq!(segments(&c, TAU, &opts(2.5)), 3);
+    }
+
+    #[test]
+    fn wrap_by_hand() {
+        // The range is (−π, π]: a difference of exactly half a turn either
+        // way comes out as +π, just past it as just past −π.
+        assert_eq!(wrap(PI), PI);
+        assert_eq!(wrap(-PI), PI);
+        assert!(crate::tolerance::angle_eq(wrap(PI + 0.25), 0.25 - PI));
+        assert!(crate::tolerance::angle_eq(wrap(3.0 * TAU + 1.0), 1.0));
+    }
+
+    #[test]
+    fn triangulator_snap_boundary() {
+        // A unit square with an extra boundary point x along the bottom edge
+        // from (0, 0). Below SNAP_TO_ZERO, x is snapped to 0 and lands on
+        // (0, 0), which belongs to another vertex: an error. At or above it
+        // the five points are distinct and the square triangulates into
+        // 5 − 2 = 3 triangles of total area 1.
+        let snap = tolerance::SNAP_TO_ZERO;
+        for (x, distinct) in [(0.9 * snap, false), (snap, true), (1.1 * snap, true)] {
+            let (ids, uv) = region(&[vec![(0.0, 0.0), (x, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]]);
+            match triangulate_uv(&ids, &uv) {
+                Ok(tris) => {
+                    assert!(distinct, "x = {x:e} was not snapped");
+                    assert_eq!(tris.len(), 3, "x = {x:e}");
+                    assert!(rel_eq(area(&tris, &uv), 1.0, FP_REL), "x = {x:e}");
+                }
+                Err(e) => assert!(!distinct && e.contains("same uv"), "x = {x:e}: {e}"),
+            }
+        }
+    }
+
+    /// A chord between two points with distinct vertex ids.
+    fn chord(a: (f64, f64), b: (f64, f64), ends: [usize; 2]) -> Chord {
+        let ends = ends.map(BoundaryPoint::Vertex);
+        Chord { a: DVec2::new(a.0, a.1), b: DVec2::new(b.0, b.1), ends, edge: 0, k: 0 }
+    }
+
+    #[test]
+    fn touching_pairs_by_hand() {
+        let count = |chords: &[Chord]| touching_pairs(chords).len();
+        // A chord from (0, 0) up to (1, 1) starts on the edge y = 0, x ∈
+        // [-2, 2]: they touch where one's lowest y is the other's highest.
+        // The edge starts further left, so the sweep meets it first.
+        let edge = chord((-2.0, 0.0), (2.0, 0.0), [0, 1]);
+        assert_eq!(count(&[edge, chord((0.0, 0.0), (1.0, 1.0), [2, 3])]), 1);
+        // The same with the edge at y = 1, touching the chord's top end.
+        let edge = chord((-2.0, 1.0), (2.0, 1.0), [0, 1]);
+        assert_eq!(count(&[edge, chord((0.0, 0.0), (1.0, 1.0), [2, 3])]), 1);
+        // Lift the chord a hair clear of either edge and nothing touches.
+        let low = chord((-2.0, 0.0), (2.0, 0.0), [0, 1]);
+        let high = chord((-2.0, 1.0 + 1e-12), (2.0, 1.0 + 1e-12), [4, 5]);
+        assert_eq!(count(&[low, high, chord((0.0, 1e-12), (1.0, 1.0), [2, 3])]), 0);
+        // Chords sharing the end point (0, 0) (vertex 0) touch only where
+        // they run along one line over each other: (0,0)–(1,0) lies inside
+        // (0,0)–(2,0), whichever comes first...
+        let long = || chord((0.0, 0.0), (2.0, 0.0), [0, 1]);
+        let short = || chord((0.0, 0.0), (1.0, 0.0), [0, 2]);
+        assert_eq!(count(&[long(), short()]), 1);
+        assert_eq!(count(&[short(), long()]), 1);
+        // ...but not when they leave it in opposite directions, or at an angle.
+        assert_eq!(count(&[chord((0.0, 0.0), (-1.0, 0.0), [0, 2]), long()]), 0);
+        assert_eq!(count(&[long(), chord((0.0, 0.0), (1.0, 1e-9), [0, 2])]), 0);
+    }
+
+    /// Flat plate on z = 0: the square [-2, 2] × [0, 4] with a round hole of
+    /// radius 1 centred at (0, 1), so the rim comes down to the bottom edge
+    /// at (0, 0). The rim starts in direction `start` from its centre (−Y:
+    /// at that lowest point; +Y: at the top, (0, 2)) and its one vertex is
+    /// stored at `vertex`. Edges 0–3 are the square, edge 4 the rim.
+    fn plate_with_hole(start: DVec3, vertex: DVec3) -> Body {
+        use crate::topology::{Coedge, Loop};
+        let mut b = Body::default();
+        let corners = [(-2.0, 0.0), (2.0, 0.0), (2.0, 4.0), (-2.0, 4.0)];
+        let c: Vec<usize> = corners.iter().map(|&(x, y)| b.add_vertex(DVec3::new(x, y, 0.0))).collect();
+        let square = (0..4).map(|i| Coedge { edge: b.add_line(c[i], c[(i + 1) % 4]), reversed: false }).collect();
+        let v = b.add_vertex(vertex);
+        let rim = Curve::Circle { center: DVec3::Y, axis: DVec3::Z, x_dir: start, radius: 1.0 };
+        let hole = b.add_edge(rim, v, v, 0.0, TAU);
+        let plane = Surface::Plane { origin: DVec3::ZERO, normal: DVec3::Z, x_dir: DVec3::X };
+        b.add_face(plane, true, vec![Loop { coedges: square }, Loop { coedges: vec![Coedge { edge: hole, reversed: true }] }]);
+        b
+    }
+
+    /// The plate's meshed area when the rim has its 32 display chords: the
+    /// square's 16 less the inscribed 32-gon, (32/2)·sin(2π/32) ≈ 3.1214.
+    /// (r = 1 at max angle 0.2: ceil(2π / 0.2) = 32 chords.)
+    fn plate_area() -> f64 {
+        16.0 - 16.0 * (PI / 16.0).sin()
+    }
+
+    #[test]
+    fn a_hole_touching_its_outline_fails_in_bounded_time() {
+        // Regression (found closing mutation survivors): the rim of radius 1
+        // round (0, 1) touches the plate's bottom edge y = 0 at (0, 0). Rim
+        // points within ~1e-8 rad of the touch round onto y = 0 (1 − cos θ
+        // rounds to 0 below θ ≈ 1.05e-8, since 1 − cos θ ≈ θ²/2 < 2⁻⁵⁴ ≈
+        // 5.6e-17 there), so their chords keep touching the edge however often
+        // they are split and the point count grows to the budget. Each split
+        // was a Vec::insert, O(n) apiece, so near the budget a pass cost
+        // ~10¹² steps and this ran for hours. A face can't touch itself in
+        // a valid body, so the answer is an error; it must come back
+        // promptly (the whole pass is now O(n)).
+        let t = std::time::Instant::now();
+        let r = tessellate(&plate_with_hole(DVec3::Y, 2.0 * DVec3::Y), &TessOptions::DISPLAY);
+        assert!(r.is_err(), "a hole touching its outline was meshed");
+        assert!(t.elapsed().as_secs() < 120, "took {:?}", t.elapsed());
+    }
+
+    #[test]
+    fn chord_touch_test_snaps_tiny_uv_like_the_triangulator() {
+        // The rim's curve comes down to (0, 0) on the bottom edge but its
+        // vertex is stored δ above it. The triangulator snaps coordinates
+        // below SNAP_TO_ZERO to 0, which would put the vertex on the bottom
+        // edge: the hole touches the outline, which the chord check must see
+        // too, rather than pass it to the triangulator. At or above the snap
+        // the vertex is clear of the edge, nothing touches, and the plate
+        // meshes with the rim's 32 chords.
+        let snap = tolerance::SNAP_TO_ZERO;
+        for (delta, touches) in [(0.9 * snap, true), (snap, false), (1.1 * snap, false)] {
+            let body = plate_with_hole(DVec3::NEG_Y, DVec3::new(0.0, delta, 0.0));
+            assert_eq!(chords_touch(&body), touches, "δ = {delta:e}");
+            if !touches {
+                let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+                assert_eq!(m.edge_polylines[4].len(), 33, "δ = {delta:e}");
+                assert!(rel_eq(m.area(), plate_area(), FP_REL), "δ = {delta:e}: area {}", m.area());
+            }
+        }
+    }
+
+    /// Whether conform_planar_faces finds chords of `body` that touch. With
+    /// the mesh-point budget already full, the first split it makes is the
+    /// budget error, so this answers at once even where splitting would take
+    /// long (see a_chord_that_cannot_be_halved_is_an_error_at_once).
+    fn chords_touch(body: &Body) -> bool {
+        let mut body = body.clone();
+        let mut params = initial_params(&body);
+        fill_budget(&mut body, &mut params, MAX_MESH_POINTS);
+        match conform_planar_faces(&body, &mut params) {
+            Ok(()) => false,
+            Err(e) if e.message.contains(&format!("more than {MAX_MESH_POINTS}")) => true,
+            Err(e) => panic!("unexpected error: {}", e.message),
+        }
+    }
+
+    #[test]
+    fn chord_touch_test_uses_the_stored_vertex_not_the_curve_end() {
+        // The rim's curve meets the bottom edge at both its ends: (0, 0) at
+        // t = 0, and at t = 2π (sin 2π, 1 − cos 2π) = (−2.4e-16, 0) after
+        // rounding. Its vertex, which the mesh uses, is stored 1 nm higher
+        // (0.1 LINEAR, within tolerance of the curve), so the chords the
+        // mesh draws clear the edge: no splits, and the plate meshes.
+        let body = plate_with_hole(DVec3::NEG_Y, DVec3::new(0.0, 1e-9, 0.0));
+        assert!(!chords_touch(&body));
+        let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.edge_polylines[4].len(), 33);
+        // Lifting one corner of the 32-gon by 1e-9 changes its area by
+        // about 1e-10, well inside LINEAR.
+        assert!(eq(m.area(), plate_area()), "area {}", m.area());
+    }
+
+    /// Unit disc on z = 0 (rim: edge 0, starting at (1, 0)) with a small
+    /// triangular hole at each angle in `at`. Each hole's outer corner P is
+    /// 1 µm inside the rim, half a rim chord round from `at` (φ = π/32,
+    /// the rim having 32 chords of 2φ); its other corners are at radius 0.9,
+    /// at `at` and `at + 2φ`.
+    fn disc_with_holes(at: &[f64]) -> Body {
+        use crate::topology::{Coedge, Loop};
+        let phi = PI / 32.0;
+        let mut b = Body::default();
+        let v = b.add_vertex(DVec3::X);
+        let rim = b.add_edge(Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, v, v, 0.0, TAU);
+        let mut loops = vec![Loop { coedges: vec![Coedge { edge: rim, reversed: false }] }];
+        for &a in at {
+            let polar = |r: f64, t: f64| DVec3::new(r * t.cos(), r * t.sin(), 0.0);
+            let p = [polar(0.999, a + phi), polar(0.9, a), polar(0.9, a + 2.0 * phi)].map(|q| b.add_vertex(q));
+            let coedges = (0..3).map(|i| Coedge { edge: b.add_line(p[i], p[(i + 1) % 3]), reversed: false }).collect();
+            loops.push(Loop { coedges });
+        }
+        b.add_face(Surface::Plane { origin: DVec3::ZERO, normal: DVec3::Z, x_dir: DVec3::X }, true, loops);
+        b
+    }
+
+    #[test]
+    fn curved_chords_are_split_where_they_cut_a_straight_edge() {
+        // By hand: rim chord 0 (angles 0 to 2φ, φ = π/32) passes its middle
+        // at radius cos φ ≈ 0.99518, inside the hole's corner P at 0.999, so
+        // it cuts both hole edges at P. Splitting it puts a rim point at
+        // angle φ, 1 µm beyond P, and the two half chords (sagging to
+        // cos(φ/2) ≈ 0.9988 midway) pass outside the hole. Chord 16 at the
+        // second hole is the same turned by π. So the rim ends with
+        // 32 + 2 = 34 chords. The holes are straight-edged and can't be
+        // split, so only the rim is; and the sweep along x meets the right
+        // hole's edges before chord 0 (x from 0.88 vs 0.98) but chord 16
+        // before the left hole's (x from −1 vs −0.994), so this checks both
+        // orders of a curved and a straight chord.
+        let body = disc_with_holes(&[0.0, PI]);
+        let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(m.edge_polylines[0].len(), 35);
+        // Area: the rim polygon is 30 chords of 2φ and 4 of φ, fanned from
+        // the centre: 15·sin 2φ + 2·sin φ. Each hole, as quadrilateral OQPR
+        // less triangle OQR: 2·(½·0.9·0.999·sin φ) − ½·0.9²·sin 2φ.
+        let phi = PI / 32.0;
+        let hole = 0.9 * 0.999 * phi.sin() - 0.5 * 0.81 * (2.0 * phi).sin();
+        let expected = 15.0 * (2.0 * phi).sin() + 2.0 * phi.sin() - 2.0 * hole;
+        assert!(rel_eq(m.area(), expected, FP_REL), "area {} vs {expected}", m.area());
+    }
+
+    /// The edge parameters `tessellate` starts from, before any splitting.
+    fn initial_params(body: &Body) -> Vec<Vec<f64>> {
+        let opts = TessOptions::DISPLAY;
+        let fractions = |n: usize| (0..=n).map(|k| k as f64 / n as f64).collect();
+        body.edges.iter().map(|e| fractions(segments(&e.curve, e.t1 - e.t0, &opts))).collect()
+    }
+
+    /// Adds an edge used by no face and gives it parameters so that all
+    /// edges together hold `total` mesh points (only its count matters).
+    fn fill_budget(body: &mut Body, params: &mut Vec<Vec<f64>>, total: usize) {
+        let (a, b) = (body.add_vertex(DVec3::new(10.0, 0.0, 0.0)), body.add_vertex(DVec3::new(11.0, 0.0, 0.0)));
+        body.add_line(a, b);
+        let used: usize = params.iter().map(Vec::len).sum();
+        params.push(vec![0.0; total - used]);
+    }
+
+    #[test]
+    fn mesh_point_budget_boundary() {
+        // The disc with one hole needs exactly one split (chord 0, see
+        // curved_chords_are_split_where_they_cut_a_straight_edge), adding one
+        // point: the rim's 33 points become 34. Ending at exactly
+        // MAX_MESH_POINTS is allowed; one more is not.
+        for (before, ok) in [(MAX_MESH_POINTS - 1, true), (MAX_MESH_POINTS, false)] {
+            let mut body = disc_with_holes(&[0.0]);
+            let mut params = initial_params(&body);
+            assert_eq!(params[0].len(), 33);
+            fill_budget(&mut body, &mut params, before);
+            match conform_planar_faces(&body, &mut params) {
+                Ok(()) => {
+                    assert!(ok, "{before} + 1 points accepted");
+                    assert_eq!(params[0].len(), 34);
+                    assert_eq!(params.iter().map(Vec::len).sum::<usize>(), MAX_MESH_POINTS);
+                }
+                Err(e) => assert!(!ok && e.message.contains(&format!("more than {MAX_MESH_POINTS}")), "{before}: {}", e.message),
+            }
+        }
+    }
+
+    #[test]
+    fn a_chord_that_cannot_be_halved_is_an_error_at_once() {
+        // The rim starts at the top, (0, 2), and at fraction ½ (t = π) is at
+        // (−sin π, 1 + cos π) = (−1.2e-16, 0): on the bottom edge, so the
+        // hole touches the outline there. Splitting can never cure that: the
+        // chords either side of fraction ½ are halved until their ends are
+        // adjacent floats, where it must stop with an error.
+        assert!(chords_touch(&plate_with_hole(DVec3::Y, 2.0 * DVec3::Y)));
+        // That last step, set up directly. Above ½ the floats are 2⁻⁵³ apart, and
+        // the midpoint ½·(1 + 2⁻⁵³) of [½, ½ + 2⁻⁵³] rounds (a tie, to even)
+        // to ½, the low end. Below ½ they are 2⁻⁵⁴ apart, and the midpoint
+        // ½·(1 − 2⁻⁵⁴) of [½ − 2⁻⁵⁴, ½] rounds to ½, the high end. The rim's
+        // chords here are [0, lo], [lo, hi] and [hi, 1], all touching the
+        // bottom edge. Inserting the useless midpoint would make a
+        // zero-length chord and go round again (for ever when the touch is
+        // inside the chord); with the point budget already full, any
+        // inserted point shows up as the budget error instead of this one.
+        let ulp_above = f64::EPSILON / 2.0; // 2⁻⁵³ (EPSILON is 2⁻⁵², the spacing in [1, 2))
+        let ulp_below = f64::EPSILON / 4.0; // 2⁻⁵⁴
+        for (lo, hi, mid) in [(0.5, 0.5 + ulp_above, 0.5), (0.5 - ulp_below, 0.5, 0.5)] {
+            assert_eq!(f64::from_bits(lo.to_bits() + 1), hi, "[{lo}, {hi}] are not adjacent floats");
+            assert_eq!(0.5 * (lo + hi), mid);
+            let mut body = plate_with_hole(DVec3::Y, 2.0 * DVec3::Y);
+            let mut params = initial_params(&body);
+            params[4] = vec![0.0, lo, hi, 1.0];
+            fill_budget(&mut body, &mut params, MAX_MESH_POINTS);
+            let err = conform_planar_faces(&body, &mut params).unwrap_err();
+            assert!(err.message.contains("can't be split further"), "[{lo}, {hi}]: {}", err.message);
+        }
+    }
+
+    #[test]
+    fn only_edges_within_angular_of_the_axis_get_one_exact_uv() {
+        // Circles: a cylinder of radius 1 from z = 5 to 7 (so the surface's
+        // origin is (0, 0, 5)), its bottom circle's axis tilted by α about X.
+        // The top circle is round the axis: every point gets v = (centre −
+        // origin)·axis = 7 − 5 = 2 exactly. The bottom one gets v = 0
+        // exactly when the tilt is within ANGULAR; past that it is not a
+        // constant-v line and keeps its points' own v. Its point a quarter
+        // turn round (point 8 of 32, loop position 7) is (0, cos α, 5 +
+        // sin α), so v = sin α.
+        for (alpha, snapped) in [(0.9 * tolerance::ANGULAR, true), (1.1 * tolerance::ANGULAR, false)] {
+            let mut body = hand_cylinder(1.0, 2.0).transformed(&crate::geom::Transform::translation(DVec3::new(0.0, 0.0, 5.0)));
+            let axis = DVec3::new(0.0, -alpha.sin(), alpha.cos());
+            body.edges[0].curve = Curve::Circle { center: DVec3::new(0.0, 0.0, 5.0), axis, x_dir: DVec3::X, radius: 1.0 };
+            let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+            let (bottom, top) = (snapped_loop_uv(&body, &m, 2, 0), snapped_loop_uv(&body, &m, 2, 1));
+            assert!(top.iter().all(|p| p.y == 2.0), "α = {alpha:e}: top {top:?}");
+            assert_eq!(bottom.len(), 32);
+            if snapped {
+                assert!(bottom.iter().all(|p| p.y == 0.0), "α = {alpha:e}: bottom {bottom:?}");
+            } else {
+                // 5 + sin α carries the rounding of 5 (4.4e-16).
+                assert!((bottom[7].y - alpha.sin()).abs() < 1e-15, "α = {alpha:e}: v = {:e}", bottom[7].y);
+            }
+        }
+        // Lines: the half cylinder's side line at +X (edge 4, from vertex 0
+        // at (1, 0, 0) to vertex 2), with vertex 2 moved round to (1, δ, 1),
+        // so the line leans by δ from the axis (|dir × axis| = δ/√(1 + δ²)).
+        // Within ANGULAR, both its ends get the u of its start, 0, exactly;
+        // past it, vertex 2 keeps its own u, atan2(δ, 1) = δ.
+        for (delta, snapped) in [(0.9 * tolerance::ANGULAR, true), (1.1 * tolerance::ANGULAR, false)] {
+            let mut body = hand_half_cylinder(1.0, 1.0);
+            body.vertices[2].point = DVec3::new(1.0, delta, 1.0);
+            let (start, end) = (body.vertices[0].point, body.vertices[2].point);
+            body.edges[4].curve = Curve::Line { origin: start, dir: (end - start).normalize() };
+            body.edges[4].t1 = start.distance(end);
+            let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+            let ids = loop_vertices(&body, &m, 3, 0);
+            let uv = snapped_loop_uv(&body, &m, 3, 0);
+            let u_at = |vertex: u32| uv[ids.iter().position(|&i| i == vertex).unwrap()].x;
+            assert_eq!(u_at(0), 0.0, "δ = {delta:e}");
+            if snapped {
+                assert_eq!(u_at(2), 0.0, "δ = {delta:e}");
+            } else {
+                assert!((u_at(2) - delta).abs() < 1e-24, "δ = {delta:e}: u = {:e}", u_at(2));
+            }
+        }
+    }
+
+    /// The half cylinder of radius 2 and height 2 with its curved face's u
+    /// measured from +Y instead of +X, so u runs from 3π/2 (at +X) up
+    /// through the seam at 2π ≡ 0 (+Y) to π/2 (at −X): the patch straddles
+    /// the seam. A triangular hole of straight lines is cut just past the
+    /// seam, at surface (u, v) = (0.4, 1), (0.6, 1), (0.5, 1.5).
+    fn half_cylinder_across_the_seam() -> Body {
+        use crate::topology::{Coedge, Loop};
+        let mut body = hand_half_cylinder(2.0, 2.0);
+        let s = Surface::Cylinder { origin: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::Y, radius: 2.0 };
+        body.faces[3].surface = s.clone();
+        let p: Vec<usize> = [(0.4, 1.0), (0.6, 1.0), (0.5, 1.5)].iter().map(|&(u, v)| body.add_vertex(s.eval(DVec2::new(u, v)))).collect();
+        let coedges = (0..3).map(|i| Coedge { edge: body.add_line(p[i], p[(i + 1) % 3]), reversed: false }).collect();
+        body.faces[3].loops.push(Loop { coedges });
+        body
+    }
+
+    #[test]
+    fn hole_beyond_the_seam_is_moved_into_its_patch() {
+        // By hand: the outer loop starts at its bottom arc's first mesh
+        // point, a sixteenth of the half turn round from +X (r = 2 at max
+        // angle 0.2: ceil(π / 0.2) = 16 chords per arc), at u = 3π/2 + π/16,
+        // and runs continuously up to 5π/2. The hole's raw u values 0.4–0.6
+        // are a period below that, so it is moved up by 2π. Then u is scaled
+        // by the radius to arc length, so the triangulator sees true
+        // proportions. The hole loop starts at its first edge's end, (0.6, 1).
+        let body = half_cylinder_across_the_seam();
+        let m = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        let (_, uv) = periodic_domain(&body, &m, 3, 2.0).unwrap();
+        assert!(crate::tolerance::angle_eq(uv[0][0].x, 2.0 * (1.5 * PI + PI / 16.0)), "outer starts at u = {}", uv[0][0].x);
+        let expected = [(0.6, 1.0), (0.5, 1.5), (0.4, 1.0)].map(|(u, v)| DVec2::new(2.0 * (u + TAU), v));
+        for (got, want) in uv[1].iter().zip(expected) {
+            assert!(got.distance(want) <= 1e-12, "hole point {got} vs {want}");
+        }
+        // In the mesh: a polygon with one hole and V boundary points and no
+        // others triangulates into V triangles (V − 2 + 2 per hole). Here V =
+        // 16 + 1 + 16 + 1 on the outer loop + 3 on the hole = 37. (A hole
+        // left a period away would be a separate island: 32 + 1 = 33.)
+        assert_eq!(m.triangle_face.iter().filter(|&&f| f == 3).count(), 37);
     }
 }

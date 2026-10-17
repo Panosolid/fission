@@ -8,6 +8,11 @@
 //! 2 vertices, 2 edges, 1 side face with 2 loops (R + 1). Both add 0 to
 //! V − E + F − R, so with the 2 caps and their h inner loops the solid has
 //! V − E + F − R = 2 − 2h = 2(1 − h): genus h.
+//!
+//! Mutation testing (`cargo mutants -f src/ops/extrude.rs`) leaves these
+//! survivors, all equivalent (no input can tell them apart): `sweep > 0.0`
+//! vs `>= 0.0` for an arc's curve axis and its wall's sense (an arc's sweep
+//! is never 0: a zero bulge is a line).
 
 use super::profile::{check_profile, Seg};
 pub use super::profile::{Boundary, Profile};
@@ -109,7 +114,7 @@ pub fn extrude(profile: &Profile, distance: f64) -> Result<Body, KernelError> {
 mod tests {
     use super::*;
     use crate::tessellate::{tessellate, TessOptions};
-    use crate::tolerance::{eq, rel_eq, FP_REL, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
+    use crate::tolerance::{eq, points_eq, rel_eq, FP_REL, MAX_COORD, MAX_PROFILE_CORNERS, MAX_SIZE, MIN_FEATURE};
     use std::f64::consts::PI;
 
     fn v(p: &[(f64, f64)]) -> Vec<DVec2> {
@@ -328,6 +333,57 @@ mod tests {
             Err(KernelError::InvalidInput(m)) => assert!(m.contains("reaches beyond"), "{m}"),
             other => panic!("expected the model-space refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn an_arc_too_close_to_the_edge_of_model_space_is_refused() {
+        // A "D": from A = (x0, y0) counter-clockwise round an arc of bulge
+        // β, through its rightmost point, to B = (x0, y1), and the chord
+        // back. That point sticks out from the chord by the sagitta
+        // (c/2)·β, c = y1 − y0 (from the module notes: r − (c/2)·cot(sweep/2)
+        // with r = c(1 + β²)/(4β) and cot(sweep/2) = (1 − β²)/(2β) gives
+        // (c/2)(1 + β² − 1 + β²)/(2β)). In exact arithmetic on these doubles
+        // that is x0 + (c/2)·β = MAX_COORD + 6.7e-9 (Python, fractions):
+        // past model space, so the extrude must be refused. The profile's
+        // own bound for that point, centre + r, rounds to MAX_COORD exactly
+        // and passes; the body's, centre + r·hypot(x_dir.x, y_dir.x) with
+        // the hypot 1 + 2.2e-16, rounds up a step, and the model-space
+        // check refuses it. (Found by search: about 1 in 1e4 such arcs
+        // falls between the two.)
+        let (x0, y0, y1, beta) = (99827566.98656493, -403403.89577761077, 404141.02118983393, 0.4270549162332822);
+        let d = Profile { outer: path(&[(x0, y0), (x0, y1)], &[beta, 0.0]), holes: vec![] };
+        match extrude(&d, 1.0) {
+            Err(KernelError::InvalidInput(m)) => assert!(m.contains("reach"), "{m}"),
+            other => panic!("expected the model-space refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_arc_walls_seam_is_its_first_upright_edge() {
+        // A cylinder's u runs from x_dir. Each arc's wall takes x_dir from
+        // the arc's centre to its first corner, so u = 0 is at that corner
+        // and the face is u ∈ [0, |sweep|] counter-clockwise, or [2π −
+        // |sweep|, 2π] clockwise (its axis is +Z either way): the seam is
+        // the wall's own first upright edge, never inside the face.
+        // Stadium (see stadium_by_hand): the right end runs (10, 0) → (10,
+        // 4) counter-clockwise about (10, 2), r = 2, turning π: u = 0 at
+        // (10, 0), u = π/2 at its rightmost point (12, 2), u = π at (10, 4).
+        let stadium = Profile { outer: path(&[(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (0.0, 4.0)], &[0.0, 1.0, 0.0, 1.0]), holes: vec![] };
+        let b = extrude(&stadium, 2.0).unwrap();
+        let right = b.faces.iter().find(|f| matches!(f.surface, Surface::Cylinder { origin, .. } if origin.x > 5.0)).unwrap();
+        assert!(points_eq(right.surface.eval(DVec2::ZERO), DVec3::new(10.0, 0.0, 0.0)));
+        assert!(points_eq(right.surface.eval(DVec2::new(PI / 2.0, 1.0)), DVec3::new(12.0, 2.0, 1.0)));
+        assert!(points_eq(right.surface.eval(DVec2::new(PI, 2.0)), DVec3::new(10.0, 4.0, 2.0)));
+        // The bowed square of concave_arc_by_hand: its top runs (10, 10) →
+        // (0, 10) clockwise about (5, 15.25), r = 7.25, turning φ = 4·atan
+        // 0.4. u = 0 at (10, 10), and (0, 10) is at u = 2π − φ.
+        let bowed = Profile { outer: path(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], &[0.0, 0.0, -0.4, 0.0]), holes: vec![] };
+        let b = extrude(&bowed, 3.0).unwrap();
+        let wall = b.faces.iter().find(|f| matches!(f.surface, Surface::Cylinder { .. })).unwrap();
+        assert!(points_eq(wall.surface.eval(DVec2::ZERO), DVec3::new(10.0, 10.0, 0.0)));
+        let phi = 4.0 * 0.4f64.atan();
+        let uv = wall.surface.project(DVec3::new(0.0, 10.0, 0.0));
+        assert!(eq(uv.x, TAU - phi) && eq(uv.y, 0.0), "{uv}");
     }
 
     #[test]
