@@ -50,4 +50,8 @@ exclude_re = [
   '^src/ops/profile\.rs:\d+:\d+: replace \+ with - in probe$', # any point of a hole's circle decides
   '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$', # at exactly 0.1 both forms are within FP_REL; the mutant's series is the more accurate one
   '^src/ops/extrude\.rs:\d+:\d+: replace > with >= in extrude$', # an arc's sweep is never 0
+  # tessellate.rs (reasons also in its top comment)
+  '^src/tessellate\.rs:\d+:\d+: replace < with <= in segments$', # chord = 2r: sag angle 2π vs no limit (∞); both clamp to the TAU/3 cap
+  '^src/tessellate\.rs:\d+:\d+: replace > with >= in periodic_domain$', # a loop's winding is 0 or ±2π up to ~1e-15 rounding, never exactly π
+  '^src/tessellate\.rs:\d+:\d+: replace < with <= in slerp$', # acos of a double is 0 or ≥ 1.49e-8 (acos(1 − 2⁻⁵³)), never exactly ANGULAR = 1e-9
 ]

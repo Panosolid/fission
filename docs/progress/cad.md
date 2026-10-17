@@ -4,6 +4,8 @@ Progress file for one workstream (rules: root CLAUDE.md, "Workstreams and where 
 
 Done: steps 1–20 (step 15: the self-intersection check, mutation-tested; 16: the Design layout; 17: one selection of bodies, faces and edges, with placeholder ids until step 32; 18: view controls, Fit framed to the narrower field of view, and the view cube; 19: save and open a .fission.json file, projects kept in the browser, autosave, and the phone top bar menu; 20: undo/redo of whole-project snapshots, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y, one labelled step per edit, hand-over or accepted AI command, the selection and camera kept through undo); the modelling range is 1 km / 10 nm (decided during step 15, measured and guarded by a test).
 
+Kernel mutation gaps (2026-10-17): all 144 survivors of the first whole-kernel run are killed by tests or listed as equivalent (each file's top comment and `kernel/.cargo/mutants.toml`, 47 mutants); `Placed::new` now calls `recentred`, so cargo-mutants checks it. Two bugs found and fixed with regression tests: a very flat arc let a hole outside the profile through (`profile.rs` winding), and a hole touching its outline made tessellation run for hours (`tessellate.rs` conform_planar_faces).
+
 Next: step 21, from main; split it into substeps (21a, 21b, …) here before starting.
 
 - [ ] 21. Sketch on ground plane: lines with grid snapping. Its geometry comes from the kernel's 2D curve library (K1), not TypeScript. Sketches must produce Outline through the existing representation registry (I8), with a test; no sketch-only path (register `design.sketch` with `outlineProducer`; the stand-in test in workspaces/design/test/document.test.ts shows the shape)
