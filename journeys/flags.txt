@@ -1,0 +1,1 @@
+2026-10-17 04:15,11a0215,claude/project-thread-xmlsbm,FLAG Design: shape to STL: slowest 1.29 s, baseline 0.70 s (84% over, flag above 15%)

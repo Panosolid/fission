@@ -1,0 +1,1 @@
+tested commit 11a02155849df8675b51c5c432e2471b9f44d9fb on branch claude/project-thread-xmlsbm (https://github.com/benpy28/fission/actions/runs/38981010278)
