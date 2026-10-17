@@ -36,7 +36,7 @@ function journey() {
     syncGraph(graph, doc, (project.workspaces.design as DesignDocument | undefined) ?? null, notes);
     project.workspaces.design = doc;
   };
-  const lookup: SourceLookup = (s) => designObjects(design()).find((o) => o.id === s.origin.id) ?? null;
+  const lookup: SourceLookup = (s) => designObjects(design(), kernel).find((o) => o.id === s.origin.id) ?? null;
   return { kernel, registry, project, graph, notes, design, edit, lookup };
 }
 
@@ -96,10 +96,10 @@ test("a target that only takes meshes gets one, with a note, and the same volume
 });
 
 test("a frozen copy stays put, and a link whose source goes away warns", async () => {
-  const { registry, edit, design, lookup } = journey();
+  const { kernel, registry, edit, design, lookup } = journey();
   edit(partDocument("l-bracket", 40, 30, 20));
   // A laser job linked to the bracket's profile (an exact outline).
-  const profile = designObjects(design()).find((o) => o.type === "design.profile")!;
+  const profile = designObjects(design(), kernel).find((o) => o.type === "design.profile")!;
   const cut = linkTo("job-1/cut-1", { kind: "object", origin: { workspace: "design", id: profile.id, label: "L-bracket profile" } }, ["outline"]);
   const frozen = await breakLink(cut, lookup, registry);
 

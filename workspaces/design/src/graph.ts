@@ -21,8 +21,10 @@ export function changeWords(kind: string, removed = false): string {
  */
 export function syncGraph(graph: DependencyGraph, doc: DesignDocument, before: DesignDocument | null, notes: ChangeNotes): void {
   const changed: { id: string; label: string; kind: string }[] = [];
-  const old = new Map<string, unknown>([...(before?.profiles ?? []), ...(before?.timeline.features ?? [])].map((x) => [x.id, x]));
-  const differs = (x: { id: string }) => JSON.stringify(old.get(x.id)) !== JSON.stringify(x);
+  // A sketch's item and its content are one node: drawing a line changes the sketch.
+  const content = (d: DesignDocument, x: { id: string }) => (d.sketches.some((s) => s.id === x.id) ? [x, d.sketches.find((s) => s.id === x.id)] : x);
+  const old = new Map<string, unknown>(before ? [...before.profiles, ...before.timeline.features].map((x) => [x.id, content(before, x)]) : []);
+  const differs = (x: { id: string }) => JSON.stringify(old.get(x.id)) !== JSON.stringify(content(doc, x));
   for (const p of doc.profiles) {
     graph.set({ id: p.id, label: `Profile ${p.id}`, workspace: "design", cost: "cheap" });
     if (differs(p)) changed.push({ id: p.id, label: `Profile ${p.id}`, kind: "profile" });

@@ -118,7 +118,7 @@ export function designActions(save: SaveFile = download, copy: CopySvg = copyToC
       if (!representationsOf(target, doc).includes("outline")) return { message: `${target.id} is not a profile of the part, so there is nothing to copy.`, bad: true };
       const id = readProfileReference(target)!;
       const profile = doc.profiles.find((p) => p.id === id)!;
-      const object = designObjects(doc).find((o) => o.type === "design.profile" && o.id === id)!;
+      const object = designObjects(doc, ctx.kernel).find((o) => o.type === "design.profile" && o.id === id)!;
       try {
         // Copies out go through the representation registry, like everything handed over.
         const { representation } = await ctx.representations.deliver(object, ["outline"]);

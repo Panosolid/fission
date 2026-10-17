@@ -4,7 +4,7 @@
 // timeline (step 32) there are two: set the part, and export it.
 
 import type { Command, CommandSpec } from "@fission/core";
-import { partDocument, type DesignDocument } from "./document.ts";
+import { withPart, type DesignDocument } from "./document.ts";
 import type { ShapeKind } from "./profiles.ts";
 
 export const SHAPES: readonly ShapeKind[] = ["box", "cylinder", "sphere", "l-bracket", "plate", "slot", "star"];
@@ -27,10 +27,10 @@ export const DESIGN_COMMANDS: readonly CommandSpec[] = [
   },
 ];
 
-/** The document a parsed Design command makes. */
-export function documentFor(command: Command): DesignDocument {
+/** The document a parsed Design command makes from `current` (none: a fresh part); set_part keeps its sketches. */
+export function documentFor(command: Command, current?: DesignDocument | null): DesignDocument {
   // export_stl makes no document: it saves the one there is.
   if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
   const { shape, width, depth, height } = command as unknown as { shape: ShapeKind; width: number; depth: number; height: number };
-  return partDocument(shape, width, depth, height);
+  return withPart(current, shape, width, depth, height);
 }
