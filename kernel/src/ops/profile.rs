@@ -365,7 +365,7 @@ pub fn perimeter(segs: &[Seg]) -> f64 {
 
 /// Axis-aligned bounds of a piece: its ends plus whichever of the circle's
 /// four axis extremes the arc passes through.
-fn bounds(s: &Seg) -> (DVec2, DVec2) {
+pub(crate) fn bounds(s: &Seg) -> (DVec2, DVec2) {
     let mut pts = s.ends();
     if let Some((c, r)) = s.circle() {
         pts.extend([0.0, 0.25, 0.5, 0.75].map(|k| k * TAU).into_iter().filter(|&t| s.spans(t)).map(|t| c + dir(t) * r));

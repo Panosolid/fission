@@ -1,8 +1,8 @@
 //! Stateful random testing of the kernel.
 //!
 //! Random chains of 1–10 operations (add a placed primitive or extrusion,
-//! some extrusions drawn as shuffled sketch lines or one sketch circle
-//! first, move, rotate)
+//! some extrusions drawn as shuffled sketch lines and arcs or one sketch
+//! circle first, move, rotate)
 //! are run against the kernel. After every step:
 //! - nothing panics;
 //! - the operation either returns a body that passes `validate()`, or a
@@ -103,8 +103,9 @@ enum Shape {
     ///
     /// `sketch`, when set on a straight outline without holes, draws the
     /// outline as sketch lines instead (shuffled and some reversed by that
-    /// seed, `sketch_lines`), and on a lone circle draws it as one sketch
-    /// circle (step 22b); either way it extrudes the loop
+    /// seed, `sketch_lines`); on a curved one without holes, as sketch lines
+    /// and arcs (step 23a, `sketch_pieces`); and on a lone circle as one
+    /// sketch circle (step 22b); either way it extrudes the loop
     /// `sketch::sketch_outline` finds, and `apply_op` checks it is the loop
     /// drawn.
     Extrude {
@@ -142,10 +143,47 @@ fn sketch_lines(pts: &[DVec2], seed: u64) -> Vec<sketch::Line> {
     lines
 }
 
+/// The pieces of a curved path (corners `pts`, one bulge each) as sketch
+/// lines and arcs (step 23a), in an order picked by `seed` (SplitMix64, as
+/// `sketch_lines`): a Fisher–Yates shuffle of the pieces, then each line
+/// reversed on a coin flip. An arc always runs counter-clockwise round its
+/// centre, so a piece bulging clockwise (negative bulge) becomes the arc
+/// from its end back to its start. Each arc's centre is the harness's own
+/// (`Piece::new`, from first principles), not the kernel's.
+fn sketch_pieces(pts: &[DVec2], bulges: &[f64], seed: u64) -> (Vec<sketch::Line>, Vec<sketch::Arc>) {
+    let mut state = seed;
+    let mut next = || {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    };
+    let n = pts.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    for i in (1..n).rev() {
+        order.swap(i, (next() % (i as u64 + 1)) as usize);
+    }
+    let (mut lines, mut arcs) = (vec![], vec![]);
+    for i in order {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        let flip = next() % 2 == 1;
+        match Piece::new(a, b, bulges[i]) {
+            Piece::Arc { c, phi, .. } if phi > 0.0 => arcs.push(sketch::Arc { start: a, end: b, centre: c }),
+            Piece::Arc { c, .. } => arcs.push(sketch::Arc { start: b, end: a, centre: c }),
+            _ if flip => lines.push(sketch::Line { a: b, b: a }),
+            _ => lines.push(sketch::Line { a, b }),
+        }
+    }
+    (lines, arcs)
+}
+
 /// What a sketched extrusion draws (`Shape::Extrude`'s `sketch` doc): its
-/// polygon as shuffled lines, or its one circle.
+/// polygon as shuffled lines, its curved path as shuffled lines and arcs,
+/// or its one circle.
 enum Drawn {
     Lines(Vec<DVec2>, u64),
+    Pieces(Vec<DVec2>, Vec<f64>, u64),
     Circle(sketch::Circle),
 }
 
@@ -153,8 +191,12 @@ impl Drawn {
     /// What `sketch::sketch_outline` makes of the drawing.
     fn outline(&self) -> Result<sketch::SketchOutline, KernelError> {
         match self {
-            Drawn::Lines(pts, seed) => sketch::sketch_outline(&sketch_lines(pts, *seed), &[]),
-            Drawn::Circle(c) => sketch::sketch_outline(&[], &[*c]),
+            Drawn::Lines(pts, seed) => sketch::sketch_outline(&sketch_lines(pts, *seed), &[], &[]),
+            Drawn::Pieces(pts, bulges, seed) => {
+                let (lines, arcs) = sketch_pieces(pts, bulges, *seed);
+                sketch::sketch_outline(&lines, &[], &arcs)
+            }
+            Drawn::Circle(c) => sketch::sketch_outline(&[], &[*c], &[]),
         }
     }
 }
@@ -165,7 +207,14 @@ fn sketched(shape: &Shape) -> Option<Drawn> {
         Shape::Extrude { outer: Ring::Circle { c, r }, holes, sketch: Some(_), .. } if holes.is_empty() => {
             Some(Drawn::Circle(sketch::Circle { centre: p2(c), radius: r.0 }))
         }
-        Shape::Extrude { outer, holes, sketch: Some(seed), .. } if holes.is_empty() => outer.polygon().map(|p| Drawn::Lines(p, *seed)),
+        Shape::Extrude { outer: outer @ Ring::Path { pts, bulges }, holes, sketch: Some(seed), .. }
+            if holes.is_empty() && (bulges.is_empty() || bulges.len() == pts.len()) =>
+        {
+            Some(match outer.polygon() {
+            Some(p) => Drawn::Lines(p, *seed),
+                None => Drawn::Pieces(pts.iter().map(p2).collect(), bulges.iter().map(|b| b.0).collect(), *seed),
+            })
+        }
         _ => None,
     }
 }
@@ -412,6 +461,9 @@ impl Op {
             Op::Add { shape: Shape::Cylinder { .. }, .. } => "add cylinder",
             Op::Add { shape: Shape::Sphere { .. }, .. } => "add sphere",
             Op::Add { shape: Shape::Extrude { outer: Ring::Circle { .. }, sketch: Some(_), .. }, .. } => "add sketch circle extrude",
+            Op::Add { shape: Shape::Extrude { outer: Ring::Path { bulges, .. }, sketch: Some(_), .. }, .. } if bulges.iter().any(|b| b.0 != 0.0) => {
+                "add sketch arc extrude"
+            }
             Op::Add { shape: Shape::Extrude { sketch: Some(_), .. }, .. } => "add sketch extrude",
             Op::Add { shape: Shape::Extrude { .. }, .. } => "add extrude",
             Op::Move { .. } => "move",
@@ -685,13 +737,14 @@ fn polygon_profile(scene: &Scene) -> BoxedStrategy<Shape> {
 
 /// A random extrusion: two fifths straight outlines (`polygon_profile`),
 /// two fifths curved ones (`curved_profile`), a fifth lone circles
-/// (`circle_profile`). Half of the straight ones without holes are drawn as
-/// sketch lines, and half the lone circles as a sketch circle.
+/// (`circle_profile`). Half of the outlines without holes are drawn as a
+/// sketch: straight ones as sketch lines, curved ones as sketch lines and
+/// arcs, lone circles as a sketch circle.
 fn extruded(scene: &Scene) -> BoxedStrategy<Shape> {
     (prop_oneof![2 => polygon_profile(scene), 2 => curved_profile(scene), 1 => circle_profile(scene)], any::<u64>(), 0..4u8)
         .prop_map(|(mut shape, seed, pick)| {
-            if let Shape::Extrude { outer, holes, sketch, .. } = &mut shape {
-                if pick < 2 && holes.is_empty() && (outer.polygon().is_some() || matches!(outer, Ring::Circle { .. })) {
+            if let Shape::Extrude { holes, sketch, .. } = &mut shape {
+                if pick < 2 && holes.is_empty() {
                     *sketch = Some(seed);
                 }
             }
@@ -1318,10 +1371,16 @@ fn extrude_expect(shape: &Shape) -> Expect {
 }
 
 /// A sketched extrusion's lines must each be within [MIN_FEATURE, MAX_SIZE]
-/// long (`sketch::check_lines`), which a profile only implies.
+/// long (`sketch::check_lines`), and its arcs' ends at least MIN_FEATURE
+/// apart (`sketch::check_arcs`), which a profile only implies.
 fn sketch_line_out_of_range(shape: &Shape) -> bool {
+    let chord = |pts: &[DVec2], i: usize| pts[i].distance(pts[(i + 1) % pts.len()]);
     match sketched(shape) {
-        Some(Drawn::Lines(pts, _)) => (0..pts.len()).any(|i| !(MIN_FEATURE..=MAX_SIZE).contains(&pts[i].distance(pts[(i + 1) % pts.len()]))),
+        Some(Drawn::Lines(pts, _)) => (0..pts.len()).any(|i| !(MIN_FEATURE..=MAX_SIZE).contains(&chord(&pts, i))),
+        Some(Drawn::Pieces(pts, bulges, _)) => (0..pts.len()).any(|i| {
+            let range = if bulges[i] == 0.0 { MIN_FEATURE..=MAX_SIZE } else { MIN_FEATURE..=f64::INFINITY };
+            !range.contains(&chord(&pts, i))
+        }),
         _ => false,
     }
 }
@@ -1463,13 +1522,48 @@ fn classify_motion(before: &Placed, r: Result<Result<Placed, KernelError>, Strin
     }
 }
 
+/// The loop `sketch_outline` found for a sketched curved path is the path
+/// drawn: the same corners, bit for bit, in order round the loop, either
+/// way round, starting where the first piece walked starts (the first
+/// line's start, or the first arc's with no lines), and each piece shaped
+/// as drawn: a line's bulge exactly 0, an arc's bulge the drawn one (its
+/// sign changed when walked the other way), its sagitta (bulge × half the
+/// chord, how far the arc's middle stands off the chord) within rounding of
+/// the drawn sagitta. Checked against the generator's corners and bulges,
+/// not against anything the kernel computed.
+fn check_sketch_pieces(pts: &[DVec2], bulges: &[f64], seed: u64) -> Result<(), String> {
+    let (lines, arcs) = sketch_pieces(pts, bulges, seed);
+    let (found, found_bulges) = match sketch::sketch_outline(&lines, &[], &arcs) {
+        Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, bulges }, .. })) => (corners, bulges),
+        other => return Err(format!("sketched path built, but its outline is {other:?}")),
+    };
+    let n = pts.len();
+    let first = lines.first().map_or_else(|| arcs[0].start, |l| l.a);
+    let Some(start) = pts.iter().position(|&p| p == first) else {
+        return Err(format!("first piece starts at {first}, not a corner"));
+    };
+    let scale = pts.iter().fold(0.0f64, |m, p| m.max(p.abs().max_element()))
+        + (0..n).map(|i| Piece::new(pts[i], pts[(i + 1) % n], bulges[i])).map(|p| if let Piece::Arc { r, .. } = p { r } else { 0.0 }).fold(0.0, f64::max);
+    let shaped = |i: usize, want: f64| {
+        let got = found_bulges.get(i).copied().unwrap_or(0.0);
+        let chord = found[i].distance(found[(i + 1) % n]);
+        if want == 0.0 { got.to_bits() == 0 } else { (got - want).abs() * chord / 2.0 <= tolerance::rounding_slack(scale) }
+    };
+    let forward = (0..n).all(|i| found.get(i) == Some(&pts[(start + i) % n]) && shaped(i, bulges[(start + i) % n]));
+    let backward = (0..n).all(|i| found.get(i) == Some(&pts[(start + n - i) % n]) && shaped(i, -bulges[(start + 2 * n - i - 1) % n]));
+    if found.len() != n || !(forward || backward) {
+        return Err(format!("sketch loop {found:?} bulging {found_bulges:?} is not the path drawn {pts:?} bulging {bulges:?}"));
+    }
+    Ok(())
+}
+
 /// Applies one operation. With `checks` off it only runs the kernel (used
 /// for the determinism replay, whose results are compared bit for bit).
 /// The outline `sketch_outline` found for a sketched circle is that circle,
 /// bit for bit, with no holes.
 fn check_sketch_circle(c: sketch::Circle) -> Result<(), String> {
     let want = Profile { outer: Boundary::Circle { center: c.centre, radius: c.radius }, holes: vec![] };
-    match sketch::sketch_outline(&[], &[c]) {
+    match sketch::sketch_outline(&[], &[c], &[]) {
         Ok(sketch::SketchOutline::Closed(p)) if p == want => Ok(()),
         other => Err(format!("sketched circle {c:?} built, but its outline is {other:?}")),
     }
@@ -1482,7 +1576,7 @@ fn check_sketch_circle(c: sketch::Circle) -> Result<(), String> {
 /// not against anything the kernel computed.
 fn check_sketch_loop(pts: &[DVec2], seed: u64) -> Result<(), String> {
     let lines = sketch_lines(pts, seed);
-    let found = match sketch::sketch_outline(&lines, &[]) {
+    let found = match sketch::sketch_outline(&lines, &[], &[]) {
         Ok(sketch::SketchOutline::Closed(Profile { outer: Boundary::Path { corners, .. }, .. })) => corners,
         other => return Err(format!("sketched polygon built, but its outline is {other:?}")),
     };
@@ -1529,6 +1623,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             };
             let drawn = match sketched(shape) {
                 Some(Drawn::Lines(pts, seed)) => check_sketch_loop(&pts, seed),
+                Some(Drawn::Pieces(pts, bulges, seed)) => check_sketch_pieces(&pts, &bulges, seed),
                 Some(Drawn::Circle(c)) => check_sketch_circle(c),
                 None => Ok(()),
             };

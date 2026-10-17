@@ -92,8 +92,8 @@ test("step 21: a sketch produces Outline through the same registry and producer,
   d = drawLine(b.doc, s.id, b.doc.sketches[0].curves[1].end, a.doc.sketches[0].curves[0].start).doc;
   const asked: unknown[] = [];
   const kernel: KernelCalls = {
-    call: (async (op: string, lines: unknown, circles: unknown) => {
-      asked.push([op, lines, circles]);
+    call: (async (op: string, lines: unknown, circles: unknown, arcs: unknown) => {
+      asked.push([op, lines, circles, arcs]);
       return { closed: triangle };
     }) as KernelCalls["call"],
   };
@@ -102,8 +102,8 @@ test("step 21: a sketch produces Outline through the same registry and producer,
   const sketch = designObjects(d, kernel).find((o) => o.type === "design.sketch")!;
   assert.equal(sketch.id, s.id);
   assert.deepEqual(await registry.deliver(sketch, ["outline", "mesh"]), { representation: { kind: "outline", plane: XY_PLANE, outline: triangle }, note: null });
-  // The kernel was given the three lines in drawing order, each end at its point's place, and no circles.
-  assert.deepEqual(asked, [["sketch_outline", [{ a: [0, 0], b: [10, 0] }, { a: [10, 0], b: [0, 10] }, { a: [0, 10], b: [0, 0] }], []]]);
+  // The kernel was given the three lines in drawing order, each end at its point's place, and no circles or arcs.
+  assert.deepEqual(asked, [["sketch_outline", [{ a: [0, 0], b: [10, 0] }, { a: [10, 0], b: [0, 10] }, { a: [0, 10], b: [0, 0] }], [], []]]);
   // A sketch that makes no closed outline is refused with the kernel's reason, named.
   const open: KernelCalls = { call: (async () => ({ open: "a line ends loose at (0, 10)" })) as unknown as KernelCalls["call"] };
   const r2 = new RepresentationRegistry();

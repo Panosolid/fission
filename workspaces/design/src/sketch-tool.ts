@@ -13,7 +13,7 @@
 // click back on the chain's first point closes it. Snapping to points off
 // the grid comes with the sketch constraints (27).
 
-import type { Plane, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
+import type { Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchLineCurve, SketchPlane } from "./document.ts";
 import { drawCircle, drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
 
@@ -186,6 +186,31 @@ export function circleSegments(centre: SketchXY, radius: number): (readonly [Ske
   return at.map((p, k) => [p, at[(k + 1) % n]] as const);
 }
 
+/**
+ * An arc as the viewport draws it (step 23a): from its start to its end
+ * counter-clockwise round its centre, at the mean of the ends' distances
+ * from it, in ⌈CIRCLE_SEGMENTS × turn / 2π⌉ equal steps (at least one), so
+ * a half circle gets 32 segments, as half a drawn circle has. The first
+ * segment starts on the start and the last ends on the end exactly, so
+ * lines sharing those points meet the drawing. Ends at the same angle are
+ * drawn as a whole turn.
+ */
+export function arcSegments(arc: SketchArc): (readonly [SketchXY, SketchXY])[] {
+  const { start, end, centre } = arc;
+  const radius = (distance(centre, start) + distance(centre, end)) / 2;
+  const from = Math.atan2(start[1] - centre[1], start[0] - centre[0]);
+  let turn = Math.atan2(end[1] - centre[1], end[0] - centre[0]) - from;
+  while (turn <= 0) turn += 2 * Math.PI;
+  const n = Math.max(1, Math.ceil((CIRCLE_SEGMENTS * turn) / (2 * Math.PI)));
+  const at: SketchXY[] = [start];
+  for (let k = 1; k < n; k++) {
+    const t = from + (turn * k) / n;
+    at.push([centre[0] + radius * Math.cos(t), centre[1] + radius * Math.sin(t)]);
+  }
+  at.push(end);
+  return at.slice(1).map((p, k) => [at[k], p] as const);
+}
+
 /** The rubber-band line from the chain's last point to the pointer, or null between chains or off the plane. */
 export function previewLine(doc: DesignDocument, tool: LineTool | null, pointer: SketchXY | null): readonly [SketchXY, SketchXY] | null {
   if (!tool || tool.from === null || !pointer) return null;
@@ -216,15 +241,16 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
 }
 
 /**
- * Every sketch as the viewport draws it, lines then circles (each as
- * `circleSegments`): the one being edited (if any) with its grid, its
- * points (and a first click not yet a point) and the preview.
+ * Every sketch as the viewport draws it, lines, then circles (each as
+ * `circleSegments`), then arcs (`arcSegments`): the one being edited (if
+ * any) with its grid, its points (and a first click not yet a point) and
+ * the preview.
  */
 export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null } | null): SketchDrawing[] {
   return doc.sketches.map((s) => {
     const plane: Plane = planeOf(sketchPlaneOf(doc, s.id));
     const curves = sketchCurves(s);
-    const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius))];
+    const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
     if (editing?.tool.sketch !== s.id) return { plane, lines };
     const points: SketchXY[] = s.points.map((p) => [p.x, p.y]);
     const tool = editing.tool;
@@ -240,10 +266,12 @@ export function sketchPlaneOf(doc: DesignDocument, id: string): SketchPlane {
   return (item?.intent.parameters.plane as SketchPlane | undefined) ?? "XY";
 }
 
-/** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", or "Nothing drawn yet" when empty. */
+/** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", "2 lines, 1 arc and 1 circle", or "Nothing drawn yet" when empty. */
 export function curveCount(sketch: Sketch): string {
-  const lines = sketch.curves.filter((c) => c.kind === "line").length;
-  const circles = sketch.curves.length - lines;
-  const words = [lines ? `${lines} line${lines === 1 ? "" : "s"}` : "", circles ? `${circles} circle${circles === 1 ? "" : "s"}` : ""];
-  return words.filter(Boolean).join(" and ") || "Nothing drawn yet";
+  const count = (kind: string, word: string) => {
+    const n = sketch.curves.filter((c) => c.kind === kind).length;
+    return n ? `${n} ${word}${n === 1 ? "" : "s"}` : "";
+  };
+  const words = [count("line", "line"), count("arc", "arc"), count("circle", "circle")].filter(Boolean);
+  return words.length ? [words.slice(0, -1).join(", "), words.at(-1)].filter(Boolean).join(" and ") : "Nothing drawn yet";
 }

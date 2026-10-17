@@ -43,11 +43,24 @@ export interface SketchCircleCurve {
   radius: number;
 }
 
-/** A sketch's curves: lines and circles (arcs add a kind at step 23). */
-export type SketchCurve = SketchLineCurve | SketchCircleCurve;
+/**
+ * A sketch arc from one of its sketch's points to another, counter-clockwise
+ * round a third, all named by id (step 23a; Fusion's convention). The
+ * centre is midway between the ends; the kernel holds that rule.
+ */
+export interface SketchArcCurve {
+  id: string;
+  kind: "arc";
+  start: string;
+  end: string;
+  centre: string;
+}
 
-/** The points a curve is drawn from: a line's two ends, a circle's centre. */
-export const curvePoints = (c: SketchCurve): string[] => (c.kind === "line" ? [c.start, c.end] : [c.centre]);
+/** A sketch's curves: lines, circles and arcs. */
+export type SketchCurve = SketchLineCurve | SketchCircleCurve | SketchArcCurve;
+
+/** The points a curve is drawn from: a line's two ends, a circle's centre, an arc's ends and centre. */
+export const curvePoints = (c: SketchCurve): string[] => (c.kind === "line" ? [c.start, c.end] : c.kind === "circle" ? [c.centre] : [c.start, c.end, c.centre]);
 
 /** A sketch's content; its place in the build order and its plane are its timeline item with the same id. */
 export interface Sketch {
@@ -265,8 +278,9 @@ const isFiniteNumber = (x: unknown): x is number => typeof x === "number" && Num
 /**
  * A sketch's content, checked: points with finite mm, lines between two
  * different points of the same sketch, circles round a point of the same
- * sketch with a finite positive radius, no constraints yet. The kernel
- * holds the limits on sizes (sketch_outline), as it does for lines.
+ * sketch with a finite positive radius, arcs between two different points
+ * round a third, no constraints yet. The kernel holds the limits on sizes
+ * and where an arc's centre may be (sketch_outline), as it does for lines.
  */
 function checkSketch(s: unknown, i: number): void {
   if (!isRecord(s) || typeof s.id !== "string") throw new Error(`Design sketch ${i + 1} has no id`);
@@ -286,7 +300,14 @@ function checkSketch(s: unknown, i: number): void {
       if (!isFiniteNumber(c.radius) || c.radius <= 0) throw new Error(`${at}: circle ${c.id} needs a radius in mm above 0, not ${shown(c.radius)}`);
       continue;
     }
-    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Fission can't read yet (only lines and circles)`);
+    if (c.kind === "arc") {
+      for (const [role, p] of [["starts at", c.start], ["ends at", c.end], ["is round", c.centre]] as const)
+        if (typeof p !== "string" || !points.has(p)) throw new Error(`${at}: arc ${c.id} ${role} ${shown(p)}, which is not one of the sketch's points`);
+      if (c.start === c.end) throw new Error(`${at}: arc ${c.id} starts and ends at the same point`);
+      if (c.centre === c.start || c.centre === c.end) throw new Error(`${at}: arc ${c.id} is round one of its own ends`);
+      continue;
+    }
+    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Fission can't read yet (only lines, circles and arcs)`);
     for (const end of [c.start, c.end])
       if (typeof end !== "string" || !points.has(end)) throw new Error(`${at}: line ${c.id} ends at ${shown(end)}, which is not one of the sketch's points`);
     if (c.start === c.end) throw new Error(`${at}: line ${c.id} starts and ends at the same point`);

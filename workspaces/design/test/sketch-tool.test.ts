@@ -6,8 +6,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SketchXY } from "@fission/core";
 import { partDocument, readDesignDocument, type DesignDocument } from "../src/document.ts";
-import { addSketch, drawCircle, drawRectangle, SKETCH_STEPS, sketchCurves, sketchLines } from "../src/sketch.ts";
-import { CIRCLE_SEGMENTS, circleSegments, clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, previewLine, previewSegments, SKETCH_TOOLS, sketchDrawings, startTool, toolBusy, type CircleTool, type LineTool, type RectangleTool, type SketchTool } from "../src/sketch-tool.ts";
+import { addSketch, drawArc, drawCircle, drawRectangle, SKETCH_STEPS, sketchCurves, sketchLines } from "../src/sketch.ts";
+import { arcSegments, CIRCLE_SEGMENTS, circleSegments, clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, previewLine, previewSegments, SKETCH_TOOLS, sketchDrawings, startTool, toolBusy, type CircleTool, type LineTool, type RectangleTool, type SketchTool } from "../src/sketch-tool.ts";
 import { DESIGN_SHORTCUTS, sketchToolKey } from "../src/shortcuts.ts";
 
 function fresh() {
@@ -429,4 +429,52 @@ test("seeded sessions of random clicks, Escapes and tool switches match a model 
   }
   assert.ok(rectangles >= 100, `the sessions drew ${rectangles} rectangles`);
   assert.ok(circles >= 100, `the sessions drew ${circles} circles`);
+});
+
+test("hand-worked: arcs drawn as segments, a quarter turn in 16 like a quarter of a drawn circle (23a)", () => {
+  const near = (p: SketchXY, q: SketchXY, what: string) => assert.ok(Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-12, `${what}: ${p} is not ${q}`);
+  // From the east point (15, 20) of the circle round (10, 20), radius 5, to
+  // its north point (10, 25): a quarter turn, ⌈64 × ¼⌉ = 16 segments, each
+  // the chord 10·sin(π/64), as on the drawn circle; step 8 is at 45°,
+  // (10 + 5/√2, 20 + 5/√2). It starts and ends on the given points exactly.
+  const quarter = arcSegments({ start: [15, 20], end: [10, 25], centre: [10, 20] });
+  assert.equal(quarter.length, 16);
+  assert.equal(quarter[0][0][0], 15);
+  assert.deepEqual([quarter[0][0], quarter[15][1]], [[15, 20], [10, 25]]);
+  near(quarter[8][0], [10 + 5 / Math.SQRT2, 20 + 5 / Math.SQRT2], "45°");
+  for (let k = 0; k < 16; k++) {
+    if (k > 0) assert.equal(quarter[k][0], quarter[k - 1][1], `segment ${k} meets the last`);
+    assert.ok(Math.abs(Math.hypot(quarter[k][1][0] - quarter[k][0][0], quarter[k][1][1] - quarter[k][0][1]) - 10 * Math.sin(Math.PI / 64)) < 1e-12, `side ${k}`);
+  }
+  // Counter-clockwise across the angle where atan2 jumps: from north (90°)
+  // round through west and south to east (360°), three quarters, 48
+  // segments; a quarter of the way along (16) is the west point (5, 20).
+  const round = arcSegments({ start: [10, 25], end: [15, 20], centre: [10, 20] });
+  assert.equal(round.length, 48);
+  near(round[16][0], [5, 20], "west");
+  near(round[32][0], [10, 15], "south");
+  // A sliver of an arc is one segment, start to end.
+  assert.deepEqual(arcSegments({ start: [10, 0], end: [10 * Math.cos(1e-4), 10 * Math.sin(1e-4)], centre: [0, 0] }), [[[10, 0], [10 * Math.cos(1e-4), 10 * Math.sin(1e-4)]]]);
+  // A whole turn when the ends are at one angle (refused by the kernel; drawn anyway).
+  assert.equal(arcSegments({ start: [5, 0], end: [6, 0], centre: [0, 0] }).length, 64);
+});
+
+test("drawings show arcs after lines and circles, and the status counts them (23a)", () => {
+  const f = fresh();
+  const line = clicks(f.doc, f.tool, [[0, 0], [10, 0]]);
+  const ringed = drawCircle(line.doc, f.tool.sketch, [50, 50], 2).doc;
+  const arc = drawArc(ringed, f.tool.sketch, "point-4", [0, 10], "point-3").doc;
+  for (const editing of [{ tool: f.tool, grid: 10, pointer: null }, null]) {
+    const [d] = sketchDrawings(arc, editing);
+    assert.deepEqual(d.lines, [[[0, 0], [10, 0]], ...circleSegments([50, 50], 2), ...arcSegments({ start: [10, 0], end: [0, 10], centre: [0, 0] })]);
+  }
+  const sketch = (doc: DesignDocument) => doc.sketches[0];
+  assert.equal(curveCount(sketch(arc)), "1 line, 1 arc and 1 circle");
+  const twoArcs = drawArc(arc, f.tool.sketch, [0, 10], [-10, 0], "point-3").doc;
+  assert.equal(curveCount(sketch(twoArcs)), "1 line, 2 arcs and 1 circle");
+  const fresh2 = fresh();
+  const lone = drawArc(fresh2.doc, fresh2.tool.sketch, [5, 0], [-5, 0], [0, 0]).doc;
+  assert.equal(curveCount(sketch(lone)), "1 arc");
+  const withLines = clicks(lone, fresh2.tool, [[20, 0], [30, 0], [30, 10]]).doc;
+  assert.equal(curveCount(sketch(withLines)), "2 lines and 1 arc");
 });
