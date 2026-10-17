@@ -17,3 +17,23 @@ Notes from step 21 for later steps:
 Notes from step 22 for later steps:
 - A circle together with any other curve is "the sketch makes n separate loops" until regions (26). The circle tool keeps only the centre as a point; the click on the circle sets the radius (√(dx² + dy²) with Math.sqrt, not Math.hypot, which V8 rounds a unit off for (10, 30)).
 - The viewport draws a circle as `CIRCLE_SEGMENTS` = 64 straight segments (`circleSegments`, drawing only; the sketch and the kernel keep the exact circle), so its `sketchLines` count is 64 per circle.
+
+## Testing catch-up after step 22 (TC1–TC5)
+
+Ben (2026-10-17): accuracy and good tests come before progress, and big new areas have started without their tests. These close the four gaps found after step 22, in test and harness files only (the 23b arc and snapping threads own the tool code). Branch: claude/project-thread-gzrxch.
+- [x] TC1. Mixed tools in one sketch on the real kernel: `packages/testing/src/outline-model.ts` (a model of the outline rules written apart from the kernel) and `journeys/sketch-mixed.journey.ts` (hand-worked mixes, 300 random three-tool sessions with deletes, 150 closed two-tool outlines extruded). Finding: in the app today no closed outline can mix tools (a chain off a rectangle's corner is always a branch, a circle with anything is two loops, and there is no delete yet); mixed closed outlines come with arcs (23) and delete. Arcs join the model and the mixes the day the arc tool lands.
+- [ ] TC2. Long messy session in the browser: `apps/fission/e2e/sketch-session.mjs`, seeded (`FISSION_SEED`): about 50 shapes with all tools, Escapes, bursts of Ctrl+Z / Ctrl+Shift+Z, each step checked against a coordinates model (points, line count, the status words from `outline-model.ts`); Save and compare the file; reload (autosave) and open the saved file in a fresh tab; carry on in Sketch 2, then a closed sketch extruded to the model's volume. Failing sessions print their seed and steps; saved ones in `e2e/regressions/` replay.
+- [ ] TC3. Screenshot checks of sketches: pixel probes on the canvas (each drawn line has sketch-line pixels along it where the maths puts it, and none away from it), working in every browser; plus golden-image comparisons in Chromium with a measured tolerance (`e2e/screenshots/`, `E2E_UPDATE_SHOTS=1` to rewrite, a diff image on failure), the comparer tested at 0.9× and 1.1× of its tolerance and against a deliberately moved line.
+- [ ] TC4. Firefox and WebKit: one `e2e/browser.mjs` launcher read by every browser test (`E2E_BROWSER`), and a CI job running the sketch tests (and the smoke test) in both, required by auto-merge.
+- [ ] TC5. Test plan before building: the checklist below, used by every big new area.
+
+### Test plan before building (for every big new area: constraints, timeline, booleans, assemblies…)
+
+Write this plan into the area's first substep before any feature code, and land the harness with the first feature substep, never after:
+1. Hand-worked cases with the working shown, written before the code, including every refusal with its exact message.
+2. Nasty cases listed up front, each at 0.9× and 1.1× of every threshold involved (the boolean list in kernel/CLAUDE.md is the model).
+3. A simple independent model the random tests compare against (like `outline-model.ts`), plus seeded random sessions and shrunk failures kept in `tests/regressions/`; the random tests must assert they reached every kind of answer.
+4. Proof the tests can fail: break the code or the model on purpose (mutation testing for the kernel) and show the tests catch it.
+5. Join the existing harnesses the same day: the kernel's stateful harness, history-fuzz (undo/redo), project-fuzz (save and open), the journeys on the real kernel, and the mixed-tool journey (the new tool mixed with every existing one).
+6. Browser: the tool at 1280 and 375 px with taps, in Chromium, Firefox and WebKit; pixel probes for anything it draws; the long sketch session extended with it.
+7. Area-specific: the constraint solver gets Ben's three (a fixed-size rectangle lands exactly; under- and over-constrained sketches detected and coloured, never solved into nonsense; a fuzzer of random shapes and constraints that either satisfies every one within tolerance or names the conflict) plus "solving twice gives the same answer" and "a small drag moves things a little". The timeline gets rebuild determinism, edit-an-early-feature-and-rebuild sessions, and the naming success rate in `tests/baseline.json`. Booleans follow the boolean test plan in kernel/CLAUDE.md.
