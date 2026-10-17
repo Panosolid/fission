@@ -13,7 +13,9 @@ name: Random testing
 # UTC.
 #
 # "Run workflow" on the Actions tab (or workflow_dispatch from a thread) tests
-# any branch: 4 jobs for `minutes`, mutation testing only if asked. Mutation
+# any branch: 4 jobs for `minutes`, mutation testing only if asked; the random
+# rounds stop early, keeping every finished round, once the branch's pull
+# request has merged or closed (.github/scripts/stop-on-merge.sh). Mutation
 # shards are not held to `minutes`: a shard cut off part way says nothing
 # about the code it didn't reach, so they get up to 330 minutes, like a
 # nightly shard.
@@ -99,6 +101,9 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    permissions:
+      contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix:
@@ -117,7 +122,22 @@ jobs:
         working-directory: kernel
         env:
           DEADLINE: ${{ needs.plan.outputs.deadline }}
-        run: scripts/run-until.sh "$DEADLINE"
+          # A run started from a push stops after the round in progress once
+          # the branch's pull request has merged or closed: tonight's run on
+          # main tests that code, and the runners go back to pull requests
+          # (.github/scripts/stop-on-merge.sh; owner's decision, 2026-10-17).
+          FISSION_ENDLESS_STOP_FILE: ${{ runner.temp }}/stop-random-testing
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          watcher=
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$GITHUB_REF_NAME" != main ]; then
+            ../.github/scripts/stop-on-merge.sh "$GITHUB_REF_NAME" "$FISSION_ENDLESS_STOP_FILE" &
+            watcher=$!
+          fi
+          code=0
+          scripts/run-until.sh "$DEADLINE" || code=$?
+          [ -z "$watcher" ] || kill "$watcher" 2>/dev/null || true
+          exit $code
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -130,6 +150,9 @@ jobs:
     if: ${{ !cancelled() && needs.plan.outputs.second_leg == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    permissions:
+      contents: read
+      pull-requests: read
     strategy:
       fail-fast: false
       matrix:
@@ -148,7 +171,22 @@ jobs:
         working-directory: kernel
         env:
           DEADLINE: ${{ needs.plan.outputs.deadline }}
-        run: scripts/run-until.sh "$DEADLINE"
+          # A run started from a push stops after the round in progress once
+          # the branch's pull request has merged or closed: tonight's run on
+          # main tests that code, and the runners go back to pull requests
+          # (.github/scripts/stop-on-merge.sh; owner's decision, 2026-10-17).
+          FISSION_ENDLESS_STOP_FILE: ${{ runner.temp }}/stop-random-testing
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          watcher=
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$GITHUB_REF_NAME" != main ]; then
+            ../.github/scripts/stop-on-merge.sh "$GITHUB_REF_NAME" "$FISSION_ENDLESS_STOP_FILE" &
+            watcher=$!
+          fi
+          code=0
+          scripts/run-until.sh "$DEADLINE" || code=$?
+          [ -z "$watcher" ] || kill "$watcher" 2>/dev/null || true
+          exit $code
       - uses: actions/upload-artifact@v4
         if: always()
         with:

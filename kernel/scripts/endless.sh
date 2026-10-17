@@ -14,6 +14,10 @@
 # FISSION_ENDLESS_MINUTES=<m> stops starting new rounds after m minutes, and
 # FISSION_ENDLESS_UNTIL=<unix time> at that moment (used by the GitHub workflow,
 # whose jobs have a time limit and whose nightly run must end by 7am Perth).
+# FISSION_ENDLESS_STOP_FILE=<path>: once that file exists, the round in
+# progress finishes and is logged, and no new round starts (the workflow's
+# .github/scripts/stop-on-merge.sh creates it when the branch's pull request
+# has merged or closed).
 #
 # Results go to kernel/endless-results/ (gitignored):
 #   log.csv           one line per round: when, seed, cases, harness result,
@@ -125,6 +129,7 @@ while [ $stop = 0 ]; do
   summary
   [ "$MAX_ROUNDS" -gt 0 ] && [ $rounds -ge "$MAX_ROUNDS" ] && stop=1
   [ $DEADLINE -gt 0 ] && [ "$(date +%s)" -ge $DEADLINE ] && stop=1
+  [ -n "${FISSION_ENDLESS_STOP_FILE:-}" ] && [ -e "$FISSION_ENDLESS_STOP_FILE" ] && stop=1
   echo "round $rounds: seed $seed, harness $harness, oracle $bodies bodies / $disagreements disagreements, ${secs}s"
 done
 
