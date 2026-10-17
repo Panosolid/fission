@@ -64,13 +64,15 @@ fn body(out: &mut String, body: &Body) {
     let d = &view.mesh;
     let floats: Vec<u8> = [&d.positions, &d.normals, &d.edge_lines].iter().flat_map(|v| v.iter().flat_map(|x| x.to_bits().to_le_bytes())).collect();
     let ints: Vec<u8> = [&d.indices, &d.triangle_faces, &d.edge_line_edges].iter().flat_map(|v| v.iter().flat_map(|x| x.to_le_bytes())).collect();
+    // Each face's role, exact area and centroid (step 24b).
+    let faces: Vec<u8> = view.face_areas.iter().chain(view.face_centroids.iter().flatten()).flat_map(|x| x.to_bits().to_le_bytes()).collect();
     // The planted break `check.sh` proves the check with: one bit of the
     // volume, in one build only.
     #[cfg(same_answer_break)]
     let view = fission_kernel::BodyView { volume: f64::from_bits(view.volume.to_bits() ^ 1), ..view };
     let _ = write!(
         out,
-        " volume={} area={} v/e/f={}/{}/{} errors={:016x} display={:016x}/{:016x}",
+        " volume={} area={} v/e/f={}/{}/{} errors={:016x} display={:016x}/{:016x} roles={:016x} faces={:016x}",
         bits(view.volume),
         bits(view.area),
         view.vertices,
@@ -78,7 +80,9 @@ fn body(out: &mut String, body: &Body) {
         view.faces,
         hash_debug(&view.errors),
         hash(&floats),
-        hash(&ints)
+        hash(&ints),
+        hash_debug(&view.face_roles),
+        hash(&faces)
     );
     match tessellate(body, &TessOptions::DISPLAY) {
         Ok(mesh) => {
@@ -112,8 +116,8 @@ pub fn answer(target: &str, data: &[u8]) -> String {
             let input = checks::sketch_input(data);
             let _ = write!(out, "input={:016x}", hash_debug(&input));
             match sketching::sketch_outline(&input.0, &input.1, &input.2) {
-                Ok(SketchOutline::Closed(profile)) => {
-                    let _ = write!(out, " closed={:016x}", hash_debug(&profile));
+                Ok(SketchOutline::Closed(profile, sources)) => {
+                    let _ = write!(out, " closed={:016x} sources={:016x}", hash_debug(&profile), hash_debug(&sources));
                     extruded(&mut out, &profile, 1.0);
                 }
                 Ok(SketchOutline::Open(why)) => {

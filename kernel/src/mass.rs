@@ -89,7 +89,7 @@ fn about(body: &Body, o: DVec3) -> MassProps {
 
 /// A coedge as the curve it runs along and its parameters in the direction
 /// of travel (from `ta` to `tb`; `tb < ta` when the coedge is reversed).
-fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) {
+pub(crate) fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) {
     let e = &body.edges[c.edge];
     if c.reversed { (&e.curve, e.t1, e.t0) } else { (&e.curve, e.t0, e.t1) }
 }
@@ -111,7 +111,7 @@ fn travel(body: &Body, c: Coedge) -> (&Curve, f64, f64) {
 /// would not close. The gap, a sliver as long as the face, times its
 /// distance from the body's centre swamped a thin far-out slot's volume
 /// (see `a_thin_slot_far_out_keeps_its_volume`).
-fn half_moment(curve: &Curve, ta: f64, tb: f64, a: DVec3, b: DVec3, o: DVec3) -> DVec3 {
+pub(crate) fn half_moment(curve: &Curve, ta: f64, tb: f64, a: DVec3, b: DVec3, o: DVec3) -> DVec3 {
     let chord = 0.5 * (a - o).cross(b - o);
     match *curve {
         Curve::Line { .. } => chord,
@@ -122,7 +122,7 @@ fn half_moment(curve: &Curve, ta: f64, tb: f64, a: DVec3, b: DVec3, o: DVec3) ->
 /// θ − sin θ without cancellation: by its series θ³/3! − θ⁵/5! + … below
 /// 0.1, to θ¹¹: the first term left out is 6θ¹⁰/13! ≈ 1e-19 of the first.
 /// (Stopping at θ⁹ left 6θ⁸/11! ≈ 1.5e-15, six ulps, at 0.1.)
-fn theta_minus_sin(t: f64) -> f64 {
+pub(crate) fn theta_minus_sin(t: f64) -> f64 {
     if t.abs() < 0.1 {
         let t2 = t * t;
         t * t2 / 6.0 * (1.0 - t2 / 20.0 * (1.0 - t2 / 42.0 * (1.0 - t2 / 72.0 * (1.0 - t2 / 110.0))))
@@ -176,7 +176,7 @@ fn corner_turn(t_in: DVec3, t_out: DVec3, n: DVec3) -> f64 {
 }
 
 /// (∬ (x − o)·n dA, area) for one face.
-fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
+pub(crate) fn face_terms(body: &Body, face: &Face, o: DVec3) -> (f64, f64) {
     let sign = if face.sense { 1.0 } else { -1.0 };
     let coedges = || face.loops.iter().flat_map(|l| l.coedges.iter().copied());
     let p = coedges().next().map_or(o, |c| body.vertices[body.coedge_start(c)].point);

@@ -166,6 +166,55 @@ pub struct Face {
     pub sense: bool,
     /// The first loop is the outer boundary when the face has one.
     pub loops: Vec<Loop>,
+    /// What the face is in the operation that made it (`FaceRole`); None
+    /// for bodies built by hand (fixtures).
+    pub role: Option<FaceRole>,
+}
+
+/// What a face is in the operation that made it (step 24b), so a later
+/// feature can find it again after an edit renumbers the faces: the app
+/// names a face by its feature, this role and, for a side, the sketch curve
+/// the piece came from (`sketch::sketch_outline` says which).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FaceRole {
+    /// An extrude's cap on the sketch plane, and the far one.
+    Start,
+    End,
+    /// An extrude's side swept from piece `piece` of profile loop `boundary`
+    /// (0 the outer loop, k the hole k − 1), both numbered as the profile
+    /// was given, whichever way round the kernel runs the loop.
+    Side(Piece),
+    /// A cylinder's curved face ("side" to the app, with no piece).
+    Wall,
+    /// A box's faces by outward direction (−Z, +Z, −Y, +Y, −X, +X); a
+    /// cylinder's caps are Bottom and Top.
+    Bottom,
+    Top,
+    Front,
+    Back,
+    Left,
+    Right,
+    /// A sphere's halves, above and below its equator.
+    Upper,
+    Lower,
+}
+
+/// Piece `piece` of profile loop `boundary` (see `FaceRole::Side`). Both
+/// fit in 16 bits (a profile has at most MAX_PROFILE_CORNERS = 2,000 corners
+/// in all), which keeps a role inside the padding a `Face` already has, so
+/// roles cost no memory (`a_role_costs_a_face_no_memory`; the baseline
+/// counts peak bytes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Piece {
+    pub boundary: u16,
+    pub piece: u16,
+}
+
+impl Piece {
+    /// Piece `piece` of loop `boundary`; both are below MAX_PROFILE_CORNERS.
+    pub fn at(boundary: usize, piece: usize) -> Piece {
+        Piece { boundary: boundary as u16, piece: piece as u16 }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -201,8 +250,15 @@ impl Body {
     }
 
     pub fn add_face(&mut self, surface: Surface, sense: bool, loops: Vec<Loop>) -> FaceId {
-        self.faces.push(Face { surface, sense, loops });
+        self.faces.push(Face { surface, sense, loops, role: None });
         self.faces.len() - 1
+    }
+
+    /// `add_face` for a face with a role.
+    pub fn add_face_as(&mut self, role: FaceRole, surface: Surface, sense: bool, loops: Vec<Loop>) -> FaceId {
+        let f = self.add_face(surface, sense, loops);
+        self.faces[f].role = Some(role);
+        f
     }
 
     pub fn coedge_start(&self, c: Coedge) -> VertexId {
@@ -278,7 +334,7 @@ impl Body {
             faces: self
                 .faces
                 .iter()
-                .map(|f| Face { surface: f.surface.transformed(tf), sense: f.sense, loops: f.loops.clone() })
+                .map(|f| Face { surface: f.surface.transformed(tf), sense: f.sense, loops: f.loops.clone(), role: f.role })
                 .collect(),
             shells: self.shells.clone(),
         }
@@ -309,6 +365,21 @@ mod tests {
     use super::*;
     use crate::tolerance::{angle_eq, eq, points_eq, ANGULAR, MAX_SIZE};
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+
+    #[test]
+    fn a_role_costs_a_face_no_memory() {
+        // A face as it was before roles (step 24b): the role fits in the
+        // padding after `sense`, so every face, body and clone stays the
+        // same size (the speed and memory baseline counts peak bytes).
+        #[allow(dead_code)]
+        struct Unnamed {
+            surface: Surface,
+            sense: bool,
+            loops: Vec<Loop>,
+        }
+        assert_eq!(std::mem::size_of::<Face>(), std::mem::size_of::<Unnamed>());
+        assert_eq!(Piece::at(3, 1999), Piece { boundary: 3, piece: 1999 });
+    }
 
     fn quarter_arc_edge() -> (Body, EdgeId) {
         // Unit circle about +Z, edge from t = π/2 to t = π: (0,1,0) → (-1,0,0).
