@@ -1,10 +1,10 @@
-Fission random testing, all runs so far (updated 2026-10-17 19:29 UTC)
+Fission random testing, all runs so far (updated 2026-10-17 22:37 UTC)
 
-hours of testing:                 317.2
-rounds:                           5002
-random operation chains:          10004000
+hours of testing:                 365.7
+rounds:                           5915
+random operation chains:          11830000
 rounds where the harness failed:  520
-bodies compared with OpenCascade: 19406910
+bodies compared with OpenCascade: 23185727
 OpenCascade disagreements:        345
 last problem found:               2026-10-17 19:18:20 (seed 166992388242136, commit 9c70d1f on claude/24c-design-names-l9qxh7)
 
@@ -15,15 +15,15 @@ failure-dumps/*/index.html is a 3D view with the problem in red.
 The commit and branch columns of log.csv (and commit.txt in each
 failures folder) say which code a round tested.
 
-Latest mutation run (whole kernel, lib tests), 2026-10-17 07:02 UTC, commit 2548459 on claude/project-thread-jkybha:
-  shards finished: 0 of 4 (incomplete: survivors list not replaced)
-  caught 0, missed , timed out 0, unviable 0
+Latest mutation run (whole kernel, lib tests), 2026-10-17 22:37 UTC, commit 0428731 on main:
+  shards finished: 3 of 4 (incomplete: survivors list not replaced)
+  caught 2494, missed 17, timed out 197, unviable 99
   survivors not in the previous complete run: 0
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 9c70d1f on claude/24c-design-names-l9qxh7, 2026-10-17 19:29 UTC (https://github.com/benpy28/fission/actions/runs/39060578769)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.97 s (baseline 1.23 s)
+  tested commit 0428731 on main, 2026-10-17 22:37 UTC (https://github.com/benpy28/fission/actions/runs/39044428728)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.88 s (baseline 1.23 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
