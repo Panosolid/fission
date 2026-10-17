@@ -1,0 +1,12 @@
+{
+  "$comment": "Mutation testing of the document model, file reading and undo (hunt 3a). Run through run.sh, from packages/core.",
+  "testRunner": "command",
+  "commandRunner": { "command": "node --experimental-strip-types --no-warnings --test test/project.test.ts test/history.test.ts test/feature.test.ts test/mutation-survivors.test.ts" },
+  "mutate": ["src/model/project.ts", "src/model/history.ts", "src/model/feature.ts"],
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "../../node_modules/.cache/stryker/core.json" },
+  "clearTextReporter": { "allowColor": false, "logTests": false, "reportMutants": false },
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": ["node_modules"],
+  "timeoutMS": 30000
+}

@@ -16,3 +16,6 @@ kernel/mutants.out*/
 
 # Training data the generator writes (training/scripts/generate.ts)
 training/data/
+
+# StrykerJS sandboxes (packages/testing/stryker/run.sh), removed after each run
+.stryker-tmp/
