@@ -3,9 +3,15 @@ name: Fuzzing
 # Fuzzing on GitHub's computers (free for public repos): the file readers,
 # the STL reader (kernel/tests/fuzz_stl.rs) and the project loader
 # (packages/testing/src/project-fuzz.ts), each broken files by the thousand
-# checked against a simple model, a fresh seed every round of 2,000 inputs;
-# and the kernel's entry points (extrude, sketch outline, moves and turns)
-# with coverage-guided fuzzing (kernel/fuzz/, cargo-fuzz on nightly Rust).
+# checked against a simple model, a fresh seed every round of 2,000 inputs.
+# Alongside them, simulated users sketching and extruding on the real kernel
+# (packages/testing/fuzz/sketch-extrude.ts, rounds of 50 sessions × 40
+# steps against the sessions' own model), then up to 20,000 of the extrudes
+# they built compared with exact values and OpenCascade
+# (prototypes/oracle/sketch_extrude.py; a disagreement is a failure folder
+# with oracle-disagreements.txt). And the kernel's entry points (extrude,
+# sketch outline, moves and turns) with coverage-guided fuzzing
+# (kernel/fuzz/, cargo-fuzz on nightly Rust).
 #
 # Nightly at 23:10 UTC (7:10am Perth), after the random testing run
 # (nightly.yml, 15:00 to 22:35 UTC, collected by about 22:50) so the two
@@ -82,6 +88,58 @@ jobs:
           path: ${{ runner.temp }}/fuzz/
           if-no-files-found: ignore
 
+  sessions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run kernel -w @fission/app
+      - name: Sketch and extrude sessions until the time is up
+        env:
+          MINUTES: ${{ inputs.minutes || '45' }}
+          FISSION_FUZZ_OUT: ${{ runner.temp }}/fuzz
+        run: FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) npm run sessions -w @fission/testing
+      - uses: actions/setup-python@v5
+        if: always()
+        with:
+          python-version: "3.12"
+      - name: Compare the extrudes with exact values and OpenCascade
+        if: always()
+        env:
+          OUT: ${{ runner.temp }}/fuzz
+        working-directory: prototypes/oracle
+        run: |
+          [ -f "$OUT/oracle.jsonl" ] || exit 0
+          pip install -q cadquery-ocp mpmath
+          if ! python3 sketch_extrude.py "$OUT/oracle.jsonl" "$OUT/disagreements.txt"; then
+            mkdir -p "$OUT/seed-oracle-${{ github.run_id }}"
+            mv "$OUT/disagreements.txt" "$OUT/seed-oracle-${{ github.run_id }}/oracle-disagreements.txt"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-sessions
+          path: |
+            ${{ runner.temp }}/fuzz/log.csv
+            ${{ runner.temp }}/fuzz/seed-*/
+          if-no-files-found: ignore
+
   kernel:
     # Coverage-guided fuzzing (libFuzzer via cargo-fuzz) of the kernel's
     # entry points: kernel/fuzz/checks.rs, one job per target. Starts from
@@ -113,7 +171,7 @@ jobs:
           if-no-files-found: ignore
 
   collect:
-    needs: [stl, project, kernel]
+    needs: [stl, project, sessions, kernel]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15

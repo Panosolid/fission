@@ -35,7 +35,7 @@ add_run() {
       rounds[$1]++; cases[$1] += $3; bad[$1] += ($4 > 0); secs += $5
       if ($4 > 0) last[$1] = $2 " (commit " $7 " on " $8 ")"
     } END {
-      print "Fuzzing (the STL reader, the project loader and the kernel fuzz targets), all runs so far (updated " now ")"
+      print "Fuzzing (the STL reader, the project loader, the sketch-extrude sessions and the kernel fuzz targets), all runs so far (updated " now ")"
       printf "  hours of fuzzing: %.1f\n", secs / 3600
       for (t in rounds) printf "  %-8s rounds %d, inputs %d, rounds that found something %d, last: %s\n", t, rounds[t], cases[t], bad[t], (t in last ? last[t] : "none yet")
       print "fuzz/log.csv has one line per round; fuzz/failures/seed-<seed>/ has each failing round'\''s"

@@ -19,3 +19,9 @@
 @media (max-width: 700px) {
   .sketch button, .sketch .sketch-grid input { min-height: 44px; }
 }
+/* Snap to grid (sketch feel SF1): a tickbox on its own line under the grid size. */
+.sketch .sketch-grid-snap { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+@media (max-width: 700px) {
+  .sketch .sketch-grid-snap { min-height: 44px; }
+  .sketch .sketch-grid-snap input { width: 24px; height: 24px; }
+}
