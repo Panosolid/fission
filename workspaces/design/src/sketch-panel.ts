@@ -1,6 +1,6 @@
 // The sketch tool's panel (step 21c), at the top of the properties: the
 // "Pick a plane" prompt of Create sketch, then while a sketch is edited its
-// name, the tools (Line, Rectangle: step 22a; Circle: 22c; Arc: 23b; Tangent arc: 23c), how to draw, the typeable grid size and Snap to grid (SF1, off by default), whether the lines close,
+// name, the tools (Line, Rectangle: step 22a; Circle: 22c; Arc: 23b; Tangent arc: 23c), how to draw, the typeable grid size and Snap to grid (SF1, off by default), Look at (SF2), whether the lines close,
 // Finish sketch and Extrude (step 21d). The workspace drives it; the panel
 // only shows what it is given and reports clicks. Styles: src/styles/sketch.css.
 
@@ -18,6 +18,8 @@ export interface SketchPanelEvents {
   extrude(): void;
   /** A tool chosen. */
   tool(kind: ToolKind): void;
+  /** Look At: the camera square onto the sketch again (SF2). */
+  lookAt(): void;
 }
 
 /** Where clicks land, under every tool's help (sketch feel SF1). */
@@ -131,6 +133,7 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
         el("p", { className: "sketch-help", id: "sketch-snap-help", textContent: SNAP_HELP }),
         label,
         snapLabel,
+        button("Look at", "sketch-look-at", () => on.lookAt(), "sketch-look-at"),
         gridError,
         status,
         el("div", { className: "sketch-buttons" }),
