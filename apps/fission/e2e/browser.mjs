@@ -17,6 +17,10 @@ export function launch() {
   // Headless Firefox on a CI machine with no graphics card refuses WebGL
   // ("AllowWebgl2:false restricts context creation"), so nothing would be
   // drawn; these let it use its software renderer, as Chromium does.
+  // Headless, it still found no GL driver ("Exhausted GL driver options"),
+  // so CI runs it with a window on a virtual screen (xvfb-run, E2E_HEADED=1)
+  // and Mesa's software GL.
   if (browserName === "firefox") options.firefoxUserPrefs = { "webgl.force-enabled": true, "webgl.disabled": false, "webgl.enable-webgl2": true };
+  if (process.env.E2E_HEADED) options.headless = false;
   return ENGINES[browserName].launch(options);
 }

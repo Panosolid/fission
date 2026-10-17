@@ -23,6 +23,7 @@ export const TOOL_HELP: Record<ToolKind, string> = {
   line: "Click to place points: each click draws a line from the last one, snapped to the grid. Click the first point to close the shape. Escape ends the line.",
   rectangle: "Click one corner, then the opposite corner: four lines, snapped to the grid. Escape drops the first corner.",
   circle: "Click the centre, then a point on the circle, both snapped to the grid. Escape drops the centre.",
+  arc: "Click the start, then the end, then a point the arc passes through, all snapped to the grid. Escape drops the ends.",
 };
 
 export interface SketchPanel {

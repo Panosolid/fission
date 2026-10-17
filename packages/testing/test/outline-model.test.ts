@@ -63,8 +63,8 @@ test("hand-worked: loose ends, branches and separate loops, each at the first en
 });
 
 test("the kernel's words for each open kind, as the app shows them", () => {
-  assert.equal(openWords({ kind: "loose", at: [-10, 20] }), "the line end at (-10, 20) is not joined to another line");
-  assert.equal(openWords({ kind: "branch", at: [40, 0], ends: 3 }), "3 line ends meet at (40, 0); every corner of an outline joins exactly two");
+  assert.equal(openWords({ kind: "loose", at: [-10, 20] }), "the end at (-10, 20) is not joined to another line or arc");
+  assert.equal(openWords({ kind: "branch", at: [40, 0], ends: 3 }), "3 ends meet at (40, 0); every corner of an outline joins exactly two");
   assert.equal(openWords({ kind: "loops", loops: 2 }), "the sketch makes 2 separate loops; for now a sketch makes one outline");
   assert.throws(() => openWords({ kind: "closed", corners: [], area: 0 }), /not open/);
 });
@@ -93,10 +93,10 @@ test("compareOutline fails on each kind of disagreement (a check must be able to
   const houseKernel = { closed: { outer: { path: { corners: [40, 30, 20, 50, 0, 30, 0, 0, 40, 0], bulges: [] } }, holes: [] } };
   compareOutline(house, houseKernel); // the same corners from another start: agrees
   assert.throws(() => compareOutline(house, rectangle), /different corners/);
-  assert.throws(() => compareOutline(house, { open: "the sketch has no lines or circles yet" }), /left it open/);
+  assert.throws(() => compareOutline(house, { open: "the sketch has no lines, arcs or circles yet" }), /left it open/);
   assert.throws(() => compareOutline({ kind: "loose", at: [0, 0] }, houseKernel), /closed it/);
-  assert.throws(() => compareOutline({ kind: "loose", at: [0, 0] }, { open: "the line end at (10, 0) is not joined to another line" }), /different reasons/);
+  assert.throws(() => compareOutline({ kind: "loose", at: [0, 0] }, { open: "the end at (10, 0) is not joined to another line or arc" }), /different reasons/);
   assert.throws(() => compareOutline({ kind: "circle", area: 1 }, rectangle), /made a path/);
   assert.throws(() => compareOutline(house, { closed: { outer: { circle: { center: [0, 0], radius: 1 } }, holes: [] } }), /made a circle/);
-  compareOutline({ kind: "not a profile", corners: [], why: "x" }, { open: "the lines close up but are not a valid outline: anything" });
+  compareOutline({ kind: "not a profile", corners: [], why: "x" }, { open: "the curves close up but are not a valid outline: anything" });
 });

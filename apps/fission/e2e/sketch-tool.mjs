@@ -9,10 +9,12 @@
 // corners make four lines as one undo step, a corner on the first one's
 // row draws nothing and says why, Escape drops the first corner, L goes
 // back to lines; extruded it is a box of the hand-worked volume; the same
-// at 375 px. Screenshots at 1280 and 375 px go to E2E_SHOTS when set.
+// at 375 px. The circle tool (22c) and the 3-point arc tool (23b, a half
+// disc of hand-worked volume) the same way. Screenshots at 1280 and 375 px
+// go to E2E_SHOTS when set.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { launch } from "./browser.mjs";
+import { browserName, launch } from "./browser.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4183, strictPort: true }, logLevel: "error" });
@@ -85,15 +87,41 @@ async function at(page, [x, y], view, tap = false) {
 }
 
 let failed = 0;
-async function check(name, fn) {
+/**
+ * Runs one check. `known` marks a known app bug in some engines: there the
+ * check must still fail with exactly that symptom (an expected failure, not
+ * a skip); failing any other way fails, and passing fails too, saying the
+ * bug looks fixed so the mark is removed.
+ */
+async function check(name, fn, known) {
+  const expected = known && known.engines.includes(browserName);
   try {
     await fn();
-    console.log(`ok - ${name}`);
+    if (expected) {
+      failed++;
+      console.log(`not ok - ${name}\n  passes in ${browserName}: the known bug looks fixed (${known.bug}); remove its mark`);
+    } else console.log(`ok - ${name}`);
   } catch (e) {
+    if (expected && known.symptom.test(e.message)) {
+      console.log(`ok - ${name} # known bug in ${browserName}, failing as expected: ${known.bug}`);
+      return;
+    }
     failed++;
     console.log(`not ok - ${name}\n  ${e.message.split("\n").join("\n  ")}`);
   }
 }
+
+/**
+ * Found by WebKit (testing catch-up TC4, docs/progress/cad.md): WebKit's
+ * number box takes the letter typed into the grid box, so it shows "Type the
+ * grid size in mm." when it loses focus, which pushes Extrude down between
+ * the press and the release of the click on it, and the click is lost.
+ */
+const GRID_ERROR_MOVES_EXTRUDE = {
+  engines: ["webkit"],
+  bug: "an invalid grid size's message moves Extrude mid-click (sketch-panel.ts)",
+  symptom: /^Extrude's OK on: timed out; the page shows .*grid error "Type the grid size in mm\."$/,
+};
 
 try {
   await check("Create sketch asks for a plane: the origin planes are drawn, only the ground plane is offered, Escape cancels", async () => {
@@ -277,7 +305,26 @@ try {
     await page.keyboard.press("r");
     assert.equal(await page.isVisible("#sketch-panel"), false);
     await page.context().close();
-  });
+  }, GRID_ERROR_MOVES_EXTRUDE);
+
+  await check("an invalid grid size's message doesn't move Extrude from under the click: a closed rectangle still opens Extrude with OK on", async () => {
+    const page = await fresh();
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("r");
+    await at(page, [0, 0], TOP);
+    await at(page, [40, 30], TOP);
+    await status(page, "4 lines, a closed outline.");
+    // "e" is the one letter every engine's number box takes; the value is then invalid.
+    await page.focus("#sketch-grid");
+    await page.keyboard.press("Control+A");
+    await page.keyboard.press("e");
+    await page.click("#sketch-extrude");
+    await until(page, () => document.querySelector("#extrude-ok")?.disabled === false, null, "Extrude's OK on");
+    await page.context().close();
+  }, { ...GRID_ERROR_MOVES_EXTRUDE, engines: ["chromium", "firefox", "webkit"] });
 
   await check("the rectangle tool at 375 px with taps: the tool buttons fit and are 44 px, two taps make a closed rectangle", async () => {
     const page = await fresh(375, true);
@@ -375,6 +422,91 @@ try {
     await status(page, "1 circle, a closed outline.");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
     if (shots) await page.screenshot({ path: `${shots}/sketch-circle-375.png`, fullPage: true });
+    await page.context().close();
+  });
+
+  await check("the 3-point arc tool: A, start, end, then a point on it as one undo step, the previews, notes for no end and no bend, a half disc extruded 10 mm is 2000π mm³", async () => {
+    const page = await fresh();
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    // The flat side first: a line (0, 0) → (40, 0), its chain ended with Escape.
+    for (const p of [[0, 0], [40, 0]]) await at(page, p, TOP);
+    await statusStarts(page, "1 line, not closed: ");
+    await page.keyboard.press("Escape");
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("a");
+    assert.equal(await page.getAttribute("#sketch-tool-arc", "aria-pressed"), "true", "A chose Arc");
+    assert.equal(await page.getAttribute("#sketch-tool-arc", "title"), "Arc (A)");
+    assert.match(await page.textContent("#sketch-help"), /^Click the start, then the end, then a point the arc passes through/);
+    // Start on the line's end (40, 0); a second click there says why and draws nothing.
+    await at(page, [40.5, 1], TOP);
+    await at(page, [39, -1], TOP);
+    await until(page, () => !document.querySelector("#sketch-grid-error").hidden, null, "the same-ends note");
+    assert.match(await page.textContent("#sketch-grid-error"), /^An arc needs two ends/);
+    // Before the end, the preview is the line from the start to the pointer.
+    const box = await page.locator("#viewport canvas").boundingBox();
+    const hover = screenPoint(box, [1, 1, 0], TOP);
+    await page.mouse.move(hover.x, hover.y);
+    await until(page, () => document.querySelector("#viewport").dataset.sketchPreview === "40,0 0,0", null, "the line to the pointer");
+    await at(page, [1, 1], TOP);
+    // A third click on the line through the ends: no bend, a note, nothing drawn.
+    await at(page, [10, 0], TOP);
+    await until(page, () => /^An arc needs to bend/.test(document.querySelector("#sketch-grid-error").textContent), null, "the no-bend note");
+    assert.equal(await page.isHidden("#sketch-grid-error"), false);
+    assert.equal(await data(page, "sketchLines"), "1", "only the line");
+    // The pointer at (20, 20): the preview is the half circle round (20, 0), 32 segments.
+    const top = screenPoint(box, [20, 20, 0], TOP);
+    await page.mouse.move(top.x, top.y);
+    await until(page, () => (document.querySelector("#viewport").dataset.sketchPreview ?? "").split(" | ").length === 32, null, "the arc's preview");
+    await at(page, [20, 20], TOP);
+    // Ends (40, 0) → (0, 0) through (20, 20): centre (20, t) with 400 + t² = (20 − t)², t = 0; counter-clockwise from (40, 0) over the top.
+    await status(page, "1 line and 1 arc, a closed outline.");
+    assert.equal(await page.isHidden("#sketch-grid-error"), true, "the note goes once an arc is drawn");
+    assert.equal(await data(page, "sketchLines"), "33", "the line and the half circle's 32 segments");
+    await points(page, "0,0 40,0 20,0");
+    assert.equal(await undoTitle(page), "Undo Draw arc (Ctrl+Z)");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-arc-1280.png` });
+    // One Ctrl+Z takes the arc and its centre back, keeping the arc tool; Ctrl+Shift+Z puts it back.
+    await page.keyboard.press("Control+z");
+    await statusStarts(page, "1 line, not closed: ");
+    await points(page, "0,0 40,0");
+    assert.equal(await page.getAttribute("#sketch-tool-arc", "aria-pressed"), "true", "still the arc tool after Undo");
+    await page.keyboard.press("Control+Shift+z");
+    await status(page, "1 line and 1 arc, a closed outline.");
+    // Escape drops the ends clicked so far.
+    await at(page, [10, 30], TOP);
+    await at(page, [30, 30], TOP);
+    await points(page, "0,0 40,0 20,0 10,30 30,30");
+    await page.keyboard.press("Escape");
+    await points(page, "0,0 40,0 20,0");
+    // Extruded 10 mm: a half disc of radius 20, ½·π·20²·10 = 2000π = 6,283.185307… mm³.
+    await page.click("#sketch-extrude");
+    await until(page, () => document.querySelector("#extrude-ok")?.disabled === false, null, "Extrude's OK on");
+    await page.fill("#extrude-distance", "10");
+    await page.click("#extrude-ok");
+    await until(page, () => document.querySelector("#volume")?.textContent === "6,283.185307 mm³", null, "2000π mm³");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-arc-extruded-1280.png` });
+    await page.context().close();
+  });
+
+  await check("the arc tool at 375 px with taps: four tool buttons fit and are 44 px, three taps draw an arc", async () => {
+    const page = await fresh(375, true);
+    await page.tap("#create-sketch");
+    await page.tap("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.tap("#sketch-tool-arc");
+    for (const id of ["sketch-tool-line", "sketch-tool-rectangle", "sketch-tool-circle", "sketch-tool-arc"]) {
+      const b = await page.locator(`#${id}`).boundingBox();
+      assert.ok(b.height >= 44, `${id} is ${b.height} px tall, at least 44 to tap`);
+      assert.ok(b.x >= 0 && b.x + b.width <= 375, `${id} fits across the screen`);
+    }
+    for (const p of [[0, 0], [40, 0], [20, 20]]) await at(page, p, TOP, true);
+    await statusStarts(page, "1 arc, not closed: ");
+    // (20, 20) is on the left of (0, 0) → (40, 0), so the arc runs from (40, 0): its points in id order.
+    await points(page, "40,0 0,0 20,0");
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+    if (shots) await page.screenshot({ path: `${shots}/sketch-arc-375.png`, fullPage: true });
     await page.context().close();
   });
 

@@ -31,15 +31,16 @@ function clicks(doc: DesignDocument, tool: SketchTool, pts: XY[]) {
 
 /** The model's answer for the sketch as it stands. */
 const modelOf = (doc: DesignDocument): ModelOutline => {
-  const { lines, circles } = sketchCurves(doc.sketches[0]);
+  const { lines, circles, arcs } = sketchCurves(doc.sketches[0]);
+  if (arcs.length > 0) throw new Error("the outline model has no arcs yet (testing catch-up TC6)");
   return modelOutline(lines, circles);
 };
 
 /** The kernel's answer, checked against the model; a closed one is extruded 10 mm and its volume checked too. */
 async function agree(doc: DesignDocument, sketch: string, where: string): Promise<ModelOutline> {
   const model = modelOf(doc);
-  const { lines, circles } = sketchCurves(doc.sketches[0]);
-  compareOutline(model, await kernel.call("sketch_outline", lines, circles), where);
+  const { lines, circles, arcs } = sketchCurves(doc.sketches[0]);
+  compareOutline(model, await kernel.call("sketch_outline", lines, circles, arcs), where);
   if (isClosed(model)) {
     const part = extrudeSketch(doc, sketch, D).doc;
     const body = await buildSpec(kernel, await featureSpec(kernel, part, lastFeature(part)));

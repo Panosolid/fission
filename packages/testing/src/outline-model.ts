@@ -117,15 +117,15 @@ export function modelOutline(lines: readonly ModelLine[], circles: readonly Mode
 export function openWords(m: ModelOutline): string {
   switch (m.kind) {
     case "empty":
-      return "the sketch has no lines or circles yet";
+      return "the sketch has no lines, arcs or circles yet";
     case "loose":
-      return `the line end at (${m.at[0]}, ${m.at[1]}) is not joined to another line`;
+      return `the end at (${m.at[0]}, ${m.at[1]}) is not joined to another line or arc`;
     case "branch":
-      return `${m.ends} line ends meet at (${m.at[0]}, ${m.at[1]}); every corner of an outline joins exactly two`;
+      return `${m.ends} ends meet at (${m.at[0]}, ${m.at[1]}); every corner of an outline joins exactly two`;
     case "loops":
       return `the sketch makes ${m.loops} separate loops; for now a sketch makes one outline`;
     case "not a profile":
-      return "the lines close up but are not a valid outline: ";
+      return "the curves close up but are not a valid outline: ";
     default:
       throw new Error(`a ${m.kind} outline is not open`);
   }

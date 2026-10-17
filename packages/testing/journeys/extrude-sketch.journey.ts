@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson } from "@fission/core";
-import { addSketch, buildSpec, clickAt, deleteCurve, designWorkspace, drawCircle, drawLine, drawRectangle, extrudeSketch, startTool, featureSpec, lastFeature, movePoint, partDocument, setExtrudeDistance, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, buildSpec, clickAt, deleteCurve, designWorkspace, drawArc, drawCircle, drawLine, drawRectangle, extrudeSketch, startTool, featureSpec, lastFeature, movePoint, partDocument, setExtrudeDistance, withPart, type DesignDocument } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
@@ -57,7 +57,7 @@ test("hand-worked: a 40 × 30 rectangle extruded 10 mm, then a corner moved, the
   near((await build(reopened(part))).volume, 16000, "volume after the move");
   // One side deleted: the sketch is open, and the extrude says why in the kernel's words.
   const open = deleteCurve(part, sketch, part.sketches[0].curves[1].id);
-  await assert.rejects(build(open), /^Error: Sketch 1 has no closed outline: the line end at \(40, 0\) is not joined to another line$/);
+  await assert.rejects(build(open), /^Error: Sketch 1 has no closed outline: the end at \(40, 0\) is not joined to another line or arc$/);
 });
 
 test("hand-worked: a 3-4-5 triangle extruded 2 mm is 12 mm³, with 5 faces", async () => {
@@ -241,7 +241,7 @@ test("hand-worked: a circle of radius 5 extruded 2 mm is πr²h = 50π mm³, and
   near((await build(setExtrudeDistance(part, 0.5))).volume, 12.5 * Math.PI, "volume at 0.5 mm");
   // A line beside it: its loose end is what to fix first, in the kernel's words.
   const withLine = drawLine(part, s.id, [20, 0], [30, 0]);
-  await assert.rejects(build(withLine.doc), /^Error: Sketch 1 has no closed outline: the line end at \(20, 0\) is not joined to another line$/);
+  await assert.rejects(build(withLine.doc), /^Error: Sketch 1 has no closed outline: the end at \(20, 0\) is not joined to another line or arc$/);
   // A closed rectangle beside it: until regions (step 26) that is two loops.
   const withSquare = drawRectangle(part, s.id, [20, 0], [30, 10]);
   await assert.rejects(build(withSquare.doc), /^Error: Sketch 1 has no closed outline: the sketch makes 2 separate loops; for now a sketch makes one outline$/);
@@ -315,4 +315,62 @@ test("seeded: circles drawn with the circle tool from two random snapped clicks 
     }
   }
   assert.ok(built >= 190, `built ${built}`);
+});
+
+test("hand-worked: a pie slice of a line, an arc and a line, saved, opened and extruded (23a)", async () => {
+  // (0,0) → (10,0), the quarter arc round (0,0) to (0,10), back to (0,0).
+  // Extruded 4 mm: V = ¼π·10²·4 = 100π ≈ 314.16 mm³. A = the two quarter
+  // discs 2·25π, the flat sides 2·10·4 = 80 and the curved side ¼·2π·10·4
+  // = 20π: 70π + 80. Three corners top and bottom, nine edges, five faces.
+  const s = addSketch(partDocument("box", 10, 10, 10));
+  const first = drawLine(s.doc, s.id, [0, 0], [10, 0]).doc;
+  const arc = drawArc(first, s.id, "point-4", [0, 10], "point-3").doc;
+  const doc = drawLine(arc, s.id, "point-6", "point-3").doc;
+  const body = await build(reopened(extrudeSketch(doc, s.id, 4).doc));
+  near(body.volume, 100 * Math.PI, "volume");
+  near(body.area, 70 * Math.PI + 80, "area");
+  assert.deepEqual([body.vertices, body.edges, body.faces, body.errors], [6, 9, 5, []]);
+  // The arc drawn from (0,10) to (10,0) instead runs counter-clockwise the
+  // long way round, through (−10,0) and (0,−10): three quarters of the
+  // circle, so with the same lines the sketch is the other three quarters
+  // of the disc. V = ¾π·10²·4 = 300π; A = 2·75π + 80 + ¾·2π·10·4 = 210π + 80.
+  const backwards = drawLine(drawArc(first, s.id, [0, 10], "point-4", "point-3").doc, s.id, "point-6", "point-3").doc;
+  const rest = await build(reopened(extrudeSketch(backwards, s.id, 4).doc));
+  near(rest.volume, 300 * Math.PI, "three quarters' volume");
+  near(rest.area, 210 * Math.PI + 80, "three quarters' area");
+  assert.deepEqual([rest.vertices, rest.edges, rest.faces, rest.errors], [6, 9, 5, []]);
+  // Moving the arc's end 1 µm outwards, to (0, 10.001), takes the centre
+  // off the line midway between the ends by (c − m)·(b − a)/|b − a|, with
+  // m = (5, 5.0005) and b − a = (−10, 10.001): (50 − 50.0100005)/14.1428
+  // ≈ −0.000707 mm. Refused by the kernel, the arc named.
+  const off = movePoint(doc, s.id, "point-6", 0, 10.001);
+  await assert.rejects(build(extrudeSketch(off, s.id, 4).doc), /^Error: arc 1 has its centre 0\.000707\d* mm off the line midway between its ends/);
+});
+
+test("seeded: half-disc sketches (a line and an arc over it) extrude to πr²d/2 (23a)", async () => {
+  // A line between two snapped clicks and the half circle over it, round
+  // its midpoint: area πr²/2 with r half the line's length, worked out
+  // here from the clicks; drawn either way round, the arc on one side or
+  // the other (a half disc either way).
+  let built = 0;
+  for (const seed of [31n, 32n, 33n]) {
+    const r = seeded(seed);
+    for (let i = 0; i < 30; i++) {
+      const grid = [0.5, 1, 2.5, 10][Math.floor(r.next() * 4)];
+      const pick = async () => kernel.call("snap_to_grid", (r.next() - 0.5) * 900, (r.next() - 0.5) * 900, grid);
+      const [a, b] = [await pick(), await pick()];
+      if (a[0] === b[0] && a[1] === b[1]) continue;
+      const s = addSketch(partDocument("box", 10, 10, 10));
+      const line = drawLine(s.doc, s.id, a, b).doc;
+      const [start, end] = r.next() < 0.5 ? ["point-3", "point-4"] : ["point-4", "point-3"];
+      const doc = drawArc(line, s.id, start, end, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]).doc;
+      const d = 1 + Math.floor(r.next() * 30);
+      const radius = Math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) / 2;
+      const body = await build(reopened(extrudeSketch(doc, s.id, d).doc));
+      near(body.volume, (Math.PI * radius * radius * d) / 2, `seed ${seed} case ${i}: ${a} ${b}`);
+      assert.deepEqual([body.vertices, body.edges, body.faces, body.errors], [4, 6, 4, []], `seed ${seed} case ${i}`);
+      built++;
+    }
+  }
+  assert.ok(built >= 85, `only ${built} built`);
 });

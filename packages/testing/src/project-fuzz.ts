@@ -22,7 +22,7 @@
 // shortest text that fails the same way.
 
 import { FORMAT_VERSION, MAX_NESTING, emptyProject, projectFromJson, projectToJson, type DataReader, type Project } from "@fission/core";
-import { addSketch, designWorkspace, drawCircle, drawLine, extrudeSketch, lastFeature, migrateDesignV1, partDocument, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, lastFeature, migrateDesignV1, partDocument, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
@@ -93,8 +93,9 @@ function randomJson(r: SeededRandom, depth = 0): unknown {
 
 /**
  * Design's data as Fission saves it: sometimes with sketches (lines, some
- * chained, so they share points, and circles (22b), some round a point
- * already there; sometimes the part extrudes one), sometimes as the version 1 data saved
+ * chained, so they share points, circles (22b), some round a point
+ * already there, and arcs (23a), some from a point already there;
+ * sometimes the part extrudes one), sometimes as the version 1 data saved
  * before step 21b (no sketches, no counter).
  */
 function designData(r: SeededRandom, part: DesignDocument): unknown {
@@ -111,7 +112,10 @@ function designData(r: SeededRandom, part: DesignDocument): unknown {
     for (let l = 0; l < below(r, 5); l++) {
       const points = doc.sketches.find((x) => x.id === sketch.id)!.points;
       const from = points.length > 0 && r.next() < 0.6 ? pick(r, points).id : ([below(r, 100) - 50, below(r, 100) / 10] as const);
-      doc = r.next() < 0.25 ? drawCircle(doc, sketch.id, from, (1 + below(r, 1000)) / 10).doc : drawLine(doc, sketch.id, from, [below(r, 100), -below(r, 1000) / 100]).doc;
+      const k = r.next();
+      if (k < 0.2) doc = drawCircle(doc, sketch.id, from, (1 + below(r, 1000)) / 10).doc;
+      else if (k < 0.4) doc = drawArc(doc, sketch.id, from, [below(r, 100), -below(r, 1000) / 100], [-1 - below(r, 100), below(r, 100) / 7]).doc;
+      else doc = drawLine(doc, sketch.id, from, [below(r, 100), -below(r, 1000) / 100]).doc;
     }
   }
   // Sometimes the part is an extrude of one of them (step 21d), open or

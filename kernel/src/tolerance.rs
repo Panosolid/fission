@@ -3,6 +3,19 @@
 //! Nothing outside this module may hard-code an epsilon. Float comparisons
 //! (in code and in tests) go through the helpers here, and orientation /
 //! in-out decisions go through the exact predicates at the bottom.
+//!
+//! Mutation testing (`cargo mutants -f src/tolerance.rs`) leaves these
+//! survivors, all equivalent (no input can tell them apart):
+//! - `<` vs `<=` in either half of `segments_touch`'s proper-crossing test
+//!   (`o1·o2 < 0 && o3·o4 < 0`). The mutant also answers true early when
+//!   one product is 0 and the other negative. Take o1 = 0 and o3·o4 < 0:
+//!   a and b lie strictly on opposite sides of line cd, so line ab
+//!   crosses line cd at one point strictly between a and b; c is on both
+//!   lines (o1 = 0, exact), so c is that point, on segment ab, and the
+//!   collinear clause (`o1 == 0 && on(a, b, c)`) returns true anyway. The
+//!   same holds for o2 = 0 (d), and with the roles of the segments swapped
+//!   for the other `<`. The predicates are exact, so there is no rounding
+//!   case.
 
 use glam::{DVec2, DVec3};
 
@@ -245,6 +258,76 @@ mod tests {
         // less than the slack at magnitude 1.
         assert!(rel_eq(rounding_slack(1e6), 1e6 * 64.0 * f64::EPSILON, FP_REL));
         assert!(rel_eq(rounding_slack(1e-3), rounding_slack(1.0), FP_REL));
+    }
+
+    #[test]
+    fn measure_eq_scales_with_the_larger_value() {
+        // With no slack the allowance is FP_REL·max(|a|, |b|): at 1e6 that
+        // is 1e-12 · 1e6 = 1e-6, a million times what it is at 1 (the
+        // boundary test above uses a = 1, where FP_REL·1 = FP_REL/1).
+        let allowed = FP_REL * 1e6;
+        assert!(measure_eq(1e6, 1e6 + allowed * 0.9, 0.0));
+        assert!(!measure_eq(1e6, 1e6 + allowed * 1.1, 0.0));
+        assert!(measure_eq(-1e6, -1e6 - allowed * 0.9, 0.0), "magnitudes, not signed values");
+    }
+
+    #[test]
+    fn a_zero_vector_has_no_direction() {
+        // dirs_eq is for unit vectors, but a degenerate one (a zero normal
+        // from a collapsed face, say) must not match every direction: its
+        // cross product with anything is 0, which is within ANGULAR, so
+        // only the dot product (0, not > 0) refuses it.
+        assert!(!dirs_eq(DVec3::ZERO, DVec3::X));
+        assert!(!dirs_eq(DVec3::Y, DVec3::ZERO));
+        assert!(!dirs_eq(DVec3::ZERO, DVec3::ZERO));
+    }
+
+    #[test]
+    fn side_by_hand() {
+        // a→b along +X: (0, 1) is to the left, (0, −1) to the right, and
+        // (7, 0) on the line, exactly 0 (not −1: the mirror image of a left
+        // point must not be confused with a point on the line).
+        let (a, b) = (DVec2::ZERO, DVec2::X);
+        assert_eq!(side(a, b, DVec2::new(0.0, 1.0)), 1);
+        assert_eq!(side(a, b, DVec2::new(0.0, -1.0)), -1);
+        assert_eq!(side(a, b, DVec2::new(7.0, 0.0)), 0);
+        assert_eq!(side(a, b, a), 0);
+        // Exact: the nearly collinear case from orient2d's test, and the
+        // point one step either side of the line (the smallest positive
+        // double), are decided correctly, not rounded to "on".
+        let (p, q) = (DVec2::new(0.5, 0.5), DVec2::new(12.0, 12.0));
+        assert_eq!(side(p, q, DVec2::new(24.0, 24.0)), 0);
+        assert_eq!(side(p, q, DVec2::new(24.0, 24.000000000000004)), 1);
+        let tiny = f64::from_bits(1);
+        assert_eq!(side(a, b, DVec2::new(3.0, tiny)), 1);
+        assert_eq!(side(a, b, DVec2::new(3.0, -tiny)), -1);
+    }
+
+    #[test]
+    fn segments_touch_by_hand() {
+        let p = |x: f64, y: f64| DVec2::new(x, y);
+        let ab = (p(0.0, 0.0), p(4.0, 0.0));
+        // A proper crossing: the diagonals of a square meet at its centre.
+        assert!(segments_touch((p(0.0, 0.0), p(4.0, 4.0)), (p(0.0, 4.0), p(4.0, 0.0))));
+        // T-junctions: cd stands on ab at (2, 0), with its first end on ab
+        // (c), then with its second (d). Neither is a proper crossing (one
+        // side test is 0), so each relies on its own collinear clause.
+        assert!(segments_touch(ab, (p(2.0, 0.0), p(2.0, 3.0))));
+        assert!(segments_touch(ab, (p(2.0, 3.0), p(2.0, 0.0))));
+        // And with ab's ends on cd (a, then b).
+        assert!(segments_touch((p(2.0, 0.0), p(2.0, 3.0)), ab));
+        assert!(segments_touch((p(2.0, 3.0), p(2.0, 0.0)), ab));
+        // Lifting the foot by the smallest positive double: no longer
+        // touching (exact, so there is no tolerance band either way).
+        let tiny = f64::from_bits(1);
+        assert!(!segments_touch(ab, (p(2.0, tiny), p(2.0, 3.0))));
+        assert!(!segments_touch(ab, (p(2.0, 3.0), p(2.0, tiny))));
+        // Ends meeting: touch. Collinear: overlapping touch, apart don't.
+        assert!(segments_touch(ab, (p(4.0, 0.0), p(5.0, 1.0))));
+        assert!(segments_touch(ab, (p(3.0, 0.0), p(6.0, 0.0))));
+        assert!(!segments_touch(ab, (p(5.0, 0.0), p(6.0, 0.0))));
+        // Parallel, one unit apart: no.
+        assert!(!segments_touch(ab, (p(0.0, 1.0), p(4.0, 1.0))));
     }
 
     #[test]

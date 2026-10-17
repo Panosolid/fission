@@ -210,14 +210,18 @@ jobs:
         working-directory: apps/fission
       - run: npx playwright install --with-deps ${{ matrix.browser }}
         working-directory: apps/fission
-      - run: npm run e2e:engines
+      # Firefox finds no GL driver headless on CI: it runs with a window on a
+      # virtual screen, drawing with Mesa's software GL (e2e/browser.mjs).
+      - if: matrix.browser == 'firefox'
+        run: sudo apt-get install -y -qq xvfb libgl1-mesa-dri libegl1 && echo "E2E_HEADED=1" >> "$GITHUB_ENV" && echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV" && echo "RUN=xvfb-run -a" >> "$GITHUB_ENV"
+      - run: $RUN npm run e2e:engines
         working-directory: apps/fission
         env:
           E2E_BROWSER: ${{ matrix.browser }}
       # The whole-app smoke test in this engine, reported but not yet required:
       # its first run here found engine differences (docs/progress/cad.md, TC4)
       # that are other workstreams' to fix; this step goes required once they are.
-      - run: node e2e/smoke.mjs
+      - run: $RUN node e2e/smoke.mjs
         if: always()
         continue-on-error: true
         working-directory: apps/fission
