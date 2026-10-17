@@ -887,6 +887,13 @@ mod tests {
         assert_eq!(bulges.len(), 3);
         assert!(bulges[0] == 0.0 && close(bulges[1], 2f64.sqrt() - 1.0) && bulges[2] == 0.0, "{bulges:?}");
         assert!(crate::tolerance::rel_eq(area(sketch_outline(&lines, &[], &arcs).unwrap()), 25.0 * std::f64::consts::PI, 1e-12));
+        // The second line drawn upwards instead, (0,0) → (0,10): the walk
+        // enters it at its end and turns its bulge round, −0 + 0 = +0, so it
+        // stays a plain +0 rather than −0.
+        let lines = [lines[0], line((0.0, 0.0), (0.0, 10.0))];
+        let (corners, bulges) = path(sketch_outline(&lines, &[], &arcs).unwrap());
+        assert_eq!(corners, vec![v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0)]);
+        assert_eq!(bulges[2].to_bits(), 0, "{bulges:?}");
     }
 
     #[test]
@@ -971,6 +978,10 @@ mod tests {
         let (start, end) = shapes[2];
         let centre = (end - start).normalize() * 1.1 * LINEAR;
         assert!((start.distance(centre) - end.distance(centre)).abs() < 0.2 * LINEAR);
+        // Exactly LINEAR off is allowed ("within"): ends (∓1,0), so the
+        // midpoint is the origin, and centre (LINEAR, 5) gives
+        // (LINEAR·2 + 5·0)/2 = LINEAR with no rounding.
+        assert!(check_arcs(&[arc((-1.0, 0.0), (1.0, 0.0), (LINEAR, 5.0))]).is_ok());
         // Far off: an end on another circle altogether.
         assert!(invalid(check_arcs(&[arc((5.0, 0.0), (0.0, 7.0), (0.0, 0.0))])).contains("mm off the line midway"));
     }
@@ -1012,6 +1023,11 @@ mod tests {
                 assert!(nearly_whole.is_ok() && sliver.is_ok());
             }
         }
+        // Exactly MIN_FEATURE apart is allowed ("at least"): √(x²) is x in
+        // floating point, so the chord comes out exactly MIN_FEATURE.
+        let exact = Arc { start: v(0.0, 0.0), end: v(MIN_FEATURE, 0.0), centre: v(MIN_FEATURE / 2.0, MIN_FEATURE) };
+        assert_eq!(exact.start.distance(exact.end), MIN_FEATURE);
+        assert!(check_arcs(&[exact]).is_ok());
     }
 
     #[test]
