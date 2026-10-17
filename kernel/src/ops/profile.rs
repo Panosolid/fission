@@ -13,13 +13,10 @@
 //!
 //! Mutation testing (`cargo mutants -f src/ops/profile.rs`) leaves these
 //! survivors, all equivalent (no input can tell them apart):
-//! - `sweep > 0.0` vs `>= 0.0` (Seg::spans, counter_clockwise): an arc's
-//!   sweep is never 0 (a zero bulge is a line).
+//! - `sweep > 0.0` vs `>= 0.0` (Seg::spans, counter_clockwise, the arc's
+//!   side in winding): an arc's sweep is never 0 (a zero bulge is a line).
 //! - `* s` vs `/ s` where s is ±1: Seg::tangents (the sweep's sign) and
-//!   half_turn (the arc's side of its chord). That side is 0 only when the
-//!   arc's middle rounds onto its chord (a sagitta below rounding), and
-//!   then a point on the chord between its ends is on the loop, which
-//!   winding's callers rule out.
+//!   half_turn (the arc's side of its chord, ±1 from the sweep's sign).
 //! - `<` vs `<=` in winding, at ties that put the point on the loop:
 //!   (a − p)·(b − p) is 0, for p on the chord's line, only at an end; and
 //!   a distance from the centre equal to the radius, on the arc's side of
@@ -405,9 +402,10 @@ fn winding(segs: &[Seg], p: DVec2) -> i64 {
         match *s {
             Seg::Line { a, b } => total += angle(a, b),
             Seg::Arc { a, b, center, radius, sweep } => {
-                // The arc's side of the chord is the side its middle is on.
-                let mid = center + dir((a - center).to_angle() + sweep / 2.0) * radius;
-                let arc_side = side(a, b, mid);
+                // A counter-clockwise arc lies right of its chord a→b, a
+                // clockwise one left (exact; its middle point can round onto
+                // the chord or past it when the arc is very flat).
+                let arc_side: i8 = if sweep > 0.0 { -1 } else { 1 };
                 let p_side = side(a, b, p);
                 if p_side == 0 && (a - p).dot(b - p) < 0.0 {
                     // From a (behind p) round to b (ahead): through the left
@@ -1384,6 +1382,32 @@ mod tests {
         let lens = path(&[(-10.0, 0.0), (10.0, 0.0)], &[0.5, 0.5]);
         let hole = Boundary::polygon(square(0.0, 0.0, 1.0));
         assert_eq!(ok(Profile { outer: lens, holes: vec![hole] }).len(), 2);
+    }
+
+    #[test]
+    fn a_very_flat_arc_lies_on_its_sweeps_side() {
+        // Regression (found closing mutation survivors): which side of its
+        // chord an arc lies on was read off the arc's middle point, which
+        // for a very flat arc rounds onto the chord or past it. Here the
+        // bottom edge starts with a clockwise arc (0,0)→(0.00508,0), bulge
+        // −1.27e-9: radius = c(1 + β²)/(4|β|) ≈ 0.00508/5.08e-9 = 1e6 mm,
+        // sagitta = |β|·c/2 ≈ 3.2e-12 mm below the chord. The 10×10 loop
+        // lies in y ≥ −3.2e-12, so the square hole 4..6 × −6..−4 is wholly
+        // outside it: winding 0 at every hole point, and the profile is
+        // refused. The old code gave −1 there (an extra −2π from "between
+        // arc and chord" on the wrong side), accepted the hole, and the
+        // extrude then failed validation.
+        let outer = path(&[(0.0, 0.0), (0.00508, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], &[-1.2700001270000003e-9, 0.0, 0.0, 0.0, 0.0]);
+        let segs = ok(Profile { outer: outer.clone(), holes: vec![] }).remove(0);
+        for (x, y) in [(4.0, -6.0), (6.0, -4.0), (5.0, -5.0), (0.002, -1.0)] {
+            assert_eq!(winding(&segs, p(x, y)), 0, "({x}, {y}) is below the loop");
+        }
+        // Points inside stay inside, including one just above the arc.
+        for (x, y) in [(5.0, 5.0), (0.002, 1e-6)] {
+            assert_eq!(winding(&segs, p(x, y)), 1, "({x}, {y}) is inside the loop");
+        }
+        let hole = Boundary::polygon(square(4.0, -6.0, 2.0));
+        refused(Profile { outer, holes: vec![hole] });
     }
 
     #[test]
