@@ -15,7 +15,7 @@ export interface EvalCase {
   prompt: string;
   /** The project the prompt is asked about, as the commands that build it (empty: a new project). */
   setup: Command[];
-  /** Parameters a correct answer must contain; others are ignored. Lengths compare to 1e-9 relative. */
+  /** Parameters the part must have after the answer; others are ignored. Lengths compare to 1e-9 relative. */
   expected: Partial<Command>[];
   /** Cases that need commands not built yet name what they wait for, and are skipped by runEval. */
   waitsFor?: string;
@@ -119,11 +119,26 @@ export const HELD_OUT_CASES: readonly EvalCase[] = [
 const same = (a: unknown, b: unknown) =>
   typeof a === "number" && typeof b === "number" ? Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b)) : a === b;
 
-/** Whether the answer contains each expected command (by the parameters given), in order. */
-export function matches(actual: Command[], expected: Partial<Command>[]): boolean {
-  let i = 0;
-  for (const c of actual) if (i < expected.length && Object.entries(expected[i]).every(([k, v]) => same(c[k], v))) i++;
-  return i === expected.length;
+/**
+ * The part after these commands, as set_part's parameters. Until the
+ * timeline (step 32) the part is one set_part: each command's parameters
+ * replace the ones it names and the rest are kept, as Design's run does.
+ */
+export function partAfter(commands: readonly Partial<Command>[]): Record<string, unknown> {
+  const part: Record<string, unknown> = {};
+  for (const c of commands) for (const [k, v] of Object.entries(c)) if (k !== "op") part[k] = v;
+  return part;
+}
+
+/**
+ * Whether the part the answer leaves (on top of the setup) has every
+ * expected parameter. Judged on the result, so a wrong command after a
+ * right one fails, and a size left out to keep it is right (AI4).
+ */
+export function matches(setup: readonly Command[], actual: readonly Command[], expected: readonly Partial<Command>[]): boolean {
+  if (expected.length > 0 && actual.length === 0) return false;
+  const part = partAfter([...setup, ...actual]);
+  return actual.every((c) => c.op === "set_part") && Object.entries(partAfter(expected)).every(([k, v]) => same(part[k], v));
 }
 
 export interface EvalResult {
@@ -142,7 +157,7 @@ export async function runEval(provider: AIProvider, cases: readonly EvalCase[], 
     if (c.waitsFor) continue;
     const system = systemPrompt(c.setup, specs);
     const answer = await askForCommands(provider, { system, messages: [{ role: "user", content: c.prompt }] }, specs);
-    const passed = answer.ok && matches(answer.commands, c.expected);
+    const passed = answer.ok && matches(c.setup, answer.commands, c.expected);
     results.push({ id: c.id, taskType: c.taskType, passed, attempts: answer.ok ? answer.attempts : 0, detail: answer.ok ? JSON.stringify(answer.commands) : answer.error });
   }
   return results;

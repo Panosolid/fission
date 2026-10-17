@@ -147,6 +147,30 @@ try {
     }
   });
 
+  await check("an answer that leaves sizes out keeps them: only the width changes, and a sphere needs no depth", async () => {
+    const { page } = await fresh([JSON.stringify({ commands: [{ op: "set_part", shape: "box", width: 50 }] }), JSON.stringify({ commands: [{ op: "set_part", shape: "sphere", width: 30 }] })]);
+    try {
+      await useOllama(page);
+      await ask(page, "Make it 10 mm wider.");
+      await page.waitForSelector("#ai-preview");
+      // Only width is named, so only width changes: 40 → 50, depth 30 and height 20 kept.
+      assert.deepEqual(await page.$$eval("#ai-preview tr", (rows) => rows.map((r) => r.dataset.param)), ["width"]);
+      assert.equal(await page.textContent("#ai-preview .ai-label"), "AI: box 50 × 30 × 20 mm");
+      await page.click("#ai-accept");
+      await volume(page, "30,000 mm³"); // 50 · 30 · 20
+      assert.equal(await page.inputValue("#depth"), "30");
+      await ask(page, "Turn it into a ball 30 mm across.");
+      await page.waitForSelector("#ai-preview");
+      assert.equal(await page.textContent("#ai-preview .ai-label"), "AI: sphere ⌀30 mm");
+      await page.click("#ai-accept");
+      await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "sphere");
+      await page.click("#undo");
+      await volume(page, "30,000 mm³");
+    } finally {
+      await page.close();
+    }
+  });
+
   await check("a preview made stale by the user's own edit is refused on Accept", async () => {
     const { page } = await fresh([setPart("box", 50, 30, 20)]);
     try {

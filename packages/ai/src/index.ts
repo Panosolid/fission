@@ -8,7 +8,7 @@ export { OLLAMA_ENDPOINT } from "./ollama.ts";
 export { gpuCanRun, IN_BROWSER_MODEL, inBrowserDownloadBytes, type BuiltInModelLike, type GpuLike, type WebLLMLike, type WebLLMModel } from "./local.ts";
 export { askForCommands, type AskResult } from "./commands.ts";
 export { acceptCommands, AI_LABEL, proposeAction, type AIAction, type ParameterChange, type Preview, type ProposeOptions } from "./actions.ts";
-export { CUBE_RULE, EVERY_PARAMETER_RULE, RADIUS_RULE, systemPrompt, UNIT_RULE } from "./prompt.ts";
+export { CUBE_RULE, RADIUS_RULE, systemPrompt, UNIT_RULE } from "./prompt.ts";
 export { buildContext, type AIContext, type ContextOptions } from "./context.ts";
 export { loadSpecialist, SPECIALISTS, type SpecialistInfo, type SpecialistModel, type SpecialistTask } from "./specialists.ts";
 export { AI_FEATURES } from "./features.ts";

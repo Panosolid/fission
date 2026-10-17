@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CommandSpec } from "@fission/core";
-import { CUBE_RULE, EVERY_PARAMETER_RULE, RADIUS_RULE, systemPrompt, UNIT_RULE } from "../src/index.ts";
+import { CUBE_RULE, RADIUS_RULE, systemPrompt, UNIT_RULE } from "../src/index.ts";
 
 // A stand-in for Design's set_part, worded the same way.
 const SET_PART: CommandSpec = {
@@ -36,8 +36,8 @@ test("commands not offered are not mentioned", () => {
 test("the size rules are in the prompt, after the part and before the request", () => {
   const p = systemPrompt([{ op: "set_part", shape: "box", width: 40 }], [SET_PART]);
   const part = p.indexOf("The part now is made by these commands:");
-  for (const rule of [UNIT_RULE, RADIUS_RULE, CUBE_RULE, EVERY_PARAMETER_RULE]) assert.ok(p.indexOf(rule) > part, rule);
-  assert.ok(p.indexOf("Keep every size the user doesn't mention") > p.indexOf(EVERY_PARAMETER_RULE));
+  for (const rule of [UNIT_RULE, RADIUS_RULE, CUBE_RULE]) assert.ok(p.indexOf(rule) > part, rule);
+  assert.ok(p.indexOf("Keep every size the user doesn't mention") > p.indexOf(CUBE_RULE));
 });
 
 test("the unit rule's factors are the units' definitions", () => {
@@ -55,8 +55,9 @@ test("the radius rule doubles a radius and keeps a diameter", () => {
   assert.match(CUBE_RULE, /box whose width, depth and height are all the same/);
 });
 
-test("a parameter the shape ignores still gets a size", () => {
-  // The first described prompt drew depth 0 for cylinders ("ignored by cylinders"), which set_part refuses.
-  assert.match(EVERY_PARAMETER_RULE, /every parameter a value, even one the shape ignores/);
-  assert.match(EVERY_PARAMETER_RULE, /keep its current size/);
+test("an optional parameter is marked so", () => {
+  const withDepth: CommandSpec = { ...SET_PART, params: { ...SET_PART.params, depth: { type: "length", optional: true, description: "depth; leave it out for a sphere" } } };
+  // Worked by hand: a length that may be left out reads "(millimetres, more than 0; optional)".
+  assert.match(systemPrompt([], [withDepth]), /^ {2}depth: depth; leave it out for a sphere \(millimetres, more than 0; optional\)$/m);
+  assert.doesNotMatch(systemPrompt([], [SET_PART]), /optional/, "nothing in SET_PART is optional");
 });

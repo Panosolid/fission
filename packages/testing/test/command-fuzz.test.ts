@@ -19,10 +19,11 @@ test("10,000 random commands: each parses cleanly or fails with a message", () =
     const parsed = parseCommand(raw, DESIGN_COMMANDS);
     if (parsed.ok) {
       passed++;
-      // What passes really is a set_part with four good values.
+      // What passes really is a set_part with a shape, a good width, and good depth and height where given.
       const c = parsed.command as Record<string, unknown>;
       assert.equal(c.op, "set_part");
-      for (const k of ["width", "depth", "height"]) assert.ok(typeof c[k] === "number" && Number.isFinite(c[k]) && (c[k] as number) > 0, `seed ${SEED} case ${i}: ${k}`);
+      for (const k of ["width", "depth", "height"])
+        if (k === "width" || c[k] !== undefined) assert.ok(typeof c[k] === "number" && Number.isFinite(c[k]) && (c[k] as number) > 0, `seed ${SEED} case ${i}: ${k}`);
     } else assert.ok(parsed.error.length > 0);
   }
   // The generator must reach both sides, or this test proves nothing.

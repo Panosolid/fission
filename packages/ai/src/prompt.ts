@@ -15,12 +15,11 @@ import type { Command, CommandSpec, ParamSpec } from "@fission/core";
 export const UNIT_RULE = "Every length in a command is in millimetres. Convert other units first: 1 cm = 10 mm, 1 m = 1000 mm, 1 inch = 25.4 mm.";
 export const RADIUS_RULE = 'A diameter is twice the radius: when the user gives a radius, use twice it wherever a diameter is asked for. A size "across" is a diameter.';
 export const CUBE_RULE = "A cube is a box whose width, depth and height are all the same.";
-/** Lengths must be above 0 even where a shape ignores them; the first prompt with descriptions drew 0s for "ignored" depths (AI4). */
-export const EVERY_PARAMETER_RULE = "Give every parameter a value, even one the shape ignores: keep its current size, or for a new part use the width.";
 
 function describe(name: string, p: ParamSpec): string {
-  const kind = p.type === "length" ? " (millimetres, more than 0)" : p.type === "choice" ? ` (one of: ${p.values.join(", ")})` : "";
-  return `  ${name}: ${p.description}${kind}`;
+  const kind = p.type === "length" ? "millimetres, more than 0" : p.type === "choice" ? `one of: ${p.values.join(", ")}` : "";
+  const notes = [kind, p.optional ? "optional" : ""].filter(Boolean).join("; ");
+  return `  ${name}: ${p.description}${notes ? ` (${notes})` : ""}`;
 }
 
 /** The instructions for one request about a project made by `setup` (empty: a new project), offering `specs`. */
@@ -33,7 +32,6 @@ export function systemPrompt(setup: readonly Command[], specs: readonly CommandS
     UNIT_RULE,
     RADIUS_RULE,
     CUBE_RULE,
-    EVERY_PARAMETER_RULE,
     "Answer with the commands that make what the user asks for. Keep every size the user doesn't mention as it is now.",
   ].join("\n");
 }

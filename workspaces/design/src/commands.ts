@@ -16,8 +16,10 @@ export const DESIGN_COMMANDS: readonly CommandSpec[] = [
     params: {
       shape: { type: "choice", values: SHAPES, description: "which shape" },
       width: { type: "length", description: "width, or diameter for a cylinder or sphere" },
-      depth: { type: "length", description: "depth (ignored by cylinders and spheres)" },
-      height: { type: "length", description: "height, or how far a profile is extruded (ignored by spheres)" },
+      // Optional (AI4): a left-out size keeps the part's current one, and cylinders and spheres need
+      // no depth. Required, small models filled the sizes a shape ignores with 0, which is refused.
+      depth: { type: "length", optional: true, description: "depth; leave it out for a cylinder or sphere, or to keep the current depth" },
+      height: { type: "length", optional: true, description: "height, or how far a profile is extruded; leave it out for a sphere, or to keep the current height" },
     },
   },
   {
@@ -27,10 +29,19 @@ export const DESIGN_COMMANDS: readonly CommandSpec[] = [
   },
 ];
 
-/** The document a parsed Design command makes. */
+/** The sizes each shape is built from; the others it ignores. */
+const NEEDS: Record<ShapeKind, readonly ("depth" | "height")[]> = { box: ["depth", "height"], cylinder: ["height"], sphere: [], "l-bracket": ["depth", "height"], plate: ["depth", "height"], slot: ["depth", "height"], star: ["depth", "height"] };
+
+/**
+ * The document a parsed Design command makes on its own, with no part to
+ * keep sizes from (the panel's own command always names all three). A size
+ * the shape needs but the command leaves out is an error; one it ignores
+ * is never read.
+ */
 export function documentFor(command: Command): DesignDocument {
   // export_stl makes no document: it saves the one there is.
   if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
-  const { shape, width, depth, height } = command as unknown as { shape: ShapeKind; width: number; depth: number; height: number };
-  return partDocument(shape, width, depth, height);
+  const { shape, width, depth, height } = command as unknown as { shape: ShapeKind; width: number; depth?: number; height?: number };
+  for (const key of NEEDS[shape]) if (command[key] === undefined) throw new Error(`set_part: a ${shape} needs its ${key}`);
+  return partDocument(shape, width, depth ?? width, height ?? width);
 }
