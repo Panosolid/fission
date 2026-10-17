@@ -85,7 +85,8 @@ export function modelOutline(lines: readonly ModelLine[], circles: readonly Mode
   const ends = lines.flatMap((l) => [l.a, l.b]);
   const at = new Map<string, number[]>();
   ends.forEach((p, e) => at.set(key(p), [...(at.get(key(p)) ?? []), e]));
-  for (const [e, p] of ends.entries()) {
+  // In end order: the first end with a problem is the one reported.
+  for (const p of ends) {
     const here = at.get(key(p))!.length;
     if (here === 1) return { kind: "loose", at: p };
     if (here > 2) return { kind: "branch", at: p, ends: here };
