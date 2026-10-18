@@ -18,6 +18,11 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 - Step 24d3c: a rebuild-time baseline (20 features with arcs, edit the first one). #153
 - Guide: Next glides to where the words rest, scenes blend, cards fit, Space plays. #152
 - Step 24e1: timeline sessions check that an edit rebuilds only what it changed. #154
+- A version number (`VERSION`) and this changelog. #156
+- Step 24e2: Design's timeline edits (delete, reorder, suppress, the rollback marker), each one undo step. #155
+- Step 24e3: each of the timeline model's planted bugs planted in the real code and caught; timeline edits in the undo fuzzer. #157
+- Design: a Start fresh button clears the design after asking, as one undo step. #158
+- Step 24e4: deleting a sketch from the browser asks first when an extrude is built from it; the extrude keeps its last shape with a warning. #159
 
 ## 0.24.9 (2026-10-18)
 
