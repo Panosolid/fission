@@ -108,7 +108,15 @@ export interface SketchArc {
  * path, or a circle when the sketch is one circle), or why there is none
  * yet, in words.
  */
-export type SketchOutline = { closed: Outline } | { open: string };
+export type SketchOutline =
+  | { closed: Outline }
+  /**
+   * `invalid`: only when the curves close up but break the profile rules
+   * (crossing, touching, doubling back): the sketch's lines, arcs and
+   * circles the rules name, by index (possibly none). Decide by it, never
+   * by the words in `open`.
+   */
+  | { open: string; invalid?: KernelInput[] };
 
 /** What to build, as the kernel's BodySpec (kernel/src/lib.rs). */
 export type BodySpec =
