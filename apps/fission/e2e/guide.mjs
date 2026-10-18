@@ -38,7 +38,12 @@ async function fresh({ width = 1280, height = 800, touch = false, reducedMotion 
       window.requestAnimationFrame = (f) => (held === null ? realFrame(f) : (waiting.push(f), waiting.length));
       performance.now = () => (held === null ? realNow() : held);
       window.stepper = {
-        hold: () => (held = realNow()),
+        // Frames already asked of the browser still run once on real time; waiting two real frames lets them run and ask
+        // again, so from then on every frame of the page's waits for step().
+        hold: () => {
+          held = realNow();
+          return new Promise((r) => realFrame(() => realFrame(r)));
+        },
         step: (ms) => {
           held += ms;
           const run = waiting;
@@ -55,6 +60,7 @@ async function fresh({ width = 1280, height = 800, touch = false, reducedMotion 
         },
         /** Steps `n` frames of `ms` and returns the scroll after each (fast: no waiting for the screen). */
         run: (n, ms = 16) => {
+          if (waiting.length === 0) throw new Error("no frame is waiting to be stepped");
           const sc = document.querySelector(".guide-scroll");
           const ys = [];
           for (let k = 0; k < n; k++) {
@@ -507,8 +513,8 @@ try {
     assert.ok(after.every((y) => y === after[0]), "still moving after Space paused it");
     assert.equal(await page.$eval(".guide-play", (b) => b.getAttribute("aria-pressed")), "false");
     await page.evaluate(() => window.stepper.release());
-    await page.waitForTimeout(600);
-    assert.equal((await hint()).opacity, 0, "the hint should go once the guide has played");
+    assert.equal(await page.$eval(".guide-hint", (h) => h.hasAttribute("data-shown")), false, "the hint should go once the guide has played");
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".guide-hint")).opacity === "0", null, { timeout: 4000 }); // its fade-out
     // The reader's own wheel stops a play too.
     await page.keyboard.press(" ");
     await page.waitForFunction(() => document.querySelector("dialog.guide").dataset.playing !== undefined);
