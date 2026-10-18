@@ -1,6 +1,10 @@
 // Typed sizes while drawing (sketch feel SF4): once a line has its start
 // or a rectangle its first corner, boxes follow the pointer with the size
-// it would draw. Typing a number in one locks that size (a padlock shows),
+// it would draw. The arcs too: a 3-point arc's end and a tangent arc's end
+// by length and angle from their start, a centre arc's start by radius
+// and angle from its centre, and its end by how far round it goes (the
+// arc angle; the pointer picks which way). A 3-point arc's third click,
+// a point the arc passes through, has no boxes. Typing a number in one locks that size (a padlock shows),
 // and the mouse then only chooses what is left: with a line's length
 // locked the pointer picks the direction, with its angle locked too
 // nothing is left and the end is fixed. Tab goes to the next box, Enter
@@ -13,10 +17,11 @@
 
 import type { SketchXY } from "@fission/core";
 import type { DesignDocument } from "./document.ts";
-import type { SketchTool } from "./sketch-tool.ts";
+import type { CentreArcTool, SketchTool } from "./sketch-tool.ts";
+import { sweep } from "./centre-arc.ts";
 
-/** The boxes a tool shows: a line's length and angle, a rectangle's width and height. */
-export type TypedField = "length" | "angle" | "width" | "height";
+/** The boxes a tool shows: a line's length and angle, a rectangle's width and height, a centre arc's radius and angle, then its arc angle (`sweep`). */
+export type TypedField = "length" | "angle" | "width" | "height" | "radius" | "sweep";
 
 /** The values typed and accepted so far, each locking its size; absent ones follow the pointer. */
 export type Locks = Partial<Record<TypedField, number>>;
@@ -56,6 +61,20 @@ export function readAngle(text: string): Reading {
   const t = text.trim().replace(/\s*(°|deg)$/i, "");
   if (!DECIMAL.test(t)) return { error: `"${text.trim()}" isn't an angle: type degrees from the x axis, like 30 or -45.` };
   return { value: turnDegrees(Number(t)) };
+}
+
+/**
+ * How far round a centre arc goes, typed in degrees ("90", "270°"): more
+ * than 0 and less than 360, since an arc can't be a whole turn (that is a
+ * circle). No sign: the pointer picks which way round.
+ */
+export function readSweep(text: string): Reading {
+  const t = text.trim().replace(/\s*(°|deg)$/i, "");
+  if (!DECIMAL.test(t)) return { error: `"${text.trim()}" isn't an angle: type how far round the arc goes in degrees, like 90 or 270.` };
+  const value = Number(t);
+  if (value <= 0) return { error: "An arc must go round more than 0°: the pointer picks which way." };
+  if (value >= 360) return { error: "An arc must go round less than 360°: a whole turn is a circle." };
+  return { value };
 }
 
 /** Degrees into [0, 360): −90 is 270, 360 is 0, 405 is 45. */
@@ -143,33 +162,84 @@ export function rectangleCorner(corner: SketchXY, p: SketchXY | null, locks: Loc
   return [x, y];
 }
 
-/** The boxes the tool shows now: a line's once it has a start, a rectangle's once it has a first corner, none otherwise (circles and arcs come later). */
+/** The boxes the tool shows now: a line's, a 3-point arc's (for its end) and a tangent arc's once they have a start, a rectangle's once it has a first corner, a centre arc's radius and angle once it has a centre and its arc angle once it has a start; none otherwise (a 3-point arc's third click and circles have none). */
 export function typedFields(tool: SketchTool): TypedField[] {
-  if (tool.kind === "line" && tool.from !== null) return ["length", "angle"];
+  if ((tool.kind === "line" || tool.kind === "tangent") && tool.from !== null) return ["length", "angle"];
   if (tool.kind === "rectangle" && tool.corner !== null) return ["width", "height"];
+  if (tool.kind === "arc" && tool.start !== null && tool.end === null) return ["length", "angle"];
+  if (tool.kind === "centre" && tool.centre !== null) return tool.start === null ? ["radius", "angle"] : ["sweep"];
   return [];
 }
 
-/** The tool's anchor: a line's start (its point id looked up) or a rectangle's first corner; null when the tool shows no boxes. */
+/** Where a point id of the tool's sketch is, or null when it is gone (after an undo, say). */
+function pointOf(doc: DesignDocument, sketch: string, id: string): SketchXY | null {
+  const p = doc.sketches.find((s) => s.id === sketch)?.points.find((x) => x.id === id);
+  return p ? [p.x, p.y] : null;
+}
+
+/** The tool's anchor, what its boxes measure from: a line's or tangent arc's start (its point id looked up), a rectangle's first corner, a 3-point arc's start until its end is down, a centre arc's centre; null when the tool shows no boxes. */
 export function anchorOf(doc: DesignDocument, tool: SketchTool): SketchXY | null {
   if (tool.kind === "rectangle") return tool.corner;
-  if (tool.kind !== "line" || tool.from === null) return null;
-  if (typeof tool.from !== "string") return tool.from;
-  const id = tool.from;
-  const p = doc.sketches.find((s) => s.id === tool.sketch)?.points.find((x) => x.id === id);
-  return p ? [p.x, p.y] : null;
+  if (tool.kind === "arc") return tool.end === null ? tool.start : null;
+  if (tool.kind === "centre") return tool.centre;
+  if (tool.kind === "circle" || tool.from === null) return null;
+  return typeof tool.from === "string" ? pointOf(doc, tool.sketch, tool.from) : tool.from;
+}
+
+/**
+ * The end of a centre arc from `s` round `c` by `deg` degrees,
+ * counter-clockwise above 0: c + R(deg)(s − c), the start's offset turned
+ * by the rotation with the cosine and sine of `direction` (exact at the
+ * quarter turns, so 90° from (10, 0) round the origin is (0, 10) exactly).
+ */
+export function centreEnd(c: SketchXY, s: SketchXY, deg: number): SketchXY {
+  const [vx, vy] = [s[0] - c[0], s[1] - c[1]];
+  const [cos, sin] = direction(deg);
+  return [c[0] + (vx * cos - vy * sin), c[1] + (vx * sin + vy * cos)];
+}
+
+/**
+ * The way a centre arc goes with the pointer at `p`: +1 counter-clockwise,
+ * −1 clockwise, from the sweep the pointer has made (centre-arc.ts
+ * `sweep`, this point included; with no pointer, the sweep so far).
+ */
+function wayRound(tool: CentreArcTool, p: SketchXY | null): 1 | -1 {
+  const swept = p && tool.centre && tool.start ? sweep(tool.centre, tool.start, tool.swept, p) : tool.swept;
+  return swept >= 0 ? 1 : -1;
 }
 
 /** Where the tool would place its next point with these locks: the pointer, or what the locks make of it; null when there is no answer. */
 export function aimOf(doc: DesignDocument, tool: SketchTool, pointer: SketchXY | null, locks: Locks): SketchXY | null {
   const anchor = anchorOf(doc, tool);
   if (!anchor) return pointer;
-  return tool.kind === "line" ? lineEnd(anchor, pointer, locks) : rectangleCorner(anchor, pointer, locks);
+  if (tool.kind === "rectangle") return rectangleCorner(anchor, pointer, locks);
+  if (tool.kind !== "centre") return lineEnd(anchor, pointer, locks);
+  if (tool.start === null) return lineEnd(anchor, pointer, { length: locks.radius, angle: locks.angle });
+  return locks.sweep === undefined ? pointer : centreEnd(anchor, tool.start, wayRound(tool, pointer) * locks.sweep);
 }
 
-/** What each box shows while not typed in: the size the aim would draw (a line's length and angle, a rectangle's width and height). */
+/**
+ * The tool a click with these locks goes to: itself, except a centre arc
+ * with its arc angle typed, whose sweep becomes that angle the way the
+ * pointer goes round (in radians, as `sweep` keeps it), so the click at
+ * `aimOf`'s end draws that much arc whichever way the pointer last
+ * unwrapped (a typed 270° with the pointer a little way round is 270°,
+ * not the 90° the other way). The preview draws from the same tool.
+ */
+export function withLocks<T extends SketchTool>(tool: T, locks: Locks, pointer: SketchXY | null): T {
+  if (tool.kind !== "centre" || tool.start === null || locks.sweep === undefined) return tool;
+  return { ...tool, swept: (wayRound(tool, pointer) * locks.sweep * Math.PI) / 180 };
+}
+
+/** What each box shows while not typed in: the size the aim would draw (a line's length and angle, a rectangle's width and height, a centre arc's radius and angle, then its arc angle, how far round the arc the aim makes goes). */
 export function liveValues(anchor: SketchXY, aim: SketchXY, tool: SketchTool): Locks {
   if (tool.kind === "rectangle") return { width: Math.abs(aim[0] - anchor[0]), height: Math.abs(aim[1] - anchor[1]) };
+  if (tool.kind === "centre" && tool.start !== null) {
+    const way = wayRound(tool, aim);
+    const turn = way * (angleOf(anchor, aim) - angleOf(anchor, tool.start));
+    return { sweep: turnDegrees(turn) };
+  }
+  if (tool.kind === "centre") return { radius: lengthOf(anchor, aim), angle: angleOf(anchor, aim) };
   return { length: lengthOf(anchor, aim), angle: angleOf(anchor, aim) };
 }
 
@@ -180,4 +250,4 @@ export function shownValue(v: number): string {
 }
 
 /** Why a click with locks placed nothing: the pointer was on the start, or behind a locked angle. */
-export const NO_AIM = "Move the pointer the way the line should go: with a typed size, the pointer picks the direction (ahead of the start for a typed angle).";
+export const NO_AIM = "Move the pointer the way the point should go: with a typed size, the pointer picks the direction (ahead of the start for a typed angle).";
