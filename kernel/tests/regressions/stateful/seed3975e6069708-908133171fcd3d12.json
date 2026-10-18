@@ -1,0 +1,47 @@
+{
+  "seed": 63178533148424,
+  "failure": "step 1 (Add { shape: Extrude { outer: Path { pts: [[0.0, 0.0], [0.0011, 0.0]], bulges: [-1126254864.681954, 0.0] }, holes: [], dist: 0.5, expect: Some(true), sketch: Some(0) }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): edge 4: face 3 (Some(Side(Piece { boundary: 0, piece: 1 }))) is said to walk it forwards, but lies on its right",
+  "ops": [
+    {
+      "Add": {
+        "shape": {
+          "Extrude": {
+            "outer": {
+              "Path": {
+                "pts": [
+                  [
+                    "0.0",
+                    "0.0"
+                  ],
+                  [
+                    "0.0011",
+                    "0.0"
+                  ]
+                ],
+                "bulges": [
+                  "-1126254864.681954",
+                  "0.0"
+                ]
+              }
+            },
+            "holes": [],
+            "dist": "0.5",
+            "expect": true,
+            "sketch": 0
+          }
+        },
+        "axis": [
+          "1.0",
+          "0.0",
+          "0.0"
+        ],
+        "angle": "0.0",
+        "at": [
+          "0.0",
+          "0.0",
+          "0.0"
+        ]
+      }
+    }
+  ]
+}
