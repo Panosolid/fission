@@ -6,7 +6,10 @@
 // already carries the feature that built it.
 
 import type { BodyView, DisplayMesh, GeometryReference } from "@fission/core";
-import type { BodyNames } from "./naming.ts";
+import { bodyFeatures } from "./browser.ts";
+import type { DesignDocument } from "./document.ts";
+import { nameBody, outlineCurves, type BodyNames } from "./naming.ts";
+import type { BodyCache, TimelineBuild } from "./rebuild.ts";
 import { designReference, readDesignReference, resolveReference } from "./references.ts";
 
 /** One built body: the feature that built it, the kernel's view of it, and its faces' and edges' names. */
@@ -23,6 +26,24 @@ export interface Scene {
   /** The joined index of each body's face 0 and edge 0. */
   faceStart: readonly number[];
   edgeStart: readonly number[];
+}
+
+/**
+ * The bodies to show after a rebuild: one for every solid feature that
+ * builds (`bodyFeatures`, the browser's Body rows, in build order) and the
+ * rebuild built, with its view from `cache` and its names. A feature the
+ * kernel refused has no body, so none is shown for it.
+ */
+export async function shownBodies(doc: DesignDocument, build: TimelineBuild, cache: BodyCache): Promise<ShownBody[]> {
+  const shown: ShownBody[] = [];
+  for (const f of bodyFeatures(doc)) {
+    const r = build.results[f.id];
+    if (r?.status !== "built" || r.body === undefined || r.spec === undefined) continue;
+    const spec = r.spec;
+    const view = await cache.view(r.body);
+    shown.push({ feature: f.id, view, names: nameBody(f.id, view, "extrude" in spec ? outlineCurves(spec.extrude.profile, r.curves) : () => null) });
+  }
+  return shown;
 }
 
 /**

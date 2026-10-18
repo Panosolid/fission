@@ -18,11 +18,10 @@ import { showTimelineBar } from "./timeline-bar.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
-import { nameBody, outlineCurves } from "./naming.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
 import { bodyReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
-import { joinBodies, type Scene, type ShownBody } from "./scene.ts";
+import { joinBodies, shownBodies, type Scene } from "./scene.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, type Locks } from "./typed-entry.ts";
@@ -266,19 +265,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   async function buildPart(doc: DesignDocument) {
     const feature = lastFeature(doc);
-    const { results } = await rebuildTimeline(doc, bodies, kernel);
-    const result = results[feature.id];
+    const build = await rebuildTimeline(doc, bodies, kernel);
+    const result = build.results[feature.id];
     if (result.status === "failed") throw new Error(result.message);
     if (result.status !== "built" || result.body === undefined || result.spec === undefined) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
-    const drawn: ShownBody[] = [];
+    const drawn = await shownBodies(doc, build, bodies);
     let kept: { feature: string; label: string; warning: KeptWarning } | undefined;
     for (const f of bodyFeatures(doc)) {
-      const r = results[f.id];
-      if (r.status !== "built" || r.body === undefined || r.spec === undefined) continue;
-      const spec = r.spec;
-      const view = await bodies.view(r.body);
-      drawn.push({ feature: f.id, view, names: nameBody(f.id, view, "extrude" in spec ? outlineCurves(spec.extrude.profile, r.curves) : () => null) });
-      if (r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
+      const r = build.results[f.id];
+      if (r.status === "built" && r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
     }
     return { view: drawn[drawn.length - 1].view, scene: joinBodies(drawn), kept };
   }

@@ -41,6 +41,7 @@ import {
   rebuildTimeline,
   setExtrudeDistance,
   settleKept,
+  shownBodies,
   shapeOf,
   type DesignDocument,
   type LineEnd,
@@ -91,9 +92,11 @@ export type DesignFault =
   /** The file forgets the kept shapes. */
   | "save-drops-kept"
   /** Bodies are read once per feature id, so an edit to a sketch doesn't reach its extrude. */
-  | "cache-by-feature";
+  | "cache-by-feature"
+  /** The scene (24d3b) leaves out the first body built: drawn bodies must be exactly the built ones. */
+  | "scene-drops-body";
 
-export const DESIGN_FAULTS: readonly DesignFault[] = ["no-settle", "leak-bodies", "save-drops-kept", "cache-by-feature"];
+export const DESIGN_FAULTS: readonly DesignFault[] = ["no-settle", "leak-bodies", "save-drops-kept", "cache-by-feature", "scene-drops-body"];
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
 /** The messages a design with no body is refused with until 24d3 shows one. */
@@ -288,20 +291,27 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
     }
   }
 
-  /** The rebuild in the model's terms. */
+  /**
+   * The rebuild in the model's terms. Each body is read from the scene the
+   * app draws (`shownBodies`, 24d3b), so a built body left out of it, or one
+   * shown that isn't built, differs from the model.
+   */
   async function read(build: TimelineBuild, from: BodyCache, keep: boolean): Promise<Rebuild> {
     const results: Record<string, ItemResult> = {};
+    const scene = await shownBodies(state.doc, build, from);
+    if (fs.has("scene-drops-body")) scene.shift();
+    const shown = new Map(scene.map((b) => [b.feature, b.view]));
     for (const id of build.order) {
       const r = build.results[id];
       if (r.status === "suppressed" || r.status === "rolled-back") results[id] = { status: r.status };
       else if (r.status === "failed") results[id] = { status: "failed", cause: r.cause as never, input: r.input };
-      else if (r.body === undefined) results[id] = { status: "built" };
+      else if (r.body === undefined || !shown.has(id)) results[id] = { status: "built" };
       else {
         // Planted bug ("cache-by-feature"): a body read once per feature id, so later edits never reach it.
         const key = fs.has("cache-by-feature") ? id : `${id}|${r.body}|${JSON.stringify(r.curves ?? null)}`;
         let body = keep ? bodies.get(key) : undefined;
         if (body === undefined) {
-          body = measure(id, await from.view(r.body), r.spec && "extrude" in r.spec ? outlineCurves(r.spec.extrude.profile, r.curves) : () => null);
+          body = measure(id, shown.get(id)!, r.spec && "extrude" in r.spec ? outlineCurves(r.spec.extrude.profile, r.curves) : () => null);
           if (keep) bodies.set(key, body);
         }
         results[id] = r.warning ? { status: "built", body, warning: { cause: r.warning.cause, input: r.warning.sketch } } : { status: "built", body };

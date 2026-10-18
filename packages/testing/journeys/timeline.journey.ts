@@ -579,6 +579,7 @@ const DESIGN_CAUGHT_BY: Record<Exclude<DesignFault, "leak-bodies">, string> = {
   "no-settle": "the rebuild differs from the model",
   "save-drops-kept": "save and open changed the rebuild",
   "cache-by-feature": "the rebuild differs from a rebuild from scratch",
+  "scene-drops-body": "the rebuild differs from the model",
 };
 
 for (const fault of DESIGN_FAULTS.filter((f): f is Exclude<DesignFault, "leak-bodies"> => f !== "leak-bodies"))
