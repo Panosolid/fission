@@ -14,7 +14,7 @@ import type { Fetch } from "./http.ts";
 import { browserKeyStore, type ApiKeyStore } from "./keys.ts";
 import { builtInProvider, IN_BROWSER_MODEL, inBrowserDownloadBytes, inBrowserProvider, type BuiltInModelLike, type GpuLike, type WebLLMLike } from "./local.ts";
 import { DEFAULT_MODELS, hostedProvider, listHostedModels } from "./hosted.ts";
-import { hasModel, ollamaModels, ollamaProvider } from "./ollama.ts";
+import { hasModel, isThisComputer, OLLAMA_ENDPOINT, ollamaModels, ollamaProvider } from "./ollama.ts";
 
 export type AIProviderKind = "in-browser" | "ollama" | "api-key" | "browser-built-in";
 
@@ -91,6 +91,7 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     notes: [
       "Install Ollama and pull a model, e.g. `ollama pull llama3.2`.",
       "Browsers may only talk to Ollama if it allows this page: start it with OLLAMA_ORIGINS set to this site's address (for example OLLAMA_ORIGINS=https://your-fission-address), then restart Ollama.",
+      "Given the address of another computer, requests go to that computer instead, and the first one is shown to you before it is sent.",
     ],
   },
   {
@@ -116,6 +117,29 @@ export const PROVIDERS: readonly ProviderInfo[] = [
 /** Whether requests to this provider leave the user's machine (the indicator next to the assistant). */
 export function dataLeavesMachine(kind: AIProviderKind): boolean {
   return PROVIDERS.find((p) => p.kind === kind)!.remote;
+}
+
+/**
+ * Whether requests with these settings leave the user's machine: a hosted
+ * API always, Ollama when its address is another computer (audit S3), the
+ * others never. The panel shows what will be sent before the first such
+ * request, and says where requests go.
+ */
+export function sendsAway(s: ProviderSettings): boolean {
+  if (s.kind === "ollama") return !isThisComputer(s.endpoint?.trim() || OLLAMA_ENDPOINT);
+  return dataLeavesMachine(s.kind);
+}
+
+/**
+ * Whether the panel shows a request and waits for Send before its origin's
+ * first one goes (audit S3): every request to a hosted API (even asking
+ * which models it has sends the key), and to Ollama at another computer
+ * only a request with a body (a question, with the part in it); asking that
+ * Ollama which models it has carries nothing of the user's.
+ */
+export function askBeforeSending(s: ProviderSettings, init: { body?: unknown }): boolean {
+  if (!sendsAway(s)) return false;
+  return s.kind !== "ollama" || init.body != null;
 }
 
 const browserFetch: Fetch = (url, init) => globalThis.fetch(url, init);

@@ -22,6 +22,7 @@ const url = "http://localhost:4181/";
 const browser = await launch();
 const errors = [];
 const KEY = "sk-ant-test-e2e-0123456789";
+const REMOTE_OLLAMA = "http://192.168.1.50:11434"; // another computer on the local network
 const OPENAI_KEY = "sk-proj-test-e2e-0123456789";
 
 /**
@@ -55,15 +56,20 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
   const listed = [];
   const ollamaHits = [];
   const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "content-type": "application/json" };
-  await context.route("http://localhost:11434/**", async (route) => {
+  const fakeOllama = (hits) => async (route) => {
     const req = route.request();
-    ollamaHits.push(req.url());
+    hits.push(req.url());
     if (!ollama) return route.abort("connectionrefused");
     if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
     if (req.url().endsWith("/api/tags")) return route.fulfill({ headers: cors, body: JSON.stringify({ models: [{ name: "qwen2.5:1.5b" }] }) });
     asked.push({ url: req.url(), headers: req.headers(), body: req.postDataJSON() });
     return route.fulfill({ headers: cors, body: JSON.stringify({ message: { role: "assistant", content: answers.shift() ?? "{}" } }) });
-  });
+  };
+  await context.route("http://localhost:11434/**", fakeOllama(ollamaHits));
+  await context.route("http://127.0.0.1:11434/**", fakeOllama(ollamaHits)); // the same Ollama by its address
+  // Ollama on another computer on the local network (audit S3).
+  const remoteHits = [];
+  await context.route(`${REMOTE_OLLAMA}/**`, fakeOllama(remoteHits));
   await context.route("https://api.anthropic.com/**", async (route) => {
     const req = route.request();
     if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
@@ -88,7 +94,7 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
   await page.goto(url + "#design");
   await volume(page, "24,000 mm³"); // the default box: 40 · 30 · 20
   if (open) await page.click("#assistant-toggle");
-  return { page, asked, listed, builtInAsked, ollamaHits };
+  return { page, asked, listed, builtInAsked, ollamaHits, remoteHits };
 }
 const looked = (page) => page.waitForFunction(() => !/Looking/.test(document.querySelector("#ai-found").textContent) && document.querySelector("#ai-found").textContent !== "");
 /** Pastes `text` into the key box the way a real paste arrives (an input event of type insertFromPaste). */
@@ -308,6 +314,54 @@ try {
       // The second request needs no new confirmation (the first one was agreed to).
       await page.click("#undo");
       await volume(page, "24,000 mm³");
+    } finally {
+      await page.close();
+    }
+  });
+
+  await check("Ollama at another computer's address: said so, its check asks nothing, the first question is shown before it is sent", async () => {
+    const { page, asked, remoteHits } = await fresh([setPart("box", 50, 30, 20), setPart("box", 60, 30, 20)]);
+    try {
+      await useOllama(page);
+      await page.fill("#ai-endpoint", REMOTE_OLLAMA);
+      await page.press("#ai-endpoint", "Tab"); // a change event, as leaving the box gives
+      await page.waitForFunction(() => document.querySelector("#ai-model-pick").value === "qwen2.5:1.5b");
+      assert.equal(
+        await page.textContent("#ai-status-detail"),
+        `Using Ollama at ${REMOTE_OLLAMA}, which is not this computer: your requests go there, and the first one is shown to you before it is sent.`,
+      );
+      assert.match(await page.getAttribute("#assistant-toggle", "title"), /sends requests to the provider/);
+      // The check only asks it which models it has (GET /api/tags, nothing of the user's), so no box.
+      await page.click("#ai-check");
+      await page.waitForFunction(() => document.querySelector("#ai-check-result").textContent === "Ready.");
+      assert.equal(await page.isVisible("#ai-consent"), false);
+      assert.deepEqual(remoteHits.filter((u) => !u.endsWith("/api/tags")), [], "only model lists so far");
+      // The first question: shown exactly, no key mentioned, and Don't send sends nothing.
+      await ask(page, "Make it 10 mm wider.");
+      await page.waitForSelector("#ai-consent");
+      const shown = await page.textContent("#ai-consent");
+      assert.match(shown, new RegExp(`first request to ${REMOTE_OLLAMA}\\. Exactly this will be sent to ${REMOTE_OLLAMA}/api/chat \\(headers: content-type\\)`));
+      assert.match(shown, /"content": "Make it 10 mm wider."/);
+      assert.equal(shown.includes("your key"), false, "no key goes to Ollama, so none is mentioned");
+      await page.click("#ai-cancel");
+      await page.waitForSelector("#ai-result .ai-error");
+      assert.match(await page.textContent("#ai-result"), /nothing was sent/);
+      assert.equal(asked.length, 0);
+      // Asked again and sent: it goes to that address only; the next question needs no box.
+      await ask(page, "Make it 10 mm wider.");
+      await page.click("#ai-send");
+      await page.waitForSelector("#ai-preview");
+      assert.deepEqual(asked.map((a) => a.url), [`${REMOTE_OLLAMA}/api/chat`]);
+      await page.click("#ai-reject");
+      await ask(page, "Make it 20 mm wider.");
+      await page.waitForSelector("#ai-preview");
+      assert.equal(await page.isVisible("#ai-consent"), false);
+      assert.deepEqual(asked.map((a) => a.url), [`${REMOTE_OLLAMA}/api/chat`, `${REMOTE_OLLAMA}/api/chat`]);
+      if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/remote-ollama.png` });
+      // Back to this computer: said so again.
+      await page.fill("#ai-endpoint", "http://127.0.0.1:11434");
+      await page.press("#ai-endpoint", "Tab"); // a change event, as leaving the box gives
+      assert.match(await page.textContent("#ai-status-detail"), /nothing leaves your machine/);
     } finally {
       await page.close();
     }

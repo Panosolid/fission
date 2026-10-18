@@ -25,8 +25,11 @@ import {
   IN_BROWSER_MODEL,
   inBrowserDownloadSize,
   apiOrigin,
+  askBeforeSending,
   proposeAction,
+  OLLAMA_ENDPOINT,
   PROVIDERS,
+  sendsAway,
   systemPrompt,
   type AIAction,
   type AIProviderKind,
@@ -209,6 +212,16 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
     return s;
   }
 
+  /** The origin an Ollama setting reaches ("http://192.168.1.50:11434"), or its address as typed when it doesn't read. */
+  function ollamaOrigin(s: ProviderSettings): string {
+    const typed = s.endpoint?.trim() || OLLAMA_ENDPOINT;
+    try {
+      return new URL(typed).origin;
+    } catch {
+      return typed;
+    }
+  }
+
   /** The origin an API key goes to for these settings, or null (not an API key, or a bad address). */
   function keyOrigin(s: ProviderSettings | null): string | null {
     if (s?.kind !== "api-key") return null;
@@ -275,13 +288,18 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
               ? `A key is saved for ${origin}, in this browser only.`
               : `No key saved for ${origin}. Saving one asks ${origin} which models it can use; only the key is sent, nothing from your project.`;
     const info = s && PROVIDERS.find((p) => p.kind === s.kind)!;
+    // Where requests go is the settings' answer, not the kind's: Ollama at another computer's address sends them there (audit S3).
+    const away = s !== null && sendsAway(s);
+    const elsewhere = s?.kind === "ollama" && away ? ollamaOrigin(s) : null;
     $("ai-status-detail").textContent = !info
       ? "AI is off. Nothing is sent anywhere, and everything in Panoshape works without it."
-      : info.remote
-        ? `Using ${info.title}: your requests go to the provider${origin ? ` at ${origin}` : ""}.`
-        : `Using ${info.title}: nothing leaves your machine.`;
+      : elsewhere
+        ? `Using Ollama at ${elsewhere}, which is not this computer: your requests go there, and the first one is shown to you before it is sent.`
+        : away
+          ? `Using ${info.title}: your requests go to the provider${origin ? ` at ${origin}` : ""}.`
+          : `Using ${info.title}: nothing leaves your machine.`;
     status.textContent = s ? SHORT[s.kind] : "off";
-    status.parentElement!.title = s ? `The AI assistant: ${info!.title}${info!.remote ? " (sends requests to the provider)" : " (stays on your machine)"}.` : "The optional AI assistant. No AI provider is active: nothing is sent anywhere.";
+    status.parentElement!.title = s ? `The AI assistant: ${info!.title}${away ? " (sends requests to the provider)" : " (stays on your machine)"}.` : "The optional AI assistant. No AI provider is active: nothing is sent anywhere.";
     const here = workspace === "design";
     $<HTMLButtonElement>("ai-ask-button").disabled = !s || !here;
     $<HTMLTextAreaElement>("ai-prompt").disabled = !s || !here;
@@ -418,14 +436,17 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
 
   /**
    * The fetch providers use from this panel: the first request to a remote
-   * provider's origin waits until the user has seen exactly what it sends
-   * (the address and the body; the key's header is named, not shown) and
-   * chosen Send.
+   * provider's origin (a hosted API, or Ollama at another computer's
+   * address) waits until the user has seen exactly what it sends (the
+   * address and the body; a key's header is named, not shown) and chosen
+   * Send. Asking another computer's Ollama which models it has sends
+   * nothing of the user's, so only a request with a body asks there
+   * (`askBeforeSending`).
    */
   const guardedFetch: Fetch = async (url, init) => {
     const s = settings;
     const origin = new URL(url).origin;
-    if (s?.kind === "api-key" && store.get(CONSENT_KEY + origin) !== "1") {
+    if (s && askBeforeSending(s, init) && store.get(CONSENT_KEY + origin) !== "1") {
       const ok = await confirmSend(url, init);
       if (!ok) throw new Error("you chose not to send it, so nothing was sent");
       store.set(CONSENT_KEY + origin, "1");
@@ -445,7 +466,8 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
       } catch {
         // shown as it is
       }
-      box.innerHTML = `<p>This is the first request to <strong>${escape(new URL(url).origin)}</strong>. Exactly this will be sent to <code>${escape(url)}</code>, with your key in a header (headers: ${escape(headers)}):</p><pre></pre><button id="ai-send" type="button">Send</button> <button id="ai-cancel" type="button">Don't send</button>`;
+      const how = settings?.kind === "api-key" ? `, with your key in a header (headers: ${escape(headers)})` : ` (headers: ${escape(headers)})`;
+      box.innerHTML = `<p>This is the first request to <strong>${escape(new URL(url).origin)}</strong>. Exactly this will be sent to <code>${escape(url)}</code>${how}:</p><pre></pre><button id="ai-send" type="button">Send</button> <button id="ai-cancel" type="button">Don't send</button>`;
       box.querySelector("pre")!.textContent = body;
       result.replaceChildren(box);
       box.querySelector("#ai-send")!.addEventListener("click", () => resolve(true), { once: true });
