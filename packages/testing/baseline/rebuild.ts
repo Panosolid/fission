@@ -9,12 +9,12 @@
 // corner, extruded by 10, side by side 30 mm apart. The edit: the first
 // sketch's square corner moved along x, as a Move point click does, then
 // what the app does after a sketch click: `settleKept`, `rebuildTimeline`
-// on the one `BodyCache`, and every built body's view and names (what
-// Design draws). Only the first extrude's spec changes, so a working cache
+// on the one `BodyCache`, and the bodies Design draws (`shownBodies`, each
+// built body's view and names, joined into one mesh by `joinBodies`). Only the first extrude's spec changes, so a working cache
 // builds one body; the other 20 keep theirs.
 
 import type { BodyView, KernelCalls } from "@fission/core";
-import { addSketch, BodyCache, drawArc, drawLine, extrudeSketch, movePoint, nameBody, outlineCurves, partDocument, pointAt, rebuildTimeline, settleKept, type DesignDocument } from "@fission/design";
+import { addSketch, BodyCache, drawArc, drawLine, extrudeSketch, joinBodies, movePoint, partDocument, pointAt, rebuildTimeline, settleKept, shownBodies, type DesignDocument } from "@fission/design";
 
 export const FEATURES = 20;
 export const WIDTH = 20;
@@ -94,9 +94,10 @@ export function countingKernel(kernel: KernelCalls): KernelCalls & { calls: numb
 }
 
 /**
- * One edit from `before` to `after` as the app makes it: the kept shapes
- * settled, the timeline rebuilt on `cache`, and every built body's view and
- * names, in build order.
+ * One edit from `before` to `after` as the app makes it (workspace.ts
+ * `buildPart` after a sketch click): the kept shapes settled, the timeline
+ * rebuilt on `cache`, and every built body's view and names, in build
+ * order, joined into the one mesh Design draws.
  */
 export async function showEdit(kernel: KernelCalls, cache: BodyCache, before: DesignDocument, after: DesignDocument, fault?: RebuildFault): Promise<{ doc: DesignDocument; views: BodyView[] }> {
   const start = performance.now();
@@ -104,14 +105,9 @@ export async function showEdit(kernel: KernelCalls, cache: BodyCache, before: De
   if (fault === "full-replay") await cache.clear();
   if (fault === "outline-twice") await settleKept(kernel, before, after);
   const build = await rebuildTimeline(doc, cache, kernel);
-  const views: BodyView[] = [];
-  for (const id of build.order) {
-    const r = build.results[id];
-    if (r.status !== "built" || r.body === undefined || r.spec === undefined) continue;
-    const view = await cache.view(r.body);
-    nameBody(id, view, "extrude" in r.spec ? outlineCurves(r.spec.extrude.profile, r.curves) : () => null);
-    views.push(view);
-  }
+  const shown = await shownBodies(doc, build, cache);
+  joinBodies(shown);
+  const views = shown.map((b) => b.view);
   if (fault === "slow") for (const end = performance.now() + 1.5 * (performance.now() - start); performance.now() < end; );
   return { doc, views };
 }
