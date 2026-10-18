@@ -63,7 +63,7 @@
     "app.project_save.retained_bytes": 546632,
     "app.rebuild_20_arcs_edit_first.body_builds": 1,
     "app.rebuild_20_arcs_edit_first.kernel_calls": 43,
-    "app.rebuild_20_arcs_edit_first.relative_time": 0.0463,
+    "app.rebuild_20_arcs_edit_first.relative_time": 0.0543,
     "kernel.extrude_arcs_200.allocations": 67430,
     "kernel.extrude_arcs_200.instructions": 206460565,
     "kernel.extrude_arcs_200.peak_bytes": 783768,
