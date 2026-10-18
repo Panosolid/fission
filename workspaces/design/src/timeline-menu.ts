@@ -11,7 +11,7 @@
 import type { KernelCalls } from "@fission/core";
 import type { DesignDocument } from "./document.ts";
 import { planDelete, type DeleteQuestion } from "./delete-ask.ts";
-import { barEdit, itemMenu, type MenuEntry } from "./timeline-bar.ts";
+import { barEdit, itemMenu, type BarAction, type MenuEntry } from "./timeline-bar.ts";
 
 /**
  * Item `id`'s menu with sketch `editing` open (its id) or none: 24f2's
@@ -55,4 +55,16 @@ export async function chooseEntry(host: MenuHost, id: string, action: MenuEntry[
   };
   if (plan.ask) host.ask(plan.ask, go);
   else go();
+}
+
+/**
+ * A playback button, a marker drop or a tap between items (step 24f5),
+ * with sketch `editing` open (its id) or none: `barEdit`'s edit recorded as
+ * one undo step with its `TIMELINE_STEPS` name, its refusal shown, or
+ * nothing when the marker is already there.
+ */
+export function chooseBarAction(host: MenuHost, a: Exclude<BarAction, { kind: "menu" }>, editing: string | null = null): void {
+  const r = barEdit(host.current(), a, editing);
+  if (r.kind === "refused") host.refuse(r.message);
+  else if (r.kind === "edit") host.record(r.step, r.doc);
 }

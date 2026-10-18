@@ -122,6 +122,38 @@ export function stepTarget(b: BarButton, marker: number, count: number): number 
   return Math.min(count, marker + 1);
 }
 
+/** The playback buttons in the bar's order. */
+export const BAR_BUTTONS: readonly BarButton[] = ["start", "back", "forward", "end"];
+
+/** Each playback button's words: its name for screen readers and its tooltip. */
+export const BUTTON_LABELS: Record<BarButton, string> = { start: "Go to the start", back: "Step back", forward: "Step forward", end: "Go to the end" };
+
+/** A playback button as the bar shows it: its words, and why it is off (null when it moves the marker). */
+export interface ButtonState {
+  button: BarButton;
+  label: string;
+  off: string | null;
+}
+
+/**
+ * The four playback buttons (step 24f5) with sketch `editing` open (its id)
+ * or none, in the bar's order: each is off when it would leave the marker
+ * where it is (already at the start or the end, or an empty timeline), or
+ * when it would put the sketch being edited after the marker (`barEdit`'s
+ * refusal, word for word). The rest move the marker as `barEdit` does.
+ */
+export function playbackButtons(doc: DesignDocument, editing: string | null = null): ButtonState[] {
+  const count = doc.timeline.features.length;
+  const { marker } = timelineBarItems(doc);
+  return BAR_BUTTONS.map((button) => {
+    const r = barEdit(doc, { kind: "button", button }, editing);
+    let off: string | null = null;
+    if (r.kind === "refused") off = r.message;
+    else if (r.kind === "none") off = count === 0 ? "The timeline is empty" : stepTarget(button, marker, count) === 0 ? "The marker is already at the start" : "The marker is already at the end";
+    return { button, label: BUTTON_LABELS[button], off };
+  });
+}
+
 /** An entry of an item's menu: what it does, its words, and why it is off (null when it can be chosen). */
 export interface MenuEntry {
   action: "marker" | "suppress" | "unsuppress" | "delete";
@@ -239,10 +271,89 @@ const ICONS: Record<TimelineIcon, string> = {
   feature: '<circle cx="12" cy="12" r="7"/>',
 };
 
+/** The playback buttons' drawings (24f5): our own, in the items' style. */
+const BUTTON_ICONS: Record<BarButton, string> = {
+  start: '<path d="M6 5v14"/><path d="M18 5l-9 7 9 7z"/>',
+  back: '<path d="M16 5l-9 7 9 7z"/>',
+  forward: '<path d="M8 5l9 7-9 7z"/>',
+  end: '<path d="M18 5v14"/><path d="M6 5l9 7-9 7z"/>',
+};
+
+/**
+ * The items' edges in `list` (the bar's row), in the row's own coordinates:
+ * px from the row's left edge with the part scrolled out of sight added, as
+ * `dropIndex` and `tapPlace` take them.
+ */
+export function barEdges(list: HTMLElement): ItemEdges[] {
+  const left = list.getBoundingClientRect().left;
+  return [...list.querySelectorAll<HTMLElement>(".timeline-bar-item")].map((li) => {
+    const r = li.getBoundingClientRect();
+    return { left: r.left - left + list.scrollLeft, right: r.right - left + list.scrollLeft };
+  });
+}
+
+/**
+ * The marker dragged (24f5): a press on it that moves DRAG_PIXELS or more
+ * follows the pointer, the marker standing where it would drop (`dropIndex`
+ * on the items' edges as they are now) and the items after it greyed; let
+ * go, the place is `act`ed on as a marker drop. A press that moves less is
+ * no drag; a drag the browser cancels (`cancel`) changes nothing. The list
+ * holds the pointer, so the marker can move about inside it.
+ */
+function dragMarker(list: HTMLElement, marker: HTMLElement, act: (a: BarAction) => void, cancel: () => void) {
+  marker.addEventListener("pointerdown", (down) => {
+    if (down.button !== 0) return;
+    down.preventDefault();
+    const items = [...list.querySelectorAll<HTMLElement>(".timeline-bar-item")];
+    let place: number | null = null;
+    try {
+      list.setPointerCapture(down.pointerId);
+    } catch {
+      // No pointer to hold (a pointer the browser no longer knows): the moves still reach the list while over it.
+    }
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== down.pointerId) return;
+      if (place === null && !isDrag(e.clientX - down.clientX, e.clientY - down.clientY)) return;
+      place = dropIndex(barEdges(list), e.clientX - list.getBoundingClientRect().left, list.scrollLeft);
+      list.dataset.dragging = "true";
+      list.insertBefore(marker, items[place] ?? null);
+      items.forEach((li, i) => {
+        if (i >= place!) li.dataset.rolledBack = "true";
+        else delete li.dataset.rolledBack;
+      });
+    };
+    const stop = (e: PointerEvent) => {
+      if (e.pointerId !== down.pointerId) return;
+      list.removeEventListener("pointermove", move);
+      list.removeEventListener("pointerup", stop);
+      list.removeEventListener("pointercancel", stop);
+      delete list.dataset.dragging;
+      if (place === null) return;
+      // The click that follows a drag's release is not a click on whatever is under the pointer now:
+      // stopped, until the next press or the end of this task, whichever comes first.
+      const view = list.ownerDocument.defaultView;
+      const swallow = (c: Event) => c.stopPropagation();
+      const done = () => view?.removeEventListener("click", swallow, { capture: true });
+      view?.addEventListener("click", swallow, { capture: true, once: true });
+      view?.addEventListener("pointerdown", done, { capture: true, once: true });
+      view?.setTimeout(done, 0);
+      if (e.type === "pointerup") act({ kind: "marker", place });
+      else cancel();
+    };
+    list.addEventListener("pointermove", move);
+    list.addEventListener("pointerup", stop);
+    list.addEventListener("pointercancel", stop);
+  });
+}
+
 /** What the bar's items do (step 24f3): `failed` are the rebuild's failed items (drawn red); `picked` is the item whose ⋯ shows. */
 export interface BarWiring {
   failed?: ReadonlySet<string>;
   picked?: string | null;
+  /** The sketch being edited (24f5): a playback button that would put it after the marker is off and says why. */
+  editing?: string | null;
+  /** A playback button, the marker dropped after a drag, or a tap between items on a touch screen (24f5): the bar redraws itself when this records nothing. */
+  onAction?(a: BarAction): void;
   /** A click or tap on an item: it is picked and its ⋯ shows (a phone's way to the menu). */
   onPick?(id: string): void;
   /** A right-click on an item (or its ⋯, or the keyboard's menu key): its menu at that point of the screen. */
@@ -261,12 +372,19 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
   const list = document.createElement("ol");
   list.className = "timeline-bar";
   list.setAttribute("aria-label", "Timeline");
+  // 24f5: every action goes to the app; one that records nothing (already there, or refused) leaves this
+  // bar in place, perhaps with a drag's marker moved, so it is drawn again from the document.
+  const act = (a: BarAction) => {
+    wiring.onAction?.(a);
+    if (list.isConnected) showTimelineBar(slot, doc, wiring);
+  };
   const markerRow = () => {
     const li = document.createElement("li");
     li.className = "timeline-bar-marker";
     li.setAttribute("role", "separator");
     li.setAttribute("aria-label", "Rollback marker");
-    li.title = "Rollback marker: the items after it are not built";
+    li.title = "Rollback marker: the items after it are not built. Drag it to roll back or forward";
+    dragMarker(list, li, act, () => showTimelineBar(slot, doc, wiring));
     return li;
   };
   items.forEach((item, i) => {
@@ -319,5 +437,35 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
     }
   });
   if (marker === items.length) list.append(markerRow());
-  slot.replaceChildren(list);
+  // A tap between two items on a touch screen puts the marker there (24f5, `tapPlace`); a tap on an item picks it instead.
+  let pointer = "";
+  list.addEventListener("pointerdown", (e) => (pointer = e.pointerType));
+  list.addEventListener("click", (e) => {
+    if (pointer !== "touch" || (e.target as Element).closest(".timeline-bar-item, .timeline-bar-more-slot")) return;
+    const place = tapPlace(barEdges(list), e.clientX - list.getBoundingClientRect().left, list.scrollLeft);
+    if (place !== null) act({ kind: "marker", place });
+  });
+  // The four playback buttons before the items (24f5), each off when it would do nothing or roll back the sketch being edited.
+  const buttons = document.createElement("div");
+  buttons.className = "timeline-bar-buttons";
+  buttons.setAttribute("role", "group");
+  buttons.setAttribute("aria-label", "Rollback marker");
+  for (const b of playbackButtons(doc, wiring.editing ?? null)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "timeline-bar-button";
+    button.dataset.button = b.button; // read by the e2e test
+    button.setAttribute("aria-label", b.label);
+    button.title = b.off ? `${b.label}: ${b.off}` : b.label;
+    // Off but still focusable and saying why; a click still goes to the app, where barEdit gives nothing
+    // (already there) or the same refusal, shown where a phone, with no tooltips, can read it.
+    if (b.off) button.setAttribute("aria-disabled", "true");
+    button.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${BUTTON_ICONS[b.button]}</svg>`;
+    button.addEventListener("click", () => act({ kind: "button", button: b.button }));
+    buttons.append(button);
+  }
+  const row = document.createElement("div");
+  row.className = "timeline-bar-row";
+  row.append(buttons, list);
+  slot.replaceChildren(row);
 }
