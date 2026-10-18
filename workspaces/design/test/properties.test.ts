@@ -67,17 +67,25 @@ test("the panel shows the body's numbers, its intent and provenance", () => {
   assert.notEqual($("provenance").textContent, "…");
   // A 40 × 30 × 20 box: volume 40·30·20 = 24,000 mm³; area 2(40·30 + 40·20 + 30·20) = 5,200 mm²; 8 V, 12 E, 6 F.
   p.showError("old message");
-  p.showBody(view());
+  p.showBody(view(), "Body 2");
+  assert.equal($("body-heading").textContent, "Body 2");
   assert.equal($("volume").textContent, "24,000 mm³");
   assert.equal($("area").textContent, "5,200 mm²");
   assert.equal($("topology").textContent, "8 V · 12 E · 6 F");
   assert.equal($("status").textContent, "valid");
   assert.equal($("status").className, "ok");
-  assert.equal($("error").textContent, "", "a body that built clears the last error");
-  p.showBody(view(["edge 3 is off face 2"]));
+  // Showing another body's numbers (a selection change) leaves the rebuild's error line to the rebuild.
+  assert.equal($("error").textContent, "old message");
+  p.showError("");
+  assert.equal($("error").textContent, "", "a rebuild that built clears the last error");
+  assert.equal($("body-problems").textContent, "");
+  p.showBody(view(["edge 3 is off face 2"]), "Body 1");
+  assert.equal($("body-heading").textContent, "Body 1");
   assert.equal($("status").textContent, "1 problem(s)");
   assert.equal($("status").className, "bad");
-  assert.equal($("error").textContent, "edge 3 is off face 2");
+  assert.equal($("body-problems").textContent, "edge 3 is off face 2");
+  p.showBody(view(), "Body 2");
+  assert.equal($("body-problems").textContent, "", "a valid body lists no problems");
 });
 
 test("stale numbers are dimmed, and said in words only when the rebuild failed", () => {

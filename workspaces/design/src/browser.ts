@@ -3,8 +3,9 @@
 // bodies they make, and the origin's planes and axes. A pure function of the document, so step 24's
 // longer timeline only adds rows here.
 
-import type { Feature } from "@fission/core";
+import type { Feature, GeometryReference } from "@fission/core";
 import { builds, isSketchItem, profileLabel, type DesignDocument } from "./document.ts";
+import { bodyReference, profileReference } from "./references.ts";
 import { sketchItem } from "./sketch.ts";
 
 export interface BrowserNode {
@@ -55,4 +56,11 @@ export function browserTree(document: DesignDocument): BrowserNode[] {
     { id: "bodies", label: "Bodies", children: bodyFeatures(document).map((_, i) => ({ id: `body-${i + 1}`, label: `Body ${i + 1}` })) },
     { id: "origin", label: "Origin", children: ORIGIN },
   ];
+}
+
+/** The browser rows that stand for selectable geometry, and the reference each selects: "body-n" its body, a profile's row its outline. */
+export function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
+  const body = /^body-(\d+)$/.exec(node);
+  if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodyFeatures(doc)[Number(body[1]) - 1]);
+  return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
 }

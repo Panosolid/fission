@@ -239,10 +239,25 @@ const ICONS: Record<TimelineIcon, string> = {
   feature: '<circle cx="12" cy="12" r="7"/>',
 };
 
-/** Fills the timeline slot: an ordered list of the items, with the marker as a separator where it stands. */
-export function showTimelineBar(slot: HTMLElement, doc: DesignDocument) {
+/** What the bar's items do (step 24f3): `failed` are the rebuild's failed items (drawn red); `picked` is the item whose ⋯ shows. */
+export interface BarWiring {
+  failed?: ReadonlySet<string>;
+  picked?: string | null;
+  /** A click or tap on an item: it is picked and its ⋯ shows (a phone's way to the menu). */
+  onPick?(id: string): void;
+  /** A right-click on an item (or its ⋯, or the keyboard's menu key): its menu at that point of the screen. */
+  onMenu?(id: string, at: { x: number; y: number }): void;
+}
+
+/**
+ * Fills the timeline slot: an ordered list of the items, with the marker
+ * as a separator where it stands. From 24f3 each item opens its menu on a
+ * right-click; a click or tap picks it and shows its ⋯ beside it, which
+ * opens the menu too.
+ */
+export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: BarWiring = {}) {
   const document = slot.ownerDocument;
-  const { items, marker } = timelineBarItems(doc);
+  const { items, marker } = timelineBarItems(doc, wiring.failed);
   const list = document.createElement("ol");
   list.className = "timeline-bar";
   list.setAttribute("aria-label", "Timeline");
@@ -262,14 +277,46 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument) {
     li.dataset.icon = item.icon;
     if (item.suppressed) li.dataset.suppressed = "true";
     if (item.rolledBack) li.dataset.rolledBack = "true";
-    const words = item.label + (item.suppressed ? " (suppressed)" : "") + (item.rolledBack ? " (after the marker)" : "");
+    if (item.failed) li.dataset.failed = "true";
+    const words = item.label + (item.suppressed ? " (suppressed)" : "") + (item.rolledBack ? " (after the marker)" : "") + (item.failed ? " (failed)" : "");
     li.title = words;
+    li.tabIndex = 0;
+    li.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const m = e as MouseEvent;
+      // The keyboard's menu key fires it at (0, 0): open by the item instead.
+      const r = li.getBoundingClientRect();
+      wiring.onMenu?.(item.id, m.clientX === 0 && m.clientY === 0 ? { x: r.left, y: r.top } : { x: m.clientX, y: m.clientY });
+    });
+    li.addEventListener("click", () => wiring.onPick?.(item.id));
+    li.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Enter") wiring.onPick?.(item.id);
+    });
     li.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[item.icon]}</svg>`;
     const name = document.createElement("span");
     name.className = "timeline-bar-name";
     name.textContent = words;
     li.append(name);
     list.append(li);
+    if (wiring.picked === item.id) {
+      // The picked item's ⋯: its menu, opening upward from the bar.
+      const slotLi = document.createElement("li");
+      slotLi.className = "timeline-bar-more-slot";
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "timeline-bar-more";
+      more.dataset.more = item.id; // read by the e2e test
+      more.textContent = "⋯";
+      more.title = `${words}: more`;
+      more.setAttribute("aria-label", `${item.label} options`);
+      more.setAttribute("aria-haspopup", "menu");
+      more.addEventListener("click", () => {
+        const r = more.getBoundingClientRect();
+        wiring.onMenu?.(item.id, { x: r.left, y: r.top });
+      });
+      slotLi.append(more);
+      list.append(slotLi);
+    }
   });
   if (marker === items.length) list.append(markerRow());
   slot.replaceChildren(list);

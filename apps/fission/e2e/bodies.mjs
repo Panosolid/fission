@@ -75,6 +75,16 @@ async function colourAt(page, p, view) {
 const differs = (a, b) => a.some((x, i) => Math.abs(x - b[i]) > 12);
 const green = ([r, g, b]) => g - (r + b) / 2;
 
+/** What the properties panel's Feature and Body sections describe. */
+const panelBody = (page) =>
+  page.evaluate(() => ({
+    heading: document.querySelector("#body-heading")?.textContent,
+    volume: document.querySelector("#volume")?.textContent,
+    intent: document.querySelector("#intent")?.textContent,
+  }));
+// The default box, 40 · 30 · 20 = 24,000 mm³.
+const BODY1 = { heading: "Body 1", volume: "24,000 mm³", intent: "Box: 40 × 30 × 20 mm" };
+
 const selection = (page) => page.evaluate(() => document.body.dataset.selection ?? "");
 const bodyRows = (page) => page.$$eval('[data-node="bodies"] .tree-row', (rows) => rows.map((r) => `${r.dataset.node} ${r.textContent.trim()}`));
 
@@ -152,10 +162,14 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
     // feature-1; the extrude is the newest feature, after the sketch.
     await at(page, [20, 15, 20], view, tap);
     await until(page, () => document.body.dataset.selection === "face:feature-1/top", null, `body 1's top (got ${await selection(page)})`);
+    // The panel describes the picked face's body (Ben's report: it always showed the last body).
+    assert.deepEqual(await panelBody(page), BODY1);
     await at(page, top2, view, tap);
     const picked = await selection(page);
     assert.match(picked, /^face:feature-\d+\/end$/, "body 2's top is its extrude's end cap");
     assert.notEqual(picked.split("/")[0], "face:feature-1");
+    const body2 = { heading: "Body 2", volume, intent: `Extrude Sketch 1 by ${distance} mm` };
+    assert.deepEqual(await panelBody(page), body2);
 
     // Listed in build order, in the browser (a drawer at phone width,
     // opened for the rows and closed again before looking at the canvas).
@@ -177,7 +191,24 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
     const lit2 = await colourAt(page, top2, view);
     assert.ok(green(lit2) > green(box2) + 20, `body 2 tinted: ${lit2} vs ${box2}`);
     assert.ok(Math.abs(green(lit1) - green(box1)) < 6, `body 1 untouched: ${lit1} vs ${box1}`);
+    assert.deepEqual(await panelBody(page), body2);
     if (shots) await page.screenshot({ path: `${shots}/bodies-${width}-selected.png` });
+
+    // Body 1's row: its faces tinted, not body 2's, and the panel shows the box, not the last body.
+    await fold(true);
+    await press(page, '#browser [data-node="body-1"]', tap);
+    await until(page, () => document.body.dataset.selection === "body:feature-1", null, "Body 1 selected");
+    assert.deepEqual(await panelBody(page), BODY1);
+    await fold(false);
+    const box1lit = await colourAt(page, [20, 15, 20], view);
+    const box2now = await colourAt(page, top2, view);
+    assert.ok(green(box1lit) > green(box1) + 20, `body 1 tinted: ${box1lit} vs ${box1}`);
+    assert.ok(Math.abs(green(box2now) - green(box2)) < 6, `body 2 untouched: ${box2now} vs ${box2}`);
+    if (shots) await page.screenshot({ path: `${shots}/bodies-${width}-body1.png` });
+    // Escape clears the selection: back to the last body, the part the parameters edit.
+    await page.keyboard.press("Escape");
+    await until(page, () => !document.body.dataset.selection, null, "nothing selected");
+    assert.deepEqual(await panelBody(page), body2);
     if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
     await page.context().close();
   });
