@@ -102,8 +102,7 @@ const warnKey = (w: NamingWarning | undefined) => (w === undefined ? "none" : w.
 function resultDiff(id: string, want: NamingResult, got: NamingResult | undefined): string | null {
   if (got === undefined) return `${id}: missing`;
   if (got.kind !== want.kind) return `${id}: a ${got.kind}, not a ${want.kind}`;
-  if (warnKey(got.warning as NamingWarning | undefined) !== warnKey(want.warning as NamingWarning | undefined))
-    return `${id}: warning ${warnKey(got.warning as NamingWarning | undefined)}, want ${warnKey(want.warning as NamingWarning | undefined)}`;
+  if (warnKey(got.warning) !== warnKey(want.warning)) return `${id}: warning ${warnKey(got.warning)}, want ${warnKey(want.warning)}`;
   if (want.kind === "sketch" && got.kind === "sketch") {
     if (got.placement.normal !== want.placement.normal) return `${id}: faces ${got.placement.normal}, want ${want.placement.normal}`;
     if (!vecClose(got.placement.origin, want.placement.origin)) return `${id}: origin ${got.placement.origin}, want ${want.placement.origin}`;
@@ -135,7 +134,7 @@ function renamed(r: NamingRebuild, to: (id: string) => string): NamingRebuild {
     w === undefined ? undefined : w.cause === "deleted-input" ? { cause: w.cause, input: to(w.input) } : { cause: w.cause, face: { feature: to(w.face.feature), role: w.face.role } };
   const results: Record<string, NamingResult> = {};
   for (const [id, res] of Object.entries(r.results)) {
-    const w = warning((res as { warning?: NamingWarning }).warning);
+    const w = warning(res.warning);
     results[to(id)] = { ...res, ...(w ? { warning: w } : {}) } as NamingResult;
   }
   return { order: r.order.map(to), results, bodies: Object.fromEntries(Object.entries(r.bodies).map(([id, v]) => [to(id), v])) };

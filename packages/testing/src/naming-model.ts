@@ -104,7 +104,7 @@ export type NamingResult =
   /** An extrude or a face extrude: the volume of the body it made, before any cut. */
   | { kind: "solid"; volume: number; warning?: NamingWarning }
   | { kind: "cut"; status: "built"; removed: number; warning?: NamingWarning }
-  | { kind: "cut"; status: "failed"; cause: "no-target-body" };
+  | { kind: "cut"; status: "failed"; cause: "no-target-body"; warning?: never };
 
 /** A rebuild: the items in order, each one's result, and each body's volume after every cut into it, by the feature that made it. */
 export interface NamingRebuild {
