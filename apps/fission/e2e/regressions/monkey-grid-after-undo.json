@@ -1,6 +1,6 @@
 {
   "seed": 5,
-  "what": "Create sketch, XY, a grid size typed and Escape, then Undo: an uncaught \"Cannot set properties of null (setting 'grid')\" (workspace.ts setGrid writes editingSketch after an await); moves to e2e/regressions/ with its fix",
+  "what": "Create sketch, XY, a grid size typed and Escape, then Undo: an uncaught \"Cannot set properties of null (setting 'grid')\" (workspace.ts setGrid wrote editingSketch after an await); fixed by a re-check after the await",
   "actions": [
     {
       "do": "click",
