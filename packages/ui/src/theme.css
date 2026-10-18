@@ -34,18 +34,28 @@ body { display: flex; flex-direction: column; }
 #save-status[data-state="error"] { order: 98; flex-basis: 100%; color: #f5b14c; white-space: normal; overflow-wrap: anywhere; padding-bottom: 8px; }
 #topbar button.soon[aria-selected="true"] { color: #b5bbc4; }
 
-/* Workspace: toolbar above, browser left, properties right of the shared
-   viewport. Columns are placed explicitly so an empty slot (hidden) leaves
-   the others where they are. */
-#workspace { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+/* Workspace: toolbar above, properties right of the shared viewport, the
+   browser floating over the viewport's top-left corner rather than taking a
+   column of its own (sketch feel SF3d), and a workspace's timeline in a thin
+   row along the very bottom, under the view's own buttons. Columns are
+   placed explicitly so an empty slot (hidden) leaves the others where they are. */
+#workspace { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
 #toolbar { grid-column: 1 / -1; grid-row: 1; }
 #toolbar, #split-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; background: #1c1f24; border-bottom: 1px solid #2a2e35; }
 #browser { grid-column: 1; grid-row: 2; width: 220px; border-right: 1px solid #2a2e35; }
 #viewport { grid-column: 2; grid-row: 2; }
+/* The floating browser: in the viewport's own cell, over it (later in the
+   stacking order), as tall as its rows up to the view's buttons; the notes
+   over the view move right of it (notes-strip.css). One workspace on a wide screen only: split
+   view keeps its browser columns and phones their Browser toggle. */
+@media (min-width: 641px) {
+  #workspace:not([data-split="on"]) #browser { grid-column: 2; z-index: 2; align-self: start; justify-self: start; margin: 8px; width: 240px; max-height: calc(100% - 64px); padding: 6px 10px; gap: 6px; background: rgba(28, 31, 36, 0.92); border: 1px solid #353a43; border-radius: 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+}
+#timeline, #split-timeline { grid-column: 1 / -1; grid-row: 3; min-width: 0; }
 #properties { grid-column: 3; grid-row: 2; width: 300px; border-left: 1px solid #2a2e35; }
 #assistant { grid-column: 4; grid-row: 2; }
 #browser, #properties, #split-browser, #split-properties { padding: 16px; background: #1c1f24; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
-#toolbar:empty, #browser:empty, #properties:empty, #split-toolbar:empty, #split-browser:empty, #split-properties:empty { display: none; }
+#toolbar:empty, #browser:empty, #properties:empty, #timeline:empty, #split-toolbar:empty, #split-browser:empty, #split-properties:empty, #split-timeline:empty { display: none; }
 #workspace aside h2 { font-size: 13px; margin: 8px 0 0; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
 label { display: flex; align-items: center; gap: 8px; }
 label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background: #14161a; border: 1px solid #2a2e35; color: inherit; border-radius: 4px; font-family: ui-monospace, monospace; }
@@ -93,7 +103,9 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
 #split-bar label { gap: 6px; }
 #split-bar select { padding: 4px 6px; font-family: inherit; }
 #workspace #split-toggle { padding: 5px 8px; background: rgba(38, 42, 49, 0.9); font-size: 13px; }
-#workspace[data-split="on"] { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto auto; grid-template-rows: auto auto minmax(0, 1fr); }
+#workspace[data-split="on"] { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto auto; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+#workspace[data-split="on"] #timeline { grid-column: 1 / 3; grid-row: 4; }
+#workspace[data-split="on"] #split-timeline { grid-column: 3 / 5; grid-row: 4; border-left: 2px solid #2a2e35; }
 #workspace[data-split="on"] #toolbar { grid-column: 1 / 3; }
 #workspace[data-split="on"] #split-toolbar { grid-column: 3 / 5; grid-row: 1; border-left: 2px solid #2a2e35; }
 #workspace[data-split="on"] #viewport { grid-column: 2; grid-row: 2 / 4; }
@@ -135,6 +147,7 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #panel-toggles button[aria-expanded="true"] { background: #23384f; border-color: #4aa8ff; }
   #workspace:has(#browser:empty) #browser-toggle, #workspace:has(#properties:empty) #properties-toggle { display: none; }
   #viewport { height: 55vh; flex-shrink: 0; order: 3; }
+  #timeline { flex-shrink: 0; order: 3; } /* after the viewport in the page, so under it */
   #browser, #properties { width: auto; flex-shrink: 0; border-left: none; border-right: none; border-top: 1px solid #2a2e35; overflow-y: visible; }
   #browser { order: 2; }
   #properties { order: 4; }

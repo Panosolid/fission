@@ -3,3 +3,7 @@
 .notes-strip:empty { display: none; }
 .notes-strip.in-split { top: 48px; }
 .notes-strip .change-note { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+/* Right of the browser floating over the view's corner (SF3d, theme.css): one workspace on a wide screen. */
+@media (min-width: 641px) {
+  .notes-strip:is(#workspace:not([data-split="on"]):has(#browser:not(:empty)) #viewport > *) { left: 264px; }
+}
