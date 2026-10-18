@@ -1,6 +1,8 @@
 // Ollama on the user's own computer: its chat endpoint, held to the JSON
 // schema with Ollama's `format` (constrained output), temperature 0 so the
-// same question gives the same answer. Nothing leaves the machine.
+// same question gives the same answer. Nothing leaves the machine, unless
+// the user gives the address of another computer (`isThisComputer`): then
+// it is treated like a hosted provider (providers.ts, `sendsAway`).
 
 import { ANSWER_TIMEOUT_MS, CHECK_TIMEOUT_MS, requestJson, type Fetch } from "./http.ts";
 import type { AIProvider, AIRequest } from "./providers.ts";
@@ -17,6 +19,27 @@ export function ollamaEndpoint(endpoint = OLLAMA_ENDPOINT): string {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`Ollama is reached over http or https, not ${url.protocol}`);
   return url.href.replace(/\/+$/, "");
+}
+
+/**
+ * Whether an Ollama address is this computer (security audit S3): the name
+ * localhost or one ending in .localhost (browsers send those to this
+ * computer), 127.0.0.0/8 in any form the URL parser accepts (127.1,
+ * 0x7f.0.0.1 and 2130706433 all read as 127.x.x.x), or [::1]. Anything
+ * else, a LAN or internet address, is another computer, so requests to it
+ * leave the machine. [::ffff:127.0.0.1] and 0.0.0.0 count as another
+ * computer too: asking once more than needed is the safe side. An address
+ * that doesn't read is not this computer.
+ */
+export function isThisComputer(endpoint: string): boolean {
+  let host: string;
+  try {
+    host = new URL(endpoint.trim()).hostname;
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host.endsWith(".localhost") || host === "[::1]") return true;
+  return /^127\.\d+\.\d+\.\d+$/.test(host); // the parser has already written any IPv4 form as four decimals
 }
 
 /** The body Ollama's /api/chat takes for this request. */
