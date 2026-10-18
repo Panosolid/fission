@@ -33,9 +33,13 @@ export const BAR_PLANTS: Plant[] = [
     replace: "export function dropIndex(edges: readonly ItemEdges[], x: number, scroll = 0): number {\n  const at = x;",
     caught: "landed at",
   },
-  { name: "back-past-start", find: "return Math.max(0, marker - 1);", replace: "return marker - 1;", caught: "the bar gave" },
+  // From 24f5 the playback buttons' check sees it first: Step back is on at the start.
+  { name: "back-past-start", find: "return Math.max(0, marker - 1);", replace: "return marker - 1;", caught: "the buttons are" },
   { name: "delete-while-sketching", find: '{ action: "delete", label: "Delete", off: busy }', replace: '{ action: "delete", label: "Delete", off: null }', caught: "the bar gave" },
   { name: "refused-reorder-recorded", find: 'if ("refused" in moved) return { kind: "refused", message: moved.message };', replace: 'if ("refused" in moved) return { kind: "edit", step: TIMELINE_STEPS.reorder(name), doc };', caught: "the bar gave" },
+  // 24f5: the playback buttons ignoring the sketch being edited (on where barEdit refuses), and the end's words given to the start.
+  { name: "buttons-ignore-editing", find: 'const r = barEdit(doc, { kind: "button", button }, editing);', replace: 'const r = barEdit(doc, { kind: "button", button }, null);', caught: "the buttons are" },
+  { name: "buttons-ends-swapped", find: "stepTarget(button, marker, count) === 0 ?", replace: "stepTarget(button, marker, count) === count ?", caught: "the buttons are" },
   { name: "delete-never-asks", find: "ask: features.some((f) => f.dependsOn.includes(a.id))", replace: "ask: false", caught: "the bar gave" },
 ];
 

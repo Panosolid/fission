@@ -270,7 +270,7 @@ const MENU_PLANTS: { name: string; edits: [string, string][]; caught: string }[]
     // Suppress done as two edits: the marker moved onto the item, then the item suppressed, each recorded.
     name: "suppress-two-steps",
     edits: [
-      ['import { barEdit, itemMenu, type MenuEntry } from "./timeline-bar.ts";', 'import { barEdit, itemMenu, type MenuEntry } from "./timeline-bar.ts";\nimport { moveMarker, suppressItem } from "./timeline-edits.ts";'],
+      ['import { barEdit, itemMenu, type BarAction, type MenuEntry } from "./timeline-bar.ts";', 'import { barEdit, itemMenu, type BarAction, type MenuEntry } from "./timeline-bar.ts";\nimport { moveMarker, suppressItem } from "./timeline-edits.ts";'],
       ['  if (r.kind === "edit") return host.record(r.step, r.doc);', '  if (r.kind === "edit" && action === "suppress") return (host.record(r.step, moveMarker(before, id)), host.record(r.step, suppressItem(before, id, true)));\n  if (r.kind === "edit") return host.record(r.step, r.doc);'],
     ],
     caught: "one Undo did not give back the document before (2 records)",

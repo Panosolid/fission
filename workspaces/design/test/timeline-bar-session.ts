@@ -183,6 +183,8 @@ export interface Failure {
 }
 
 const BUTTONS = ["start", "back", "forward", "end"] as const;
+/** Where a playback button sends the marker from place `p` of `n` items: written out again from the owner's rules (held at either end). */
+const buttonTarget = (button: (typeof BUTTONS)[number], p: number, n: number) => (button === "start" ? 0 : button === "end" ? n : button === "back" ? (p === 0 ? 0 : p - 1) : p === n ? n : p + 1);
 
 /** Runs `steps` on Design's document through `bar` and on the model; the first step where they differ, or null. */
 export function runBarSession(bar: Bar, steps: readonly Step[]): Failure | null {
@@ -250,7 +252,7 @@ export function runBarSession(bar: Bar, steps: readonly Step[]): Failure | null 
         } else if (op === "button") {
           const button = BUTTONS[Math.floor(a * 4)];
           const p = place(model);
-          const target = button === "start" ? 0 : button === "end" ? n : button === "back" ? (p === 0 ? 0 : p - 1) : p === n ? n : p + 1;
+          const target = buttonTarget(button, p, n);
           expected = moveTo(model, target, editing);
           got = bar.barEdit(doc, { kind: "button", button }, editing);
         } else {
@@ -304,6 +306,16 @@ export function runBarSession(bar: Bar, steps: readonly Step[]): Failure | null 
     if (flags(have) !== flags(want as unknown as typeof have)) return fail(`the bar shows ${flags(have)}, the model ${flags(want as unknown as typeof have)}`);
     const marker = doc.timeline.marker ?? null;
     if (marker !== model.marker) return fail(`the document's marker is ${JSON.stringify(marker)}, the model's ${JSON.stringify(model.marker)}`);
+    // The playback buttons (24f5): each off exactly when the model's move to its target does nothing (with why) or is refused (with its words).
+    const buttons = bar.playbackButtons(doc, editing).map((x) => [x.button, x.off]);
+    const p = place(model);
+    const wantButtons = BUTTONS.map((button) => {
+      const target = buttonTarget(button, p, model.items.length);
+      if (target === p) return [button, model.items.length === 0 ? "The timeline is empty" : target === 0 ? "The marker is already at the start" : "The marker is already at the end"];
+      const [, out] = moveTo(model, target, editing);
+      return [button, out.kind === "refused" ? out.message : null];
+    });
+    if (JSON.stringify(buttons) !== JSON.stringify(wantButtons)) return fail(`the buttons are ${JSON.stringify(buttons)}, the model's ${JSON.stringify(wantButtons)}`);
   }
   return null;
 }

@@ -1,0 +1,13 @@
+/* Step 24f5: the timeline's row: the four playback buttons (go to the
+   start, step back, step forward, go to the end) and then the bar of items
+   (timeline-bar.css), which scrolls on its own. The buttons' strip matches
+   the bar's 32 px, background and top line, so the row is as tall as the
+   bar alone was. An off button is greyed and still says why. ":not(#none)"
+   lifts a rule over the base layout's "#workspace button". */
+.timeline-marker { display: flex; min-width: 0; }
+.timeline-marker .timeline-bar { flex: 1 1 auto; min-width: 0; }
+.timeline-marker .timeline-marker-buttons { display: flex; flex-shrink: 0; align-items: center; gap: 2px; height: 32px; padding-left: 12px; background: #1c1f24; border-top: 1px solid #2a2e35; }
+.timeline-marker .timeline-marker-button:not(#none) { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0; background: #262a31; border: 1px solid #353a43; border-radius: 3px; color: #c9d1d9; cursor: pointer; }
+.timeline-marker .timeline-marker-button:not(#none):hover { border-color: #4aa8ff; }
+.timeline-marker .timeline-marker-button:not(#none):focus-visible { outline: 2px solid #4aa8ff; outline-offset: 1px; }
+.timeline-marker .timeline-marker-button[aria-disabled="true"]:not(#none) { opacity: 0.4; cursor: default; border-color: #353a43; }

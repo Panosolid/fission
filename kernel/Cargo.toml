@@ -3,7 +3,6 @@ name = "fission-kernel"
 version = "0.1.0"
 edition = "2021"
 description = "Geometry kernel for Fission CAD"
-license = "MIT"
 repository = "https://github.com/benpy28/fission"
 
 [lib]
