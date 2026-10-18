@@ -93,6 +93,13 @@ await check("1280 px: a 10 mm square typed side by side closes on its first corn
   assert.equal(await boxesShown(page), true, "the boxes show once the line has its start");
   assert.equal(await page.getAttribute("#typed-length", "placeholder"), "20", "the live length");
   assert.equal(await page.getAttribute("#typed-angle", "placeholder"), "0", "the live angle");
+  // Regression (Firefox sketch session): with nothing typed, a click where the boxes are goes through them to the sketch.
+  const under = async () => page.evaluate(() => {
+    const r = document.querySelector("#typed-entry").getBoundingClientRect();
+    const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return e?.closest("#typed-entry") ? "BOXES" : e?.tagName;
+  });
+  assert.equal(await under(), "CANVAS", "the boxes let clicks through while nothing is typed");
   // Boxes by the pointer: their corner within 60 px of it.
   const box = await page.locator("#viewport canvas").boundingBox();
   const at = screenPoint(box, [20, 0, 0], TOP);
@@ -105,6 +112,7 @@ await check("1280 px: a 10 mm square typed side by side closes on its first corn
   await page.keyboard.press("0");
   assert.equal(await page.inputValue("#typed-length"), "10");
   assert.equal(await locked(page, "length"), true, "padlock on the typed length");
+  assert.equal(await under(), "BOXES", "while typing, the boxes take clicks");
   await previewIs(page, "0,0 10,0");
   // The pointer turns the locked length: straight up gives (0, 10).
   await hover(page, [0, 30]);

@@ -3,7 +3,14 @@
    live size as grey placeholder text, a typed size in white with a green
    padlock, a size it can't take outlined in red with the reason under it.
    ":not(#none)" lifts a rule over the base layout's "#workspace input". */
-.typed-entry { position: absolute; z-index: 20; display: flex; flex-direction: column; gap: 3px; pointer-events: auto; transform: translate(18px, 14px); }
+/* Clicks go through the boxes to the sketch while nothing is typed in
+   them: the boxes trail the pointer, and a quick move-and-click can land
+   where they were a moment before (found by the Firefox sketch session).
+   With a mouse a digit starts typing; on a touch screen (no hover) and
+   while typing they take taps. */
+.typed-entry { position: absolute; z-index: 20; display: flex; flex-direction: column; gap: 3px; pointer-events: none; transform: translate(18px, 14px); }
+.typed-entry:focus-within { pointer-events: auto; }
+@media (hover: none) { .typed-entry { pointer-events: auto; } }
 .typed-entry[hidden] { display: none; }
 .typed-entry .typed-entry-row { display: grid; grid-template-columns: 52px 76px 18px 14px; align-items: center; gap: 4px; padding: 2px 6px; background: rgba(22, 25, 30, 0.92); border: 1px solid #3a404a; border-radius: 4px; font-size: 12px; color: #b7c0cc; }
 .typed-entry .typed-entry-name { font-size: 11px; }
