@@ -496,8 +496,9 @@ function keep(id: string) {
 // project as it was and says why.
 const fileStatus = (message: string) => ($("file-status").textContent = message);
 $("file-dismiss").addEventListener("click", () => fileStatus(""));
-$("save").addEventListener("click", () => {
+$("save").addEventListener("click", async () => {
   try {
+    await started; // the project shown, not the empty one the app starts with
     const url = URL.createObjectURL(new Blob([projectToJson(ctx.project)], { type: "application/json" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `${ctx.project.name.replace(/[\\/:*?"<>|]/g, "-") || "Untitled"}.fission.json` });
     a.click();
@@ -540,6 +541,7 @@ $("open-file").addEventListener("change", async () => {
 // project opens as Open does, a PNG or JPEG opens in Image, and anything
 // else is refused in the top bar with what will take it and when.
 async function receive(files: File[]) {
+  await started; // or the project being reopened would replace what this opens
   const heads = await Promise.all(files.map(async (f) => ({ name: f.name, size: f.size, head: new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()) })));
   const route = routeFiles(representations, heads);
   if (!route) return;
@@ -735,7 +737,9 @@ async function start() {
   show(fromHash());
   ctx.history.reset(); // the project as it opened is the start
 }
-void start();
+// Save, Open, a drop and a paste wait for this: until the last project is
+// open, ctx.project is the empty one the app starts with.
+const started = start();
 ctx.kernel.call("kernel_version").then((v) => {
   $("version").textContent = `kernel v${v}`;
   $("version").parentElement!.title = `Panoshape, kernel v${v}`; // where the version shows when the bar has no room for it
