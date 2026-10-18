@@ -30,3 +30,14 @@ Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, 
   PENDING Photo to lithophane: waits for Image (G2), Slice (P2)
   PENDING Part to simulation and back: waits for Simulate (S3), parameters (34, I18)
 journeys/flags.txt lists every FLAG line so far.
+
+Fuzzing (the STL reader, the project loader, the sketch-extrude sessions and the kernel fuzz targets), all runs so far (updated 2026-10-18 00:16 UTC)
+  hours of fuzzing: 3.7
+  placed   rounds 1, inputs 39716, rounds that found something 0, last: none yet
+  sessions rounds 8, inputs 16000, rounds that found something 1, last: 12350086931642870781 (commit 453785d on main)
+  stl      rounds 3281, inputs 6562000, rounds that found something 0, last: none yet
+  extrude  rounds 1, inputs 31853, rounds that found something 0, last: none yet
+  sketch   rounds 1, inputs 156592, rounds that found something 0, last: none yet
+  project  rounds 5110, inputs 10220000, rounds that found something 1, last: 13772787006414445203 (commit 453785d on main)
+fuzz/log.csv has one line per round; fuzz/failures/seed-<seed>/ has each failing round's
+fuzz-report.txt and its shrunk failing inputs.

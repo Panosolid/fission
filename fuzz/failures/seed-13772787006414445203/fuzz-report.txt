@@ -1,0 +1,2 @@
+Project loader fuzzing, seed 13772787006414445203, 2000 inputs: 1 kind(s) of failure
+failure: refused with an engine message: Cannot convert object to primitive value | case 604 | shrunk input: input-604.json (450 characters)
