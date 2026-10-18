@@ -165,8 +165,8 @@ test("the marker: at the start nothing builds, on the last item everything does,
   const d = part();
   const start = moveMarker(d, "start");
   assert.ok(start.timeline.features.every((f) => !builds(start, f)));
-  // A file with nothing built is still refused when opened, until the app can show a design with no body (the harness's NOTHING_BUILT).
-  assert.throws(() => reopen(start), /Design data builds no body/);
+  // A file with nothing built opens as it is (24f4: the app shows a design with no body).
+  assert.deepEqual(reopen(start), start);
   const last = moveMarker(d, "feature-11");
   assert.ok(last.timeline.features.every((f) => builds(last, f)));
   // Back to everything: the marker left out, the document as it was.

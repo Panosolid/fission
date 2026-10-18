@@ -5,7 +5,7 @@
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import type { ShapeKind } from "./profiles.ts";
-import { isSketchItem, lastFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
+import { isSketchItem, partFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
 import { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
 import { extrudePanel } from "./extrude-panel.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -13,17 +13,17 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { bodyFeatures, browserTree, type BrowserNode } from "./browser.ts";
-import { showTimelineBar } from "./timeline-bar.ts";
+import { bodyFeatures, browserTree, rowReference, type BrowserNode } from "./browser.ts";
+import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
-import { deleteAsk, planDelete } from "./delete-ask.ts";
-import { itemName, TIMELINE_STEPS } from "./timeline-edits.ts";
+import { deleteAsk } from "./delete-ask.ts";
+import { itemName } from "./timeline-edits.ts";
+import { chooseEntry, menuEntries, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
-import { bodyReference, profileReference } from "./references.ts";
-import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
+import { droppedNote, highlightOf, panelBody, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene } from "./scene.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
@@ -33,7 +33,7 @@ import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawSt
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
-import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
+import { COPY_SVG, DOWNLOAD_STL, NO_BODY_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
 /**
  * What the user last entered (as typed), kept while other workspaces are
@@ -113,13 +113,6 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
 /** Browser groups the user folded, kept across rebuilds and workspace switches. */
 const folded = new Set<string>();
 
-/** The browser rows that stand for selectable geometry, and the reference each selects. */
-function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  const body = /^body-(\d+)$/.exec(node);
-  if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodyFeatures(doc)[Number(body[1]) - 1]);
-  return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
-}
-
 /** Lights the browser rows whose geometry is selected (aria-current), and only those. */
 function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly GeometryReference[]) {
   for (const row of slot.querySelectorAll<HTMLElement>(".tree-row")) {
@@ -139,6 +132,8 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
  * Rebuilt on every edit; folding is kept by id.
  */
 function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void) {
+  // Rows with the timeline's item menu (24f3): every Timeline row by its item's id, and each sketch's row in Sketches.
+  const items = new Set(doc.timeline.features.map((f) => f.id));
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
@@ -170,7 +165,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
         row.textContent = n.label;
         row.dataset.node = n.id;
         if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
-        if (n.id.startsWith("sketches/")) {
+        if (items.has(n.id) || n.id.startsWith("sketches/")) {
           // The row's menu: a right-click at the pointer, or the ⋯ button under itself.
           row.addEventListener("contextmenu", (e) => {
             e.preventDefault();
@@ -223,9 +218,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shape = saved.shape;
     inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
   } else if (held) {
-    const part = partOf(held); // readDesignDocument checked it when the file was opened
-    shape = part.shape;
-    for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+    const part = partOf(held); // readDesignDocument checked it when the file was opened; null when it has no body (24f4)
+    if (part) {
+      shape = part.shape;
+      for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+    }
     loaded = held;
     framedKind = null; // an opened file is a new part: frame it (not after Undo or Redo: keepCamera)
   }
@@ -260,6 +257,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.showSelection(highlightOf(items, lastScene));
     lightRows(ctx.browser, doc, items);
     panel.showSelection(selectionRows(items, lastScene, doc.profiles));
+    // The Feature and Body sections describe the selected body (else the last one), with the browser's number for it.
+    const focus = panelBody(items, lastScene);
+    const feature = focus && doc.timeline.features.find((f) => f.id === focus.feature);
+    const part = partFeature(doc);
+    panel.showFeature(feature ?? part);
+    if (focus && feature) panel.showBody(focus.view, `Body ${focus.place}`);
+    else if (part === null) panel.showNoBody(); // a design with no body (24f4)
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -287,24 +291,25 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return next;
   });
   /**
-   * Every body the timeline built, joined for drawing (scene.ts, 24d3b),
-   * the part's (the last solid feature's) view for the panel and, when a
-   * body is built from a kept shape, the warning (the last such); or
-   * throws why the part has no body.
+   * Every body the timeline built, joined for drawing (scene.ts, 24d3b)
+   * and, when a body is built from a kept shape, the warning (the last
+   * such); or throws why the part (the last solid feature) has no body.
+   * A design with no part (24f4) builds an empty scene.
    */
   async function buildPart(doc: DesignDocument) {
-    const feature = lastFeature(doc);
+    const feature = partFeature(doc);
     const build = await rebuildTimeline(doc, bodies, kernel);
-    const result = build.results[feature.id];
-    if (result.status === "failed") throw new Error(result.message);
-    if (result.status !== "built" || result.body === undefined || result.spec === undefined) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
+    failedNow = new Set(Object.keys(build.results).filter((id) => build.results[id].status === "failed"));
+    const result = feature && build.results[feature.id];
+    if (result?.status === "failed") throw new Error(result.message);
+    if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
     const drawn = await shownBodies(doc, build, bodies);
     let kept: { feature: string; label: string; warning: KeptWarning } | undefined;
     for (const f of bodyFeatures(doc)) {
       const r = build.results[f.id];
       if (r.status === "built" && r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
     }
-    return { view: drawn[drawn.length - 1].view, scene: joinBodies(drawn), kept };
+    return { scene: joinBodies(drawn), kept };
   }
   /** The part built from a kept shape (the owner's rule): shown on its timeline row and, once the sketch is finished, in the panel. */
   let keptNow: { feature: string; label: string; warning: KeptWarning } | undefined;
@@ -353,7 +358,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // The whole part's STL: the same verb a selected body offers, from the registry.
     if (command.op === "export_stl") {
       const doc = ctx.project.workspaces.design as DesignDocument | undefined;
-      return runAction(DOWNLOAD_STL, doc ? [partBody(doc)] : []);
+      const body = doc && partBody(doc);
+      if (!body) return panel.showActionNote(NO_BODY_STL, true);
+      return runAction(DOWNLOAD_STL, [body]);
     }
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
     const kind = command.shape as ShapeKind;
@@ -369,7 +376,6 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   async function update(label?: string, mergeKey?: string, next?: DesignDocument) {
     const kind = shape;
-    for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
     // The panel edits the part's one solid feature, keeping the sketches; the
@@ -377,6 +383,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // first edit. An extrude of a sketch has one size, its distance (the height box).
     const current = ctx.project.workspaces.design as DesignDocument | undefined;
     const doc = next ?? loaded ?? (kind === "sketch-extrude" && current ? setExtrudeDistance(current, Number(inputs[2].value)) : documentFor(partCommand(), current));
+    // No shape is pressed while the design has no body (24f4).
+    const pressed = partFeature(doc) === null ? null : kind;
+    for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === pressed));
     // An opened document is all new to the graph: out of date until it builds.
     const before = loaded ? null : (current ?? null);
     loaded = undefined;
@@ -403,80 +412,114 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(START_FRESH_STEP, undefined, freshDesign());
   }
 
-  /** A sketch row's menu (24e4): Delete for that sketch. */
+  /** The items the last rebuild failed (24f3: red in the bar and the browser's Timeline rows); the data's own failures are added by `timelineBarItems`. */
+  let failedNow: ReadonlySet<string> = new Set();
+  /** The bar's item whose ⋯ shows (a click or tap picked it). */
+  let picked: string | null = null;
+  /** The sketch being edited, whose own Suppress and Delete are off. */
+  const editingId = () => (mode.kind === "edit" && editingSketch ? editingSketch.id : null);
+
+  /** The timeline bar for `doc`, wired to the item menu. */
+  function showBar(doc: DesignDocument) {
+    if (!ctx.timeline) return;
+    showTimelineBar(ctx.timeline, doc, {
+      failed: failedNow,
+      picked,
+      onPick: (id) => {
+        picked = picked === id ? null : id;
+        showBar(designDoc());
+      },
+      onMenu: (id, at) => openMenu(id, at),
+    });
+  }
+
+  /** The bar's items and the browser's Timeline rows red for every failed item (24f3). */
+  function showFailed(doc: DesignDocument) {
+    showBar(doc);
+    const failed = new Set(timelineBarItems(doc, failedNow).items.filter((i) => i.failed).map((i) => i.id));
+    for (const row of ctx.browser.querySelectorAll<HTMLElement>('[data-node="timeline"] .tree-row')) {
+      const on = failed.has(row.dataset.node!);
+      row.classList.toggle("timeline-menu", on);
+      row.classList.toggle("timeline-menu-failed", on);
+    }
+  }
+
+  /** A row's menu (24e4 for sketches, 24f3 for every timeline item): "sketches/<id>" or an item's id. */
   function openRowMenu(node: string, at: { x: number; y: number }) {
-    const id = node.slice("sketches/".length);
-    const item = designDoc().timeline.features.find((f) => f.id === id);
-    if (item) deleting.menu(itemName(item), at, () => void deleteFromBrowser(id));
+    openMenu(node.startsWith("sketches/") ? node.slice("sketches/".length) : node, at);
+  }
+
+  /** Item `id`'s menu (timeline-menu.ts): Move the marker here, Suppress or Unsuppress, Delete; an entry that is off says why. */
+  function openMenu(id: string, at: { x: number; y: number }) {
+    const doc = designDoc();
+    const item = doc.timeline.features.find((f) => f.id === id);
+    if (!item) return;
+    const editing = editingId();
+    const entries = menuEntries(doc, id, editing).map((e) => ({ ...e, run: () => void chooseEntry(menuHost, id, e.action, editing).catch((err) => panel.showError(err instanceof Error ? err.message : String(err))) }));
+    deleting.menu(itemName(item), at, entries);
   }
 
   /**
-   * Deletes item `id` (24e4, the owner's rule): at once when nothing is
-   * built from it, else after the box asks, naming what is built from it
-   * and what happens to each. The document recorded is the one the box
-   * was worked out from (`planDelete`), as one undo step ("Delete Sketch
-   * 1"); nothing is recorded if the design changed in between.
+   * How a menu choice reaches the project: the document recorded as one
+   * undo step (out of any sketch or Extrude panel first, the panel showing
+   * the part the edit leaves), the delete box asking first (24e4), and a
+   * refusal shown as the part's error line.
    */
-  async function deleteFromBrowser(id: string) {
-    const before = designDoc();
-    const item = before.timeline.features.find((f) => f.id === id);
-    if (!item) return;
-    let plan;
-    try {
-      plan = await planDelete(kernel, before, id);
-    } catch (e) {
-      return panel.showError(e instanceof Error ? e.message : String(e));
-    }
-    if (designDoc() !== before) return;
-    const go = () => {
-      if (designDoc() !== before) return;
+  const menuHost: MenuHost = {
+    kernel,
+    current: () => designDoc(),
+    record(step, next) {
       leaveExtrude();
       if (mode.kind !== "none") leaveSketch();
-      // The part the panel shows may now be another feature (an extrude with nothing to keep fails).
-      const part = partOf(plan.next);
-      shape = part.shape;
-      for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
-      void update(TIMELINE_STEPS.delete(itemName(item)), undefined, plan.next);
-    };
-    if (plan.ask) deleting.ask(plan.ask, go);
-    else go();
-  }
+      // The part the panel shows may now be another feature (the last body that still builds), or none (24f4):
+      // then the boxes stay, and a size typed adds a preset of the shape shown (a box when it was an extrude).
+      const part = partOf(next);
+      if (part) {
+        shape = part.shape;
+        for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+      } else if (shape === "sketch-extrude") shape = "box";
+      void update(step, undefined, next);
+    },
+    ask: (q, go) => deleting.ask(q, go),
+    refuse: (message) => panel.showError(message),
+  };
 
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
   async function show(doc: DesignDocument, kind: PartKind) {
     browser(ctx.browser, doc, selectRow, openRowMenu);
     fresh.showFor(doc);
-    if (ctx.timeline) showTimelineBar(ctx.timeline, doc);
+    showFailed(doc);
     showKept();
     drawSketches();
     showSelection();
     markStale();
-    const feature = lastFeature(doc);
-    panel.showFeature(feature);
     try {
       const { current, value } = await build(doc);
       if (!current) return;
       if (!shown) return void (missed = true);
       missed = false;
-      const { view, scene } = value;
+      const { scene } = value;
       keptNow = value.kept;
       showKept();
+      showFailed(doc);
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
       markStale();
       viewport.showBody(scene.mesh);
+      const empty = scene.bodies.length === 0;
       // A different shape is a new part: frame it (not when Undo or Redo put
-      // it back: the camera stays unless the body no longer fits).
+      // it back: the camera stays unless the body no longer fits). With no
+      // body (24f4) the camera stays where it is, for the body's return.
       const newPart = kind !== framedKind && !keepCamera;
       keepCamera = false;
-      if (newPart || needsRefit(framed, viewport.bodyFraming())) {
+      if (!empty && (newPart || needsRefit(framed, viewport.bodyFraming()))) {
         framed = viewport.fit();
         viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
         viewport.element.dataset.fits = String(++fits);
       }
-      framedKind = kind;
-      panel.showBody(view);
+      if (!empty) framedKind = kind;
+      panel.showError("");
       // Faces and edges the edit took off the body leave the selection, with a
       // note (17e); the rest follow their names, however the kernel numbers them now.
       const { kept, dropped } = survivors(ctx.selection.items, scene, doc.profiles.map((p) => p.id));
@@ -489,12 +532,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       panel.showSelectionNote(note);
       showSelection();
-      viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
+      viewport.element.dataset.shape = empty ? "none" : kind; // read by the e2e test: what is on screen
     } catch (e) {
       if (!shown) return void (missed = true);
       missed = false;
       keptNow = undefined;
       showKept();
+      if (designDoc() === doc) showFailed(doc);
       panel.showError(e instanceof Error ? e.message : String(e));
       markStale(true);
     }
@@ -566,11 +610,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ctx.projectChanged(label);
     browser(ctx.browser, next, selectRow, openRowMenu);
     fresh.showFor(next);
-    if (ctx.timeline) showTimelineBar(ctx.timeline, next);
+    showFailed(next);
     showKept(); // the rows are new: mark them again until the rebuild says otherwise
     markStale();
     // The part extrudes this sketch: rebuild it from the edited lines (a live link; an open sketch fails with the kernel's reason).
-    if (lastFeature(next).dependsOn.includes(sketchId)) void show(next, shape);
+    if (partFeature(next)?.dependsOn.includes(sketchId)) void show(next, shape);
   }
 
   /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
@@ -649,6 +693,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** A grid size typed: the kernel judges it (snapping 0, 0 to it); a refused one keeps the grid and says why. */
   async function setGrid(typed: string) {
     if (mode.kind !== "edit" || !editingSketch) return;
+    const sketch = editingSketch;
     const grid = Number(typed);
     try {
       if (typed.trim() === "" || !Number.isFinite(grid)) throw new Error("Type the grid size in mm.");
@@ -656,10 +701,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     } catch (e) {
       return sketchBox.showError(e instanceof Error ? e.message : String(e));
     }
-    if (mode.kind !== "edit") return;
+    // The kernel answered after an Undo, Escape or Finish put this sketch away: the size is for a sketch no longer open.
+    if (mode.kind !== "edit" || editingSketch !== sketch) return;
     sketchBox.showError("");
-    mode.grid = editingSketch.grid = grid;
-    editingSketch.typed = typed;
+    mode.grid = sketch.grid = grid;
+    sketch.typed = typed;
     drawSketches();
   }
 
@@ -753,7 +799,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const before = designDoc();
     const made = extrudeSketch(before, id, distance);
     try {
-      await buildSpec(kernel, await featureSpec(kernel, made.doc, lastFeature(made.doc)));
+      await buildSpec(kernel, await featureSpec(kernel, made.doc, made.doc.timeline.features.find((f) => f.id === made.id)!));
     } catch (e) {
       if (extruding?.sketch === id) extrudeBox.showError(e instanceof Error ? e.message : String(e));
       return;

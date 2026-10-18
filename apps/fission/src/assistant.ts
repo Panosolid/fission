@@ -92,7 +92,10 @@ export function partCommand(project: Project): Command[] {
   const doc = project.workspaces.design as DesignDocument | undefined;
   if (!doc) return [];
   try {
-    const { shape, sizes } = partOf(doc);
+    const part = partOf(doc);
+    // A design with no body (24f4) has no part to describe.
+    if (!part) return [];
+    const { shape, sizes } = part;
     // An extrude of a sketch (step 21d) has no set_part that makes it.
     if (shape === "sketch-extrude") return [];
     return [{ op: "set_part", shape, ...sizes }];
@@ -273,7 +276,7 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
               : `No key saved for ${origin}. Saving one asks ${origin} which models it can use; only the key is sent, nothing from your project.`;
     const info = s && PROVIDERS.find((p) => p.kind === s.kind)!;
     $("ai-status-detail").textContent = !info
-      ? "AI is off. Nothing is sent anywhere, and everything in Fission works without it."
+      ? "AI is off. Nothing is sent anywhere, and everything in Panoshape works without it."
       : info.remote
         ? `Using ${info.title}: your requests go to the provider${origin ? ` at ${origin}` : ""}.`
         : `Using ${info.title}: nothing leaves your machine.`;

@@ -28,8 +28,9 @@
 // sketch, an extrude and its sketch and distance, each suppressed or not)
 // and the marker, and works out the part (the last solid item that builds)
 // itself, by the rules written in its own words below. An edit the model
-// says leaves nothing built (which this Fission can't open yet) must leave
-// Design's `lastFeature` with nothing either; it is then not made.
+// says leaves nothing built is made like any other (24f4), and Design's
+// `partFeature` must then be none too; a width typed then adds a new box
+// at the marker, and a default filling in a size has none to fill.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHistory, emptyProject, projectFromJson, projectToJson, type Feature, type Project } from "@fission/core";
@@ -48,10 +49,10 @@ import {
   isSketchExtrude,
   isSketchItem,
   itemName,
-  lastFeature,
   moveMarker,
   movePoint,
   partDocument,
+  partFeature,
   reorderItem,
   setExtrudeDistance,
   shapeOf,
@@ -90,7 +91,7 @@ type Item = { id: string; kind: "box"; size: number; off: boolean } | { id: stri
  * The model's state: the timeline's items in order, the marker ("start",
  * an item's id, or null for everything built), the sketch's id (null once
  * deleted) and its curves in drawing order, and the part, which the model
- * works out (`partOf`) and the project's is read by Design's lastFeature.
+ * works out (`partOf`) and the project's is read by Design's partFeature.
  * As text, so states compare with ===.
  */
 interface Model {
@@ -120,7 +121,8 @@ function buildsIn(m: Model, item: Item): boolean {
 function partOf(m: Model): string | null {
   return [...m.items].reverse().find((i) => i.kind !== "sketch" && buildsIn(m, i))?.id ?? null;
 }
-const partItem = (m: Model) => m.items.find((i) => i.id === partOf(m))!;
+/** The part's item, or undefined when nothing builds (24f4). */
+const partItem = (m: Model): Item | undefined => m.items.find((i) => i.id === partOf(m));
 /** Where a new item goes in: just after the marker, first at the start, else last; the marker, if there is one, moves onto it. */
 function insert(m: Model, item: Item): Model {
   const items = [...m.items];
@@ -156,7 +158,7 @@ function stateOf(p: Project): string {
           (c): Line => (c.kind === "line" ? [c.id, ...at.get(c.start)!, ...at.get(c.end)!] : c.kind === "circle" ? [c.id, ...at.get(c.centre)!, c.radius] : [c.id, ...at.get(c.start)!, ...at.get(c.end)!, ...at.get(c.centre)!]) as Line,
         );
       })();
-  return JSON.stringify({ part: lastFeature(doc).id, items, marker: doc.timeline.marker ?? null, sketch: sketch?.id ?? null, lines });
+  return JSON.stringify({ part: partFeature(doc)?.id ?? null, items, marker: doc.timeline.marker ?? null, sketch: sketch?.id ?? null, lines });
 }
 
 interface Undo {
@@ -203,17 +205,18 @@ function session(seed: bigint, steps: number) {
   /** A box width to go back to: the part's when it is a box, else a new one. */
   const boxWidth = (s: string) => {
     const part = partItem(parse(s));
-    return part.kind === "box" ? part.size : 1 + Math.floor(r.next() * 20);
+    return part?.kind === "box" ? part.size : 1 + Math.floor(r.next() * 20);
   };
   /**
    * The model after the part got width `w`: the same box when the part is
-   * one, else a new box (its id read from the project, checked new) put in
-   * at the marker.
+   * one, else (an extrude, or no part at all: 24f4) a new box (its id read
+   * from the project, checked new) put in at the marker.
    */
   const boxPart = (m: Model, w: number, at: string): Model => {
     const part = partItem(m);
-    if (part.kind === "box") return { ...m, items: m.items.map((i) => (i === part ? { ...part, size: w } : i)) };
-    const made = lastFeature(designOf(project)).id;
+    if (part?.kind === "box") return { ...m, items: m.items.map((i) => (i === part ? { ...part, size: w } : i)) };
+    if (part === undefined) counts.boxIntoEmpty++;
+    const made = partFeature(designOf(project))!.id;
     isNew(made, at);
     return insert(m, { id: made, kind: "box", size: w, off: false });
   };
@@ -249,10 +252,13 @@ function session(seed: bigint, steps: number) {
     draws: 0, chained: 0, circles: 0, centred: 0, arcs: 0, arcsChained: 0, deletes: 0, moves: 0, extrudes: 0, extrudesRefused: 0, sketchesAdded: 0, distances: 0, edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0, steps: 0, stepsFailed: 0, stepsEmpty: 0,
     // Step 24e3: the timeline edits.
     itemsDeleted: 0, sketchDeleted: 0, markerMovedBack: 0, reorders: 0, reorderedInPlace: 0, refusedBefore: 0, refusedAfter: 0, suppressed: 0, unsuppressed: 0, markers: 0, markersSame: 0, nothingBuilt: 0, partNotLast: 0,
+    // Step 24f4: a design with no body.
+    boxIntoEmpty: 0, amendsNoBody: 0, stepsOnEmpty: 0, deletedAll: 0,
   };
 
   for (let i = 0; i < steps; i++) {
     const at = `seed ${seed} step ${i}`;
+    if (parse(present).items.length === 0) counts.stepsOnEmpty++;
     t += Math.floor(r.next() * 2 * MERGE);
     const n = r.next();
     if (n < 0.06) {
@@ -263,7 +269,7 @@ function session(seed: bigint, steps: number) {
       const inner = 1 + Math.floor(r.next() * 3);
       const widths = Array.from({ length: inner }, () => 1 + Math.floor(r.next() * 20));
       const part = partItem(now());
-      if (r.next() < 0.2 && part.kind === "box") widths.push(part.size); // ends where it began
+      if (r.next() < 0.2 && part?.kind === "box") widths.push(part.size); // ends where it began
       const fails = r.next() < 0.2;
       const run = () => {
         for (const [j, w] of widths.entries()) {
@@ -392,11 +398,18 @@ function session(seed: bigint, steps: number) {
       // it. The model's answer first; then Design's.
       const m = now();
       const doc = designOf(project);
+      // Everything deleted (24f4): no item to edit.
+      if (m.items.length === 0) {
+        check(at);
+        continue;
+      }
       const edit = pick(r, ["delete", "reorder", "reorder", "reorder", "suppress", "marker"] as const);
       // Mostly any item; sometimes the one each edit's rarer paths need: the item the marker is on (a delete moves the
       // marker back), an extrude or a sketch (a reorder can be refused), a suppressed item (unsuppress).
       const linked = m.items.filter((x) => x.kind === "extrude" || m.items.some((y) => y.kind === "extrude" && y.sketch === x.id));
-      const wanted = { delete: m.items.filter((x) => x.id === m.marker), reorder: linked, suppress: m.items.filter((x) => x.off), marker: [] }[edit];
+      // A delete also often takes the last item (24f4): deleting from the end empties the timeline, and the states with no body come up often.
+      const ends = r.next() < 0.5 ? [m.items[m.items.length - 1]] : m.items.filter((x) => x.id === m.marker);
+      const wanted = { delete: ends, reorder: linked, suppress: m.items.filter((x) => x.off), marker: [] }[edit];
       const item = wanted.length > 0 && r.next() < 0.6 ? pick(r, wanted) : pick(r, m.items);
       const feature = doc.timeline.features.find((f) => f.id === item.id) as Feature;
       const name = itemName(feature);
@@ -446,13 +459,8 @@ function session(seed: bigint, steps: number) {
         next = moveMarker(doc, to);
         label = TIMELINE_STEPS.marker;
       }
-      if (partOf(after) === null) {
-        // Nothing would build, which this Fission can't open: Design must agree, and the edit isn't made.
-        assert.throws(() => lastFeature(next), /builds no body|has no part/, `${at}: the model says ${edit} of ${item.id} leaves nothing built`);
-        counts.nothingBuilt++;
-        check(at);
-        continue;
-      }
+      // Nothing built (24f4): made like any other edit; check() then compares Design's part, none, with the model's.
+      if (partOf(after) === null) counts.nothingBuilt++;
       project = { ...project, workspaces: { design: next } };
       if (state(after) === present) {
         // At its own place, or the marker where it was: the same document, no step.
@@ -475,7 +483,7 @@ function session(seed: bigint, steps: number) {
       // height box, merged like the sizes), else a width (a new box).
       const m = now();
       const part = partItem(m);
-      const extrude = part.kind === "extrude" && r.next() < 0.5 ? part : null;
+      const extrude = part?.kind === "extrude" && r.next() < 0.5 ? part : null;
       const key = extrude ? "height" : pick(r, KEYS);
       const label = extrude ? DISTANCE_STEP : key ? `Change ${key}` : "Change shape";
       let next: string;
@@ -526,6 +534,13 @@ function session(seed: bigint, steps: number) {
       // again, which no workspace's default ever does).
       const m = now();
       const part = partItem(m);
+      // No part (24f4): no size to fill in, so nothing changes.
+      if (part === undefined) {
+        assert.equal(h.amend(), false, at);
+        counts.amendsNoBody++;
+        check(at);
+        continue;
+      }
       const before = undos.length ? partItem(parse(undos[undos.length - 1].before)) : null;
       const back = r.next() < 0.3 && before?.kind === part.kind && before.id === part.id ? before.size : null;
       const value = r.next() < 0.1 ? part.size : (back ?? 1 + Math.floor(r.next() * 20));
@@ -590,6 +605,23 @@ function session(seed: bigint, steps: number) {
       }
       lastWasRecord = false;
       counts.walks++;
+    } else if (n < 0.99) {
+      // Every item deleted, last first, each its own step (24f4): the empty timeline, which later steps then build on.
+      for (let m = now(); m.items.length > 0; m = now()) {
+        const item = m.items[m.items.length - 1];
+        const k = m.items.length - 1;
+        const after: Model = { ...clone(m), items: m.items.slice(0, k) };
+        if (m.marker === item.id) after.marker = k === 0 ? "start" : m.items[k - 1].id;
+        if (item.kind === "sketch") Object.assign(after, { sketch: null, lines: [] });
+        const doc = designOf(project);
+        const name = itemName(doc.timeline.features.find((f) => f.id === item.id)!);
+        project = { ...project, workspaces: { design: deleteItem(doc, item.id) } };
+        recordStep(TIMELINE_STEPS.delete(name), after, at);
+        check(at);
+      }
+      assert.deepEqual(designOf(project).timeline.features, [], at);
+      assert.deepEqual(designOf(project).profiles, [], at);
+      counts.deletedAll++;
     } else {
       // A file opened: a fresh start.
       const w = 1 + Math.floor(r.next() * 20);
@@ -608,7 +640,8 @@ function session(seed: bigint, steps: number) {
 
 test("random edit/undo/redo sessions on a real project match the model at every step", () => {
   for (const seed of SEEDS) {
-    const c = session(seed, 4_000);
+    const c = session(seed, 5_000);
+    if (process.env.FISSION_COUNTS) console.log(seed, JSON.stringify({ nothingBuilt: c.nothingBuilt, boxIntoEmpty: c.boxIntoEmpty, amendsNoBody: c.amendsNoBody, stepsOnEmpty: c.stepsOnEmpty, deletedAll: c.deletedAll }));
     // Every path must be reached, or the test proves nothing.
     for (const [k, n] of Object.entries(c)) assert.ok(n > 5, `seed ${seed}: only ${n} ${k}`);
   }

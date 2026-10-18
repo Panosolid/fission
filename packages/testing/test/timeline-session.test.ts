@@ -69,6 +69,8 @@ test("seeded sessions on the model pass, and reach every kind of outcome", async
     // (the model's own cache builds exactly the changed ones, so never "builds:some").
     "builds:none",
     "builds:most",
+    // Step 24f4: a design with nothing built saved and opened, like any other.
+    "save-open:nothing-built",
   ];
   const missing = wanted.filter((k) => !total[k]);
   assert.deepEqual(missing, [], `never reached: ${missing.join(", ")}`);

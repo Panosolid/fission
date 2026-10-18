@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { launch } from "./browser.mjs";
+import { decodePng } from "./png.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4174, strictPort: true }, logLevel: "error" });
@@ -957,11 +958,11 @@ try {
     const regions = [];
     for (let i = 0; i < 120 && regions.at(-1) !== "properties"; i++) {
       await page.keyboard.press("Tab");
-      const region = await page.evaluate(() => document.activeElement?.closest("#topbar, #toolbar, #browser, #view-controls, #split-toggle, #properties")?.id ?? "other");
+      const region = await page.evaluate(() => document.activeElement?.closest("#topbar, #toolbar, #browser, #view-controls, #split-toggle, #timeline, #properties")?.id ?? "other");
       if (region !== regions.at(-1)) regions.push(region);
     }
-    // The View buttons and Split sit over the viewport, between the browser and properties.
-    assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "split-toggle", "properties"]);
+    // The View buttons and Split sit over the viewport, between the browser and properties; the timeline bar under the view (its items are stops from 24f3, for the keyboard's menu key) comes before properties in the page.
+    assert.deepEqual(regions, ["topbar", "toolbar", "browser", "view-controls", "split-toggle", "timeline", "properties"]);
     await page.screenshot({ path: "e2e/design-1280.png" });
   });
 
@@ -1089,7 +1090,7 @@ try {
       for (let i = 0; i < 120 && regions.at(-1)?.id !== "properties"; i++) {
         await page.keyboard.press("Tab");
         const r = await page.evaluate(() => {
-          const el = document.activeElement?.closest("#topbar, #toolbar, #panel-toggles, #browser, #undo-redo, #view-controls, #properties");
+          const el = document.activeElement?.closest("#topbar, #toolbar, #panel-toggles, #browser, #undo-redo, #view-controls, #timeline, #properties");
           return el ? { id: el.id, top: el.getBoundingClientRect().top + document.querySelector("#workspace").scrollTop } : { id: "other", top: -1 };
         });
         if (r.id !== regions.at(-1)?.id) regions.push(r);
@@ -1100,13 +1101,13 @@ try {
     const downward = (regions) => regions.every((r, i) => i === 0 || r.top >= regions[i - 1].top);
     if ((await page.getAttribute("#browser-toggle", "aria-expanded")) === "true") await page.click("#browser-toggle");
     let regions = await tabRegions();
-    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "undo-redo", "view-controls", "properties"], "browser folded: no stops in it");
+    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "undo-redo", "view-controls", "timeline", "properties"], "browser folded: no stops in it");
     assert.ok(downward(regions), JSON.stringify(regions));
     // Opened, the browser sits under its toggle, above the viewport, so focus still moves down the screen.
     await page.click("#browser-toggle");
     await page.screenshot({ path: "e2e/design-375-browser-open.png" });
     regions = await tabRegions();
-    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "browser", "undo-redo", "view-controls", "properties"]);
+    assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "browser", "undo-redo", "view-controls", "timeline", "properties"]);
     assert.ok(downward(regions), JSON.stringify(regions));
     await page.click("#browser-toggle");
     await page.setViewportSize({ width: 1000, height: 640 });
@@ -1147,9 +1148,9 @@ try {
   await check("a file that is not a project is refused with its message, keeping the open part", async () => {
     await page.setInputFiles("#open-file", { name: "half.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 2, "name": "Cut') });
     await page.waitForFunction(() => document.querySelector("#file-status").textContent !== "");
-    assert.match(await text("file-status"), /^Couldn't open “half\.fission\.json”: not a Fission project: the file is not valid JSON/); // the same words as a drop (X6)
+    assert.match(await text("file-status"), /^Couldn't open “half\.fission\.json”: not a Panoshape project: the file is not valid JSON/); // the same words as a drop (X6)
     await page.setInputFiles("#open-file", { name: "new.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 99}') });
-    await page.waitForFunction(() => /newer Fission/.test(document.querySelector("#file-status").textContent));
+    await page.waitForFunction(() => /newer Panoshape/.test(document.querySelector("#file-status").textContent));
     assert.equal(await text("volume"), "37,500 mm³");
     assert.equal(await page.inputValue("#height"), "25");
   });
@@ -1190,6 +1191,56 @@ try {
       assert.equal(stored, 2);
     } finally {
       await kept.close();
+    }
+  });
+
+  await check("Save and Open pressed while the app is still reopening the stored project wait for it", async () => {
+    // Found by the monkey tester (seed 109, CPU slowed): Save pressed just after a reload wrote the
+    // empty project the app starts from, with no design in it, and a file opened then was replaced by the stored one.
+    const context = await browser.newContext({ viewport: { width: 1000, height: 640 } }); // two tabs sharing one storage
+    const kept = await context.newPage();
+    kept.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await kept.goto(url + "#design");
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await kept.fill("#width", "50");
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³"); // 50·30·20
+      await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+      // A second tab of the same browser holds a write on the store, so the reloaded app waits to read it.
+      const holder = await context.newPage();
+      await holder.route(`${url}hold`, (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><title>hold</title>" }));
+      await holder.goto(`${url}hold`);
+      await holder.evaluate(
+        () =>
+          new Promise((held) => {
+            const req = indexedDB.open("fission");
+            req.onsuccess = () => {
+              const db = req.result;
+              const tx = db.transaction([...db.objectStoreNames], "readwrite");
+              const store = tx.objectStore(db.objectStoreNames[0]);
+              const spin = () => { if (!window.release) store.get("hold").onsuccess = spin; }; // a transaction with a request pending stays open
+              spin();
+              tx.oncomplete = () => db.close();
+              held();
+            };
+          }),
+      );
+      await kept.reload({ waitUntil: "domcontentloaded" });
+      const download = kept.waitForEvent("download");
+      await kept.click("#save");
+      const wide = JSON.parse(readFileSync("e2e/saved.fission.json", "utf8"));
+      wide.workspaces.design.timeline.features[0].intent.parameters.width = 60;
+      await kept.setInputFiles("#open-file", { name: "wide.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(wide)) });
+      await holder.evaluate(() => (window.release = true));
+      const file = JSON.parse(readFileSync(await (await download).path(), "utf8"));
+      assert.deepEqual(file.workspaces.design?.timeline.features[0].intent.parameters, { width: 50, depth: 30, height: 20 }, "Save waited for the stored project");
+      // Opened after the stored project came back, so it stays: 60·30·20 = 36000.
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "36,000 mm³");
+      await kept.waitForTimeout(500); // nothing replaces it a moment later
+      assert.equal(await kept.textContent("#volume"), "36,000 mm³");
+      assert.equal(await kept.inputValue("#width"), "60");
+    } finally {
+      await context.close();
     }
   });
 
@@ -1308,7 +1359,7 @@ try {
       // Not a blank app: the default part, and the message in full.
       await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       const message = await phone.textContent("#file-status");
-      assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a Fission project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
+      assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a Panoshape project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
       const notice = await phone.$eval("#file-notice", (el) => ({ ...el.getBoundingClientRect().toJSON(), cut: el.scrollWidth > el.clientWidth }));
       assert.ok(notice.width > 0 && notice.left >= 0 && notice.right <= 375 && !notice.cut, JSON.stringify(notice));
       assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
@@ -1384,7 +1435,7 @@ try {
     }
   });
 
-  await check("split view: Design beside a placeholder, own panels and cameras, one selection, Close split restores one view", async () => {
+  await check("split view: Image beside Design by default; Design in the second pane with its own panels and camera, one selection; a placeholder there says Coming soon and draws no 3D view; Close split restores one view", async () => {
     const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     wide.on("pageerror", (e) => consoleErrors.push(e.message));
     wide.on("console", (m) => {
@@ -1392,7 +1443,7 @@ try {
     });
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
-      await wide.goto(url + "#design");
+      await wide.goto(url + "?test-hooks#design");
       await wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
       const canvasOf = (sel) => `${sel} > canvas`;
       const image = (sel) => wide.evaluate((s) => document.querySelector(s).toDataURL(), canvasOf(sel));
@@ -1415,45 +1466,47 @@ try {
       const selected = () => wide.evaluate(() => document.body.dataset.selection ?? "");
       const settle = () => wide.waitForTimeout(300); // orbit damping settles, a frame or two paints
       const box = (sel) => wide.locator(canvasOf(sel)).boundingBox();
+      const splitPose = () => wide.evaluate(() => window.fissionTest.splitView().cameraPose());
 
       // One workspace to start: no second pane, one canvas drawing the scene.
       assert.equal(await wide.isVisible("#split"), false);
       assert.equal((await wide.$$("#viewport > canvas, #split-viewport > canvas")).length, 1);
       await wide.click("#split-toggle");
-      await wide.waitForFunction(() => document.body.dataset.split === "render");
-      // Render (the first workspace that is not Design) in the second pane's
-      // own properties; Design keeps its panels in the first pane.
-      assert.equal(await wide.textContent("#split-properties .placeholder h2"), "Render");
+      // Split opens on the first working workspace beside Design: Image (Render, Simulate… come first but are placeholders).
+      await wide.waitForFunction(() => document.body.dataset.split === "image");
       assert.equal(await wide.textContent("#properties #status"), "valid");
-      assert.equal(await wide.$("#properties .placeholder"), null);
       assert.equal(await wide.$eval("body", (b) => b.dataset.activeWorkspace), "design");
       assert.equal(await wide.getAttribute("#split-toggle", "aria-pressed"), "true");
-      // The choice offers every workspace but Design, Render chosen.
+      assert.equal(await wide.isVisible("#split-toggle"), false, "Close split stands in for Split");
+      assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.image), "none", "Image's empty 2D view in the second pane");
+      // The choice offers every workspace but Design, Image chosen.
       assert.deepEqual(await wide.$$eval("#split-choice option", (os) => os.map((o) => o.value)), ["render", "simulate", "manufacture", "laser", "slice", "circuit", "vector", "image", "layout"]);
-      assert.equal(await wide.$eval("#split-choice", (s) => s.value), "render");
+      assert.equal(await wide.$eval("#split-choice", (s) => s.value), "image");
+
+      // Choosing the second pane's workspace in the switcher swaps the panes:
+      // Image in the first, Design (its panels, its picking) in the second.
+      await wide.click("[data-workspace=image]");
+      await wide.waitForFunction(() => document.body.dataset.split === "design");
+      assert.equal(await wide.$eval("body", (b) => b.dataset.activeWorkspace), "image");
+      assert.equal(await wide.textContent("#split-properties #status"), "valid");
+      assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.shape), "box");
+      assert.equal(await wide.$("#properties #status"), null, "Design's panels left the first pane");
       await settle();
 
-      // Both views draw the body: each starts at home on the same box, so the
-      // box's centre (20, 15, 10) lands at each canvas's own screenPoint.
+      // The second view draws the body from home, framed for its own size:
+      // taller than wide, so the framed sphere fits the narrower horizontal
+      // field of view and the box, inside the sphere, stops short of the left
+      // and right edges.
       const [mainBox, splitBox] = [await box("#viewport"), await box("#split-viewport")];
-      // The second view is framed for its own size: taller than wide, so the
-      // framed sphere fits the narrower horizontal field of view and the
-      // box, inside the sphere, stops short of the left and right edges.
       for (const fx of [0.01, 0.99]) {
         const p = { x: splitBox.x + fx * splitBox.width, y: splitBox.y + splitBox.height / 2 };
         assert.ok(!isBody(await pixelAt("#split-viewport", p.x, p.y)), `the whole box fits the second view (at ${fx} of its width)`);
       }
       assert.ok(mainBox.width > 300 && splitBox.width > 300, `room for both: ${mainBox.width}, ${splitBox.width}`);
-      assert.ok(mainBox.x + mainBox.width <= splitBox.x + 0.5, "side by side, Design's on the left");
-      for (const [sel, b] of [["#viewport", mainBox], ["#split-viewport", splitBox]]) {
-        const c = screenPoint(b, [20, 15, 10]);
-        assert.ok(isBody(await pixelAt(sel, c.x, c.y)), `${sel} draws the body`);
-        // A grid line can cross any one pixel (where depends on the view's size, which the timeline row changed in SF3d), so the
-        // corner is background when any of four pixels 3 to 9 px in is the exact background colour; the body would cover all four.
-        const corner = [];
-        for (const [dx, dy] of [[3, 3], [9, 3], [3, 9], [9, 9]]) corner.push(await pixelAt(sel, b.x + dx, b.y + b.height - dy));
-        assert.ok(corner.some((p) => p.join() === "20,22,26"), `${sel} corner is background: ${JSON.stringify(corner)}`);
-      }
+      assert.ok(mainBox.x + mainBox.width <= splitBox.x + 0.5, "side by side, Image's on the left");
+      const centre = screenPoint(splitBox, [20, 15, 10]);
+      assert.ok(isBody(await pixelAt("#split-viewport", centre.x, centre.y)), "the second view draws the body");
+      assert.ok(!isBody(await pixelAt("#viewport", mainBox.x + mainBox.width / 2, mainBox.y + mainBox.height / 2)), "Image's 2D view shows no body");
       assert.equal(await wide.evaluate(() => document.documentElement.scrollWidth), 1280, "no sideways scroll");
       await wide.screenshot({ path: "e2e/split-1280.png" });
 
@@ -1467,43 +1520,41 @@ try {
       // From the top the box's top face centre (20, 15, 20) is under TOP's screenPoint in the second view.
       const topInSplit = screenPoint(splitBox, [20, 15, 20], TOP);
       assert.ok(isBody(await pixelAt("#split-viewport", topInSplit.x, topInSplit.y)), "top view of the body");
+      const topPose = await splitPose();
 
-      // One selection: a face picked in the first view shows in both, and a
-      // click in the second view picks the same shared body.
-      const topInMain = screenPoint(mainBox, [20, 15, 20]);
-      await wide.mouse.click(topInMain.x, topInMain.y);
-      assert.equal(await selected(), "face:feature-1/top");
-      assert.equal(await wide.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges ");
+      // Design picks through the second view; the one selection.
+      await wide.mouse.click(topInSplit.x, topInSplit.y);
+      assert.equal(await selected(), "face:feature-1/top", "picked through the second view");
       assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.highlight), "faces 1 edges ");
       await wide.keyboard.press("Escape");
       assert.equal(await selected(), "");
-      await wide.mouse.click(topInSplit.x, topInSplit.y);
-      assert.equal(await selected(), "face:feature-1/top", "picked through the second view");
-      assert.equal(await wide.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges ");
-      await wide.keyboard.press("Escape");
 
-      // Choosing another workspace for the second pane keeps its camera.
-      const splitTop = await image("#split-viewport");
+      // A placeholder in the second pane: its name, Coming soon and what it
+      // will do in the middle of the pane, and no 3D view: the view stops
+      // drawing, its canvas, cube and bar are hidden, its properties column too.
       await wide.selectOption("#split-choice", "slice");
       await wide.waitForFunction(() => document.body.dataset.split === "slice");
-      assert.equal(await wide.textContent("#split-properties .placeholder h2"), "Slice");
-      await settle();
-      assert.equal(await image("#split-viewport"), splitTop, "the second camera stayed on Top");
-
-      // Choosing the second pane's workspace in the switcher swaps the panes:
-      // Slice in the first, Design (its panels, its picking) in the second.
-      await wide.click("[data-workspace=slice]");
+      assert.equal(await wide.textContent("#split-viewport .split-soon h2"), "Slice");
+      assert.equal(await wide.textContent("#split-viewport .split-soon .coming-soon"), "Coming soon");
+      assert.equal(await wide.isVisible("#split-viewport .split-soon"), true);
+      assert.equal(await wide.textContent("#split-properties .placeholder h2"), "Slice", "the workspace's own page, where the card comes from");
+      assert.equal(await wide.isVisible("#split-properties"), false, "no second copy beside the card");
+      assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.drawing), "off");
+      for (const part of ["canvas", ".view-cube", ".view-controls"]) assert.equal(await wide.isVisible(`#split-viewport > ${part}`), false, `no ${part} in the placeholder's pane`);
+      // Back to Design: the view draws again with the camera it had (still Top).
+      await wide.selectOption("#split-choice", "design");
       await wide.waitForFunction(() => document.body.dataset.split === "design");
-      assert.equal(await wide.$eval("body", (b) => b.dataset.activeWorkspace), "slice");
-      assert.equal(await wide.textContent("#properties .placeholder h2"), "Slice");
-      assert.equal(await wide.textContent("#split-properties #status"), "valid");
-      assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.shape), "box");
-      assert.deepEqual(await wide.$$eval("#split-choice option", (os) => os.map((o) => o.value)).then((v) => v.includes("slice")), false);
-      await wide.mouse.click(topInMain.x, topInMain.y);
-      assert.equal(await selected(), "face:feature-1/top", "Design picks from either view while it is in the second pane");
-      await wide.keyboard.press("Escape");
+      assert.equal(await wide.isVisible("#split-viewport .split-soon"), false);
+      assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.drawing), undefined);
+      assert.equal(await wide.isVisible("#split-viewport > canvas"), true);
+      // Within 0.05 mm: orbit damping may still have been settling its last fraction of a pixel when the pose was read.
+      const back = await splitPose();
+      for (const key of ["position", "target", "up"]) assert.ok(back[key].every((v, i) => Math.abs(v - topPose[key][i]) < 0.05), `the second camera stayed on Top (${key}: ${back[key]} vs ${topPose[key]})`);
+      assert.ok(isBody(await pixelAt("#split-viewport", topInSplit.x, topInSplit.y)), "drawn from the top again");
+
+      // Back to Design in the first pane and Image beside it.
       await wide.click("[data-workspace=design]");
-      await wide.waitForFunction(() => document.body.dataset.split === "slice");
+      await wide.waitForFunction(() => document.body.dataset.split === "image");
       assert.equal(await wide.textContent("#properties #status"), "valid");
 
       // Close split: one view again, its canvas gone, the first view untouched.
@@ -1515,6 +1566,7 @@ try {
       assert.equal(await wide.$eval("#split-properties", (el) => el.childElementCount), 0, "the second workspace emptied its slots");
       assert.equal(await wide.$eval("body", (b) => b.dataset.split), "");
       assert.equal(await wide.getAttribute("#split-toggle", "aria-pressed"), "false");
+      assert.equal(await wide.isVisible("#split-toggle"), true);
       assert.equal(await wide.evaluate(() => document.activeElement?.id), "split-toggle", "focus back on Split");
       await settle();
       const full = await box("#viewport");
@@ -1525,7 +1577,7 @@ try {
 
       // Too narrow for two: a window shrinking under 900 px closes the split, and phones never offer it.
       await wide.click("#split-toggle");
-      await wide.waitForFunction(() => document.body.dataset.split === "render");
+      await wide.waitForFunction(() => document.body.dataset.split === "image");
       await wide.setViewportSize({ width: 860, height: 800 });
       await wide.waitForFunction(() => document.body.dataset.split === "");
       assert.equal(await wide.$("#split-viewport > canvas"), null);
@@ -1533,6 +1585,149 @@ try {
       await wide.setViewportSize({ width: 375, height: 740 });
       assert.equal(await wide.isVisible("#split-toggle"), false);
       assert.equal(await wide.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
+    } finally {
+      await wide.close();
+    }
+  });
+
+  await check("split view, every choice in the second pane: one toolbar row per pane and no empty band; placeholders say Coming soon and draw no 3D view; each check fails on the old layout", async () => {
+    const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
+      await wide.goto(url + "?test-hooks#design");
+      await wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+      const titles = Object.fromEntries(await wide.$$eval("[data-workspace]", (tabs) => tabs.map((t) => [t.dataset.workspace, t.textContent.trim()])));
+      const placeholders = ["render", "simulate", "manufacture", "laser", "slice", "circuit", "vector", "layout"];
+
+      /** What the layout checks read, in page pixels. */
+      const measure = () =>
+        wide.evaluate(() => {
+          const shown = (el) => el && getComputedStyle(el).display !== "none" && el.getClientRects().length > 0;
+          const box = (el) => {
+            const r = el.getBoundingClientRect();
+            return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, h: r.height };
+          };
+          const $ = (sel) => document.querySelector(sel);
+          const rowsOf = (bar) => (shown(bar) ? new Set([...bar.querySelectorAll("button")].filter(shown).map((b) => Math.round(b.getBoundingClientRect().top))).size : 0);
+          const views = ["#viewport", "#split-viewport"].map((sel) => {
+            const bar = $(`${sel} > .view-controls`);
+            return { view: box($(sel)), bar: shown(bar) ? box(bar) : null };
+          });
+          return {
+            width: innerWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+            workspaceTop: $("#workspace").getBoundingClientRect().top,
+            toolbarRows: rowsOf($("#toolbar")),
+            splitToolbarRows: rowsOf($("#split-toolbar")),
+            splitToolbar: shown($("#split-toolbar")) ? box($("#split-toolbar")) : null,
+            bar: box($("#split-bar")),
+            views,
+          };
+        });
+      /** One row of tools along the top of each pane, both views starting right under it, the choice in that row clear of the pane's tools. */
+      function checkRow(m, id) {
+        assert.equal(m.scrollWidth, m.width, `${id}: no sideways scroll`);
+        assert.ok(m.toolbarRows <= 1 && m.splitToolbarRows <= 1, `${id}: each toolbar keeps to one row (${m.toolbarRows}, ${m.splitToolbarRows})`);
+        const [main, second] = m.views;
+        assert.ok(Math.abs(main.view.y - second.view.y) <= 1, `${id}: both views start at the same height`);
+        // One row: a button 7 px + 13 px text + 7 px tall plus the bar's padding and border is at most 48 px; three rows were 120.
+        assert.ok(second.view.y - m.workspaceTop <= 48, `${id}: no band over the second view (${second.view.y - m.workspaceTop} px)`);
+        assert.ok(m.bar.y >= m.workspaceTop - 1 && m.bar.bottom <= second.view.y + 1, `${id}: the choice and Close split sit in the toolbar row`);
+        if (m.splitToolbar) assert.ok(m.bar.x >= m.splitToolbar.right - 1, `${id}: the choice is clear of the second pane's tools`);
+        for (const [i, { view, bar }] of m.views.entries()) {
+          if (bar) assert.ok(bar.x >= view.x - 1 && bar.right <= view.right + 1 && bar.y >= view.y, `${id}: view ${i + 1}'s buttons stay inside it`);
+        }
+      }
+      /** No 3D view in a placeholder's pane: the card instead, the view not drawing, and every pixel of the pane (the card's words hidden for the look) its plain background. */
+      async function checkNoView(id) {
+        assert.equal(await wide.isVisible("#split-viewport .split-soon"), true, `${id}: the card shows`);
+        assert.equal(await wide.textContent("#split-viewport .split-soon h2"), titles[id]);
+        assert.equal(await wide.textContent("#split-viewport .split-soon .coming-soon"), "Coming soon");
+        assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.drawing), "off", `${id}: the view is not drawing`);
+        assert.equal(await wide.isVisible("#split-viewport > canvas"), false, `${id}: no canvas`);
+        assert.equal(await wide.isVisible("#split-viewport > .view-controls"), false, `${id}: no view buttons`);
+        await wide.addStyleTag({ content: ".split-soon { visibility: hidden; }" }).then((tag) => tag.evaluate((t) => t.setAttribute("data-probe", "")));
+        const r = await wide.locator("#split-viewport").boundingBox();
+        const png = decodePng(await wide.screenshot({ clip: { x: r.x + 4, y: r.y + 4, width: r.width - 8, height: r.height - 8 } }));
+        await wide.evaluate(() => document.querySelector("style[data-probe]").remove());
+        const first = png.data.slice(0, 3).join();
+        let other = 0;
+        for (let i = 0; i < png.data.length; i += 4) if (png.data.slice(i, i + 3).join() !== first) other++;
+        assert.equal(other, 0, `${id}: the pane is one plain colour (${other} pixels differ from ${first})`);
+      }
+      async function checkView(id) {
+        assert.equal(await wide.isVisible("#split-viewport .split-soon"), false, `${id}: no card`);
+        assert.equal(await wide.$eval("#split-viewport", (el) => el.dataset.drawing), undefined, `${id}: the view draws`);
+        assert.equal(await wide.isVisible("#split-viewport > canvas"), true, `${id}: its canvas shows`);
+      }
+      const choose = async (id) => {
+        await wide.selectOption("#split-choice", id);
+        await wide.waitForFunction((id) => document.body.dataset.split === id, id);
+        await wide.waitForTimeout(150); // a frame or two
+      };
+
+      // Every choice beside Design, then Design beside Image.
+      await wide.click("#split-toggle");
+      await wide.waitForFunction(() => document.body.dataset.split === "image");
+      const cases = [...placeholders.map((id) => ["design", id]), ["design", "image"], ["image", "design"]];
+      for (const [main, id] of cases) {
+        if ((await wide.$eval("body", (b) => b.dataset.activeWorkspace)) !== main) {
+          await wide.click(`[data-workspace=${main}]`); // swaps the panes
+          await wide.waitForFunction((id) => document.body.dataset.split === id, main === "image" ? "design" : "image");
+        }
+        if ((await wide.$eval("body", (b) => b.dataset.split)) !== id) await choose(id);
+        checkRow(await measure(), id);
+        if (placeholders.includes(id)) await checkNoView(id);
+        else await checkView(id);
+        if (id === "render") await wide.screenshot({ path: "e2e/split-render-1280.png" });
+      }
+      // Design's toolbar is wider than its half: the wheel scrolls it sideways.
+      const before = await wide.$eval("#split-toolbar", (b) => [b.scrollLeft, b.scrollWidth - b.clientWidth]);
+      assert.ok(before[0] === 0 && before[1] > 0, `Design's toolbar overflows its half (${before})`);
+      const tb = await wide.locator("#split-toolbar").boundingBox();
+      await wide.mouse.move(tb.x + 40, tb.y + tb.height / 2);
+      await wide.mouse.wheel(0, 120);
+      await wide.waitForFunction(() => document.querySelector("#split-toolbar").scrollLeft > 0);
+
+      // Deliberate breaks: each check must fail on what was there before.
+      const fails = async (label, fn) => {
+        let failed = false;
+        try {
+          await fn();
+        } catch {
+          failed = true;
+        }
+        assert.ok(failed, `the check passed on the broken page: ${label}`);
+      };
+      await wide.click("[data-workspace=design]");
+      await wide.waitForFunction(() => document.body.dataset.split === "image");
+      const wrap = await wide.addStyleTag({ content: ".split-view #toolbar, .split-view #split-toolbar, .split-view .tool-group { flex-wrap: wrap !important; }" });
+      await fails("toolbars wrapping into rows", async () => checkRow(await measure(), "wrapped"));
+      await wrap.evaluate((t) => t.remove());
+      const floating = await wide.addStyleTag({ content: "#split-bar { position: absolute !important; left: 8px; top: 8px; } #split-toolbar { grid-column: 3 / 5 !important; }" });
+      await fails("the choice floating over the view", async () => checkRow(await measure(), "floating"));
+      await floating.evaluate((t) => t.remove());
+      checkRow(await measure(), "image, breaks removed");
+      await choose("render");
+      await wide.evaluate(() => window.fissionTest.splitView().setDrawing(true)); // the view drawing again under the card
+      await wide.waitForTimeout(150);
+      await fails("a placeholder drawing a 3D view", () => checkNoView("render"));
+      await wide.evaluate(() => window.fissionTest.splitView().setDrawing(false));
+      await checkNoView("render");
+
+      // At 375 px there is no split: one opened wider closes, whatever is in it, with nothing wider than the screen.
+      for (const id of ["render", "image"]) {
+        await wide.setViewportSize({ width: 1280, height: 800 });
+        if ((await wide.$eval("body", (b) => b.dataset.split)) === "") await wide.click("#split-toggle");
+        await choose(id);
+        await wide.setViewportSize({ width: 375, height: 740 });
+        await wide.waitForFunction(() => document.body.dataset.split === "");
+        assert.equal(await wide.isVisible("#split-toggle"), false, `${id}: no Split at 375 px`);
+        assert.equal(await wide.isVisible("#split-viewport .split-soon"), false, `${id}: no card left behind`);
+        assert.equal(await wide.$("#workspace.split-view"), null, `${id}: split styles off`);
+        assert.equal(await wide.evaluate(() => document.documentElement.scrollWidth), 375, `${id}: no sideways scroll`);
+      }
     } finally {
       await wide.close();
     }

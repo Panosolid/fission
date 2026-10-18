@@ -2,14 +2,14 @@
 // dropping or pasting a file anywhere routes it through the representation
 // registry. identifyFile says what a file is from its first bytes and its
 // name; routeFiles finds the workspace that registered an importer for that
-// format, or refuses with a message saying why: a type Fission will open
+// format, or refuses with a message saying why: a type Panoshape will open
 // later names the workspace that will take it, a damaged or renamed file
-// says so, and an unknown one lists what Fission opens today.
+// says so, and an unknown one lists what Panoshape opens today.
 //
 // What a file is, in order:
 // 1. Contents with a strong signature decide alone, whatever the name says:
 //    PNG (its 8 signature bytes), JPEG (FF D8 FF), PDF ("%PDF-"), STEP
-//    ("ISO-10303-21;"), a Fission project (a JSON object with
+//    ("ISO-10303-21;"), a Panoshape project (a JSON object with
 //    "formatVersion" near the start) and SVG (its first element is <svg).
 // 2. STL and DXF have weak signatures (an ASCII STL starts with "solid",
 //    which plenty of text does; a binary STL has no signature at all, only
@@ -38,9 +38,9 @@ export interface FileFormatInfo {
   planned: { workspaces: readonly WorkspaceId[]; as: string };
 }
 
-/** Every format Fission knows, in the order lists name them. */
+/** Every format Panoshape knows, in the order lists name them. */
 export const FILE_FORMATS: readonly FileFormatInfo[] = [
-  { format: "project", one: "a Fission project", many: "Fission projects (.fission.json)", extensions: [".fission.json"], representation: null, planned: { workspaces: [], as: "projects" } },
+  { format: "project", one: "a Panoshape project", many: "Panoshape projects (.fission.json)", extensions: [".fission.json"], representation: null, planned: { workspaces: [], as: "projects" } },
   { format: "png", one: "a PNG image", many: "PNG images", extensions: [".png"], representation: "image", planned: { workspaces: ["image"], as: "images" } },
   { format: "jpeg", one: "a JPEG image", many: "JPEG images", extensions: [".jpg", ".jpeg"], representation: "image", planned: { workspaces: ["image"], as: "images" } },
   { format: "svg", one: "an SVG drawing", many: "SVG drawings", extensions: [".svg"], representation: "outline", planned: { workspaces: ["vector", "laser"], as: "outlines" } },
@@ -172,12 +172,12 @@ export function routeFiles(registry: RepresentationRegistry, files: readonly Fil
     return { kind: "refused", message: `Couldn't open ${name}: it is named like ${formatInfo(found.claimed).one}, but its contents aren't one (it may be damaged, or renamed from another type).` };
   if (!found.ok) {
     const opens = FILE_FORMATS.filter((f) => registry.importerFor(f.format)).map((f) => f.many);
-    return { kind: "refused", message: `Couldn't open ${name}: Fission doesn't know this type of file. ${opens.length ? `It opens ${andList(opens)}.` : "It can't open any files yet."}` };
+    return { kind: "refused", message: `Couldn't open ${name}: Panoshape doesn't know this type of file. ${opens.length ? `It opens ${andList(opens)}.` : "It can't open any files yet."}` };
   }
   const importer = registry.importerFor(found.format);
   if (importer) return { kind: "open", format: found.format, importer };
   const info = formatInfo(found.format);
   if (info.planned.workspaces.length === 0) return { kind: "refused", message: `Couldn't open ${name}: nothing here opens ${info.many}.` };
   const who = andList(info.planned.workspaces.map(workspaceName));
-  return { kind: "refused", message: `Couldn't open ${name}: Fission can't open ${info.many} yet. ${who} will take them as ${info.planned.as}.` };
+  return { kind: "refused", message: `Couldn't open ${name}: Panoshape can't open ${info.many} yet. ${who} will take them as ${info.planned.as}.` };
 }

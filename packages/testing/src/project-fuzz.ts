@@ -22,7 +22,7 @@
 // shortest text that fails the same way.
 
 import { FORMAT_VERSION, MAX_NESTING, emptyProject, projectFromJson, projectToJson, type DataReader, type Project } from "@fission/core";
-import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, insertPreset, lastFeature, migrateDesignV1, migrateDesignV2, partDocument, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, insertPreset, migrateDesignV1, migrateDesignV2, partDocument, partFeature, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
@@ -61,7 +61,7 @@ export function outerModel(data: unknown): { refusal: string | null; upgraded?: 
   if (!isObj(data)) return { refusal: "expected an object" };
   const v = data.formatVersion;
   if (typeof v !== "number" || !Number.isInteger(v) || v < 1) return { refusal: "no format version" };
-  if (v > FORMAT_VERSION) return { refusal: "saved by a newer Fission" };
+  if (v > FORMAT_VERSION) return { refusal: "saved by a newer Panoshape" };
   // The one upgrade so far, 1 → 2: links arrive, empty.
   const p = v === 1 ? { ...data, formatVersion: 2, links: [] } : data;
   for (const key of ["name", "units", "materials", "links", "workspaces"]) if (!Object.hasOwn(p, key)) return { refusal: `"${key}" is missing` };
@@ -92,11 +92,13 @@ function randomJson(r: SeededRandom, depth = 0): unknown {
 }
 
 /**
- * Design's data as Fission saves it: sometimes with sketches (lines, some
+ * Design's data as Panoshape saves it: sometimes with sketches (lines, some
  * chained, so they share points, circles (22b), some round a point
  * already there, and arcs (23a), some from a point already there;
  * sometimes the part extrudes one; from 24d1 several solid features and a
- * rollback marker), sometimes as the version 1 data saved before step 21b
+ * rollback marker; from 24f4 sometimes nothing built: the marker at the
+ * start, every solid suppressed, or everything deleted), sometimes as the
+ * version 1 data saved before step 21b
  * (no sketches, no counter), sometimes as version 2 (steps 21b to 24c,
  * which a save upgrades: its earlier solid features suppressed).
  */
@@ -133,10 +135,18 @@ function designData(r: SeededRandom, part: DesignDocument): unknown {
   if (r.next() < 0.2) return { ...doc, version: 2 };
   if (r.next() < 0.2) doc = { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f, i) => (i > 0 && r.next() < 0.3 ? { ...f, suppressed: true } : f)) } };
   if (r.next() < 0.3) doc = { ...doc, timeline: { ...doc.timeline, marker: pick(r, doc.timeline.features).id } };
+  // Nothing built (24f4): opens as a design with no body.
+  const none = r.next();
+  if (none < 0.05) doc = { ...doc, timeline: { ...doc.timeline, marker: "start" } };
+  else if (none < 0.1) doc = { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f) => (f.intent.type === "sketch" ? f : { ...f, suppressed: true })) } };
+  else if (none < 0.13) {
+    const { kept: _, ...rest } = doc;
+    doc = { ...rest, profiles: [], sketches: [], timeline: { features: [] } };
+  }
   return doc;
 }
 
-/** A real project's text: what Fission saves (sometimes in the old format 1). */
+/** A real project's text: what Panoshape saves (sometimes in the old format 1). */
 export function validProjectText(r: SeededRandom): string {
   const size = () => Math.round(10 ** (r.next() * 4 - 1) * 1000) / 1000;
   const p: Project = { ...emptyProject(pick(r, ["Untitled", "Bracket", "Gehäuse 2", "", "a\"quote\\and\nnewline"])), units: { length: pick(r, ["mm", "cm", "m", "in"] as const) } };
@@ -246,7 +256,7 @@ export function makeCase(r: SeededRandom): string {
 
 // ---- The checks.
 
-const OWN_MESSAGES = [/^not a Fission project: /, /^this project was saved by a newer Fission /, /^can't open the [a-z]+ workspace's data: /];
+const OWN_MESSAGES = [/^not a Panoshape project: /, /^this project was saved by a newer Panoshape /, /^can't open the [a-z]+ workspace's data: /];
 const ENGINE_WORDS = /Cannot read propert|Cannot convert|is not a function|is not iterable|Maximum call stack|Invalid array length|Cannot destructure/;
 
 export interface Problem {
@@ -298,8 +308,10 @@ export function checkText(text: string, readers: readonly DataReader[] = READERS
   if (design) {
     const shown = guard("showing the Design part", () => {
       // An extrude of a sketch needs the kernel for its outline; readDesignDocument checked its sketch and distance.
-      if (partOf(design).shape === "sketch-extrude") return null;
-      return specOf(design, lastFeature(design));
+      // A design with no body (24f4) has no part to show.
+      const part = partOf(design);
+      if (part === null || part.shape === "sketch-extrude") return null;
+      return specOf(design, partFeature(design)!);
     });
     if (isProblem(shown)) return shown;
   }
@@ -342,7 +354,7 @@ export interface Failure extends Problem {
 export function fuzzRound(seed: bigint, cases: number, readers: readonly DataReader[] = READERS) {
   const r = seeded(seed);
   const failures: Failure[] = [];
-  const counts = { opened: 0, refusedInvalidJson: 0, refusedOuter: 0, refusedByReader: 0, nested: 0, proto: 0 };
+  const counts = { opened: 0, openedNoBody: 0, refusedInvalidJson: 0, refusedOuter: 0, refusedByReader: 0, nested: 0, proto: 0 };
   for (let index = 0; index < cases; index++) {
     const text = makeCase(r);
     if (text.includes("[[[[[[[[[[")) counts.nested++;
@@ -353,8 +365,9 @@ export function fuzzRound(seed: bigint, cases: number, readers: readonly DataRea
       continue;
     }
     try {
-      projectFromJson(text, readers);
+      const design = projectFromJson(text, readers).workspaces.design as DesignDocument | undefined;
       counts.opened++;
+      if (design && partFeature(design) === null) counts.openedNoBody++;
     } catch (e) {
       const m = (e as Error).message;
       if (m.includes("not valid JSON")) counts.refusedInvalidJson++;

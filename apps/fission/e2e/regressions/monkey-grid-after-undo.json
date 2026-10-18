@@ -1,0 +1,23 @@
+{
+  "seed": 5,
+  "what": "Create sketch, XY, a grid size typed and Escape, then Undo: an uncaught \"Cannot set properties of null (setting 'grid')\" (workspace.ts setGrid wrote editingSketch after an await); fixed by a re-check after the await",
+  "actions": [
+    {
+      "do": "click",
+      "sel": "#create-sketch"
+    },
+    {
+      "do": "click",
+      "sel": "#sketch-plane-XY"
+    },
+    {
+      "do": "type",
+      "sel": "#sketch-grid",
+      "text": "0.5",
+      "finish": "Escape"
+    },
+    {
+      "do": "undo-redo"
+    }
+  ]
+}

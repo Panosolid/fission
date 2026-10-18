@@ -1,7 +1,7 @@
 // @fission/community: the community library. PLACEHOLDER: nothing here works yet.
 //
 // People share what they have made and anyone can download it, always for
-// free: there is no paid content and no payments anywhere. A shared Fission
+// free: there is no paid content and no payments anywhere. A shared Panoshape
 // project opens with its editable timeline (and its render scenes, studies,
 // toolpaths, laser jobs and print plates), not just a mesh; remixes link
 // back to the original. It needs a server (accounts, uploads, moderation,
@@ -16,7 +16,7 @@ export interface SharedItem {
   author: string;
   /** A free licence chosen by the author, e.g. "CC-BY-4.0". */
   licence: string;
-  /** A whole Fission project (editable) or a plain mesh. */
+  /** A whole Panoshape project (editable) or a plain mesh. */
   kind: "project" | "mesh";
   /** Which workspaces have content in it (design, render scenes, print plates…). */
   contains: WorkspaceId[];
@@ -44,7 +44,7 @@ export const communityPage = {
   plans: [
     "Publish a project or a mesh with a free licence of your choice",
     "Search and browse what others have shared",
-    "Download into a new project: a Fission project opens with its editable timeline, not just a mesh",
+    "Download into a new project: a Panoshape project opens with its editable timeline, not just a mesh",
     "Open a download in any workspace (Design, Render, Slice…) since it is all one project",
     "Remix: your copy links back to the original and credits its author",
   ],

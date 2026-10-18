@@ -3,12 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Fission</title>
+    <title>Panoshape</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   </head>
   <body>
     <header id="topbar">
-      <h1>Fission <span id="version"></span></h1>
+      <h1>Panoshape <span id="version"></span></h1>
       <nav id="workspaces" aria-label="Workspaces"></nav>
       <span id="save-status" role="status" aria-live="polite"></span>
       <button id="menu-toggle" type="button" aria-expanded="false" aria-controls="topbar-actions" title="Save, Open, the AI assistant and Community">Menu</button>
@@ -21,7 +21,7 @@
         <button id="open" type="button" title="Open a project or an image">Open</button>
         <input id="open-file" type="file" hidden /><!-- accept: set from the registered importers (src/main.ts) -->
         <button id="assistant-toggle" type="button" aria-pressed="false" title="The optional AI assistant. No AI provider is active: nothing is sent anywhere.">AI <span id="ai-status">off</span></button>
-        <button id="guide-open" type="button" title="How Fission works: a scrolling 3D guide to Design and the kernel">Guide</button>
+        <button id="guide-open" type="button" title="How Panoshape works: a scrolling 3D guide to Design and the kernel">Guide</button>
         <button id="community" type="button" title="Shared models, free to download (coming soon)">Community</button>
       </div>
       <div id="file-notice">
@@ -41,11 +41,12 @@
       <aside id="properties" aria-label="Properties"></aside>
       <section id="split" aria-label="Second workspace" hidden>
         <div id="split-toolbar" role="toolbar" aria-label="Tools of the second workspace"></div>
+        <div id="split-bar">
+          <label><span class="split-bar-label">Beside it</span> <select id="split-choice" title="The workspace in the second pane"></select></label>
+          <button id="split-close" type="button" title="Back to one workspace">Close split</button>
+        </div>
         <div id="split-viewport">
-          <div id="split-bar">
-            <label>Beside it <select id="split-choice" title="The workspace in the second pane"></select></label>
-            <button id="split-close" type="button" title="Back to one workspace">Close split</button>
-          </div>
+          <div class="split-soon" role="status" hidden></div>
         </div>
         <aside id="split-browser" aria-label="Browser of the second workspace"></aside>
         <aside id="split-properties" aria-label="Properties of the second workspace"></aside>

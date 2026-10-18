@@ -15,6 +15,8 @@ import { designReference, readDesignReference, resolveReference } from "./refere
 /** One built body: the feature that built it, the kernel's view of it, and its faces' and edges' names. */
 export interface ShownBody {
   feature: string;
+  /** Its browser row's number, n in "Body n": its place among `bodyFeatures`, counting ones that did not build. */
+  place: number;
   view: BodyView;
   names: BodyNames;
 }
@@ -36,12 +38,12 @@ export interface Scene {
  */
 export async function shownBodies(doc: DesignDocument, build: TimelineBuild, cache: BodyCache): Promise<ShownBody[]> {
   const shown: ShownBody[] = [];
-  for (const f of bodyFeatures(doc)) {
+  for (const [i, f] of bodyFeatures(doc).entries()) {
     const r = build.results[f.id];
     if (r?.status !== "built" || r.body === undefined || r.spec === undefined) continue;
     const spec = r.spec;
     const view = await cache.view(r.body);
-    shown.push({ feature: f.id, view, names: nameBody(f.id, view, "extrude" in spec ? outlineCurves(spec.extrude.profile, r.curves) : () => null) });
+    shown.push({ feature: f.id, place: i + 1, view, names: nameBody(f.id, view, "extrude" in spec ? outlineCurves(spec.extrude.profile, r.curves) : () => null) });
   }
   return shown;
 }

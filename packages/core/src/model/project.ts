@@ -5,7 +5,7 @@
 //
 // The format is open and documented in docs/project-format.md: a version
 // number, and a migration for every version change, so a file saved by an
-// older Fission always opens in a newer one.
+// older Panoshape always opens in a newer one.
 
 import type { Link } from "./links.ts";
 import type { Material } from "./material.ts";
@@ -50,23 +50,23 @@ const MIGRATIONS: Record<number, (old: Json) => Json> = {
 
 /**
  * Reads a saved project (already parsed from JSON), upgrading older
- * versions step by step. A file from a newer Fission, or one that is not a
+ * versions step by step. A file from a newer Panoshape, or one that is not a
  * project, is refused with a clear message rather than half-read.
  */
 export function readProject(data: unknown): Project {
-  if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("not a Fission project: expected an object");
+  if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("not a Panoshape project: expected an object");
   let p = data as Json;
   const v = p.formatVersion;
-  if (typeof v !== "number" || !Number.isInteger(v) || v < 1) throw new Error("not a Fission project: no format version");
-  if (v > FORMAT_VERSION) throw new Error(`this project was saved by a newer Fission (format ${v}; this one reads up to ${FORMAT_VERSION})`);
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1) throw new Error("not a Panoshape project: no format version");
+  if (v > FORMAT_VERSION) throw new Error(`this project was saved by a newer Panoshape (format ${v}; this one reads up to ${FORMAT_VERSION})`);
   for (let n = v; n < FORMAT_VERSION; n++) p = MIGRATIONS[n](p);
   for (const key of ["name", "units", "materials", "links", "workspaces"])
-    if (!(key in p)) throw new Error(`not a Fission project: "${key}" is missing`);
-  if (typeof p.name !== "string") throw new Error('not a Fission project: "name" must be text');
-  if (!isObject(p.units) || !LENGTH_UNITS.includes(p.units.length as LengthUnit)) throw new Error(`not a Fission project: "units" must give a length unit (${LENGTH_UNITS.join(", ")})`);
-  if (!Array.isArray(p.materials)) throw new Error('not a Fission project: "materials" must be a list');
-  if (!Array.isArray(p.links)) throw new Error('not a Fission project: "links" must be a list');
-  if (!isObject(p.workspaces)) throw new Error('not a Fission project: "workspaces" must be an object');
+    if (!(key in p)) throw new Error(`not a Panoshape project: "${key}" is missing`);
+  if (typeof p.name !== "string") throw new Error('not a Panoshape project: "name" must be text');
+  if (!isObject(p.units) || !LENGTH_UNITS.includes(p.units.length as LengthUnit)) throw new Error(`not a Panoshape project: "units" must give a length unit (${LENGTH_UNITS.join(", ")})`);
+  if (!Array.isArray(p.materials)) throw new Error('not a Panoshape project: "materials" must be a list');
+  if (!Array.isArray(p.links)) throw new Error('not a Panoshape project: "links" must be a list');
+  if (!isObject(p.workspaces)) throw new Error('not a Panoshape project: "workspaces" must be an object');
   return p as unknown as Project;
 }
 
@@ -103,9 +103,9 @@ function checkValues(data: unknown) {
   const stack: [unknown, string, number][] = [[data, "project", 1]];
   while (stack.length) {
     const [x, path, depth] = stack.pop()!;
-    if (typeof x === "number" && !Number.isFinite(x)) throw new Error(`not a Fission project: ${path} is too big a number`);
+    if (typeof x === "number" && !Number.isFinite(x)) throw new Error(`not a Panoshape project: ${path} is too big a number`);
     if (typeof x !== "object" || x === null) continue;
-    if (depth > MAX_NESTING) throw new Error(`not a Fission project: ${path} is nested more than ${MAX_NESTING} deep`);
+    if (depth > MAX_NESTING) throw new Error(`not a Panoshape project: ${path} is nested more than ${MAX_NESTING} deep`);
     if (Array.isArray(x)) x.forEach((v, i) => stack.push([v, `${path}[${i}]`, depth + 1]));
     else for (const key of Object.keys(x)) stack.push([(x as Json)[key], `${path}.${key}`, depth + 1]);
   }
@@ -129,7 +129,7 @@ export function projectFromJson(text: string, readers: readonly DataReader[]): P
   try {
     data = JSON.parse(text);
   } catch (e) {
-    throw new Error(`not a Fission project: the file is not valid JSON (${e instanceof Error ? e.message : String(e)})`);
+    throw new Error(`not a Panoshape project: the file is not valid JSON (${e instanceof Error ? e.message : String(e)})`);
   }
   checkValues(data);
   const project = readProject(data);

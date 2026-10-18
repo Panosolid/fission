@@ -2,11 +2,11 @@
 export { outline, type ProfileKind, type ShapeKind, type Loop, type Outline } from "./profiles.ts";
 export { designWorkspace } from "./workspace.ts";
 export { DESIGN_COMMANDS, documentFor, SHAPES } from "./commands.ts";
-export { bodyFeatures, browserTree, type BrowserNode } from "./browser.ts";
+export { bodyFeatures, browserTree, rowReference, type BrowserNode } from "./browser.ts";
 export { parameterRows, propertiesPanel, SIZE_KEYS, type ParameterRow, type Verb, type PropertiesPanel, type SizeKey } from "./properties.ts";
 export { toolbarGroups, type ToolButton, type ToolGroup } from "./toolbar.ts";
 export { buildSpec, specFor } from "./spec.ts";
-export { builds, changePreset, curvePoints, idNumber, keptOf, type KeptShape, insertAt, insertItem, insertPreset, isSketchExtrude, isSketchItem, lastFeature, migrateDesignV1, migrateDesignV2, partDocument, partOf, shapeOf, profileLabel, readDesignDocument, SKETCH_PLANES, specOf, withPart, type DesignDocument, type Marker, type PartKind, type PartSizes, type ReadyProfile, type Sketch, type SketchArcCurve, type SketchCircleCurve, type SketchCurve, type SketchLineCurve, type SketchPlane, type SketchPoint } from "./document.ts";
+export { builds, changePreset, curvePoints, idNumber, keptOf, type KeptShape, insertAt, insertItem, insertPreset, isSketchExtrude, isSketchItem, lastFeature, partFeature, migrateDesignV1, migrateDesignV2, partDocument, partOf, shapeOf, profileLabel, readDesignDocument, SKETCH_PLANES, specOf, withPart, type DesignDocument, type Marker, type PartKind, type PartSizes, type ReadyProfile, type Sketch, type SketchArcCurve, type SketchCircleCurve, type SketchCurve, type SketchLineCurve, type SketchPlane, type SketchPoint } from "./document.ts";
 export { addSketch, askOutline, deleteCurve, drawArc, drawCircle, drawLine, drawRectangle, movePoint, planeOf, pointAt, SKETCH_STEPS, sketchCurves, sketchItem, sketchLines, sketchOutline, type LineEnd } from "./sketch.ts";
 export { clickAt, hoverTool, SKETCH_TOOLS, startTool, switchTool, toolBusy, type LineTool, type RectangleTool, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
@@ -15,7 +15,7 @@ export { designObjects, outlineProducer, registerDesign, type FeatureHandle, typ
 export { bodyReference, designReference, NAME_NOTE, profileReference, readProfileReference, resolveReference } from "./references.ts";
 export { featureNames, nameBody, outlineCurves, type BodyNames } from "./naming.ts";
 export { pickChange, type SelectionChange } from "./picking.ts";
-export { droppedNote, highlightOf, referenceLabel, selectionRows, survivors } from "./selection.ts";
+export { droppedNote, highlightOf, panelBody, referenceLabel, selectionRows, survivors } from "./selection.ts";
 export { bodyOf, joinBodies, resolveInScene, sceneHit, sceneReference, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 export { COPY_SVG, designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";
 export { rounding, snapOnSketch, SNAP_PIXELS, type Rounding, type Snap } from "./snap.ts";
