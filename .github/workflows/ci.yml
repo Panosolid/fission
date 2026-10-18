@@ -2,7 +2,7 @@ name: CI
 
 on:
   # Branches are tested by their pull request's run: a push run of the same
-  # commit would repeat kernel, app, baseline and both browsers and hold five
+  # commit would repeat kernel, app, e2e, baseline and both browsers and hold nine
   # of the account's 20 runners for nothing.
   push:
     branches: [main]
@@ -286,17 +286,54 @@ jobs:
         working-directory: apps/fission
       - run: npm run typecheck
       - run: npm run journeys
+
+  # The Chromium browser checks (`npm run e2e`), split by e2e/shard.mjs into
+  # shares that run side by side: one after another they took 15 minutes,
+  # most of the wait for a merge. Every check runs in exactly one share
+  # (e2e/shard.test.mjs, part of npm test above).
+  e2e-shard:
+    name: e2e (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+        working-directory: apps/fission
       - run: npx playwright install --with-deps chromium
         working-directory: apps/fission
-      - run: npm run e2e
+      - run: node e2e/shard.mjs ${{ matrix.shard }} 3
         working-directory: apps/fission
       # A golden image that no longer matches leaves the actual image and a diff (red where different).
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-screenshots-chromium
+          name: e2e-screenshots-chromium-${{ matrix.shard }}
           path: apps/fission/e2e/screenshots/*.*.png
           if-no-files-found: ignore
+
+  # The one check auto-merge waits for (REQUIRED_CHECKS in .github/scripts/automerge.py):
+  # green only when every share passed; a failed, cancelled or skipped share fails it.
+  e2e:
+    needs: e2e-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.e2e-shard.result }}" = success || { echo "an e2e share did not pass (${{ needs.e2e-shard.result }})"; exit 1; }
 
   # The sketch browser tests (and, reported only, the smoke test) in the other two engines
   # people use: Firefox and WebKit (Safari's engine). Pixel probes run in
