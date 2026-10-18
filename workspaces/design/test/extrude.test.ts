@@ -202,7 +202,9 @@ test("a file whose extrude breaks a rule is refused when it is opened, each with
   const cases: [(d: DesignDocument) => void, RegExp][] = [
     // Built in order, the sketch must come first.
     [(d) => d.timeline.features.reverse(), /^Error: Design feature feature-11 extrudes sketch-2, which is not a sketch before it in the timeline$/],
-    [(d) => (extrude(d).intent.parameters.sketch = "sketch-99"), /extrudes sketch-99, which is not a sketch before it/],
+    // A sketch that is gone is allowed from 24d2 (deleted: the extrude keeps its last shape, test/kept.test.ts), but the extrude must still depend on it.
+    [(d) => (extrude(d).intent.parameters.sketch = "sketch-99"), /^Error: Design feature feature-11 extrudes sketch-99 but does not depend on it$/],
+    [(d) => (extrude(d).intent.parameters.sketch = "feature-1"), /extrudes feature-1, which is not a sketch before it/],
     [(d) => (extrude(d).intent.parameters.sketch = 2), /extrudes 2, which is not a sketch before it/],
     [(d) => (extrude(d).dependsOn = []), /^Error: Design feature feature-11 extrudes sketch-2 but does not depend on it$/],
     [(d) => (extrude(d).intent.parameters.distance = "10"), /^Error: Design feature feature-11: distance 10 is not a number of mm$/],

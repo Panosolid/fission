@@ -19,13 +19,13 @@ const SEEDS = process.env.FISSION_SEED ? [BigInt(process.env.FISSION_SEED)] : Ar
 const STEPS = Number(process.env.FISSION_TIMELINE_STEPS ?? 150);
 
 /** Runs a session; on failure, the message carries the seed and the shrunk steps to save. */
-function session(make: () => TimelineSubject, seed: bigint): SessionCounts {
+async function session(make: () => TimelineSubject, seed: bigint): Promise<SessionCounts> {
   const steps = randomSession(seed, STEPS);
   try {
-    return runSession(make(), steps);
+    return await runSession(make(), steps);
   } catch (e) {
     if (!(e instanceof TimelineFailure)) throw e;
-    const shrunk = shrinkSession(make, steps);
+    const shrunk = await shrinkSession(make, steps);
     assert.fail(`seed ${seed}: ${e.message}\nminimal steps (save in test/regressions/timeline/${seed}.json):\n${JSON.stringify({ seed: String(seed), check: e.check, steps: shrunk })}`);
   }
 }
@@ -41,15 +41,15 @@ test("the comparer's tolerance: 0.9 × MATCH_REL apart matches, 1.1 × doesn't, 
   assert.equal(close(0, -0.9 * MATCH_REL), true);
 });
 
-test("the same seed gives the same steps and the same session", () => {
+test("the same seed gives the same steps and the same session", async () => {
   assert.deepEqual(randomSession(7n, 100), randomSession(7n, 100));
   assert.notDeepEqual(randomSession(7n, 100), randomSession(8n, 100));
-  assert.deepEqual(runSession(modelSubject(), randomSession(7n, 100)), runSession(modelSubject(), randomSession(7n, 100)));
+  assert.deepEqual(await runSession(modelSubject(), randomSession(7n, 100)), await runSession(modelSubject(), randomSession(7n, 100)));
 });
 
-test("seeded sessions on the model pass, and reach every kind of outcome", () => {
+test("seeded sessions on the model pass, and reach every kind of outcome", async () => {
   const total: SessionCounts = {};
-  for (const seed of SEEDS) for (const [k, v] of Object.entries(session(() => modelSubject(), seed))) total[k] = (total[k] ?? 0) + v;
+  for (const seed of SEEDS) for (const [k, v] of Object.entries(await session(() => modelSubject(), seed))) total[k] = (total[k] ?? 0) + v;
   if (process.env.FISSION_SEED) return; // one seed alone needn't reach everything
   const wanted = [
     ...["add-sketch", "add-extrude", "add-preset", "set-size", "move-corner", "delete-curve", "redraw-curve", "delete-item", "reorder", "suppress", "marker", "undo", "redo", "save-open", "hold-ref"].map((o) => `op:${o}`),
@@ -58,7 +58,10 @@ test("seeded sessions on the model pass, and reach every kind of outcome", () =>
     "refused:before-dependency",
     "refused:after-dependent",
     ...["built", "suppressed", "rolled-back", "failed"].map((s) => `status:${s}`),
-    ...["deleted-input", "suppressed-input", "open-outline", "invalid-outline"].map((c) => `cause:${c}`),
+    // The owner's rule: an extrude whose sketch is lost keeps its last shape with a warning, so a session (whose extrudes
+    // start from closed outlines) fails one only for a suppressed sketch; failing with no kept shape is hand-worked.
+    "cause:suppressed-input",
+    ...["deleted-input", "open-outline", "invalid-outline"].map((c) => `warning:${c}`),
     "ref:kept",
     "ref:missing",
     "ref:missing-on-built-feature",
@@ -87,51 +90,55 @@ const CAUGHT_BY: Record<ModelFault, string> = {
   "uprights-as-given": "the rebuild differs from the model",
   "cap-edges-swapped": "the rebuild differs from the model",
   "end-edges-named-start": "two edges share a name",
+  "lost-sketch-fails": "the rebuild differs from the model",
+  "kept-not-forgotten": "the rebuild differs from the model",
+  "save-drops-kept": "save and open changed the rebuild",
+  "warning-dropped": "the rebuild differs from the model",
 };
 
 /** The first seed whose session the planted bug fails, and how. */
-function firstFailure(make: () => TimelineSubject): { seed: bigint; failure: TimelineFailure } | null {
+async function firstFailure(make: () => TimelineSubject): Promise<{ seed: bigint; failure: TimelineFailure } | null> {
   for (const seed of Array.from({ length: 12 }, (_, k) => BigInt(k + 1))) {
-    const failure = failureOf(make, randomSession(seed, 150));
+    const failure = await failureOf(make, randomSession(seed, 150));
     if (failure) return { seed, failure };
   }
   return null;
 }
 
 for (const fault of MODEL_FAULTS)
-  test(`planted bug "${fault}" is caught: ${CAUGHT_BY[fault]}`, () => {
-    const found = firstFailure(() => modelSubject([fault]));
+  test(`planted bug "${fault}" is caught: ${CAUGHT_BY[fault]}`, async () => {
+    const found = await firstFailure(() => modelSubject([fault]));
     assert.ok(found, `no session caught ${fault}`);
     assert.equal(found.failure.check, CAUGHT_BY[fault], found.failure.message);
   });
 
-test("without a rebuild from scratch, a stale cache is still caught by the model", () => {
+test("without a rebuild from scratch, a stale cache is still caught by the model", async () => {
   const make = (): TimelineSubject => {
     const { rebuildFromScratch: _, ...rest } = modelSubject(["stale-extrude-cache"]);
     return rest;
   };
-  assert.equal(firstFailure(make)?.failure.check, "the rebuild differs from the model");
+  assert.equal((await firstFailure(make))?.failure.check, "the rebuild differs from the model");
 });
 
-test("a failing session shrinks to a list no single step can be dropped from", () => {
+test("a failing session shrinks to a list no single step can be dropped from", async () => {
   for (const fault of ["keep-redo", "cascade-delete"] as const) {
     const make = () => modelSubject([fault]);
-    const found = firstFailure(make);
+    const found = await firstFailure(make);
     assert.ok(found);
     const steps = randomSession(found.seed, 150);
-    const shrunk = shrinkSession(make, steps);
+    const shrunk = await shrinkSession(make, steps);
     assert.ok(shrunk.length <= found.failure.step + 1);
-    assert.equal(failureOf(make, shrunk)?.check, CAUGHT_BY[fault]);
-    for (let k = 0; k < shrunk.length; k++) assert.notEqual(failureOf(make, [...shrunk.slice(0, k), ...shrunk.slice(k + 1)])?.check, CAUGHT_BY[fault], `step ${k} of ${fault}'s list can go`);
+    assert.equal((await failureOf(make, shrunk))?.check, CAUGHT_BY[fault]);
+    for (let k = 0; k < shrunk.length; k++) assert.notEqual((await failureOf(make, [...shrunk.slice(0, k), ...shrunk.slice(k + 1)]))?.check, CAUGHT_BY[fault], `step ${k} of ${fault}'s list can go`);
     // And the shrunk list still passes on the model itself.
-    assert.doesNotThrow(() => runSession(modelSubject(), shrunk));
+    await assert.doesNotReject(() => runSession(modelSubject(), shrunk));
   }
 });
 
 const REGRESSIONS = new URL("./regressions/timeline/", import.meta.url);
-test("saved timeline regressions replay", { skip: !existsSync(REGRESSIONS) && "none saved yet" }, () => {
+test("saved timeline regressions replay", { skip: !existsSync(REGRESSIONS) && "none saved yet" }, async () => {
   for (const file of readdirSync(REGRESSIONS).filter((f) => f.endsWith(".json"))) {
     const saved: { seed: string; check: string; steps: SessionOp[] } = JSON.parse(readFileSync(new URL(file, REGRESSIONS), "utf8"));
-    assert.doesNotThrow(() => runSession(modelSubject(), saved.steps), file);
+    await assert.doesNotReject(() => runSession(modelSubject(), saved.steps), file);
   }
 });
