@@ -2,27 +2,39 @@
 // in the selection colour, and the properties panel's rows. Pure, so both
 // are unit-tested; workspace.ts applies them on every selection change.
 
-import type { BodyView, GeometryReference, ViewportHighlight } from "@fission/core";
+import type { GeometryReference, ViewportHighlight } from "@fission/core";
 import { profileLabel, type ReadyProfile } from "./document.ts";
-import type { BodyNames } from "./naming.ts";
 import { readDesignReference, readProfileReference, resolveReference } from "./references.ts";
+import { bodyOf, resolveInScene, type Scene } from "./scene.ts";
 
 /**
- * The viewport highlight for these items on the body `featureId` built,
- * whose faces and edges `names` names (null before one is built). Faces
- * and edges not on it, other bodies, and references not built by
- * `designReference` (a profile among them: it is not part of the body),
- * draw nothing.
+ * The viewport highlight for these items on the bodies shown (`scene`,
+ * scene.ts; null before any is built), in the joined mesh's numbering. A
+ * selected body tints its faces; every shown body selected is the whole
+ * highlight's `body`. Faces and edges no shown body has, bodies not shown,
+ * and references not built by `designReference` (a profile among them: it
+ * is not part of a body) draw nothing.
  */
-export function highlightOf(items: readonly GeometryReference[], featureId: string, names: BodyNames | null): ViewportHighlight {
+export function highlightOf(items: readonly GeometryReference[], scene: Scene | null): ViewportHighlight {
   const highlight = { body: false, faces: [] as number[], edges: [] as number[] };
+  if (scene === null) return highlight;
+  const bodies = new Set<number>();
   for (const item of items) {
     const r = readDesignReference(item);
     if (r === null) continue;
-    if (r.kind === "body") highlight.body ||= r.featureId === featureId;
-    else {
-      const i = resolveReference(item, names);
+    if (r.kind === "body") {
+      const b = bodyOf(scene, item);
+      if (b >= 0) bodies.add(b);
+    } else {
+      const i = resolveInScene(item, scene);
       if (i !== null) (r.kind === "face" ? highlight.faces : highlight.edges).push(i);
+    }
+  }
+  if (bodies.size > 0 && bodies.size === scene.bodies.length) return { ...highlight, body: true };
+  for (const b of [...bodies].sort((x, y) => x - y)) {
+    for (let f = 0; f < scene.bodies[b].view.faces; f++) {
+      const i = scene.faceStart[b] + f;
+      if (!highlight.faces.includes(i)) highlight.faces.push(i);
     }
   }
   return highlight;
@@ -59,13 +71,14 @@ export function referenceLabel(ref: GeometryReference): string {
 }
 
 /**
- * One row per selected item, in selection order. `view` and `names` are
- * the last built body's (null before the first build): a face or edge it
- * does not have, or a reference to another feature's body, says so instead
- * of a type. A profile is named from `profiles` (the document's), as the
- * browser names it, of type "outline"; one the document no longer has says so.
+ * One row per selected item, in selection order, from the bodies shown
+ * (`scene`, null before the first build): a body is "Body n" by its place
+ * in build order; a face or edge no shown body has, or a body not shown,
+ * says so instead of a type. A profile is named from `profiles` (the
+ * document's), as the browser names it, of type "outline"; one the
+ * document no longer has says so.
  */
-export function selectionRows(items: readonly GeometryReference[], featureId: string, view: BodyView | null, names: BodyNames | null, profiles: readonly ReadyProfile[] = []): SelectionRow[] {
+export function selectionRows(items: readonly GeometryReference[], scene: Scene | null, profiles: readonly ReadyProfile[] = []): SelectionRow[] {
   return items.map((item) => {
     if (item.kind === "outline") {
       const profile = profiles.find((p) => p.id === readProfileReference(item));
@@ -73,26 +86,28 @@ export function selectionRows(items: readonly GeometryReference[], featureId: st
     }
     const r = readDesignReference(item);
     if (!r) return { name: referenceLabel(item), type: NOT_ON_BODY, id: item.id };
-    if (r.kind === "body") return { name: "Body 1", type: r.featureId === featureId ? "solid" : NOT_ON_BODY, id: item.id };
-    const i = resolveReference(item, names);
-    const types = r.kind === "face" ? view?.face_types : view?.edge_types;
+    const b = scene === null ? -1 : bodyOf(scene, item);
+    if (r.kind === "body") return b >= 0 ? { name: `Body ${b + 1}`, type: "solid", id: item.id } : { name: "Body", type: scene ? NOT_ON_BODY : "…", id: item.id };
+    const shown = b >= 0 ? scene!.bodies[b] : undefined;
+    const i = shown ? resolveReference(item, shown.names) : null;
+    const types = r.kind === "face" ? shown?.view.face_types : shown?.view.edge_types;
     const type = i !== null && types ? types[i] : undefined;
-    return { name: referenceLabel(item), type: type ?? (view ? NOT_ON_BODY : "…"), id: item.id };
+    return { name: referenceLabel(item), type: type ?? (scene ? NOT_ON_BODY : "…"), id: item.id };
   });
 }
 
 /**
  * What survives a rebuild (17e, by name from step 24c): a face or edge of
- * the rebuilt body's feature is kept while the new body has a face or
- * edge of that name, whatever the kernel now numbers it (a resize, a corner
- * moved, the outline walked from another line), and dropped when its face
- * is gone (its sketch curve deleted, a box turned into a cylinder, which
- * has no front). Body references stay; references this function cannot
- * read, or to another feature, are left alone (not Design's to judge here).
- * A profile (an outline reference Design built) is kept while `profileIds`
- * has it: a change to a shape with no profile, a box, drops it.
+ * a shown body is kept while that body has a face or edge of that name,
+ * whatever the kernel now numbers it (a resize, a corner moved, the
+ * outline walked from another line), and dropped when its face is gone
+ * (its sketch curve deleted, a box turned into a cylinder, which has no
+ * front). Body references stay; references this function cannot read, or
+ * to a feature with no body shown, are left alone (not Design's to judge
+ * here). A profile (an outline reference Design built) is kept while
+ * `profileIds` has it: a change to a shape with no profile, a box, drops it.
  */
-export function survivors(items: readonly GeometryReference[], names: BodyNames, profileIds: readonly string[] = []): { kept: GeometryReference[]; dropped: GeometryReference[] } {
+export function survivors(items: readonly GeometryReference[], scene: Scene, profileIds: readonly string[] = []): { kept: GeometryReference[]; dropped: GeometryReference[] } {
   const kept: GeometryReference[] = [];
   const dropped: GeometryReference[] = [];
   for (const item of items) {
@@ -100,7 +115,7 @@ export function survivors(items: readonly GeometryReference[], names: BodyNames,
     let keep = true;
     const profile = readProfileReference(item);
     if (profile !== null) keep = profileIds.includes(profile);
-    else if (r && r.featureId === names.feature && r.kind !== "body") keep = resolveReference(item, names) !== null;
+    else if (r && r.kind !== "body" && bodyOf(scene, item) >= 0) keep = resolveInScene(item, scene) !== null;
     (keep ? kept : dropped).push(item);
   }
   return { kept, dropped };

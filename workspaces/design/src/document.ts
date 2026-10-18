@@ -293,7 +293,8 @@ export function shapeOf(document: DesignDocument, f: Feature): { shape: PartKind
       if (isSketchExtrude(f)) return { shape: "sketch-extrude", sizes: { height: num(f, "distance") } };
       const profile = document.profiles.find((x) => x.id === f.intent.parameters.profile);
       if (!profile) throw new Error(`${f.intent.summary}: its profile ${shown(f.intent.parameters.profile)} is missing`);
-      if (!Object.hasOwn(profileNames, profile.kind)) throw new Error(`profile ${profile.id} has an unknown kind ${shown(profile.kind)}`);
+      // A kind that isn't text never reaches Object.hasOwn, which would turn it into text (issue #139).
+      if (typeof profile.kind !== "string" || !Object.hasOwn(profileNames, profile.kind)) throw new Error(`profile ${profile.id} has an unknown kind ${shown(profile.kind)}`);
       if (typeof profile.width !== "number" || typeof profile.depth !== "number") throw new Error(`profile ${profile.id}: width and depth must be numbers`);
       return { shape: profile.kind, sizes: { width: profile.width, depth: profile.depth, height: num(f, "distance") } };
     }
@@ -471,6 +472,8 @@ export function readDesignDocument(data: unknown): DesignDocument {
     const n = idNumber(id);
     if (n !== null && n >= d.nextId!) throw new Error(`Design data's nextId ${d.nextId} is not above ${id}, so a new id could repeat it`);
   }
+  // Every solid feature is its own body (24d1), so each one's sizes or profile are checked, not only the part's.
+  for (const f of d.timeline.features) if (!isSketchItem(f)) shapeOf(d as DesignDocument, f);
   partOf(d as DesignDocument);
   return d as DesignDocument;
 }
