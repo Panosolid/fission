@@ -170,7 +170,7 @@ function useGraph(graph: DependencyGraph, notes: ChangeNotes) {
 useGraph(ctx.graph, ctx.changeNotes);
 // For the browser test only (?test-hooks): the graph and notes, so it can
 // stand in a result in another workspace before any workspace makes one;
-// the main view's camera, to check navigation (SF3a).
+// the main view's camera, to check navigation (SF3a); how many bodies the kernel holds (the monkey tester's leak check).
 if (new URLSearchParams(location.search).has("test-hooks"))
   Object.assign(window, {
     fissionTest: {
@@ -181,6 +181,7 @@ if (new URLSearchParams(location.search).has("test-hooks"))
         return ctx.changeNotes;
       },
       camera: () => viewer.main.cameraPose(),
+      bodyCount: () => kernel.call("body_count"),
     },
   });
 
