@@ -20,7 +20,12 @@
 // - every face reference held earlier resolves to the face with that name
 //   when the model still has it, and to nothing when it doesn't, never to
 //   another face;
-// - saving and opening changes neither the rebuild nor the saved text.
+// - saving and opening changes neither the rebuild nor the saved text;
+// - when the subject counts the bodies its rebuild builds (`builds`, step
+//   24e), the first rebuild after each step builds no fewer than the bodies
+//   whose solid the last rebuild didn't hold and no more than those whose
+//   inputs it didn't (`buildBounds`): an edit rebuilds what it changed and
+//   nothing else.
 // The model itself runs as a subject (`modelSubject`), with bugs planted
 // through `faults` to show each check can fail; from 24d2 Design's real
 // timeline on the real kernel runs too (journeys/timeline.journey.ts), so a
@@ -29,6 +34,8 @@
 import { seeded, type SeededRandom } from "./index.ts";
 import {
   applyOp,
+  bodyKeys,
+  buildBounds,
   createModel,
   dependsOn,
   edgeKey,
@@ -90,6 +97,12 @@ export interface TimelineSubject {
   open(text: string): Maybe<void | "nothing built">;
   /** The name of the face this name resolves to now, or null when it resolves to none. */
   resolve(name: FaceName): Maybe<FaceName | null>;
+  /**
+   * How many bodies `rebuild` has built so far (step 24e), when it keeps
+   * them between rebuilds; a rebuild from scratch doesn't count. Leave it
+   * out when there is nothing to count.
+   */
+  builds?(): Maybe<number>;
 }
 
 /** How the harness compares edges with the model's: to MATCH_REL unless the subject measures them on the display mesh (`edgeMatches` in the journeys). */
@@ -432,6 +445,8 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
   const count = (k: string) => (counts[k] = (counts[k] ?? 0) + 1);
   let refs: FaceName[] = [];
   let prev: Rebuild = await subject.rebuild();
+  let held = [...bodyKeys(model.doc, rebuild(model.doc)).values()];
+  let built = subject.builds ? await subject.builds() : 0;
 
   for (const [i, step] of steps.entries()) {
     const fail = (check: string, detail: string): never => {
@@ -489,6 +504,7 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
     }
 
     const now = await subject.rebuild();
+    const builtNow = subject.builds ? (await subject.builds()) - built : 0;
     const names = now.order.flatMap((id) => {
       const r = now.results[id];
       return r.status === "built" && r.body ? r.body.faces.map((f) => faceKey(f.name)) : [];
@@ -530,6 +546,16 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
       const owner = expected.results[ref.feature];
       count(there ? "ref:kept" : owner?.status === "built" ? "ref:missing-on-built-feature" : "ref:missing");
     }
+
+    const keys = [...bodyKeys(model.doc, expected).values()];
+    if (subject.builds) {
+      const { least, most } = buildBounds(held, keys);
+      if (builtNow > most) fail("an edit rebuilt bodies that didn't change", `${builtNow} bodies built, at most ${most} changed`);
+      if (builtNow < least) fail("an edit kept a body whose shape changed", `${builtNow} bodies built, ${least} new shapes`);
+      count(builtNow === 0 ? "builds:none" : builtNow === most ? "builds:most" : "builds:some");
+      built = await subject.builds();
+    }
+    held = keys;
 
     for (const id of expected.order) {
       const r = expected.results[id];
@@ -591,6 +617,18 @@ export function modelSubject(faults: Iterable<ModelFault> = []): TimelineSubject
   const cache = new Map<string, ItemResult>();
   let calls = 0;
   let saves = 0;
+  // Bodies "built": the model's own cache of what each body is built from, as Design's BodyCache keeps them by spec.
+  let builds = 0;
+  let holding = new Map<string, string>();
+  const count = (r: Rebuild) => {
+    const keys = bodyKeys(m.doc, r);
+    // Planted bug ("body-kept-by-item"): bodies kept by item id, so a changed item keeps its old body.
+    const key = (id: string, k: { spec: string }) => (fs.has("body-kept-by-item") ? id : k.spec);
+    const now = new Map([...keys].map(([id, k]) => [key(id, k), id]));
+    // Planted bug ("full-replay"): the cache emptied before every rebuild.
+    for (const k of now.keys()) if (fs.has("full-replay") || !holding.has(k)) builds++;
+    holding = now;
+  };
   const now = (): Rebuild => {
     const r = rebuild(m.doc, fs);
     // Planted bug: every other rebuild's volumes off by a thousandth (state kept between rebuilds).
@@ -611,7 +649,12 @@ export function modelSubject(faults: Iterable<ModelFault> = []): TimelineSubject
   };
   return {
     apply: (op) => applyOp(m, op),
-    rebuild: now,
+    rebuild() {
+      const r = now();
+      count(rebuild(m.doc));
+      return r;
+    },
+    builds: () => builds,
     rebuildFromScratch: () => rebuild(m.doc, fs),
     save() {
       const doc: ModelDoc = JSON.parse(JSON.stringify(m.doc));

@@ -65,6 +65,10 @@ test("seeded sessions on the model pass, and reach every kind of outcome", async
     "ref:kept",
     "ref:missing",
     "ref:missing-on-built-feature",
+    // Step 24e: edits that build nothing (suppress, the marker, a lost sketch kept) and edits that build every changed body
+    // (the model's own cache builds exactly the changed ones, so never "builds:some").
+    "builds:none",
+    "builds:most",
   ];
   const missing = wanted.filter((k) => !total[k]);
   assert.deepEqual(missing, [], `never reached: ${missing.join(", ")}`);
@@ -94,6 +98,8 @@ const CAUGHT_BY: Record<ModelFault, string> = {
   "kept-not-forgotten": "the rebuild differs from the model",
   "save-drops-kept": "save and open changed the rebuild",
   "warning-dropped": "the rebuild differs from the model",
+  "full-replay": "an edit rebuilt bodies that didn't change",
+  "body-kept-by-item": "an edit kept a body whose shape changed",
 };
 
 /** The first seed whose session the planted bug fails, and how. */
