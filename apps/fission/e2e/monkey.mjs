@@ -316,7 +316,9 @@ async function act(s, a) {
       const before = await save(s);
       await page.waitForTimeout(800); // the store writes after a change; a user closing the tab at once is another matter
       await page.reload(); // to the workspace on screen (its #link), so the timeline may not be there
-      await page.waitForFunction(() => /kernel v/.test(document.getElementById("version")?.textContent ?? ""), null, { timeout: 20000 });
+      // Ready means the last project is open again, not just the kernel: Save before that writes a file without the design (a bug of its own, found by seed 124 under load, reproduced with the CPU slowed 8×).
+      await page.waitForFunction(() => /kernel v/.test(document.getElementById("version")?.textContent ?? "") && (location.hash !== "#design" || document.querySelector("#timeline li[data-item]") !== null), null, { timeout: 20000 });
+      if (!(await page.evaluate(() => location.hash === "#design"))) await page.waitForTimeout(1500);
       await settle(page);
       same("a reload brings the project back", before, await save(s));
       return true;
