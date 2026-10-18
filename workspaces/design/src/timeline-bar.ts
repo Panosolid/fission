@@ -11,6 +11,7 @@
 
 import { buildingItems, type DesignDocument } from "./document.ts";
 import { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS } from "./timeline-edits.ts";
+import { dragItem } from "./timeline-reorder.ts";
 
 export type TimelineIcon = "sketch" | "extrude" | "box" | "cylinder" | "sphere" | "feature";
 
@@ -294,6 +295,20 @@ export function barEdges(list: HTMLElement): ItemEdges[] {
 }
 
 /**
+ * The click that follows a drag's release is not a click on whatever is
+ * under the pointer now: stopped, until the next press or the end of this
+ * task, whichever comes first (the marker's drag, 24f5, and an item's, 24f6).
+ */
+export function swallowClick(list: HTMLElement) {
+  const view = list.ownerDocument.defaultView;
+  const swallow = (c: Event) => c.stopPropagation();
+  const done = () => view?.removeEventListener("click", swallow, { capture: true });
+  view?.addEventListener("click", swallow, { capture: true, once: true });
+  view?.addEventListener("pointerdown", done, { capture: true, once: true });
+  view?.setTimeout(done, 0);
+}
+
+/**
  * The marker dragged (24f5): a press on it that moves DRAG_PIXELS or more
  * follows the pointer, the marker standing where it would drop (`dropIndex`
  * on the items' edges as they are now) and the items after it greyed; let
@@ -330,14 +345,7 @@ function dragMarker(list: HTMLElement, marker: HTMLElement, act: (a: BarAction) 
       list.removeEventListener("pointercancel", stop);
       delete list.dataset.dragging;
       if (place === null) return;
-      // The click that follows a drag's release is not a click on whatever is under the pointer now:
-      // stopped, until the next press or the end of this task, whichever comes first.
-      const view = list.ownerDocument.defaultView;
-      const swallow = (c: Event) => c.stopPropagation();
-      const done = () => view?.removeEventListener("click", swallow, { capture: true });
-      view?.addEventListener("click", swallow, { capture: true, once: true });
-      view?.addEventListener("pointerdown", done, { capture: true, once: true });
-      view?.setTimeout(done, 0);
+      swallowClick(list);
       if (e.type === "pointerup") act({ kind: "marker", place });
       else cancel();
     };
@@ -353,7 +361,7 @@ export interface BarWiring {
   picked?: string | null;
   /** The sketch being edited (24f5): a playback button that would put it after the marker is off and says why. */
   editing?: string | null;
-  /** A playback button, the marker dropped after a drag, or a tap between items on a touch screen (24f5): the bar redraws itself when this records nothing. */
+  /** A playback button, the marker dropped after a drag, a tap between items on a touch screen (24f5), or an item dropped after a drag (24f6): the bar redraws itself when this records nothing. */
   onAction?(a: BarAction): void;
   /** A click or tap on an item: it is picked and its ⋯ shows (a phone's way to the menu). */
   onPick?(id: string): void;
@@ -372,6 +380,8 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
   const { items, marker } = timelineBarItems(doc, wiring.failed);
   const list = document.createElement("ol");
   list.className = "timeline-bar";
+  // The row of the playback buttons and this list, made here so an item's drag can show where it would drop above both (24f6).
+  const row = document.createElement("div");
   list.setAttribute("aria-label", "Timeline");
   // 24f5: every action goes to the app; one that records nothing (already there, or refused) leaves this
   // bar in place, perhaps with a drag's marker moved, so it is drawn again from the document.
@@ -411,6 +421,9 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
     li.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") wiring.onPick?.(item.id);
     });
+    // 24f6: dragged to a new place; a finger drags it once it is picked (a tap), and scrolls the row elsewhere.
+    if (wiring.picked === item.id) li.classList.add("timeline-reorder-picked");
+    dragItem(row, list, li, { doc, id: item.id, editing: wiring.editing ?? null, picked: wiring.picked === item.id, act, cancel: () => showTimelineBar(slot, doc, wiring) });
     li.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[item.icon]}</svg>`;
     const name = document.createElement("span");
     name.className = "timeline-bar-name";
@@ -473,8 +486,7 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
     button.addEventListener("click", () => act({ kind: "button", button: b.button }));
     buttons.append(button);
   }
-  const row = document.createElement("div");
-  row.className = "timeline-marker";
+  row.className = "timeline-marker timeline-reorder";
   row.append(buttons, list);
   slot.replaceChildren(row);
 }
