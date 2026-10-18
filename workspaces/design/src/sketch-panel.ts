@@ -28,9 +28,9 @@ export const TOOL_HELP: Record<ToolKind, string> = {
   line: "Click to place points: each click draws a line from the last one. Click the first point to close the shape. Escape ends the line.",
   rectangle: "Click one corner, then the opposite corner: four lines. Escape drops the first corner.",
   circle: "Click the centre, then a point on the circle. Escape drops the centre.",
-  arc: "Click the start, then the end, then a point the arc passes through. Escape drops the ends.",
-  centre: "Click the centre, then the start, then where the arc ends: it goes round the way you move the pointer, past half a turn if you go that far. Escape drops the centre and start.",
-  tangent: "Click the end of a line or arc, then where the arc ends: it leaves the line smoothly, and the next click carries on from its end. Escape ends it.",
+  arc: "Click the start, then the end, then a point the arc passes through. For the end you can type its length and angle from the start. Escape drops the ends.",
+  centre: "Click the centre, then the start, then where the arc ends: it goes round the way you move the pointer, past half a turn if you go that far. You can type the radius and angle for the start, and how far round the arc goes for the end. Escape drops the centre and start.",
+  tangent: "Click the end of a line or arc, then where the arc ends: it leaves the line smoothly, and the next click carries on from its end. You can type the end's length and angle from the start. Escape ends it.",
 };
 
 export interface SketchPanel {

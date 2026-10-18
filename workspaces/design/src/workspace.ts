@@ -27,8 +27,9 @@ import { droppedNote, highlightOf, panelBody, selectionRows, survivors } from ".
 import { joinBodies, shownBodies, type Scene } from "./scene.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
-import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, type Locks } from "./typed-entry.ts";
+import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, withLocks, type Locks } from "./typed-entry.ts";
 import { typedBoxes } from "./typed-boxes.ts";
+import { hintOf, pointerHint } from "./pointer-hint.ts";
 import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
@@ -567,6 +568,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     enter: () => placeTyped(),
     escape: () => ((locks = {}), drawSketches()),
   });
+  /** What the next click places, by the pointer ("Specify next point"). */
+  const hint = pointerHint(viewport.element);
   /** Empties the boxes: a point placed, the tool changed or ended, the sketch left. */
   function unlock(keepFocus = false) {
     locks = {};
@@ -588,11 +591,14 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // With a size typed the preview goes where the locks put it, and the snap marks (which the locks overrule) are left out.
     const locked = Object.keys(locks).length > 0;
     const aim = editing && aimOf(doc, editing.tool, editing.pointer, locks);
-    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, pointer: aim, gridSnap }), locked ? null : (editing?.snap ?? null), editing?.pixel));
+    // A typed arc angle goes the pointer's way round however little it went (typed-entry.ts withLocks): the preview from the tool the click will use.
+    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, tool: withLocks(editing.tool, locks, editing.pointer), pointer: aim, gridSnap }), locked ? null : (editing?.snap ?? null), editing?.pixel));
     const anchor = editing && anchorOf(doc, editing.tool);
-    if (!editing) return typed.hide();
+    if (!editing) return (typed.hide(), hint.hide());
     const width = viewport.element.clientWidth;
     typed.show(typedFields(editing.tool), anchor && aim ? liveValues(anchor, aim, editing.tool) : {}, Math.min(screen.x, Math.max(0, width - 200)), screen.y);
+    if (editing.pointer) hint.show(hintOf(editing.tool), Math.min(screen.x, Math.max(0, width - 200)), screen.y);
+    else hint.hide();
   }
 
   /**
@@ -858,7 +864,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const aim = aimOf(designDoc(), mode.tool, snapped, locks);
       if (!aim) return sketchBox.showError(NO_AIM);
       const before = designDoc();
-      const done = clickAt(before, mode.tool, aim);
+      const done = clickAt(before, withLocks(mode.tool, locks, snapped), aim);
       // The owner's rule (rebuild.ts): an extrude whose sketch this edit breaks keeps the sketch as it was, in the same undo step.
       let next = done.doc;
       if (done.drew) {
@@ -891,7 +897,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!aim) return sketchBox.showError(NO_AIM);
       const changes = toolChanges;
       const before = designDoc();
-      const done = clickAt(before, mode.tool, aim);
+      const done = clickAt(before, withLocks(mode.tool, locks, mode.pointer), aim);
       // As a click: an extrude whose sketch this breaks keeps the sketch as it was (rebuild.ts), in the same undo step.
       let next = done.doc;
       if (done.drew) {
@@ -951,6 +957,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.element.removeEventListener("pointermove", onViewportMove);
     viewport.element.removeEventListener("pointerdown", onViewportMove);
     typed.hide();
+    hint.hide();
     sketchBar.closeMenu();
     // Asleep, the sketches stay drawn as finished ones: no grid, no planes to pick.
     viewport.showPlanes([]);
@@ -1016,6 +1023,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       void bodies.clear();
       viewport.showSketches([]);
       typed.element.remove();
+      hint.element.remove();
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties, ctx.timeline]) slot?.replaceChildren();
     },
   };
