@@ -7,7 +7,7 @@
 // this same producer, so there is no sketch-only path.
 
 import type { KernelCalls, Outline, Plane, Producible, Producer, RepresentationRegistry } from "@fission/core";
-import { lastFeature, type DesignDocument, type SketchPlane } from "./document.ts";
+import { partFeature, type DesignDocument, type SketchPlane } from "./document.ts";
 import { featureSpec } from "./extrude.ts";
 import { outline } from "./profiles.ts";
 import { planeOf, sketchItem, sketchOutline } from "./sketch.ts";
@@ -34,7 +34,7 @@ export interface FeatureHandle extends Producible {
 /**
  * Design's objects that other workspaces can take: each profile, each
  * sketch (its outline found by `kernel` when asked for, never stored) and
- * the part's solid feature.
+ * the part's solid feature (none for a design with no body, 24f4).
  */
 export function designObjects(document: DesignDocument, kernel: KernelCalls): (OutlineSource | FeatureHandle)[] {
   const profiles: OutlineSource[] = document.profiles.map((p) => ({
@@ -49,7 +49,10 @@ export function designObjects(document: DesignDocument, kernel: KernelCalls): (O
     plane: planeOf(sketchItem(document, s.id).intent.parameters.plane as SketchPlane),
     outline: () => sketchOutline(kernel, document, s.id),
   }));
-  return [...profiles, ...sketches, { type: "design.feature", id: lastFeature(document).id, document }];
+  // A design with no body (24f4) offers no solid.
+  const part = partFeature(document);
+  const solid: FeatureHandle[] = part === null ? [] : [{ type: "design.feature", id: part.id, document }];
+  return [...profiles, ...sketches, ...solid];
 }
 
 /** Says what Design produces. `kernel` builds meshes. */

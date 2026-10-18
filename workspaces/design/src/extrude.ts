@@ -11,7 +11,7 @@
 // them: it is added to the timeline at the marker and replaces nothing.
 
 import type { BodySpec, Feature, KernelCalls } from "@fission/core";
-import { insertAt, insertItem, isSketchExtrude, lastFeature, shown, specOf, type DesignDocument } from "./document.ts";
+import { insertAt, insertItem, isSketchExtrude, partFeature, shown, specOf, type DesignDocument } from "./document.ts";
 import { extrudeSpec } from "./rebuild.ts";
 import { sketchItem } from "./sketch.ts";
 
@@ -54,10 +54,10 @@ export function extrudeSketch(doc: DesignDocument, sketchId: string, distance: n
   return { id, doc: { ...doc, nextId: doc.nextId + 1, timeline: insertItem(doc, feature) } };
 }
 
-/** The document with an extrude of a sketch (the part, `lastFeature`, unless `id` names another) going `distance` mm instead. */
+/** The document with an extrude of a sketch (the part, `partFeature`, unless `id` names another) going `distance` mm instead. */
 export function setExtrudeDistance(doc: DesignDocument, distance: number, id?: string): DesignDocument {
-  const old = id === undefined ? lastFeature(doc) : doc.timeline.features.find((f) => f.id === id);
-  if (!old) throw new Error(`there is no feature ${shown(id)} in the design`);
+  const old = id === undefined ? partFeature(doc) : doc.timeline.features.find((f) => f.id === id);
+  if (!old) throw new Error(id === undefined ? "the design has no body to change the distance of" : `there is no feature ${shown(id)} in the design`);
   if (!isSketchExtrude(old)) throw new Error(`${old.intent.summary} is not an extrude of a sketch`);
   // Its sketch may be gone (deleted: the extrude keeps its last shape, 24d2); its summary then names it as the extrude remembers it.
   const sketchId = old.intent.parameters.sketch as string;

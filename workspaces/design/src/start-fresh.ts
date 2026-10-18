@@ -1,8 +1,8 @@
 // Start fresh: the design cleared back to the one a new project opens with,
 // as one undo step, after asking. Every sketch, feature, profile and kept
 // shape goes; what is left is the starting box (the panel's default sizes),
-// since Design always shows a part until it can show a design with no body
-// (a file with nothing built is still refused, docs/progress/cad.md 24e).
+// the design a new project opens with (a design with no body opens too
+// from 24f4, but a fresh start gives the same start as a new project).
 // The workspace runs it from the toolbar's Start fresh button (workspace.ts);
 // the dialog asks first, says what goes, and that Undo brings it back.
 // Styles: src/styles/start-fresh.css.

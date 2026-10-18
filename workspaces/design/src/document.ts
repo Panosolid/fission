@@ -5,9 +5,10 @@
 // until booleans join them), presets are ordinary features with ids from
 // the counter, and the rollback marker is saved with the timeline. A new
 // item goes in just after the marker and the marker moves onto it, the
-// model's rule (packages/testing/src/timeline-model.ts). Until 24d2 and
-// 24d3 rebuild and draw every body, the app builds and shows one: the last
-// solid feature that builds (`lastFeature`). Each body is built from its
+// model's rule (packages/testing/src/timeline-model.ts). The part the
+// panel edits is the last solid feature that builds (`partFeature`), or
+// none: a design with no body (24f4) is one like any other, shown as an
+// empty view. Each body is built from its
 // feature's intent (specOf), so the intent is the source of truth, not a
 // description written next to the geometry.
 
@@ -212,14 +213,15 @@ export function changePreset(doc: DesignDocument, id: string, kind: ShapeKind, w
 
 /**
  * The document after the panel or set_part asks for this shape and these
- * sizes: the part (`lastFeature`) changed in place when it is a preset,
- * else (an extrude of a sketch) a new preset feature put in at the marker,
- * so nothing already in the timeline is replaced. The counter never goes back.
+ * sizes: the part (`partFeature`) changed in place when it is a preset,
+ * else (an extrude of a sketch, or no part at all: 24f4) a new preset
+ * feature put in at the marker, so nothing already in the timeline is
+ * replaced. The counter never goes back.
  */
 export function withPart(previous: DesignDocument | null | undefined, kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
   if (!previous) return partDocument(kind, w, d, h);
-  const part = lastFeature(previous);
-  return isSketchExtrude(part) ? insertPreset(previous, kind, w, d, h).doc : changePreset(previous, part.id, kind, w, d, h);
+  const part = partFeature(previous);
+  return part === null || isSketchExtrude(part) ? insertPreset(previous, kind, w, d, h).doc : changePreset(previous, part.id, kind, w, d, h);
 }
 
 /**
@@ -274,11 +276,15 @@ export type PartSizes = Partial<Record<"width" | "depth" | "height", number>>;
 export type PartKind = ShapeKind | "sketch-extrude";
 
 /**
- * The shape and sizes the part (`lastFeature`) was made from: the inverse
- * of partDocument, for the panel showing a loaded part. Throws a clear
- * message for a feature the panel can't show.
+ * The shape and sizes the part (`partFeature`) was made from: the inverse
+ * of partDocument, for the panel showing a loaded part; null when the
+ * design has no body (24f4). Throws a clear message for a feature the
+ * panel can't show.
  */
-export const partOf = (document: DesignDocument): { shape: PartKind; sizes: PartSizes } => shapeOf(document, lastFeature(document));
+export function partOf(document: DesignDocument): { shape: PartKind; sizes: PartSizes } | null {
+  const part = partFeature(document);
+  return part === null ? null : shapeOf(document, part);
+}
 
 /** The shape and sizes a solid feature was made from (presetFeature's inverse; an extrude of a sketch has its distance). */
 export function shapeOf(document: DesignDocument, f: Feature): { shape: PartKind; sizes: PartSizes } {
@@ -409,8 +415,8 @@ export function readDesignDocument(data: unknown): DesignDocument {
   const v2 = data.version === 1 ? migrateDesignV1(data) : data;
   const d = (v2.version === 2 ? migrateDesignV2(v2) : v2) as Partial<DesignDocument>;
   if (d.version !== 3) throw new Error(`Design data version ${shown(d.version)} is not one this Panoshape reads (1, 2 or 3)`);
-  if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features) || d.timeline.features.length === 0)
-    throw new Error("Design data has no timeline");
+  // An empty timeline is an empty design (24f4: everything deleted), shown with no body.
+  if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features)) throw new Error("Design data has no timeline");
   if (!Array.isArray(d.sketches)) throw new Error("Design data has no sketches list");
   if (!Number.isSafeInteger(d.nextId) || d.nextId! < 1) throw new Error(`Design data's nextId ${shown(d.nextId)} is not a counting number`);
   for (const [i, profile] of d.profiles.entries())
@@ -473,8 +479,8 @@ export function readDesignDocument(data: unknown): DesignDocument {
     if (n !== null && n >= d.nextId!) throw new Error(`Design data's nextId ${d.nextId} is not above ${id}, so a new id could repeat it`);
   }
   // Every solid feature is its own body (24d1), so each one's sizes or profile are checked, not only the part's.
+  // Whether any of them builds doesn't matter: a design with no body opens as one (24f4).
   for (const f of d.timeline.features) if (!isSketchItem(f)) shapeOf(d as DesignDocument, f);
-  partOf(d as DesignDocument);
   return d as DesignDocument;
 }
 
@@ -497,14 +503,20 @@ export function builds(document: DesignDocument, f: Feature): boolean {
 }
 
 /**
- * The part the app builds and shows until every body is drawn (24d3): the
- * last solid feature that builds. Every solid feature is its own body in
- * the data from version 3.
+ * The part the panel edits: the last solid feature that builds, or null
+ * when none does (24f4: the marker at the start, every solid suppressed,
+ * rolled back or deleted, or only sketches left). Every solid feature is
+ * its own body in the data from version 3.
  */
+export function partFeature(document: DesignDocument): Feature | null {
+  const { features } = document.timeline;
+  for (let i = features.length - 1; i >= 0; i--) if (!isSketchItem(features[i]) && builds(document, features[i])) return features[i];
+  return null;
+}
+
+/** The part (`partFeature`) where one is needed (a test's or a command's build); throws when the design has no body. */
 export function lastFeature(document: DesignDocument): Feature {
-  const solids = document.timeline.features.filter((x) => !isSketchItem(x));
-  if (solids.length === 0) throw new Error("Design data has no part: every timeline item is a sketch");
-  const f = [...solids].reverse().find((x) => builds(document, x));
-  if (!f) throw new Error("Design data builds no body: every solid feature is suppressed or after the rollback marker, and this Panoshape can't show a design with no body yet");
+  const f = partFeature(document);
+  if (!f) throw new Error("Design builds no body: every solid feature is suppressed, rolled back or deleted");
   return f;
 }
