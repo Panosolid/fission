@@ -261,6 +261,38 @@ try {
     assert.equal(await chapter(page), "mesh");
   });
 
+  await check("Licences beside Close opens the third-party notices in a new tab: every shipped package, with its licence text", async () => {
+    // licences.mjs lists them and its tests check the lists; here the built
+    // app serves the file the link names. three's MIT text names its
+    // authors; glam ships as MIT; unicode-ident's Unicode licence is the
+    // AND half that once went missing; tslib is copied inside web-llm.
+    const page = await fresh({ query: "?guide" });
+    await page.waitForSelector("dialog.guide[open][data-frames]");
+    const link = await page.$eval(".guide-licences", (a) => ({ box: a.getBoundingClientRect().toJSON(), close: document.querySelector(".guide-close").getBoundingClientRect().toJSON(), rel: a.rel, target: a.target }));
+    assert.ok(link.box.width > 0 && link.box.right <= link.close.left && link.box.top >= 0, `Licences sits left of Close: ${JSON.stringify(link)}`);
+    assert.deepEqual([link.rel, link.target], ["noopener", "_blank"]);
+    const [notices] = await Promise.all([page.context().waitForEvent("page"), page.click(".guide-licences")]);
+    await notices.waitForLoadState();
+    assert.equal(new URL(notices.url()).pathname, "/third-party-licences.txt");
+    const text = await notices.evaluate(() => document.body.innerText);
+    await notices.close();
+    assert.match(text, /^Third-party licences for Panoshape/);
+    for (const line of [/\nthree 0\.\d+\.\d+: MIT\n/, /three\.js authors/, /\n@mlc-ai\/web-llm [\d.]+: Apache-2\.0\n/, /\nglam [\d.]+: MIT \(offered as MIT OR Apache-2\.0\)\n/, /UNICODE LICENSE V3/, /\ntslib \(TypeScript's helpers\), inside @mlc-ai\/web-llm: 0BSD\n/]) assert.match(text, line);
+    const response = await page.request.get(`${url}third-party-licences.txt`);
+    assert.equal(response.status(), 200);
+    assert.match(response.headers()["content-type"], /^text\/plain/);
+    // The guide stays open behind the new tab.
+    assert.ok(await page.$("dialog.guide[open]"));
+  });
+
+  await check("375 px: Licences and Close both fit in the guide's bar", async () => {
+    const page = await fresh({ width: 375, height: 740, touch: true, query: "?guide" });
+    await page.waitForSelector("dialog.guide[open][data-frames]");
+    const [title, link, close] = await page.$$eval(".guide-title, .guide-licences, .guide-close", (els) => els.map((e) => e.getBoundingClientRect().toJSON()));
+    assert.ok(title.right <= link.left && link.right <= close.left && close.right <= 375, `${JSON.stringify({ title, link, close })}`);
+    assert.ok(link.height >= 13 && Math.abs((link.top + link.bottom) / 2 - (close.top + close.bottom) / 2) < 4, "on Close's line");
+  });
+
   await check("375 px with taps: Guide is in Menu, nothing spills sideways, Next walks every chapter, Close returns", async () => {
     const page = await fresh({ width: 375, height: 740, touch: true });
     await page.tap("#menu-toggle");
