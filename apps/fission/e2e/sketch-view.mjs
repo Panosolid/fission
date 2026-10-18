@@ -119,7 +119,12 @@ async function probeSketchView(page, what) {
   }
   for (const y of [20, -4]) {
     const p = screenPoint(box, [0, y]);
-    assert.ok(greenest(await pixels(page, p, 7, 1)) > 50, `${what}: no green y axis at (0, ${y})`);
+    if (greenest(await pixels(page, p, 7, 1)) <= 50) {
+      // Where the green line is instead, across 121 px of that row, so a failure says how far off it is.
+      const row = await pixels(page, p, 121, 1);
+      const greens = row.flatMap(([r, g, b], i) => (g - Math.max(r, b) > 50 ? [i - 60] : []));
+      assert.fail(`${what}: no green y axis at (0, ${y}); green at ${JSON.stringify(greens)} px from there; row ${JSON.stringify(row.filter((_, i) => i % 10 === 0))}`);
+    }
   }
   // Half way between two axes, nowhere near an axis: neither colour.
   const off = screenPoint(box, [25.5, 18.5]);
