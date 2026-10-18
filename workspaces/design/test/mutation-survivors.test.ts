@@ -5,7 +5,7 @@
 // listed, with the reason, in packages/testing/stryker/explained.json.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { idNumber, partDocument, readDesignDocument } from "../src/document.ts";
+import { idNumber, partDocument, readDesignDocument, shapeOf, type DesignDocument } from "../src/document.ts";
 import { addSketch, drawRectangle } from "../src/sketch.ts";
 import { extrudeSketch } from "../src/extrude.ts";
 
@@ -121,4 +121,30 @@ test("a kept shape's point ids count against the counter, not only its curves' (
   refused(gone, "Design data's nextId 12 is not above point-30, so a new id could repeat it");
   // Above the counter: it opens.
   assert.equal(readDesignDocument({ ...gone, nextId: 31 }).nextId, 31);
+});
+
+// Audit S2 (2026-10-18): readDesignDocument looks ids up in Maps that keep
+// each id's first item, as the searches they replaced found it.
+
+test("shapeOf finds the extrude's own profile, not the first one", () => {
+  // Two plates: profile-1 is 40 × 30, profile-2 (added by hand) 60 × 50, and
+  // the extrude uses profile-2, so its sizes are 60 × 50 by 5. Catches
+  // shapeOf's search turned into "the first profile" (x.id === id => true).
+  const d = partDocument("plate", 40, 30, 5) as DesignDocument;
+  d.profiles.push({ ...d.profiles[0], id: "profile-2", width: 60, depth: 50 });
+  d.timeline.features[0].intent.parameters.profile = "profile-2";
+  assert.deepEqual(shapeOf(d, d.timeline.features[0]), { shape: "plate", sizes: { width: 60, depth: 50, height: 5 } });
+});
+
+test("a repeated timeline id is refused as repeated: the lookup keeps the first item with an id", () => {
+  // Sketch 1 (sketch-2) with its extrude (feature-11) after it, then a second
+  // item that reuses the id sketch-2 at the end. The extrude's sketch is the
+  // first sketch-2, before it, so the reader gets as far as the id check.
+  // Catches the lookup keeping the last item instead (!byId.has(...) => true),
+  // which would place sketch-2 after the extrude and refuse that instead.
+  const s = addSketch(partDocument("box", 40, 30, 20));
+  const e = extrudeSketch(drawRectangle(s.doc, s.id, [0, 0], [40, 30]).doc, s.id, 10);
+  const d = clone(e.doc) as DesignDocument;
+  d.timeline.features.push(clone(d.timeline.features[1]));
+  refused(d, "Design id sketch-2 is used twice");
 });
