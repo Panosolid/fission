@@ -486,11 +486,11 @@ test("Design shows a kernel failure in its panel rather than throwing", async ()
   const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   assert.match(ctx.properties.querySelector("#error")!.textContent!, /no kernel in this test/);
-  // Its toolbar (16b): the sketch tool (21c), then the command groups, with the part's shape pressed.
+  // Its toolbar (16b): the sketch tool (21c), then the command groups, with the part's shape pressed, then Start fresh's Design group.
   const groups = [...ctx.toolbar.querySelectorAll<HTMLElement>("[role=group]")];
-  assert.deepEqual(groups.filter((g) => !g.hidden).map((g) => g.getAttribute("aria-label")), ["Sketch", "Create", "Export"]);
+  assert.deepEqual(groups.filter((g) => !g.hidden).map((g) => g.getAttribute("aria-label")), ["Sketch", "Create", "Export", "Design"]);
   // The sketch's own toolbar (SF3b) is there too, hidden until a sketch is edited: its Create menu and tools first, Finish Sketch last.
-  assert.deepEqual(groups.map((g) => [g.getAttribute("aria-label"), g.hidden]), [["Create", true], ["Sketch", false], ["Create", false], ["Export", false], ["Finish", true]]);
+  assert.deepEqual(groups.map((g) => [g.getAttribute("aria-label"), g.hidden]), [["Create", true], ["Sketch", false], ["Create", false], ["Export", false], ["Design", false], ["Finish", true]]);
   assert.deepEqual([...ctx.toolbar.querySelectorAll("[aria-pressed=true]")].map((b) => b.textContent), ["Box"]);
   view.unmount();
 });
