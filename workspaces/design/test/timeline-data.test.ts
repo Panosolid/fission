@@ -207,7 +207,7 @@ test("the part is the last solid feature that builds: suppressed, rolled back, o
   assert.equal(lastFeature(edit(() => ({}), "sketch-2")).id, "feature-1");
   assert.equal(lastFeature(edit(() => ({}), "feature-11")).id, "feature-11");
   // Nothing builds: refused, with the reason.
-  const none = /^Error: Design data builds no body: every solid feature is suppressed or after the rollback marker, and this Fission can't show a design with no body yet$/;
+  const none = /^Error: Design data builds no body: every solid feature is suppressed or after the rollback marker, and this Panoshape can't show a design with no body yet$/;
   assert.throws(() => lastFeature(edit(() => ({}), "start")), none);
   assert.throws(() => lastFeature(edit((x) => ({ suppressed: x.id !== "sketch-2" }))), none);
   assert.throws(() => readDesignDocument(structuredClone(edit(() => ({}), "start"))), none);

@@ -8,7 +8,7 @@
 // add a sketch (drawn with Design's line, circle and arc functions), an
 // extrude or a preset, change a size, undo, redo, save and open. Suppression
 // and the marker have no edit in Design until 24e, so they are written into
-// the data as a later Fission would, and must open. After every step:
+// the data as a later Panoshape would, and must open. After every step:
 // - the items in order, with their kinds, inputs, sizes, suppressed flags
 //   and the marker, are the model's (ids mapped through the edits' new ids);
 // - every new id is one no state undo or redo can reach held, ids are
@@ -216,7 +216,7 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
         return { doc: { ...next, nextId: next.nextId + 1, timeline: marker === undefined ? { features } : { features, marker } }, made: [] };
       }
       case "suppress": {
-        // Written into the data, as a later Fission would (Design's suppress edit is 24e).
+        // Written into the data, as a later Panoshape would (Design's suppress edit is 24e).
         const id = to(op.item);
         return { doc: { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f): Feature => (f.id === id ? { ...f, suppressed: op.on } : f)) } }, made: [] };
       }

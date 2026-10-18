@@ -738,5 +738,5 @@ async function start() {
 void start();
 ctx.kernel.call("kernel_version").then((v) => {
   $("version").textContent = `kernel v${v}`;
-  $("version").parentElement!.title = `Fission, kernel v${v}`; // where the version shows when the bar has no room for it
+  $("version").parentElement!.title = `Panoshape, kernel v${v}`; // where the version shows when the bar has no room for it
 });

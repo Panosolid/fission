@@ -70,7 +70,7 @@ try {
     try { await store.open("b"); return "opened"; } catch (e) { return e.message; }
   `);
   check("a corrupt stored project is refused with its message", () =>
-    assert.match(corrupt, /^can't open the stored project "b": not a Fission project: the file is not valid JSON/),
+    assert.match(corrupt, /^can't open the stored project "b": not a Panoshape project: the file is not valid JSON/),
   );
 
   await inPage(`await store.remove("b");`);

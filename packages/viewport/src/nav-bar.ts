@@ -97,7 +97,7 @@ export function navBar(actions: NavBarActions): { element: HTMLElement; showMode
       const on = document.fullscreenElement !== null;
       full.setAttribute("aria-pressed", String(on));
       full.setAttribute("aria-label", on ? "Exit full screen" : "Full screen");
-      full.title = on ? "Exit full screen (Escape)" : "Full screen: the whole window for Fission";
+      full.title = on ? "Exit full screen (Escape)" : "Full screen: the whole window for Panoshape";
       full.innerHTML = svg(on ? "exit-full-screen" : "full-screen");
     };
     // A refusal (no click to allow it, a policy) changes nothing and the button stays as it was.

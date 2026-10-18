@@ -14,7 +14,7 @@ test("the settings text covers what the spec asks for", () => {
   assert.match(notes("api-key"), /stored only in this browser/);
   assert.match(notes("api-key"), /shows exactly what will be sent/);
   assert.match(notes("in-browser"), /size is shown before the download/);
-  assert.match(notes("in-browser"), /too weak, Fission suggests/);
+  assert.match(notes("in-browser"), /too weak, Panoshape suggests/);
 });
 
 test("specialist models are placeholders, one list covering the spec's tasks", async () => {

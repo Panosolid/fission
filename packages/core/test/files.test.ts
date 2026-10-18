@@ -127,12 +127,12 @@ test("routing: a registered importer takes its formats; the rest are refused wit
   const project = routeFiles(registry, [file("plate.fission.json", projectToJson(emptyProject()))]);
   assert.ok(project?.kind === "open" && project.importer === shell);
   // The messages, written out in full.
-  assert.equal(refusal(registry, file("part.stl", "solid x\n")), "Couldn't open “part.stl”: Fission can't open STL meshes yet. Design will take them as mesh bodies.");
-  assert.equal(refusal(registry, file("logo.svg", "<svg/>")), "Couldn't open “logo.svg”: Fission can't open SVG drawings yet. Vector and Laser will take them as outlines.");
-  assert.equal(refusal(registry, file("plate.dxf", "0\nSECTION\n")), "Couldn't open “plate.dxf”: Fission can't open DXF drawings yet. Laser will take them as outlines.");
-  assert.equal(refusal(registry, file("bracket.step", "ISO-10303-21;")), "Couldn't open “bracket.step”: Fission can't open STEP models yet. Design will take them as exact solids.");
-  assert.equal(refusal(registry, file("poster.pdf", "%PDF-1.4")), "Couldn't open “poster.pdf”: Fission can't open PDF documents yet. Layout will take them as pages.");
-  assert.equal(refusal(registry, file("notes.docx", "PK\x03\x04")), "Couldn't open “notes.docx”: Fission doesn't know this type of file. It opens Fission projects (.fission.json), PNG images and JPEG images.");
+  assert.equal(refusal(registry, file("part.stl", "solid x\n")), "Couldn't open “part.stl”: Panoshape can't open STL meshes yet. Design will take them as mesh bodies.");
+  assert.equal(refusal(registry, file("logo.svg", "<svg/>")), "Couldn't open “logo.svg”: Panoshape can't open SVG drawings yet. Vector and Laser will take them as outlines.");
+  assert.equal(refusal(registry, file("plate.dxf", "0\nSECTION\n")), "Couldn't open “plate.dxf”: Panoshape can't open DXF drawings yet. Laser will take them as outlines.");
+  assert.equal(refusal(registry, file("bracket.step", "ISO-10303-21;")), "Couldn't open “bracket.step”: Panoshape can't open STEP models yet. Design will take them as exact solids.");
+  assert.equal(refusal(registry, file("poster.pdf", "%PDF-1.4")), "Couldn't open “poster.pdf”: Panoshape can't open PDF documents yet. Layout will take them as pages.");
+  assert.equal(refusal(registry, file("notes.docx", "PK\x03\x04")), "Couldn't open “notes.docx”: Panoshape doesn't know this type of file. It opens Panoshape projects (.fission.json), PNG images and JPEG images.");
   assert.equal(refusal(registry, file("photo.png", "GIF89a")), "Couldn't open “photo.png”: it is named like a PNG image, but its contents aren't one (it may be damaged, or renamed from another type).");
   // Routing opens nothing by itself.
   assert.deepEqual([shell.opened, image.opened], [[], []]);
@@ -143,12 +143,12 @@ test("routing: one file at a time, nothing for nothing, and the lists follow wha
   assert.equal(routeFiles(registry, []), null);
   const two = routeFiles(registry, [file("a.png", ""), file("b.png", "")]);
   assert.deepEqual(two, { kind: "refused", message: "Drop or paste one file at a time (there were 2)." });
-  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: Fission doesn't know this type of file. It can't open any files yet.");
-  assert.equal(refusal(registry, file("p.fission.json", '{"formatVersion":2}')), "Couldn't open “p.fission.json”: nothing here opens Fission projects (.fission.json).");
+  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: Panoshape doesn't know this type of file. It can't open any files yet.");
+  assert.equal(refusal(registry, file("p.fission.json", '{"formatVersion":2}')), "Couldn't open “p.fission.json”: nothing here opens Panoshape projects (.fission.json).");
   // A PNG with nobody registered for it is refused naming Image, the workspace that takes images.
-  assert.equal(refusal(registry, file("a.png", new Uint8Array(PNG))), "Couldn't open “a.png”: Fission can't open PNG images yet. Image will take them as images.");
+  assert.equal(refusal(registry, file("a.png", new Uint8Array(PNG))), "Couldn't open “a.png”: Panoshape can't open PNG images yet. Image will take them as images.");
   registry.registerImporter(importer(["jpeg"], "image"));
-  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: Fission doesn't know this type of file. It opens JPEG images.");
+  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: Panoshape doesn't know this type of file. It opens JPEG images.");
 });
 
 test("one importer per format: a second is refused and the first stays", () => {

@@ -15,8 +15,8 @@ body { display: flex; flex-direction: column; }
 /* Basis 0, so the tabs take the room that is left and never push the rest onto a second row. */
 #workspaces { display: flex; gap: 2px; flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 /* Save, Open, AI and Community sit in the top bar on wide screens and behind Menu on phones. */
-/* Tabs a little tighter than the other buttons, so all ten fit a 1280 px screen in the wider system fonts too. */
-#workspaces [role="tab"] { padding-left: 6px; padding-right: 6px; }
+/* Tabs a little tighter than the other buttons, so all ten fit a 1280 px screen beside the name in the wider system fonts too. */
+#workspaces [role="tab"] { padding-left: 4px; padding-right: 4px; }
 #topbar-actions { display: contents; }
 #menu-toggle { display: none; }
 #topbar button { background: none; border: none; border-bottom: 2px solid transparent; color: #b5bbc4; padding: 12px 10px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
@@ -160,11 +160,13 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #workspace #assistant { width: auto; order: 5; flex-shrink: 0; border-left: none; border-top: 1px solid #2a2e35; }
   #topbar { gap: 8px; padding: 0 8px; }
   #topbar h1 #version { display: none; }
+  /* A little smaller, so three whole tabs still fit beside the name in the wider system fonts. */
+  #topbar h1 { font-size: 14px; }
   /* Save, Open, AI and Community fold behind Menu, so the workspace tabs keep
      the row (they scroll sideways inside it). The open menu drops down at
      the right; Escape, a choice or a tap elsewhere closes it. */
   #menu-toggle { display: block; }
-  #workspaces [role="tab"] { padding-left: 6px; padding-right: 6px; }
+  #workspaces [role="tab"] { padding-left: 4px; padding-right: 4px; }
   #topbar { position: relative; }
   #topbar-actions { display: none; position: absolute; top: 44px; right: 0; z-index: 20; min-width: 180px; flex-direction: column; background: #1c1f24; border: 1px solid #2a2e35; border-top: none; }
   #topbar[data-menu="open"] #topbar-actions { display: flex; }

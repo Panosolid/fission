@@ -1,6 +1,6 @@
-# The Fission project format
+# The Panoshape project format
 
-A Fission project is one JSON document. The format is open: anyone may read and write it, and this page describes it. The types it is checked against are in `packages/core/src/model/` (`project.ts`, `links.ts`, `feature.ts`, `material.ts`).
+A Panoshape project is one JSON document. The format is open: anyone may read and write it, and this page describes it. The types it is checked against are in `packages/core/src/model/` (`project.ts`, `links.ts`, `feature.ts`, `material.ts`).
 
 ## Current version: 2
 
@@ -17,7 +17,7 @@ A Fission project is one JSON document. The format is open: anyone may read and 
 }
 ```
 
-- `formatVersion`: the version of this outer layout. A reader refuses a file with a higher number than it knows, with a message saying a newer Fission saved it. It never half-reads one.
+- `formatVersion`: the version of this outer layout. A reader refuses a file with a higher number than it knows, with a message saying a newer Panoshape saved it. It never half-reads one.
 - `units.length`: the one units system for every workspace (`mm`, `cm`, `m` or `in`). Stored numbers are always millimetres; units only change what the user sees and types.
 - `materials`: the one materials library (appearance, mechanical properties, process presets), shared by every workspace.
 - `links`: live links and frozen copies between workspaces. A live link names its source by id (`{"kind": "object", "origin": {...}}`, or `"geometry"` with a stable face or edge id from step 24 on) and the representations the holder accepts. A frozen copy also carries the representation it froze. Nothing else in the file copies another workspace's data.
@@ -101,7 +101,7 @@ A shared design is a complete recipe (docs/integration.md, principle 7). These f
 
 1. Any change a version-N reader can't read is a new version, N + 1.
 2. Every bump adds `MIGRATIONS[N]` in `packages/core/src/model/project.ts`: a function from a version-N file to a version-N+1 file. Old entries are never edited, because files in those versions exist on people's machines.
-3. Reading runs the migrations one after another, from the file's version up to the current one. A version-1 file therefore opens in every later Fission.
+3. Reading runs the migrations one after another, from the file's version up to the current one. A version-1 file therefore opens in every later Panoshape.
 4. A workspace's own `version` follows the same rules inside `readData`.
 5. Each migration has a test that turns a real old file into the new shape (`packages/core/test/project.test.ts`).
 

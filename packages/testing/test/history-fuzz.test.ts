@@ -28,7 +28,7 @@
 // sketch, an extrude and its sketch and distance, each suppressed or not)
 // and the marker, and works out the part (the last solid item that builds)
 // itself, by the rules written in its own words below. An edit the model
-// says leaves nothing built (which this Fission can't open yet) must leave
+// says leaves nothing built (which this Panoshape can't open yet) must leave
 // Design's `lastFeature` with nothing either; it is then not made.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -447,7 +447,7 @@ function session(seed: bigint, steps: number) {
         label = TIMELINE_STEPS.marker;
       }
       if (partOf(after) === null) {
-        // Nothing would build, which this Fission can't open: Design must agree, and the edit isn't made.
+        // Nothing would build, which this Panoshape can't open: Design must agree, and the edit isn't made.
         assert.throws(() => lastFeature(next), /builds no body|has no part/, `${at}: the model says ${edit} of ${item.id} leaves nothing built`);
         counts.nothingBuilt++;
         check(at);

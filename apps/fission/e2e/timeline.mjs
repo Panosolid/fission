@@ -266,7 +266,7 @@ try {
       assert.deepEqual((await state()).drawn, { box: false, square: true });
       await barMenu("feature-11");
       assert.equal(await page.isDisabled("#row-menu-suppress"), true);
-      assert.equal(await page.textContent("#row-menu-suppress .delete-ask-off"), "This would leave no body, and Fission can't show a design with no body yet");
+      assert.equal(await page.textContent("#row-menu-suppress .delete-ask-off"), "This would leave no body, and Panoshape can't show a design with no body yet");
       if (shots) await page.screenshot({ path: `${shots}/entry-off-${width}.png` });
       await page.keyboard.press("Escape");
       await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed by Escape");

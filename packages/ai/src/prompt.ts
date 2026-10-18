@@ -25,7 +25,7 @@ function describe(name: string, p: ParamSpec): string {
 /** The instructions for one request about a project made by `setup` (empty: a new project), offering `specs`. */
 export function systemPrompt(setup: readonly Command[], specs: readonly CommandSpec[]): string {
   return [
-    "You edit a CAD part in Fission by answering with commands.",
+    "You edit a CAD part in Panoshape by answering with commands.",
     "The commands you can use:",
     ...specs.flatMap((s) => [`- ${s.op}: ${s.summary}`, ...Object.entries(s.params).map(([name, p]) => describe(name, p))]),
     `The part now is made by these commands: ${JSON.stringify(setup)}`,
