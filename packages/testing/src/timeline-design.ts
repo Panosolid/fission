@@ -21,10 +21,13 @@
 // faces with its length and centroid measured on the display mesh (so
 // compared with `edgeMatches`, within EDGE_SLACK). `builds` counts the
 // body_build calls the rebuild's cache makes (step 24e), so the session
-// checks an edit rebuilds only what it changed. `faults` plants bugs in
+// checks an edit rebuilds only what it changed. A held reference resolves
+// as the app's selection does (step 24e3): Design's reference for the
+// name, found by `resolveInScene` on the scene `shownBodies` and
+// `joinBodies` draw. `faults` plants bugs in
 // Design's side to prove the checks catch them.
 
-import { emptyProject, projectFromJson, projectToJson, type BodyView, type KernelCalls } from "@fission/core";
+import { emptyProject, projectFromJson, projectToJson, type BodyView, type KernelCalls, type StableId } from "@fission/core";
 import {
   addSketch,
   BodyCache,
@@ -43,8 +46,11 @@ import {
   outlineCurves,
   partDocument,
   readDesignDocument,
+  joinBodies,
   rebuildTimeline,
   reorderItem,
+  resolveInScene,
+  sceneHit,
   setExtrudeDistance,
   settleKept,
   shownBodies,
@@ -52,6 +58,7 @@ import {
   suppressItem,
   type DesignDocument,
   type LineEnd,
+  type Scene,
   type SketchCurve,
   type TimelineBuild,
 } from "@fission/design";
@@ -352,10 +359,21 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
     return { order: build.order, results };
   }
 
-  async function rebuild(): Promise<Rebuild> {
+  /** Design's rebuild on the subject's cache, with the planted bugs that reach it. */
+  async function build(): Promise<TimelineBuild> {
     if (fs.has("leak-bodies")) cache = new BodyCache(counted);
     if (fs.has("full-replay")) await cache.clear();
-    return read(await rebuildTimeline(state.doc, cache, kernel), cache, true);
+    return rebuildTimeline(state.doc, cache, kernel);
+  }
+
+  const rebuild = async (): Promise<Rebuild> => read(await build(), cache, true);
+
+  /** The scene the app draws after a rebuild (`shownBodies`, `joinBodies`), which Design's selection resolves names on. */
+  async function scene(): Promise<Scene> {
+    const b = await build();
+    const shown = await shownBodies(state.doc, b, cache);
+    if (fs.has("scene-drops-body")) shown.shift();
+    return joinBodies(shown);
   }
 
   return {
@@ -416,16 +434,16 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
       redo = [];
     },
     async resolve(name) {
-      const r = await rebuild();
-      const key = faceKey(name);
-      for (const id of r.order) {
-        const res = r.results[id];
-        if (res.status === "built" && res.body) {
-          const f = res.body.faces.find((x) => faceKey(x.name) === key);
-          if (f) return f.name;
-        }
-      }
-      return null;
+      // As the app keeps a selection through an edit (selection.ts `survivors`): the name as Design's reference, resolved
+      // on the scene by Design's own `resolveInScene`, and the face it lands on named back.
+      const s = await scene();
+      const part = name.curve === undefined ? name.role : `${name.role}:${encodeURIComponent(name.curve)}`;
+      const i = resolveInScene({ kind: "face", id: `face:${encodeURIComponent(name.feature)}/${part}` as StableId }, s);
+      if (i === null) return null;
+      const hit = sceneHit(s, "face", i);
+      if (hit === null) throw new Error(`Design resolved ${faceKey(name)} to face ${i}, which no shown body has`);
+      const body = s.bodies[hit.body];
+      return faceName(body.feature, body.names.faces[hit.index], hit.index);
     },
     async dispose() {
       await cache.clear();
