@@ -31,7 +31,7 @@ const listed = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll("#shortcuts section")].map((s) => ({
       title: s.querySelector("h3").textContent,
-      rows: [...s.querySelectorAll("dl > div")].map((d) => `${d.querySelector("kbd").textContent}: ${d.querySelector("dd").textContent}`),
+      rows: [...s.querySelectorAll("dl > div")].map((d) => `${d.querySelector("dt").textContent}: ${d.querySelector("dd").textContent}`),
     })),
   );
 
@@ -57,8 +57,8 @@ try {
       // Worked out from the table: Design is on screen, so it comes first, then the
       // app's keys; no placeholder binds a key and Image binds none yet.
       assert.deepEqual(await listed(page), [
-        { title: "Design on screen", rows: ["Esc: Clear the selection", "Ctrl+C: Copy the selected profile as SVG", "L: Line tool (in a sketch)", "R: Rectangle tool (in a sketch)", "C: Circle tool (in a sketch)", "A: 3-point arc tool (in a sketch)", "T: Tangent arc tool (in a sketch)"] },
-        { title: "Everywhere", rows: ["?: Show the keyboard shortcuts", "Ctrl+V: Paste files into the project (a project file, an image…)", "Ctrl+Z: Undo", "Ctrl+Shift+Z: Redo", "Ctrl+Y: Redo"] },
+        { title: "Design on screen", rows: ["Esc: Clear the selection", "Ctrl+C: Copy the selected profile as SVG", "L: Line tool (in a sketch)", "R: Rectangle tool (in a sketch)", "C: Circle tool (in a sketch)", "A: 3-point arc tool (in a sketch)", "T: Tangent arc tool (in a sketch)", "0 1 2 3 4 5 6 7 8 9 . -: Type a length or width (while drawing a line or rectangle)"] },
+        { title: "Everywhere", rows: ["?: Show the keyboard shortcuts", "Ctrl+V: Paste files into the project (a project file, an image…)", "Ctrl+Z: Undo", "Ctrl+Shift+Z Ctrl+Y: Redo"] },
       ]);
       await page.screenshot({ path: "e2e/shortcuts.png" });
       await page.keyboard.press("Escape");
