@@ -1602,10 +1602,23 @@ fn check_edge_pairs(local: &Body, baked: &Body) -> Result<(), String> {
     if fission_kernel::edge_faces(baked) != pairs {
         return Err("placing the body changed which faces its edges join".into());
     }
-    edge_pairs_off(local, &pairs)
+    let centroids: Vec<DVec3> = face_masses(local).iter().map(|m| m.centroid).collect();
+    edge_pairs_off(local, &pairs, &centroids)
 }
 
-fn edge_pairs_off(body: &Body, pairs: &[Option<[usize; 2]>]) -> Result<(), String> {
+/// How far a face's centroid c can be off the left-hand test's zero by
+/// rounding alone: FP_REL of the distances involved. Within it the test
+/// says nothing: a side swept from an arc of almost a full turn has its
+/// centroid (1 − cos θ)/θ · r along the tangent from the upright, 3e-10 mm
+/// for an arc of radius 321 km closing to a 1.1 µm gap (seed5dc4), below
+/// the rounding of a centroid 321 km away (~3e-10 here). The other face
+/// (that gap's line, 0.55 µm along) must then decide.
+fn left_bound(c: DVec3, m: DVec3) -> f64 {
+    tolerance::FP_REL * ((c - m).length() + m.length())
+}
+
+/// `centroids` (each face's, by index) are passed in so a test can move them.
+fn edge_pairs_off(body: &Body, pairs: &[Option<[usize; 2]>], centroids: &[DVec3]) -> Result<(), String> {
     if pairs.len() != body.edges.len() {
         return Err(format!("{} edge pairs for {} edges", pairs.len(), body.edges.len()));
     }
@@ -1615,7 +1628,6 @@ fn edge_pairs_off(body: &Body, pairs: &[Option<[usize; 2]>]) -> Result<(), Strin
             if c.reversed { uses[c.edge].1.push(f) } else { uses[c.edge].0.push(f) }
         }
     }
-    let centroids = face_masses(body);
     for (e, pair) in pairs.iter().enumerate() {
         let Some([f, g]) = *pair else { return Err(format!("edge {e} joins no two faces")) };
         if (uses[e].0.as_slice(), uses[e].1.as_slice()) != (&[f][..], &[g][..]) {
@@ -1624,16 +1636,24 @@ fn edge_pairs_off(body: &Body, pairs: &[Option<[usize; 2]>]) -> Result<(), Strin
         let edge = &body.edges[e];
         let mid = 0.5 * (edge.t0 + edge.t1);
         let (m, t) = (edge.curve.eval(mid), edge.curve.tangent(mid));
+        let mut decided = false;
         for (face, along) in [(f, t), (g, -t)] {
             if matches!(body.faces[face].role, Some(FaceRole::Start | FaceRole::End)) {
                 continue;
             }
             let sense = if body.faces[face].sense { 1.0 } else { -1.0 };
             let n = body.faces[face].surface.normal_at(m) * sense;
-            if (centroids[face].centroid - m).dot(n.cross(along)) <= 0.0 {
+            let c = centroids[face];
+            let left = (c - m).dot(n.cross(along));
+            let bound = left_bound(c, m);
+            if left.is_nan() || left < -bound {
                 let way = if face == f { "forwards" } else { "backwards" };
-                return Err(format!("edge {e}: face {face} ({:?}) is said to walk it {way}, but lies on its right", body.faces[face].role));
+                return Err(format!("edge {e}: face {face} ({:?}) is said to walk it {way}, but lies on its right ({left:e}, {bound:e} allowed; centroid {c}, midpoint {m}, normal {n}, tangent {along})", body.faces[face].role));
             }
+            decided |= left > bound;
+        }
+        if !decided {
+            return Err(format!("edge {e}: neither face's centroid is clearly on its left, so which walks it forwards is not checked"));
         }
     }
     Ok(())
@@ -2664,7 +2684,7 @@ fn edge_pairs_by_hand_and_broken() {
     // walks it forwards has that offset on its left.
     let b = primitives::make_box(1.0, 2.0, 3.0).unwrap();
     let pairs = fission_kernel::edge_faces(&b);
-    edge_pairs_off(&b, &pairs).unwrap();
+    edge_pairs_off(&b, &pairs, &mid(&b)).unwrap();
     let (front, bottom) = (face_with(&b, FaceRole::Front), face_with(&b, FaceRole::Bottom));
     let e = pairs.iter().position(|p| matches!(p, Some([f, g]) if [*f, *g] == [front, bottom] || [*f, *g] == [bottom, front])).unwrap();
     let edge = &b.edges[e];
@@ -2676,30 +2696,63 @@ fn edge_pairs_by_hand_and_broken() {
     // A cylinder and a sphere pass too; so does every extrude the harness
     // makes (checked in every case).
     for body in [primitives::make_cylinder(2.0, 5.0).unwrap(), primitives::make_sphere(3.0).unwrap()] {
-        edge_pairs_off(&body, &fission_kernel::edge_faces(&body)).unwrap();
+        edge_pairs_off(&body, &fission_kernel::edge_faces(&body), &mid(&body)).unwrap();
     }
     // Planted bugs, each caught by its own check: a pair swapped (the
     // loops), the loops' answer flipped on the body too (the geometry), an
     // edge with no pair, one pair missing, one face twice.
     let mut swapped = pairs.clone();
     swapped[e] = pairs[e].map(|[f, g]| [g, f]);
-    assert!(edge_pairs_off(&b, &swapped).unwrap_err().contains("its loops say"));
+    assert!(edge_pairs_off(&b, &swapped, &mid(&b)).unwrap_err().contains("its loops say"));
     let mut flipped = b.clone();
     for face in &mut flipped.faces {
         for l in &mut face.loops {
             l.coedges.iter_mut().filter(|c| c.edge == e).for_each(|c| c.reversed = !c.reversed);
         }
     }
-    assert!(edge_pairs_off(&flipped, &fission_kernel::edge_faces(&flipped)).unwrap_err().contains("lies on its right"));
+    assert!(edge_pairs_off(&flipped, &fission_kernel::edge_faces(&flipped), &mid(&flipped)).unwrap_err().contains("lies on its right"));
     let mut none = pairs.clone();
     none[e] = None;
-    assert!(edge_pairs_off(&b, &none).unwrap_err().contains("joins no two faces"));
-    assert!(edge_pairs_off(&b, &pairs[1..]).unwrap_err().contains("11 edge pairs for 12 edges"));
+    assert!(edge_pairs_off(&b, &none, &mid(&b)).unwrap_err().contains("joins no two faces"));
+    assert!(edge_pairs_off(&b, &pairs[1..], &mid(&b)).unwrap_err().contains("11 edge pairs for 12 edges"));
     let mut twice = pairs.clone();
     twice[e] = Some([front, front]);
-    assert!(edge_pairs_off(&b, &twice).unwrap_err().contains("its loops say"));
+    assert!(edge_pairs_off(&b, &twice, &mid(&b)).unwrap_err().contains("its loops say"));
     // Placing keeps the pairs; a body whose pairs differ is caught.
     assert!(check_edge_pairs(&b, &flipped).unwrap_err().contains("changed which faces"));
+    // The rounding allowance's edge: the forward face's centroid moved to
+    // k × the allowance on the right of the edge is let through at 0.9 (the
+    // other face decides) and caught at 1.1. With the centroid at m + x u,
+    // u the unit left direction, the allowance is FP_REL (|x| + |m|), so
+    // x = −k FP_REL |m| / (1 − k FP_REL).
+    let f = pairs[e].unwrap()[0];
+    let edge = &b.edges[e];
+    let at = 0.5 * (edge.t0 + edge.t1);
+    let (m, t) = (edge.curve.eval(at), edge.curve.tangent(at));
+    let sense = if b.faces[f].sense { 1.0 } else { -1.0 };
+    let u = (b.faces[f].surface.normal_at(m) * sense).cross(t).normalize();
+    for (k, pass) in [(0.9, true), (1.1, false)] {
+        let x = -k * tolerance::FP_REL * m.length() / (1.0 - k * tolerance::FP_REL);
+        let mut moved = mid(&b);
+        moved[f] = m + u * x;
+        let got = edge_pairs_off(&b, &pairs, &moved);
+        assert_eq!(got.is_ok(), pass, "{k}: {got:?}");
+    }
+    // Both centroids on the edge: neither decides, and that is reported.
+    let mut both = mid(&b);
+    let [f, g] = pairs[e].unwrap();
+    (both[f], both[g]) = (m, m);
+    assert!(edge_pairs_off(&b, &pairs, &both).unwrap_err().contains("neither face"));
+    // seed5dc4: a side swept from an arc of radius 321 km closing to a
+    // 1.1 µm gap; its centroid is 3e-10 mm left of the upright, within the
+    // allowance, so the gap's line side decides.
+    let outer = Boundary::Path { corners: vec![DVec2::new(0.0, 0.0), DVec2::new(0.0011, 0.0)], bulges: vec![-1168734181.6392605, 0.0] };
+    let body = extrude::extrude(&Profile { outer, holes: vec![] }, 0.5).unwrap();
+    edge_pairs_off(&body, &fission_kernel::edge_faces(&body), &mid(&body)).unwrap();
+}
+
+fn mid(b: &Body) -> Vec<DVec3> {
+    face_masses(b).iter().map(|m| m.centroid).collect()
 }
 
 fn strip_with_bulges(pts: &[(f64, f64)], bulges: &[f64], dist: f64) -> Shape {
