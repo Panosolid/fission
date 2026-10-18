@@ -8,9 +8,10 @@
 // bottom line, right half circle, top line and left half circle; a
 // circle), corners and slot sizes moved with movePoint, curves deleted
 // with deleteCurve and drawn again between the same corners, extrudes,
-// presets and their sizes. Edits Design gets at 24e (suppress, the marker,
-// deleting an item, reordering) and a circle's radius (no edit yet) are
-// written into the data as a later Fission would. After every edit Design's
+// presets and their sizes, and the timeline edits (step 24e2: deleteItem,
+// reorderItem with its refusals, suppressItem, moveMarker). A circle's
+// radius (no edit yet) is written into the data as a later Fission would.
+// After every edit Design's
 // `settleKept` applies the owner's rule, and the undo history is whole
 // snapshots, as the app's is.
 //
@@ -23,7 +24,7 @@
 // checks an edit rebuilds only what it changed. `faults` plants bugs in
 // Design's side to prove the checks catch them.
 
-import { emptyProject, projectFromJson, projectToJson, type BodyView, type Feature, type KernelCalls } from "@fission/core";
+import { emptyProject, projectFromJson, projectToJson, type BodyView, type KernelCalls } from "@fission/core";
 import {
   addSketch,
   BodyCache,
@@ -33,18 +34,22 @@ import {
   drawCircle,
   drawLine,
   extrudeSketch,
+  deleteItem,
   insertPreset,
   isSketchExtrude,
+  moveMarker,
   movePoint,
   nameBody,
   outlineCurves,
   partDocument,
   readDesignDocument,
   rebuildTimeline,
+  reorderItem,
   setExtrudeDistance,
   settleKept,
   shownBodies,
   shapeOf,
+  suppressItem,
   type DesignDocument,
   type LineEnd,
   type SketchCurve,
@@ -98,9 +103,28 @@ export type DesignFault =
   /** The scene (24d3b) leaves out the first body built: drawn bodies must be exactly the built ones. */
   | "scene-drops-body"
   /** Every rebuild empties the cache first, so every body is built again (24e): the shapes are right, the work isn't. */
-  | "full-replay";
+  | "full-replay"
+  /** 24e2, one per timeline edit: the marker on a deleted item moves to the item after it. */
+  | "delete-marker-forward"
+  /** A reorder's refusal is ignored and the item moved past its dependency. */
+  | "reorder-unchecked"
+  /** Unsuppressing does nothing. */
+  | "unsuppress-ignored"
+  /** The marker at the start is read as no marker. */
+  | "marker-start-ignored";
 
-export const DESIGN_FAULTS: readonly DesignFault[] = ["no-settle", "leak-bodies", "save-drops-kept", "cache-by-feature", "scene-drops-body", "full-replay"];
+export const DESIGN_FAULTS: readonly DesignFault[] = [
+  "no-settle",
+  "leak-bodies",
+  "save-drops-kept",
+  "cache-by-feature",
+  "scene-drops-body",
+  "full-replay",
+  "delete-marker-forward",
+  "reorder-unchecked",
+  "unsuppress-ignored",
+  "marker-start-ignored",
+];
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
 /** The messages a design with no body is refused with until 24d3 shows one. */
@@ -201,11 +225,6 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
     return drawArc(doc, sketch, pt("t2"), pt("a"), pt("c0"));
   }
 
-  const write = (doc: DesignDocument, features: Feature[], marker: string | undefined): DesignDocument => {
-    const { marker: _, ...rest } = doc.timeline;
-    return { ...doc, timeline: marker === undefined ? { ...rest, features } : { ...rest, features, marker } };
-  };
-
   /** The edit on Design's side: the new state and the ids it made, or a refusal. */
   function edit(s: State, op: Exclude<ConcreteOp, { op: "undo" | "redo" }>): { state: State; made: string[] } | Applied {
     let doc = s.doc;
@@ -278,28 +297,29 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
         return { state: { doc: c.doc, meta }, made: [c.id] };
       }
       case "delete-item": {
-        // Written into the data until 24e: the item goes (a sketch with its content); the marker moves to the item before.
-        const features = doc.timeline.features;
-        const k = features.findIndex((f) => f.id === op.item);
-        const marker = doc.timeline.marker === op.item ? (k === 0 ? "start" : features[k - 1].id) : doc.timeline.marker;
-        doc = write(doc, features.filter((f) => f.id !== op.item), marker);
-        return { state: { doc: { ...doc, sketches: doc.sketches.filter((x) => x.id !== op.item) }, meta }, made: [] };
+        let next = deleteItem(doc, op.item);
+        // Planted bug: the marker on a deleted item moves to the item after it, not before.
+        const k = doc.timeline.features.findIndex((f) => f.id === op.item);
+        if (fs.has("delete-marker-forward") && doc.timeline.marker === op.item && k + 1 < doc.timeline.features.length) next = moveMarker(next, doc.timeline.features[k + 1].id);
+        return { state: { doc: next, meta }, made: [] };
       }
       case "reorder": {
-        // Written into the data until 24e, refused as the model refuses.
-        const features = [...doc.timeline.features];
-        const k = features.findIndex((f) => f.id === op.item);
-        const [item] = features.splice(k, 1);
-        features.splice(op.to, 0, item);
-        const place = (id: string) => features.findIndex((f) => f.id === id);
-        if (item.dependsOn.some((d) => place(d) > op.to)) return { kind: "refused", cause: "before-dependency" };
-        if (features.some((f, j) => j < op.to && f.dependsOn.includes(item.id))) return { kind: "refused", cause: "after-dependent" };
-        return { state: { doc: write(doc, features, doc.timeline.marker), meta }, made: [] };
+        const r = reorderItem(doc, op.item, op.to);
+        if ("refused" in r) {
+          // Planted bug: the refusal is ignored and the item is moved anyway, as the data was written before 24e.
+          if (!fs.has("reorder-unchecked")) return { kind: "refused", cause: r.refused };
+          const features = doc.timeline.features.filter((f) => f.id !== op.item);
+          features.splice(op.to, 0, doc.timeline.features.find((f) => f.id === op.item)!);
+          return { state: { doc: { ...doc, timeline: { ...doc.timeline, features } }, meta }, made: [] };
+        }
+        return { state: { doc: r.doc, meta }, made: [] };
       }
       case "suppress":
-        return { state: { doc: write(doc, doc.timeline.features.map((f): Feature => (f.id === op.item ? { ...f, suppressed: op.on } : f)), doc.timeline.marker), meta }, made: [] };
+        // Planted bug: unsuppressing does nothing.
+        return { state: { doc: fs.has("unsuppress-ignored") && !op.on ? doc : suppressItem(doc, op.item, op.on), meta }, made: [] };
       case "marker":
-        return { state: { doc: write(doc, doc.timeline.features, op.at === null ? undefined : op.at), meta }, made: [] };
+        // Planted bug: the marker at the start is read as no marker, so everything builds.
+        return { state: { doc: moveMarker(doc, fs.has("marker-start-ignored") && op.at === "start" ? null : op.at), meta }, made: [] };
     }
   }
 

@@ -19,4 +19,5 @@ export { droppedNote, highlightOf, referenceLabel, selectionRows, survivors } fr
 export { bodyOf, joinBodies, resolveInScene, sceneHit, sceneReference, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 export { COPY_SVG, designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";
 export { rounding, snapOnSketch, SNAP_PIXELS, type Rounding, type Snap } from "./snap.ts";
+export { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS, type ReorderCause, type Reordered } from "./timeline-edits.ts";
 export { BodyCache, rebuildTimeline, settleKept, type CurveIds, type FeatureResult, type KeptWarning, type LostCause, type TimelineBuild } from "./rebuild.ts";

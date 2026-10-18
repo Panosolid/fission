@@ -17,6 +17,7 @@ import {
   addSketch,
   buildSpec,
   deleteCurve,
+  deleteItem,
   designReference,
   droppedNote,
   extrudeSketch,
@@ -25,14 +26,18 @@ import {
   highlightOf,
   joinBodies,
   lastFeature,
+  moveMarker,
   movePoint,
   nameBody,
   BodyCache,
   outlineCurves,
   readDesignDocument,
   rebuildTimeline,
+  reorderItem,
   setExtrudeDistance,
   settleKept,
+  suppressItem,
+  TIMELINE_STEPS,
   partDocument,
   pointAt,
   resolveReference,
@@ -497,7 +502,7 @@ test("the owner's rule on the real kernel, hand-worked: a lost sketch's extrude 
   await edit(movePoint(doc, s.id, point(0, 0), 0, -10));
   assert.ok(close((await body()).view.volume, 18000));
   // Suppressing the sketch fails the extrude, kept shape or not; unsuppressing brings the kept shape back.
-  const suppress = (on: boolean): DesignDocument => ({ ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((x) => (x.id === s.id ? { ...x, suppressed: on } : x)) } });
+  const suppress = (on: boolean): DesignDocument => suppressItem(doc, s.id, on);
   await edit(suppress(true));
   assert.deepEqual(await result(), { status: "failed", cause: "suppressed-input", input: s.id, message: "Sketch 1 is suppressed" });
   await edit(suppress(false));
@@ -516,8 +521,8 @@ test("the owner's rule on the real kernel, hand-worked: a lost sketch's extrude 
   assert.equal(b.r.warning.cause, "invalid-outline");
   assert.deepEqual([...b.r.warning.curves].sort(), [again.id, left].sort());
   assert.ok(close(b.view.volume, 22000));
-  // The sketch deleted (written into the data until 24e's delete): the kept shape stays, now warned as deleted.
-  await edit({ ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.filter((x) => x.id !== s.id) }, sketches: [] });
+  // The sketch deleted (Design's deleteItem, 24e2): the kept shape stays, now warned as deleted.
+  await edit(deleteItem(doc, s.id));
   b = await body();
   assert.deepEqual(warned(b.r), ["deleted-input", s.id]);
   assert.ok(close(b.view.volume, 22000));
@@ -634,6 +639,12 @@ const DESIGN_CAUGHT_BY: Record<Exclude<DesignFault, "leak-bodies">, string> = {
   "cache-by-feature": "the rebuild differs from a rebuild from scratch",
   "scene-drops-body": "the rebuild differs from the model",
   "full-replay": "an edit rebuilt bodies that didn't change",
+  // 24e2, one per timeline edit Design now does itself.
+  "delete-marker-forward": "the rebuild differs from the model",
+  "reorder-unchecked": "outcome differs from the model",
+  // Unsuppressing changes nothing, so the edit's outcome is "unchanged" where the model's is "done".
+  "unsuppress-ignored": "outcome differs from the model",
+  "marker-start-ignored": "the rebuild differs from the model",
 };
 
 for (const fault of DESIGN_FAULTS.filter((f): f is Exclude<DesignFault, "leak-bodies"> => f !== "leak-bodies"))
@@ -663,7 +674,94 @@ test("planted in Design: bodies never freed (\"leak-bodies\", a new cache each r
   assert.equal(await kernel.call("body_count"), start);
 });
 
-pending("delete, reorder, suppress and the marker on the real document, each one undo step; refused reorders give their exact messages", "24e");
+test("Design's timeline edits on the real kernel, hand-worked (24e2): suppress, reorder, the marker and delete, each one undo step by name; a refused reorder records none; undo across a reorder and a delete", async () => {
+  const kernel = nodeKernel();
+  const start = await kernel.call("body_count");
+  const cache = new BodyCache(kernel);
+  // The 40 × 30 × 20 box (feature-1: 24000 mm³), Sketch 1 (sketch-2, a 40 × 30 rectangle) and Extrude 1 of it by 10
+  // (feature-11: 40 × 30 × 10 = 12000 mm³).
+  const s = addSketch(partDocument("box", 40, 30, 20));
+  const made = extrudeSketch(drawRectangle(s.doc, s.id, [0, 0], [40, 30]).doc, s.id, 10);
+  assert.deepEqual([s.id, made.id], ["sketch-2", "feature-11"]);
+  let doc = made.doc;
+  // The app's history: whole documents, one step per edit that changed something, named.
+  const steps: { name: string; doc: DesignDocument }[] = [];
+  const record = async (name: string, next: DesignDocument) => {
+    const settled = await settleKept(kernel, doc, next);
+    if (projectToJson({ ...emptyProject("E"), workspaces: { design: settled } }) === projectToJson({ ...emptyProject("E"), workspaces: { design: doc } })) return;
+    steps.push({ name, doc });
+    doc = settled;
+  };
+  const undo = () => (doc = steps.pop()!.doc);
+  const results = async () => (await rebuildTimeline(doc, cache, kernel)).results;
+  const volume = async (id: string) => {
+    const r = (await results())[id];
+    assert.ok(r.status === "built" && r.body !== undefined, `${id}: ${JSON.stringify(r)}`);
+    return (await cache.view(r.body)).volume;
+  };
+  const order = () => doc.timeline.features.map((f) => f.id);
+  assert.ok(close(await volume("feature-1"), 24000) && close(await volume("feature-11"), 12000));
+
+  // Suppress Sketch 1: its extrude fails naming it, the box still builds.
+  await record(TIMELINE_STEPS.suppress("Sketch 1"), suppressItem(doc, "sketch-2", true));
+  assert.deepEqual((await results())["feature-11"], { status: "failed", cause: "suppressed-input", input: "sketch-2", message: "Sketch 1 is suppressed" });
+  assert.deepEqual((await results())["sketch-2"], { status: "suppressed" });
+  assert.ok(close(await volume("feature-1"), 24000));
+  await record(TIMELINE_STEPS.unsuppress("Sketch 1"), suppressItem(doc, "sketch-2", false));
+  assert.ok(close(await volume("feature-11"), 12000));
+  // Unsuppressing again changes nothing: no step.
+  await record(TIMELINE_STEPS.unsuppress("Sketch 1"), suppressItem(doc, "sketch-2", false));
+  assert.deepEqual(steps.map((x) => x.name), ["Suppress Sketch 1", "Unsuppress Sketch 1"]);
+
+  // Extrude 1 before its sketch: refused with its message, nothing recorded.
+  assert.deepEqual(reorderItem(doc, "feature-11", 1), { refused: "before-dependency", message: "Extrude 1 can't go before Sketch 1: it is built from Sketch 1" });
+  assert.deepEqual(reorderItem(doc, "sketch-2", 2), { refused: "after-dependent", message: "Sketch 1 can't go after Extrude 1: Extrude 1 is built from it" });
+  // The box to the end: [sketch-2, feature-11, feature-1], the same two bodies.
+  const moved = reorderItem(doc, "feature-1", 2);
+  assert.ok("doc" in moved);
+  await record(TIMELINE_STEPS.reorder("Feature 1 (box)"), moved.doc);
+  assert.deepEqual(order(), ["sketch-2", "feature-11", "feature-1"]);
+  assert.ok(close(await volume("feature-1"), 24000) && close(await volume("feature-11"), 12000));
+
+  // The marker on the sketch: the extrude and the box after it are rolled back. At the start: everything is.
+  await record(TIMELINE_STEPS.marker, moveMarker(doc, "sketch-2"));
+  let r = await results();
+  assert.deepEqual([r["sketch-2"].status, r["feature-11"].status, r["feature-1"].status], ["built", "rolled-back", "rolled-back"]);
+  await record(TIMELINE_STEPS.marker, moveMarker(doc, "start"));
+  r = await results();
+  assert.ok(order().every((id) => r[id].status === "rolled-back"));
+  await record(TIMELINE_STEPS.marker, moveMarker(doc, null));
+  assert.ok(close(await volume("feature-11"), 12000));
+
+  // Delete Sketch 1: Extrude 1 keeps its last shape (12000 mm³) with the warning naming the deleted sketch.
+  await record(TIMELINE_STEPS.delete("Sketch 1"), deleteItem(doc, "sketch-2"));
+  assert.deepEqual(order(), ["feature-11", "feature-1"]);
+  r = await results();
+  const kept = r["feature-11"];
+  assert.ok(kept.status === "built" && kept.warning, JSON.stringify(kept));
+  assert.deepEqual([kept.warning.cause, kept.warning.sketch], ["deleted-input", "sketch-2"]);
+  assert.ok(close(await volume("feature-11"), 12000));
+  assert.deepEqual(steps.map((x) => x.name), [
+    "Suppress Sketch 1",
+    "Unsuppress Sketch 1",
+    "Move Feature 1 (box) in the timeline",
+    "Move the rollback marker",
+    "Move the rollback marker",
+    "Move the rollback marker",
+    "Delete Sketch 1",
+  ]);
+
+  // Undo the delete: the sketch is back, the extrude built from it with no warning and nothing kept.
+  undo();
+  r = await results();
+  assert.ok(r["feature-11"].status === "built" && !r["feature-11"].warning && doc.kept === undefined);
+  // Undo the three marker moves and the reorder: the box first again, both bodies the same.
+  for (let k = 0; k < 4; k++) undo();
+  assert.deepEqual(order(), ["feature-1", "sketch-2", "feature-11"]);
+  assert.ok(close(await volume("feature-1"), 24000) && close(await volume("feature-11"), 12000));
+  await cache.clear();
+  assert.equal(await kernel.call("body_count"), start);
+});
 pending("each planted bug of MODEL_FAULTS, planted by hand once in Design's code, is caught by its check (recorded in the substep's line)", "24e");
 pending("the timeline in the browser at 1280 and 375 px in Chromium, Firefox and WebKit: rows in build order, the marker dragged and tapped, suppress and delete from a row, failed items marked; pixel probes for each body drawn", "24f");
 pending("editing an early feature rebuilds everything after it; references re-resolve through their names; one that can't shows a warning on the item holding it", "25a");
