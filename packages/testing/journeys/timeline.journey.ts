@@ -356,7 +356,7 @@ test("Design names edges by the two faces they join, the uprights in order round
 
 /** Builds the part of a Design document on the real kernel and names it, as Design's workspace does. */
 /** One built body as the app shows it: joined alone (24d3b), so its numbering is the kernel's. */
-const sceneOf = (b: { view: BodyView; names: ReturnType<typeof nameBody> }) => joinBodies([{ feature: decodeURIComponent(b.names.feature), view: b.view, names: b.names }]);
+const sceneOf = (b: { view: BodyView; names: ReturnType<typeof nameBody> }) => joinBodies([{ feature: decodeURIComponent(b.names.feature), place: 1, view: b.view, names: b.names }]);
 
 async function builtNames(kernel: KernelCalls, doc: DesignDocument) {
   const feature = lastFeature(doc);
