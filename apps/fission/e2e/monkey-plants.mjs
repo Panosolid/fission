@@ -36,7 +36,7 @@ export const MONKEY_PLANTS = {
   "bodies-ignore-builds": {
     what: "the Bodies group lists every solid, built or not",
     expect: "Bodies group matches the file",
-    edits: [{ file: "workspaces/design/src/browser.ts", find: "  return document.timeline.features.filter((f) => !isSketchItem(f) && builds(document, f));", replace: "  return document.timeline.features.filter((f) => !isSketchItem(f) && (builds(document, f) || true));" }],
+    edits: [{ file: "workspaces/design/src/browser.ts", find: "  return document.timeline.features.filter((f) => !isSketchItem(f) && building.has(f));", replace: "  return document.timeline.features.filter((f) => !isSketchItem(f) && (building.has(f) || true));" }],
   },
   "redo-does-nothing": {
     what: "Redo says it redid the step but puts nothing back",
@@ -56,7 +56,7 @@ export const MONKEY_PLANTS = {
   "body-row-off-by-one": {
     what: "a Bodies row selects the next body",
     expect: "selection agrees",
-    edits: [{ file: "workspaces/design/src/browser.ts", find: "(bodyFeatures(doc)[Number(body[1]) - 1]);", replace: "(bodyFeatures(doc)[Number(body[1]) % bodyFeatures(doc).length]);" }],
+    edits: [{ file: "workspaces/design/src/browser.ts", find: "(bodies[Number(body[1]) - 1]);", replace: "(bodies[Number(body[1]) % bodies.length]);" }],
   },
   "top-bar-spills-on-phone": {
     what: "at phone width the top bar is wider than the window",

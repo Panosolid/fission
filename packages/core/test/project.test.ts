@@ -23,7 +23,7 @@ test("files from a newer Panoshape, and things that are not projects, are refuse
 });
 
 // ---- Saving and opening a project file (19a) ----
-import { MAX_NESTING, projectFromJson, projectToJson, type Project } from "../src/model/project.ts";
+import { MAX_NESTING, MAX_PROJECT_BYTES, megabytes, projectFromJson, projectToJson, type Project } from "../src/model/project.ts";
 
 test("a saved file has sorted keys and two-space indents (worked by hand)", () => {
   // emptyProject("A"): the keys sorted are formatVersion, links, materials,
@@ -160,4 +160,27 @@ test("a number too big for a double (read as Infinity) is refused with where it 
   assert.throws(() => projectFromJson(text("1e400"), []), /not a Panoshape project: project\.workspaces\.render\.w is too big a number/);
   assert.throws(() => projectFromJson(text("-1e400"), []), /project\.workspaces\.render\.w is too big a number/);
   assert.equal((projectFromJson(text("1e308"), []).workspaces.render as { w: number }).w, 1e308);
+});
+
+test("a project of MAX_PROJECT_BYTES opens; one more is refused before it is parsed (audit S2)", () => {
+  // 64 × 1024 × 1024 = 67,108,864 bytes. A saved empty project padded with
+  // spaces (still valid JSON) to exactly that opens; one space more doesn't.
+  assert.equal(MAX_PROJECT_BYTES, 67_108_864);
+  const json = projectToJson(emptyProject("P"));
+  const padded = (n: number) => json + " ".repeat(n - json.length);
+  assert.equal(projectFromJson(padded(MAX_PROJECT_BYTES), []).name, "P");
+  // 67,108,865 / 1,048,576 = 64.000001, rounded up to a tenth: 64.1, so it never reads as the limit.
+  assert.throws(() => projectFromJson(padded(MAX_PROJECT_BYTES + 1), []), { message: "can't open this project: it is 64.1 MB, and a Panoshape project may be at most 64 MB" });
+  // Refused by its size before JSON.parse: text that isn't JSON at all gets the size message, not "not valid JSON".
+  assert.throws(() => projectFromJson("x".repeat(MAX_PROJECT_BYTES + 1), []), /^Error: can't open this project: it is 64\.1 MB/);
+  // 0.9 × 64 MB = 57.6 MB opens; 1.1 × is 73,819,750 bytes = 70.39999… MB, up to 70.4.
+  assert.equal(projectFromJson(padded(Math.floor(0.9 * MAX_PROJECT_BYTES)), []).name, "P");
+  assert.throws(() => projectFromJson(padded(Math.floor(1.1 * MAX_PROJECT_BYTES)), []), /it is 70\.4 MB/);
+});
+
+test("megabytes, worked by hand", () => {
+  assert.equal(megabytes(1024 * 1024), "1 MB");
+  assert.equal(megabytes(1.25 * 1024 * 1024), "1.3 MB"); // 1.25 up to a tenth
+  assert.equal(megabytes(1), "0.1 MB"); // a single byte is still more than nothing
+  assert.equal(megabytes(0), "0 MB");
 });

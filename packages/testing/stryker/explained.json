@@ -110,5 +110,12 @@
     "original": "there > i",
     "replacement": "there >= i",
     "why": "there === i means the extrude names its own id as its sketch; that item is the extrude itself, not a sketch, so the isSketchItem half refuses it with the same message."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ConditionalExpression",
+    "original": "!profiles.has(p.id)",
+    "replacement": "true",
+    "why": "Which of two profiles sharing an id the Map keeps can't matter: the id check above already refused any file with a repeated id before the sizes are read."
   }
 ]

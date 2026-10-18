@@ -240,7 +240,7 @@ export const PLANTS: Record<ModelFault, Plant> = {
     edits: [
       {
         file: REBUILD,
-        find: "    else results[f.id] = await buildFeature(doc, f, results, cache, kernel);",
+        find: "    else results[f.id] = await buildFeature(doc, f, results, cache, kernel, index);",
         replace: [
           "    else {",
           "      const g = globalThis as { prev?: WeakMap<object, Map<string, { k: string; r: FeatureResult }>> };",
@@ -249,7 +249,7 @@ export const PLANTS: Record<ModelFault, Plant> = {
           "      const k = JSON.stringify(f);",
           "      const old = prev.get(cache)!.get(f.id);",
           "      const held = old?.r.status === \"built\" && [...(cache as unknown as { bodies: Map<string, { handle: unknown }> }).bodies.values()].some((b) => b.handle === (old.r as { body?: unknown }).body);",
-          "      results[f.id] = old && old.k === k && held ? old.r : await buildFeature(doc, f, results, cache, kernel);",
+          "      results[f.id] = old && old.k === k && held ? old.r : await buildFeature(doc, f, results, cache, kernel, index);",
           "      prev.get(cache)!.set(f.id, { k, r: results[f.id] });",
           "    }",
         ].join("\n"),

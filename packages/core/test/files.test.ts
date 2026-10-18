@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { claimedFormat, FILE_FORMATS, identifyFile, routeFiles, type FileFormat, type FileHead, type FileImporter, type Identified } from "../src/model/files.ts";
 import { RepresentationRegistry } from "../src/model/representation.ts";
-import { emptyProject, projectToJson } from "../src/model/project.ts";
+import { emptyProject, MAX_PROJECT_BYTES, projectToJson } from "../src/model/project.ts";
 
 const bytes = (s: string) => new Uint8Array([...s].map((c) => c.charCodeAt(0)));
 /** A whole file as identifyFile sees it (head = all of it: these are small). */
@@ -270,4 +270,24 @@ test("seeded random files: identifyFile matches the model of the rules, and neve
       assert.doesNotThrow(() => identifyFile({ name: String.fromCharCode(...Array.from({ length: int(12) }, () => int(0x3000))), size: raw.length + int(3) * 50, head: raw }));
     }
   }
+});
+
+test("a project file over MAX_PROJECT_BYTES is refused by its size, before the shell reads it (audit S2)", () => {
+  const registry = new RepresentationRegistry();
+  const shell = importer(["project"], null);
+  const image = importer(["png"], "image");
+  registry.registerImporter(shell);
+  registry.registerImporter(image);
+  // Only the head is read before routing: a file's size comes from the file itself.
+  const head = bytes(projectToJson(emptyProject()));
+  const project = (size: number): FileHead => ({ name: "big.fission.json", size, head });
+  const at = routeFiles(registry, [project(MAX_PROJECT_BYTES)]);
+  assert.ok(at?.kind === "open" && at.importer === shell);
+  // 64 MB + 1 byte is 64.000001 MB, shown rounded up: 64.1.
+  assert.equal(refusal(registry, project(MAX_PROJECT_BYTES + 1)), "Couldn't open “big.fission.json”: it is 64.1 MB, and a Panoshape project may be at most 64 MB.");
+  // The limit is a project's: an image that big goes on to Image, which has its own limits.
+  const png = routeFiles(registry, [{ name: "big.png", size: MAX_PROJECT_BYTES + 1, head: new Uint8Array(PNG) }]);
+  assert.ok(png?.kind === "open" && png.importer === image);
+  // With no importer for projects the old refusal stands (nothing opens them), size aside.
+  assert.match(refusal(new RepresentationRegistry(), project(MAX_PROJECT_BYTES + 1)), /nothing here opens Panoshape projects/);
 });

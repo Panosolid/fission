@@ -21,6 +21,22 @@ export const FORMAT_VERSION = 2;
 /** Deepest nesting of lists and objects a file may have (JSON.stringify fails somewhere past ~5,000; real projects are about 10 deep). */
 export const MAX_NESTING = 256;
 
+/**
+ * Largest project file opened, in bytes (security audit S2): reading a far
+ * bigger one could freeze the tab, and the app reopens the last project on
+ * every visit. Real projects are well under 1 MB; the biggest design Design
+ * itself opens is about 40 MB.
+ */
+export const MAX_PROJECT_BYTES = 64 * 1024 * 1024;
+
+/** A size in MB as the messages say it, rounded up to a tenth so a size over a limit never reads as the limit: "64 MB", "64.1 MB" (1 MB = 1024 × 1024 bytes, as MAX_PROJECT_BYTES counts). */
+export const megabytes = (bytes: number): string => `${Math.ceil((bytes / (1024 * 1024)) * 10) / 10} MB`;
+
+/** Why a project of this many bytes (or UTF-16 code units, which a UTF-8 file never has more of than bytes) isn't opened, or null when it is. */
+export function tooBig(size: number): string | null {
+  return size > MAX_PROJECT_BYTES ? `it is ${megabytes(size)}, and a Panoshape project may be at most ${megabytes(MAX_PROJECT_BYTES)}` : null;
+}
+
 export interface Project {
   formatVersion: typeof FORMAT_VERSION;
   name: string;
@@ -125,6 +141,8 @@ export interface DataReader {
  * returned half-read.
  */
 export function projectFromJson(text: string, readers: readonly DataReader[]): Project {
+  const big = tooBig(text.length); // before parsing, which is the slow part
+  if (big) throw new Error(`can't open this project: ${big}`);
   let data: unknown;
   try {
     data = JSON.parse(text);

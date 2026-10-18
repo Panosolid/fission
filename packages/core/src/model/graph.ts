@@ -29,6 +29,11 @@ export class DependencyGraph {
   private nodes = new Map<string, GraphNode>();
   /** id → the ids it reads. */
   private inputs = new Map<string, string[]>();
+  /** id → the ids that read it, the other way round from `inputs`, so finding readers doesn't search every node (security audit S2). */
+  private readers = new Map<string, Set<string>>();
+  /** id → when it first entered `inputs`: readers are walked in that order, the order `inputs` iterates in. */
+  private order = new Map<string, number>();
+  private added = 0;
   private staleIds = new Set<string>();
   private listeners = new Set<() => void>();
 
@@ -53,10 +58,18 @@ export class DependencyGraph {
   set(node: GraphNode, dependsOn: string[] = []): void {
     for (const d of dependsOn) {
       if (!this.nodes.has(d)) throw new Error(`${node.label} depends on ${d}, which is not in the project`);
-      if (d === node.id || this.upstreamOf(d).has(node.id)) throw new Error(`${node.label} would depend on itself through ${d}`);
+      // Only an id something reads can be upstream of d: a new id nothing reads skips the walk, so a long chain is built in linear time.
+      if (d === node.id || (this.readers.has(node.id) && this.upstreamOf(d).has(node.id))) throw new Error(`${node.label} would depend on itself through ${d}`);
     }
     this.nodes.set(node.id, node);
+    this.unlink(node.id);
+    if (!this.order.has(node.id)) this.order.set(node.id, this.added++);
     this.inputs.set(node.id, [...dependsOn]);
+    for (const d of dependsOn) {
+      const r = this.readers.get(d);
+      if (r) r.add(node.id);
+      else this.readers.set(d, new Set([node.id]));
+    }
     this.notify();
   }
 
@@ -64,10 +77,21 @@ export class DependencyGraph {
   remove(id: string): Staleness {
     const result = this.changed(id);
     this.nodes.delete(id);
+    this.unlink(id);
     this.inputs.delete(id);
+    this.order.delete(id);
     this.staleIds.delete(id);
     this.notify();
     return result;
+  }
+
+  /** Takes `id` out of the readers of what it reads now. */
+  private unlink(id: string): void {
+    for (const d of this.inputs.get(id) ?? []) {
+      const r = this.readers.get(d);
+      r?.delete(id);
+      if (r?.size === 0) this.readers.delete(d);
+    }
   }
 
   has(id: string): boolean {
@@ -79,24 +103,37 @@ export class DependencyGraph {
     return this.nodes.get(id);
   }
 
-  /** Ids `id` reads, directly or through others. */
+  /** Ids `id` reads, directly or through others, depth first; no recursion, so a long chain can't overflow the stack. */
   upstreamOf(id: string): Set<string> {
+    return this.walk(id, (x) => this.inputs.get(x) ?? []);
+  }
+
+  /** Depth first from `id` through `next`, each id once, in the order found. */
+  private walk(id: string, next: (x: string) => readonly string[]): Set<string> {
     const seen = new Set<string>();
-    const walk = (x: string) => {
-      for (const d of this.inputs.get(x) ?? []) if (!seen.has(d)) (seen.add(d), walk(d));
-    };
-    walk(id);
+    const stack = [{ list: next(id), at: 0 }];
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      if (top.at === top.list.length) {
+        stack.pop();
+        continue;
+      }
+      const n = top.list[top.at++];
+      if (seen.has(n)) continue;
+      seen.add(n);
+      stack.push({ list: next(n), at: 0 });
+    }
     return seen;
   }
 
-  /** Ids that read `id`, directly or through others. */
+  /**
+   * Ids that read `id`, directly or through others, depth first with each
+   * id's readers in the order they entered the graph. Time in proportion
+   * to what it finds, through `readers`, and no recursion, so a long chain
+   * can't overflow the stack (security audit S2).
+   */
   downstreamOf(id: string): Set<string> {
-    const seen = new Set<string>();
-    const walk = (x: string) => {
-      for (const [n, ins] of this.inputs) if (ins.includes(x) && !seen.has(n)) (seen.add(n), walk(n));
-    };
-    walk(id);
-    return seen;
+    return this.walk(id, (x) => [...(this.readers.get(x) ?? [])].sort((a, b) => this.order.get(a)! - this.order.get(b)!));
   }
 
   /**
