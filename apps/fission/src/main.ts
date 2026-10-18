@@ -18,7 +18,7 @@ import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS,
 import { changeNote, shortcutList, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
-import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
+import { localStore, reopenGuard, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
 import { createAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
@@ -473,6 +473,18 @@ function closeSplit() {
 // Each project has its own stored id: an opened file becomes a new stored
 // project rather than overwriting the one that was open.
 const store = localStore(workspaces);
+// Marks the project being opened, so one that froze or crashed the tab isn't
+// reopened on the next visit (audit S2, reopen.ts in @fission/storage).
+const guard = reopenGuard(
+  (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null; // storage turned off: projects reopen as before
+    }
+  })(),
+);
+window.addEventListener("pagehide", () => guard.finished());
 let autosave: Autosave | null = null;
 const saveStatus = (s: AutosaveStatus) => {
   const el = $("save-status");
@@ -521,11 +533,14 @@ function openProject(text: string) {
   ctx.selection.clear(); // it named the old part's faces
   ctx.project = project;
   useGraph(new DependencyGraph(), new ChangeNotes()); // the old notes were about the old project
-  keep(newId());
+  const id = newId();
+  guard.opening(id); // stored at once, so it would be reopened on the next visit
+  keep(id);
   autosave?.changed(); // store the opened file as it is
   pool.forgetAll(); // every warm workspace showed the old project
   show(current); // mounts the workspace on the opened project
   if (split) mountSplit(split.id); // and the second one
+  guard.shown(id);
   ctx.history.reset(); // a new start: nothing from the old project to undo
   fileStatus("");
 }
@@ -711,8 +726,10 @@ const fromHash = (): Page => {
 window.addEventListener("hashchange", () => show(fromHash()));
 // Start on the project saved most recently in this browser, or a new one.
 // One that can't be read is left stored as it is, and a new project starts
-// with a message saying so; a browser that can't keep projects at all still
-// gets a working app (Save and Open use files). Never a blank app.
+// with a message saying so; so does one the last visit started opening and
+// never finished (it froze or crashed the tab), once: the visit after tries
+// it again. A browser that can't keep projects at all still gets a working
+// app (Save and Open use files). Never a blank app.
 async function start() {
   const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
   let newest: string | undefined;
@@ -724,17 +741,25 @@ async function start() {
     show(fromHash());
     return ctx.history.reset();
   }
+  let opened: string | undefined;
   try {
-    if (newest) {
+    if (newest && guard.stuck(newest)) {
+      keep(newId());
+      fileStatus("The last project didn't finish opening on your last visit, so a new one was started. The old one is still kept in this browser: reload the page now, before changing anything, to try it again.");
+    } else if (newest) {
+      guard.opening(newest);
       ctx.project = await store.open(newest);
       keep(newest);
       saveStatus({ state: "saved" });
+      opened = newest;
     } else keep(newId());
   } catch (e) {
+    guard.finished(); // refused with a message, which is not a freeze
     keep(newId());
     fileStatus(`Couldn't open the last project (${why(e)}), so a new one was started. The old one is still kept in this browser.`);
   }
   show(fromHash());
+  if (opened) guard.shown(opened);
   ctx.history.reset(); // the project as it opened is the start
 }
 // Save, Open, a drop and a paste wait for this: until the last project is

@@ -97,6 +97,17 @@ export const SKETCH_PLANES = ["XY", "XZ", "YZ"] as const;
 export type SketchPlane = (typeof SKETCH_PLANES)[number];
 
 /**
+ * The most a design file holds (security audit S2): far above any real
+ * part, but low enough that a file can't freeze the tab while it opens.
+ * `items` counts the timeline, `profiles` the ready-made outlines,
+ * `sketch` one sketch's (or kept shape's) points and curves together, and
+ * `content` every sketch's and kept shape's points and curves together.
+ * The kernel's own limit on one outline is 2,000 corners, so a sketch has
+ * ten times that.
+ */
+export const DESIGN_LIMITS = { items: 5_000, profiles: 5_000, sketch: 20_000, content: 500_000 } as const;
+
+/**
  * The rollback marker: the id of the last item built, or "start" when
  * nothing is; left out when everything is built (docs/project-format.md).
  */
@@ -288,6 +299,11 @@ export function partOf(document: DesignDocument): { shape: PartKind; sizes: Part
 
 /** The shape and sizes a solid feature was made from (presetFeature's inverse; an extrude of a sketch has its distance). */
 export function shapeOf(document: DesignDocument, f: Feature): { shape: PartKind; sizes: PartSizes } {
+  return shapeWith(f, (id) => document.profiles.find((x) => x.id === id));
+}
+
+/** shapeOf with the profile found by `profileOf` (readDesignDocument's is a Map, so a big file reads in linear time). */
+function shapeWith(f: Feature, profileOf: (id: unknown) => ReadyProfile | undefined): { shape: PartKind; sizes: PartSizes } {
   switch (f.intent.type) {
     case "box":
       return { shape: "box", sizes: { width: num(f, "width"), depth: num(f, "depth"), height: num(f, "height") } };
@@ -297,7 +313,7 @@ export function shapeOf(document: DesignDocument, f: Feature): { shape: PartKind
       return { shape: "sphere", sizes: { width: num(f, "diameter") } };
     case "extrude": {
       if (isSketchExtrude(f)) return { shape: "sketch-extrude", sizes: { height: num(f, "distance") } };
-      const profile = document.profiles.find((x) => x.id === f.intent.parameters.profile);
+      const profile = profileOf(f.intent.parameters.profile);
       if (!profile) throw new Error(`${f.intent.summary}: its profile ${shown(f.intent.parameters.profile)} is missing`);
       // A kind that isn't text never reaches Object.hasOwn, which would turn it into text (issue #139).
       if (typeof profile.kind !== "string" || !Object.hasOwn(profileNames, profile.kind)) throw new Error(`profile ${profile.id} has an unknown kind ${shown(profile.kind)}`);
@@ -320,9 +336,9 @@ export function migrateDesignV2(d: Record<string, unknown>): Record<string, unkn
   const timeline = d.timeline as Record<string, unknown> | undefined;
   if (isRecord(timeline) && Object.hasOwn(timeline, "marker")) throw new Error("Design data says version 2 but has a timeline marker, which version 2 never had");
   if (!isRecord(timeline) || !Array.isArray(timeline.features)) return { ...d, version: 3 };
-  const solids = timeline.features.filter((f) => !(isRecord(f) && isRecord(f.intent) && f.intent.type === "sketch"));
-  const last = solids.at(-1);
-  const features = timeline.features.map((f) => (solids.includes(f) && f !== last && isRecord(f) ? { ...f, suppressed: true } : f));
+  const solids = new Set(timeline.features.filter((f) => !(isRecord(f) && isRecord(f.intent) && f.intent.type === "sketch")));
+  const last = [...solids].at(-1);
+  const features = timeline.features.map((f) => (solids.has(f) && f !== last && isRecord(f) ? { ...f, suppressed: true } : f));
   return { ...d, version: 3, timeline: { ...timeline, features } };
 }
 
@@ -361,7 +377,13 @@ function checkSketch(s: unknown, i: number): void {
   const at = `Design sketch ${s.id}`;
   if (!Array.isArray(s.points) || !Array.isArray(s.curves) || !Array.isArray(s.constraints)) throw new Error(`${at} needs points, curves and constraints lists`);
   if (s.constraints.length > 0) throw new Error(`${at} has constraints, which this Panoshape can't read yet`);
+  notTooMany(s.points.length + s.curves.length, DESIGN_LIMITS.sketch, `${at} has`, "points and curves");
   checkContent(s.points, s.curves, at);
+}
+
+/** Refuses a count above its limit (DESIGN_LIMITS) before anything loops over what it counts: "Design data has 6000 timeline items, more than the 5000 …". */
+function notTooMany(count: number, limit: number, has: string, what: string): void {
+  if (count > limit) throw new Error(`${has} ${count} ${what}, more than the ${limit} this Panoshape opens`);
 }
 
 /** A sketch's or kept shape's points and curves, checked as checkSketch says; `at` starts each message. */
@@ -398,10 +420,13 @@ function checkContent(pointList: unknown[], curves: unknown[], at: string): void
 function checkKept(kept: unknown, feature: string): void {
   const at = `Design feature ${feature}'s kept shape`;
   if (!isRecord(kept) || !Array.isArray(kept.points) || !Array.isArray(kept.curves)) throw new Error(`${at} needs points and curves lists`);
+  notTooMany(kept.points.length + kept.curves.length, DESIGN_LIMITS.sketch, `${at} has`, "points and curves");
   checkContent(kept.points, kept.curves, at);
-  const ids = [...kept.points, ...kept.curves].map((x) => (x as { id: string }).id);
-  const twice = ids.find((id, k) => ids.indexOf(id) !== k);
-  if (twice !== undefined) throw new Error(`${at} uses the id ${shown(twice)} twice`);
+  const seen = new Set<string>();
+  for (const { id } of [...kept.points, ...kept.curves] as { id: string }[]) {
+    if (seen.has(id)) throw new Error(`${at} uses the id ${shown(id)} twice`);
+    seen.add(id);
+  }
 }
 
 /**
@@ -412,6 +437,9 @@ function checkKept(kept: unknown, feature: string): void {
  */
 export function readDesignDocument(data: unknown): DesignDocument {
   if (!isRecord(data)) throw new Error("Design data is missing");
+  // Counted before migrating, which spreads every id of a version 1 file.
+  for (const [list, limit, what] of [[data.profiles, DESIGN_LIMITS.profiles, "profiles"], [isRecord(data.timeline) ? data.timeline.features : undefined, DESIGN_LIMITS.items, "timeline items"], [data.sketches, DESIGN_LIMITS.items, "sketches"]] as const)
+    if (Array.isArray(list)) notTooMany(list.length, limit, "Design data has", what);
   const v2 = data.version === 1 ? migrateDesignV1(data) : data;
   const d = (v2.version === 2 ? migrateDesignV2(v2) : v2) as Partial<DesignDocument>;
   if (d.version !== 3) throw new Error(`Design data version ${shown(d.version)} is not one this Panoshape reads (1, 2 or 3)`);
@@ -427,10 +455,18 @@ export function readDesignDocument(data: unknown): DesignDocument {
       throw new Error(`Design feature ${i + 1} has no id or intent`);
     if (typeof f.suppressed !== "boolean") throw new Error(`Design feature ${f.id}: suppressed must be true or false, not ${shown(f.suppressed)}`);
   }
+  // Each id's first item, so every lookup below is one step (a search in a loop took minutes on a big file, audit S2).
+  const byId = new Map<string, { item: Feature; at: number }>();
+  for (const [at, item] of d.timeline.features.entries()) if (!byId.has(item.id)) byId.set(item.id, { item, at });
   const marker = d.timeline.marker;
-  if (Object.hasOwn(d.timeline, "marker") && marker !== "start" && !d.timeline.features.some((f) => f.id === marker))
+  if (Object.hasOwn(d.timeline, "marker") && marker !== "start" && !byId.has(marker as string))
     throw new Error(`Design timeline marker ${shown(marker)} is not "start" or the id of an item in the timeline`);
-  d.sketches.forEach(checkSketch);
+  let content = 0;
+  for (const [i, s] of d.sketches.entries()) {
+    checkSketch(s, i);
+    content += s.points.length + s.curves.length;
+    notTooMany(content, DESIGN_LIMITS.content, "Design data's sketches have at least", "points and curves together");
+  }
   // Each sketch has exactly one timeline item, on a plane this Panoshape knows, and each sketch item its sketch.
   const sketchIds = new Set(d.sketches.map((s) => s.id));
   const items = d.timeline.features.filter(isSketchItem);
@@ -438,14 +474,15 @@ export function readDesignDocument(data: unknown): DesignDocument {
     if (!sketchIds.has(f.id)) throw new Error(`Design timeline item ${f.id} is a sketch with no content in the sketches list`);
     if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Panoshape knows (XY, XZ or YZ)`);
   }
-  for (const s of d.sketches) if (!items.some((f) => f.id === s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
+  const itemIds = new Set(items.map((f) => f.id));
+  for (const s of d.sketches) if (!itemIds.has(s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
   // An extrude of a sketch comes after its sketch and depends on it, so a rebuild in order always has the outline.
   for (const [i, f] of d.timeline.features.entries()) {
     if (!isSketchExtrude(f)) continue;
     const p = f.intent.parameters;
     if (Object.hasOwn(p, "profile")) throw new Error(`Design feature ${f.id} extrudes both a sketch and a profile`);
     // Its sketch may be gone (deleted: the extrude keeps its last shape, or fails naming it), but never another item or a later one.
-    const there = d.timeline.features.findIndex((x) => x.id === p.sketch);
+    const there = byId.get(p.sketch as string)?.at ?? -1;
     if (typeof p.sketch !== "string" || (there >= 0 && (there > i || !isSketchItem(d.timeline.features[there]))))
       throw new Error(`Design feature ${f.id} extrudes ${shown(p.sketch)}, which is not a sketch before it in the timeline`);
     if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(p.sketch as string)) throw new Error(`Design feature ${f.id} extrudes ${p.sketch} but does not depend on it`);
@@ -454,9 +491,11 @@ export function readDesignDocument(data: unknown): DesignDocument {
   if (Object.hasOwn(d, "kept")) {
     if (!isRecord(d.kept)) throw new Error("Design data's kept shapes are not an object of extrude ids");
     for (const [id, kept] of Object.entries(d.kept)) {
-      const f = d.timeline.features.find((x) => x.id === id);
+      const f = byId.get(id)?.item;
       if (!f || !isSketchExtrude(f)) throw new Error(`Design data keeps a shape for ${shown(id)}, which is not an extrude of a sketch in the timeline`);
       checkKept(kept, id);
+      content += (kept as KeptShape).points.length + (kept as KeptShape).curves.length;
+      notTooMany(content, DESIGN_LIMITS.content, "Design data's sketches and kept shapes have at least", "points and curves together");
     }
   }
   // Ids are unique in the document (a sketch shares its id with its timeline item), and the counter is above all of them.
@@ -480,7 +519,9 @@ export function readDesignDocument(data: unknown): DesignDocument {
   }
   // Every solid feature is its own body (24d1), so each one's sizes or profile are checked, not only the part's.
   // Whether any of them builds doesn't matter: a design with no body opens as one (24f4).
-  for (const f of d.timeline.features) if (!isSketchItem(f)) shapeOf(d as DesignDocument, f);
+  const profiles = new Map<unknown, ReadyProfile>();
+  for (const p of d.profiles) if (!profiles.has(p.id)) profiles.set(p.id, p);
+  for (const f of d.timeline.features) if (!isSketchItem(f)) shapeWith(f, (id) => profiles.get(id));
   return d as DesignDocument;
 }
 

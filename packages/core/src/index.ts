@@ -13,7 +13,7 @@ export { reportFeedback } from "./model/feedback.ts";
 export type { Parameter, ParameterSweep, ProjectParameters } from "./model/parameters.ts";
 export { projectParameters } from "./model/parameters.ts";
 export type { DataReader, LengthUnit, Project, WorkspaceId } from "./model/project.ts";
-export { emptyProject, FORMAT_VERSION, MAX_NESTING, projectFromJson, projectToJson, readProject } from "./model/project.ts";
+export { emptyProject, FORMAT_VERSION, MAX_NESTING, MAX_PROJECT_BYTES, projectFromJson, projectToJson, readProject } from "./model/project.ts";
 export type { FrozenCopy, LiveLink, Link, LinkSource, LinkStatus, SourceLookup } from "./model/links.ts";
 export { breakLink, fetchLinked, linkTo, resolveLink } from "./model/links.ts";
 export type { Answer, EditRoute, LinkedValue, OwnershipChange, ProposedEdit, Transfer } from "./model/ownership.ts";
