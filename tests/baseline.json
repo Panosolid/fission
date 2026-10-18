@@ -37,6 +37,14 @@
       "flag": 15,
       "fail": 100,
       "why": "time divided by a fixed JavaScript workload's in the same process; still varies by about 15% between runs and machines, so past 15% it only warns, and only twice as slow fails"
+    },
+    "kernel_calls": {
+      "fail": 15,
+      "why": "every kernel call one edit makes (step 24d3c, packages/testing/baseline/rebuild.ts): exact, so 15%, the project's margin, lets a few calls more pass and fails a waste on every feature (20 more on the 20-feature part)"
+    },
+    "body_builds": {
+      "fail": 0,
+      "why": "bodies the kernel builds for one edit: exact; a working cache builds only the edited feature's body, so any more means unchanged features are being rebuilt"
     }
   },
   "metrics": {
@@ -53,6 +61,8 @@
     "app.project_open.retained_bytes": 523928,
     "app.project_save.relative_time": 0.06,
     "app.project_save.retained_bytes": 546632,
+    "app.rebuild_20_arcs_edit_first.body_builds": 1,
+    "app.rebuild_20_arcs_edit_first.kernel_calls": 43,
     "kernel.extrude_arcs_200.allocations": 67430,
     "kernel.extrude_arcs_200.instructions": 206460565,
     "kernel.extrude_arcs_200.peak_bytes": 783768,

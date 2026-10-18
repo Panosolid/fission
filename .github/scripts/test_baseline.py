@@ -103,6 +103,30 @@ class TheRealBaseline(unittest.TestCase):
         for rule in b["margins"].values():
             self.assertTrue(set(rule) <= {"fail", "flag", "floor", "why"} and ("fail" in rule or "flag" in rule))
 
+    def test_the_rebuild_counts_fail_each_planted_bug(self):
+        # The counts journeys/rebuild-baseline.journey.ts works out by hand for
+        # one edit of "20 features with arcs, edit the first" (step 24d3c):
+        # 43 kernel calls and 1 body built; with the cache emptied every edit,
+        # 103 and 21; with every outline asked twice, 63 and 1.
+        with open(baseline.BASELINE) as f:
+            b = json.load(f)
+        op = "app.rebuild_20_arcs_edit_first"
+        ours = {m: v for m, v in b["metrics"].items() if m.startswith(op + ".") and baseline.kind_of(m) != "relative_time"}
+        self.assertEqual(ours, {f"{op}.kernel_calls": 43, f"{op}.body_builds": 1})
+
+        def judged(calls, builds):
+            return {m: v for m, _, _, _, v in compare({"margins": b["margins"], "metrics": ours}, {f"{op}.kernel_calls": calls, f"{op}.body_builds": builds})}
+
+        self.assertEqual(judged(43, 1), {f"{op}.kernel_calls": "ok", f"{op}.body_builds": "ok"})
+        self.assertEqual(judged(103, 21), {f"{op}.kernel_calls": "fail", f"{op}.body_builds": "fail"})
+        self.assertEqual(judged(63, 1), {f"{op}.kernel_calls": "fail", f"{op}.body_builds": "ok"})
+        # One body more is a feature rebuilt that didn't change: fails.
+        self.assertEqual(judged(43, 2)[f"{op}.body_builds"], "fail")
+        # Calls at 0.9x and 1.1x of the 15% margin: 43 x 1.135 = 48.8, so 48
+        # (+11.6%) passes; 43 x 1.165 = 50.1, so 51 (+18.6%) fails.
+        self.assertEqual(judged(48, 1)[f"{op}.kernel_calls"], "ok")
+        self.assertEqual(judged(51, 1)[f"{op}.kernel_calls"], "fail")
+
 
 if __name__ == "__main__":
     unittest.main()
