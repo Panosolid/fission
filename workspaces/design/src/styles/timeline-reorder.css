@@ -1,0 +1,15 @@
+/* Step 24f6: an item dragged along the timeline to a new place. The row
+   (the playback buttons and the bar) holds the line that stands where the
+   item would drop, blue, or red with the refusal's words above the bar
+   when it can't go there. The dragged item is dimmed. A picked item takes
+   a finger's drag rather than the row's sideways scroll. Each rule starts
+   with .timeline-reorder, so it styles this feature alone. */
+.timeline-reorder { position: relative; }
+.timeline-reorder .timeline-reorder-picked { touch-action: none; }
+.timeline-reorder .timeline-reorder-dragged { opacity: 0.45; outline: 1px dashed #4aa8ff; outline-offset: 1px; cursor: grabbing; }
+.timeline-reorder .timeline-reorder-line { position: absolute; top: 3px; bottom: 3px; width: 2px; border-radius: 1px; background: #4aa8ff; pointer-events: none; z-index: 2; }
+.timeline-reorder .timeline-reorder-line[data-state="refused"] { background: #ff6b6b; }
+.timeline-reorder .timeline-reorder-line[data-state="refused"]::before { content: "×"; position: absolute; top: -9px; left: -4px; color: #ff6b6b; font: 700 11px/1 system-ui, sans-serif; }
+.timeline-reorder .timeline-reorder-note { position: absolute; bottom: calc(100% + 4px); max-width: min(360px, calc(100vw - 16px)); padding: 4px 8px; border: 1px solid #e0656d; border-radius: 4px; background: #3a2226; color: #ffd7d9; font: 12px/1.35 system-ui, sans-serif; pointer-events: none; z-index: 5; box-sizing: border-box; }
+.timeline-reorder .timeline-reorder-note[hidden] { display: none; }
+.timeline-reorder .timeline-bar-item { user-select: none; -webkit-user-select: none; }

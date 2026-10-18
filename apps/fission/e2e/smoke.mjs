@@ -259,7 +259,8 @@ try {
     await clickRow("body-1");
     assert.equal(await viewport("highlight"), "body faces  edges ");
     assert.ok(green(await colourAt(front)) > green(plainFront) + 40, "the body's front face is tinted too");
-    assert.deepEqual(await lit(), ["body-1"]);
+    // The box's Timeline row selects the same body (24f6), so it is lit with Body 1's row.
+    assert.deepEqual(await lit(), ["feature-1", "body-1"]);
     assert.deepEqual(await listed(), ["Body 1 · solid body:feature-1"]);
     // Shift-click a face adds it beside the body; a plain click replaces it and unlights the row.
     await page.keyboard.down("Shift");
@@ -649,16 +650,18 @@ try {
     const current = () => page.$$eval("#browser [aria-current=true]", (els) => els.map((e) => e.dataset.node));
     assert.deepEqual(await current(), []);
     await page.click("#browser [data-node=body-1]");
-    assert.deepEqual(await current(), ["body-1"]);
+    // The part's Timeline row selects the same body (24f6): lit with Body 1's.
+    const both = ["feature-1", "body-1"];
+    assert.deepEqual(await current(), both);
     // Origin rows select nothing until sketches need them (step 21).
     await page.click("#browser [data-node=origin-z]");
-    assert.deepEqual(await current(), ["body-1"]);
+    assert.deepEqual(await current(), both);
     // Folding a group keeps it folded when an edit rebuilds the tree.
     await page.click("#browser [data-node=origin] summary");
     await setSize("height", 21);
     await page.waitForFunction(() => document.querySelector("#browser [data-node=feature-1]").textContent.endsWith("by 21 mm"));
     assert.equal(await page.$eval("#browser [data-node=origin]", (el) => el.open), false);
-    assert.deepEqual(await current(), ["body-1"], "the body stays selected through the edit");
+    assert.deepEqual(await current(), both, "the body stays selected through the edit");
     await page.click("#browser [data-node=origin] summary");
     await setSize("height", 20);
     await page.screenshot({ path: "e2e/browser.png" });
