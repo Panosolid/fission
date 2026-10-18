@@ -77,7 +77,7 @@ export function openGuide(opener?: HTMLElement | null): GuideDialog {
       <div class="guide-end"></div>
     </div>
     <header class="guide-bar">
-      <h1 id="guide-title" class="guide-title">How Fission works</h1>
+      <h1 id="guide-title" class="guide-title">How Panoshape works</h1>
       <button type="button" class="guide-close">Close</button>
       <div class="guide-progress" aria-hidden="true"><i></i></div>
     </header>

@@ -170,7 +170,8 @@ useGraph(ctx.graph, ctx.changeNotes);
 // For the browser test only (?test-hooks): the graph and notes, so it can
 // stand in a result in another workspace before any workspace makes one;
 // the main view's camera, to check navigation (SF3a); split view's second
-// view, to check its camera and to break its "no 3D view" on purpose.
+// view, to check its camera and to break its "no 3D view" on purpose; how
+// many bodies the kernel holds (the monkey tester's leak check).
 if (new URLSearchParams(location.search).has("test-hooks"))
   Object.assign(window, {
     fissionTest: {
@@ -182,6 +183,7 @@ if (new URLSearchParams(location.search).has("test-hooks"))
       },
       camera: () => viewer.main.cameraPose(),
       splitView: () => split?.view ?? null,
+      bodyCount: () => kernel.call("body_count"),
     },
   });
 
@@ -736,5 +738,5 @@ async function start() {
 void start();
 ctx.kernel.call("kernel_version").then((v) => {
   $("version").textContent = `kernel v${v}`;
-  $("version").parentElement!.title = `Fission, kernel v${v}`; // where the version shows when the bar has no room for it
+  $("version").parentElement!.title = `Panoshape, kernel v${v}`; // where the version shows when the bar has no room for it
 });

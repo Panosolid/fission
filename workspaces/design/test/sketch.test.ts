@@ -184,7 +184,7 @@ test("drawing a line changes the sketch in the graph, not the part", () => {
 
 const REAL_V1 = readFileSync(new URL("./files/v1-bracket.fission.json", import.meta.url), "utf8");
 
-test("a real version 1 file (saved by the Fission before 21b) opens as version 3, and saves and reopens unchanged", () => {
+test("a real version 1 file (saved by the Panoshape before 21b) opens as version 3, and saves and reopens unchanged", () => {
   // v1-bracket.fission.json was saved by main before this step: an
   // L-bracket 40 × 30 extruded 20. Its ids are profile-1 and feature-1, so
   // the counter starts at 2; there are no sketches; its one solid feature
@@ -226,16 +226,16 @@ test("a file with sketches that breaks a rule is refused when it is opened, each
     [(d) => (d.nextId = 7), /^Error: Design data's nextId 7 is not above line-7, so a new id could repeat it$/],
     [(d) => ((d.sketches[0] as { id: unknown }).id = 3), /^Error: Design sketch 1 has no id$/],
     [(d) => delete (d.sketches[0] as Partial<DesignDocument["sketches"][0]>).curves, /sketch-2 needs points, curves and constraints lists/],
-    [(d) => ((d.sketches[0].constraints as unknown[]) = [{ kind: "horizontal" }]), /sketch-2 has constraints, which this Fission can't read yet/],
+    [(d) => ((d.sketches[0].constraints as unknown[]) = [{ kind: "horizontal" }]), /sketch-2 has constraints, which this Panoshape can't read yet/],
     [(d) => ((d.sketches[0].points[0] as { x: unknown }).x = "0"), /^Error: Design sketch sketch-2: point point-3 needs x and y in mm$/],
     [(d) => ((d.sketches[0].points[1] as { id: unknown }).id = null), /^Error: Design sketch sketch-2: point 2 has no id$/],
-    [(d) => ((d.sketches[0].curves[0] as { kind: string }).kind = "spline"), /curve line-5 is a spline, which this Fission can't read yet \(only lines, circles and arcs\)/],
+    [(d) => ((d.sketches[0].curves[0] as { kind: string }).kind = "spline"), /curve line-5 is a spline, which this Panoshape can't read yet \(only lines, circles and arcs\)/],
     [(d) => (d.sketches[0].curves[1].end = "point-99"), /line line-7 ends at point-99, which is not one of the sketch's points/],
     [(d) => (d.sketches[0].curves[1].end = "point-4"), /line line-7 starts and ends at the same point/],
     [(d) => ((d.sketches[0].curves[0] as { id: unknown }).id = undefined), /^Error: Design sketch sketch-2: curve 1 has no id$/],
     [(d) => d.timeline.features.pop(), /^Error: Design sketch sketch-2 has no place in the timeline$/],
     [(d) => (d.sketches = []), /^Error: Design timeline item sketch-2 is a sketch with no content in the sketches list$/],
-    [(d) => (d.timeline.features[1].intent.parameters.plane = "AB"), /sketch-2 is on AB, not a plane this Fission knows \(XY, XZ or YZ\)/],
+    [(d) => (d.timeline.features[1].intent.parameters.plane = "AB"), /sketch-2 is on AB, not a plane this Panoshape knows \(XY, XZ or YZ\)/],
     [(d) => d.sketches[0].points.push({ id: "point-3", x: 1, y: 1 }), /^Error: Design id point-3 is used twice$/],
     [(d) => (d.sketches[0].curves[0].id = "feature-1"), /^Error: Design id feature-1 is used twice$/],
   ];
@@ -382,7 +382,7 @@ test("a file value whose own toString is broken is named by its kind, not run (f
   const doc = structuredClone(lSketch().doc);
   (doc.sketches[0].curves[1] as { end: unknown }).end = evil;
   assert.throws(() => readDesignDocument(doc), /^Error: Design sketch sketch-2: line line-7 ends at an object, which is not one of the sketch's points$/);
-  assert.throws(() => readDesignDocument({ ...lSketch().doc, version: evil }), /^Error: Design data version an object is not one this Fission reads/);
+  assert.throws(() => readDesignDocument({ ...lSketch().doc, version: evil }), /^Error: Design data version an object is not one this Panoshape reads/);
   assert.throws(() => readDesignDocument({ ...lSketch().doc, nextId: [evil] }), /^Error: Design data's nextId a list is not a counting number$/);
   const slot = partDocument("slot", 40, 30, 20);
   slot.timeline.features[0].intent.parameters.profile = evil as never;

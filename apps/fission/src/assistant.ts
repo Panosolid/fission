@@ -276,7 +276,7 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
               : `No key saved for ${origin}. Saving one asks ${origin} which models it can use; only the key is sent, nothing from your project.`;
     const info = s && PROVIDERS.find((p) => p.kind === s.kind)!;
     $("ai-status-detail").textContent = !info
-      ? "AI is off. Nothing is sent anywhere, and everything in Fission works without it."
+      ? "AI is off. Nothing is sent anywhere, and everything in Panoshape works without it."
       : info.remote
         ? `Using ${info.title}: your requests go to the provider${origin ? ` at ${origin}` : ""}.`
         : `Using ${info.title}: nothing leaves your machine.`;

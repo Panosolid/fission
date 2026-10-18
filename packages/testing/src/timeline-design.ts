@@ -10,7 +10,7 @@
 // with deleteCurve and drawn again between the same corners, extrudes,
 // presets and their sizes, and the timeline edits (step 24e2: deleteItem,
 // reorderItem with its refusals, suppressItem, moveMarker). A circle's
-// radius (no edit yet) is written into the data as a later Fission would.
+// radius (no edit yet) is written into the data as a later Panoshape would.
 // After every edit Design's
 // `settleKept` applies the owner's rule, and the undo history is whole
 // snapshots, as the app's is.

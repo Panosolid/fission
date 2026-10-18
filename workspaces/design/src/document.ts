@@ -360,7 +360,7 @@ function checkSketch(s: unknown, i: number): void {
   if (!isRecord(s) || typeof s.id !== "string") throw new Error(`Design sketch ${i + 1} has no id`);
   const at = `Design sketch ${s.id}`;
   if (!Array.isArray(s.points) || !Array.isArray(s.curves) || !Array.isArray(s.constraints)) throw new Error(`${at} needs points, curves and constraints lists`);
-  if (s.constraints.length > 0) throw new Error(`${at} has constraints, which this Fission can't read yet`);
+  if (s.constraints.length > 0) throw new Error(`${at} has constraints, which this Panoshape can't read yet`);
   checkContent(s.points, s.curves, at);
 }
 
@@ -387,7 +387,7 @@ function checkContent(pointList: unknown[], curves: unknown[], at: string): void
       if (c.centre === c.start || c.centre === c.end) throw new Error(`${at}: arc ${c.id} is round one of its own ends`);
       continue;
     }
-    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Fission can't read yet (only lines, circles and arcs)`);
+    if (c.kind !== "line") throw new Error(`${at}: curve ${c.id} is a ${shown(c.kind)}, which this Panoshape can't read yet (only lines, circles and arcs)`);
     for (const end of [c.start, c.end])
       if (typeof end !== "string" || !points.has(end)) throw new Error(`${at}: line ${c.id} ends at ${shown(end)}, which is not one of the sketch's points`);
     if (c.start === c.end) throw new Error(`${at}: line ${c.id} starts and ends at the same point`);
@@ -414,7 +414,7 @@ export function readDesignDocument(data: unknown): DesignDocument {
   if (!isRecord(data)) throw new Error("Design data is missing");
   const v2 = data.version === 1 ? migrateDesignV1(data) : data;
   const d = (v2.version === 2 ? migrateDesignV2(v2) : v2) as Partial<DesignDocument>;
-  if (d.version !== 3) throw new Error(`Design data version ${shown(d.version)} is not one this Fission reads (1, 2 or 3)`);
+  if (d.version !== 3) throw new Error(`Design data version ${shown(d.version)} is not one this Panoshape reads (1, 2 or 3)`);
   // An empty timeline is an empty design (24f4: everything deleted), shown with no body.
   if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features)) throw new Error("Design data has no timeline");
   if (!Array.isArray(d.sketches)) throw new Error("Design data has no sketches list");
@@ -431,12 +431,12 @@ export function readDesignDocument(data: unknown): DesignDocument {
   if (Object.hasOwn(d.timeline, "marker") && marker !== "start" && !d.timeline.features.some((f) => f.id === marker))
     throw new Error(`Design timeline marker ${shown(marker)} is not "start" or the id of an item in the timeline`);
   d.sketches.forEach(checkSketch);
-  // Each sketch has exactly one timeline item, on a plane this Fission knows, and each sketch item its sketch.
+  // Each sketch has exactly one timeline item, on a plane this Panoshape knows, and each sketch item its sketch.
   const sketchIds = new Set(d.sketches.map((s) => s.id));
   const items = d.timeline.features.filter(isSketchItem);
   for (const f of items) {
     if (!sketchIds.has(f.id)) throw new Error(`Design timeline item ${f.id} is a sketch with no content in the sketches list`);
-    if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Fission knows (XY, XZ or YZ)`);
+    if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Panoshape knows (XY, XZ or YZ)`);
   }
   for (const s of d.sketches) if (!items.some((f) => f.id === s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
   // An extrude of a sketch comes after its sketch and depends on it, so a rebuild in order always has the outline.

@@ -693,6 +693,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** A grid size typed: the kernel judges it (snapping 0, 0 to it); a refused one keeps the grid and says why. */
   async function setGrid(typed: string) {
     if (mode.kind !== "edit" || !editingSketch) return;
+    const sketch = editingSketch;
     const grid = Number(typed);
     try {
       if (typed.trim() === "" || !Number.isFinite(grid)) throw new Error("Type the grid size in mm.");
@@ -700,10 +701,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     } catch (e) {
       return sketchBox.showError(e instanceof Error ? e.message : String(e));
     }
-    if (mode.kind !== "edit") return;
+    // The kernel answered after an Undo, Escape or Finish put this sketch away: the size is for a sketch no longer open.
+    if (mode.kind !== "edit" || editingSketch !== sketch) return;
     sketchBox.showError("");
-    mode.grid = editingSketch.grid = grid;
-    editingSketch.typed = typed;
+    mode.grid = sketch.grid = grid;
+    sketch.typed = typed;
     drawSketches();
   }
 

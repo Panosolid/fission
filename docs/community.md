@@ -3,7 +3,7 @@
 A design note, not a plan. The Community page in the app is a placeholder
 until these are answered with the owner (roadmap item C1).
 
-What it is: people share what they make (a whole Fission project with its
+What it is: people share what they make (a whole Panoshape project with its
 editable timeline and every workspace's data, or a plain mesh) and anyone
 can download it, open it in any workspace and remix it. Everything is free:
 no paid models and no payments, ever.
@@ -27,7 +27,7 @@ Open questions:
      everything so the library can move or be mirrored.
 2. Accounts. Sign-in method; whether downloading needs an account (ideally
    not); what profile data we keep (as little as possible).
-3. Uploads. Size limits; which file kinds (Fission project, STL, 3MF);
+3. Uploads. Size limits; which file kinds (Panoshape project, STL, 3MF);
    thumbnails generated in the browser or on the server; virus and malformed
    file checks, since a project file is parsed by the kernel.
 4. Licences. Which free licences to offer (for example CC0, CC BY, CC BY-SA)
