@@ -356,6 +356,13 @@ export function migrateDesignV1(d: Record<string, unknown>): Record<string, unkn
   return { ...rest, version: 2, nextId: Math.max(0, ...used) + 1, sketches: [] };
 }
 
+/**
+ * What every id in Design's data looks like: a lower-case word, a dash and
+ * the counter's number ("line-4"), or the word alone (a version 1 file's
+ * "base", which the counter didn't make). No such id is "__proto__".
+ */
+const ID_SHAPE = /^[a-z]+(-\d+)?$/;
+
 /** The counter's number in an id such as "line-4" (4); null for an id the counter did not make. */
 export function idNumber(id: unknown): number | null {
   const m = typeof id === "string" ? /-(\d+)$/.exec(id) : null;
@@ -512,6 +519,8 @@ export function readDesignDocument(data: unknown): DesignDocument {
     if (n !== null && n >= d.nextId!) throw new Error(`Design data's nextId ${d.nextId} is not above ${id}, so a new id could repeat it`);
   }
   for (const id of ids) {
+    // Shaped as Design makes ids (sketch-3), so no id is a name every object has, like __proto__ (re-check N1).
+    if (!ID_SHAPE.test(id)) throw new Error(`Design id ${JSON.stringify(id)} is not shaped like Design's ids: a lower-case word and its number, like sketch-3`);
     if (seen.has(id)) throw new Error(`Design id ${shown(id)} is used twice`);
     seen.add(id);
     const n = idNumber(id);
@@ -541,6 +550,33 @@ export function builds(document: DesignDocument, f: Feature): boolean {
   // A deleted sketch: the extrude builds from its kept shape, if it has one (24d2).
   if (sketch === undefined) return keptOf(document, f) !== undefined;
   return builds(document, sketch);
+}
+
+/**
+ * Every timeline item that builds (`builds`), for the whole timeline at
+ * once in time in proportion to it (security audit S2): `builds` searches
+ * the timeline on each call, so asking it about every item takes the
+ * timeline's length squared, which froze the tab on a big file.
+ */
+export function buildingItems(document: DesignDocument): Set<Feature> {
+  const { features, marker } = document.timeline;
+  // Items before `end` are in range; a marker naming no item leaves none (as `builds` finds no index for it).
+  const end = marker === "start" ? 0 : marker === undefined ? features.length : features.findIndex((x) => x.id === marker) + 1;
+  const open = new Set<Feature>();
+  const sketches = new Map<unknown, Feature>();
+  for (const [i, f] of features.entries()) {
+    if (i < end && !f.suppressed) open.add(f);
+    if (isSketchItem(f) && !sketches.has(f.id)) sketches.set(f.id, f);
+  }
+  const out = new Set<Feature>();
+  for (const f of open) {
+    if (!isSketchExtrude(f)) out.add(f);
+    else {
+      const sketch = sketches.get(f.intent.parameters.sketch);
+      if (sketch === undefined ? keptOf(document, f) !== undefined : open.has(sketch)) out.add(f);
+    }
+  }
+  return out;
 }
 
 /**

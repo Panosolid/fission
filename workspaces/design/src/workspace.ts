@@ -13,7 +13,7 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { bodyFeatures, browserTree, rowReference, type BrowserNode } from "./browser.ts";
+import { bodyFeatures, browserTree, rowReferences, type BrowserNode } from "./browser.ts";
 import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
@@ -115,8 +115,9 @@ const folded = new Set<string>();
 
 /** Lights the browser rows whose geometry is selected (aria-current), and only those. */
 function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly GeometryReference[]) {
+  const refOf = rowReferences(doc);
   for (const row of slot.querySelectorAll<HTMLElement>(".tree-row")) {
-    const ref = rowReference(row.dataset.node!, doc);
+    const ref = refOf(row.dataset.node!);
     if (ref && items.some((i) => i.kind === ref.kind && i.id === ref.id)) row.setAttribute("aria-current", "true");
     else row.removeAttribute("aria-current");
   }
@@ -134,6 +135,7 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
 function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void) {
   // Rows with the timeline's item menu (24f3): every Timeline row by its item's id, and each sketch's row in Sketches.
   const items = new Set(doc.timeline.features.map((f) => f.id));
+  const refOf = rowReferences(doc);
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
@@ -158,7 +160,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
         details.append(summary, list(n.children));
         li.append(details);
       } else {
-        const ref = rowReference(n.id, doc);
+        const ref = refOf(n.id);
         const row = document.createElement(ref ? "button" : "span");
         if (ref) row.setAttribute("type", "button");
         row.className = "tree-row";
@@ -1013,7 +1015,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       putAwayByRestore = ctx.history.restoring();
       if (!putAwayByRestore) editingSketch = null;
       sleep();
-      void bodies.clear();
+      void bodies.close();
       viewport.showSketches([]);
       typed.element.remove();
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties, ctx.timeline]) slot?.replaceChildren();
