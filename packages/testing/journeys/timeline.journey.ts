@@ -41,7 +41,7 @@ import {
   drawRectangle,
   type DesignDocument,
 } from "@fission/design";
-import { applyOp, createModel, edgeKey, faceKey, rebuild, shoelace, type ModelBody, type ModelShape, type PresetKind } from "../src/timeline-model.ts";
+import { applyOp, createModel, edgeKey, faceKey, rebuild, shoelace, type ConcreteOp, type ModelBody, type ModelShape, type PresetKind } from "../src/timeline-model.ts";
 import { close, randomSession, randomShape, runSession, failureOf, TimelineFailure, type SessionCounts } from "../src/timeline-session.ts";
 import { DESIGN_FAULTS, designSubject, EDGE_SLACK, edgeGeometry, edgeMatches as meshEdgeMatches, type DesignFault } from "../src/timeline-design.ts";
 
@@ -569,9 +569,62 @@ test("seeded sessions: Design's timeline on the real kernel passes runSession fo
     "refused:after-dependent",
     "ref:kept",
     "ref:missing",
+    // Step 24e: edits that build nothing and edits that build every changed body.
+    "builds:none",
+    "builds:most",
   ];
   const missing = wanted.filter((k) => !total[k]);
   assert.deepEqual(missing, [], `never reached: ${missing.join(", ")}`);
+});
+
+test("an edit rebuilds only what it changed, counted on the real kernel (24e): suppress, the marker, a kept shape and a box the size of another build nothing", async () => {
+  const kernel = nodeKernel();
+  const start = await kernel.call("body_count");
+  const subject = designSubject(kernel);
+  const rebuilds = async () => {
+    const before = await subject.builds!();
+    await subject.rebuild();
+    return (await subject.builds!()) - before;
+  };
+  const apply = async (op: ConcreteOp) => {
+    const r = await subject.apply(op);
+    assert.equal(r.kind, "done", JSON.stringify(op));
+    return { made: r.kind === "done" ? r.ids : [], built: await rebuilds() };
+  };
+  // The starting 40 × 30 × 20 box is one body, built once; asking again builds nothing.
+  assert.equal(await rebuilds(), 1);
+  assert.equal(await rebuilds(), 0);
+  // A 40 × 30 rectangle (sides bottom, right, top, left from (0, 0)) extruded by 10: the sketch is no body, the extrude one.
+  const sk = await apply({ op: "add-sketch", shape: { kind: "polygon", corners: [[0, 0], [40, 0], [40, 30], [0, 30]] } });
+  assert.equal(sk.built, 0);
+  const [sketch, , right] = sk.made;
+  const ex = await apply({ op: "add-extrude", sketch, distance: 10 });
+  assert.equal(ex.built, 1);
+  const extrude = ex.made[0];
+  // Suppressing the box drops its body (the cache frees it): nothing built. Unsuppressing builds it again: 1.
+  assert.equal((await apply({ op: "suppress", item: "feature-1", on: true })).built, 0);
+  assert.equal((await apply({ op: "suppress", item: "feature-1", on: false })).built, 1);
+  // The marker on the sketch rolls the extrude back: 0. Back at the end: the extrude again, 1.
+  assert.equal((await apply({ op: "marker", at: sketch })).built, 0);
+  assert.equal((await apply({ op: "marker", at: null })).built, 1);
+  // A corner moved, (40, 30) to (40, 20): the extrude's outline changed, one body; the box keeps its own.
+  assert.equal((await apply({ op: "move-corner", sketch, corner: 2, to: [40, 20] })).built, 1);
+  // The right side deleted: the extrude keeps the sketch as it just was, the same outline, so the same body: 0.
+  assert.equal((await apply({ op: "delete-curve", sketch, curve: right })).built, 0);
+  // Drawn again: the same solid with a new line id. The kernel's outline lists that line in another place, so the spec
+  // may or may not match the kept one's: at least 0, at most 1 (the model's bounds).
+  assert.ok((await apply({ op: "redraw-curve", sketch, index: 1 })).built <= 1);
+  // The sketch deleted: kept again from the sketch just before, nothing built.
+  assert.equal((await apply({ op: "delete-item", item: sketch })).built, 0);
+  // Reordering the box after the extrude changes no body: 0.
+  assert.equal((await apply({ op: "reorder", item: "feature-1", to: 1 })).built, 0);
+  // A second 40 × 30 × 20 box is the same spec as the first: one body for both, 0 built.
+  assert.equal((await apply({ op: "add-preset", kind: "box", sizes: [40, 30, 20] })).built, 0);
+  // The extrude's distance typed, 10 to 12: one body. Undo: the 10 mm body was freed, so built again: 1.
+  assert.equal((await apply({ op: "set-size", item: extrude, key: "distance", value: 12 })).built, 1);
+  assert.equal((await apply({ op: "undo" })).built, 1);
+  await subject.dispose();
+  assert.equal(await kernel.call("body_count"), start);
 });
 
 /** The check each bug planted in Design's side must be caught by. */
@@ -580,6 +633,7 @@ const DESIGN_CAUGHT_BY: Record<Exclude<DesignFault, "leak-bodies">, string> = {
   "save-drops-kept": "save and open changed the rebuild",
   "cache-by-feature": "the rebuild differs from a rebuild from scratch",
   "scene-drops-body": "the rebuild differs from the model",
+  "full-replay": "an edit rebuilt bodies that didn't change",
 };
 
 for (const fault of DESIGN_FAULTS.filter((f): f is Exclude<DesignFault, "leak-bodies"> => f !== "leak-bodies"))
@@ -595,11 +649,12 @@ for (const fault of DESIGN_FAULTS.filter((f): f is Exclude<DesignFault, "leak-bo
     assert.equal(found.check, DESIGN_CAUGHT_BY[fault], found.message);
   });
 
-test("planted in Design: bodies never freed (\"leak-bodies\") pass the session but are caught by body_count", async () => {
+test("planted in Design: bodies never freed (\"leak-bodies\", a new cache each rebuild) are caught by the build count and by body_count", async () => {
   const kernel = nodeKernel();
   const start = await kernel.call("body_count");
   const subject = designSubject(kernel, ["leak-bodies"]);
-  await runSession(subject, randomSession(1n, 30), meshEdgeMatches);
+  // Each rebuild's new cache builds every body again, which the session sees (24e) before the leak is counted.
+  assert.equal((await failureOf(() => subject, randomSession(1n, 30), meshEdgeMatches))?.check, "an edit rebuilt bodies that didn't change");
   await subject.dispose();
   const left = (await kernel.call("body_count")) - start;
   assert.ok(left > 0, "the leak was not seen");

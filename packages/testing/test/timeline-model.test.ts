@@ -5,6 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyOp,
+  bodyKeys,
+  buildBounds,
   createModel,
   edgeKey,
   edgeName,
@@ -263,6 +265,52 @@ test("suppress, the marker, delete: what the extrude says, and its names coming 
   assert.equal(m.doc.marker, "item-1");
   run(m, { op: "marker", at: "item-1" }, { op: "delete-item", item: "item-1" });
   assert.equal(m.doc.marker, "start");
+});
+
+test("what an edit must rebuild (24e): nothing for suppress, the marker or a lost sketch kept; one body for a moved corner; a redrawn side changes the inputs but not the solid", () => {
+  const m = createModel();
+  run(m, { op: "add-preset", kind: "box", sizes: [40, 30, 20] }, { op: "add-sketch", shape: { kind: "polygon", corners: RECT } }, { op: "add-extrude", sketch: "item-2", distance: 10 });
+  // Items: box item-1, sketch item-2 (sides curve-3 to curve-6), extrude item-7.
+  const keys = () => [...bodyKeys(m.doc, rebuild(m.doc)).values()];
+  const step = (op: ConcreteOp) => {
+    const before = keys();
+    run(m, op);
+    return buildBounds(before, keys());
+  };
+  // Two bodies, each from its own inputs: the box's kind and sizes, the extrude's rectangle, curve ids and distance.
+  assert.deepEqual([...bodyKeys(m.doc, rebuild(m.doc)).keys()], ["item-1", "item-7"]);
+  // Suppressing the box drops a body and builds none; unsuppressing builds it again, since the cache let it go.
+  assert.deepEqual(step({ op: "suppress", item: "item-1", on: true }), { least: 0, most: 0 });
+  assert.deepEqual(step({ op: "suppress", item: "item-1", on: false }), { least: 1, most: 1 });
+  // The marker on the sketch rolls the extrude back (nothing to build); moving it to the end builds the extrude again.
+  assert.deepEqual(step({ op: "marker", at: "item-2" }), { least: 0, most: 0 });
+  assert.deepEqual(step({ op: "marker", at: null }), { least: 1, most: 1 });
+  // A corner moved: the extrude's solid and inputs both change, one body; the box is untouched.
+  assert.deepEqual(step({ op: "move-corner", sketch: "item-2", corner: 0, to: [-5, 0] }), { least: 1, most: 1 });
+  // A side deleted: the extrude keeps its last shape, which is the sketch as it just was, so the same inputs: nothing to build.
+  assert.deepEqual(step({ op: "delete-curve", sketch: "item-2", curve: "curve-4" }), { least: 0, most: 0 });
+  // Drawn again: a new curve id (curve-8) names a side, so the inputs are new, but the solid is the one already held:
+  // a cache keyed by inputs builds 1, one that could see the solid is the same could build 0.
+  assert.deepEqual(step({ op: "redraw-curve", sketch: "item-2", index: 1 }), { least: 0, most: 1 });
+  // Deleting the sketch: kept again, nothing to build. A second box the size of the first is the same inputs and solid.
+  assert.deepEqual(step({ op: "delete-item", item: "item-2" }), { least: 0, most: 0 });
+  assert.deepEqual(step({ op: "add-preset", kind: "box", sizes: [40, 30, 20] }), { least: 0, most: 0 });
+  // A distance typed: one new body.
+  assert.deepEqual(step({ op: "set-size", item: "item-7", key: "distance", value: 12 }), { least: 1, most: 1 });
+});
+
+test("a polygon drawn from another corner is the same solid, other inputs; two new bodies of one size count once", () => {
+  const before = [{ spec: "a", shape: "x" }];
+  assert.deepEqual(buildBounds(before, [{ spec: "b", shape: "x" }]), { least: 0, most: 1 });
+  assert.deepEqual(buildBounds(before, [{ spec: "b", shape: "y" }, { spec: "b", shape: "y" }]), { least: 1, most: 1 });
+  assert.deepEqual(buildBounds([], []), { least: 0, most: 0 });
+  // The same rectangle from corner 2 on: same sorted corners, so the same solid.
+  const m = createModel();
+  run(m, { op: "add-sketch", shape: { kind: "polygon", corners: RECT } }, { op: "add-extrude", sketch: "item-1", distance: 10 });
+  run(m, { op: "add-sketch", shape: { kind: "polygon", corners: [...RECT.slice(2), ...RECT.slice(0, 2)] } }, { op: "add-extrude", sketch: "item-7", distance: 10 });
+  const [a, b] = [...bodyKeys(m.doc, rebuild(m.doc)).values()];
+  assert.equal(a.shape, b.shape);
+  assert.notEqual(a.spec, b.spec);
 });
 
 test("a side deleted and drawn again gets a new name; the old one resolves to nothing", () => {

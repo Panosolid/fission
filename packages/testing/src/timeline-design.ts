@@ -18,7 +18,9 @@
 // the model's terms: each body's volume, each face by Design's name
 // (`nameBody`) with the kernel's area and centroid, each edge by its two
 // faces with its length and centroid measured on the display mesh (so
-// compared with `edgeMatches`, within EDGE_SLACK). `faults` plants bugs in
+// compared with `edgeMatches`, within EDGE_SLACK). `builds` counts the
+// body_build calls the rebuild's cache makes (step 24e), so the session
+// checks an edit rebuilds only what it changed. `faults` plants bugs in
 // Design's side to prove the checks catch them.
 
 import { emptyProject, projectFromJson, projectToJson, type BodyView, type Feature, type KernelCalls } from "@fission/core";
@@ -94,9 +96,11 @@ export type DesignFault =
   /** Bodies are read once per feature id, so an edit to a sketch doesn't reach its extrude. */
   | "cache-by-feature"
   /** The scene (24d3b) leaves out the first body built: drawn bodies must be exactly the built ones. */
-  | "scene-drops-body";
+  | "scene-drops-body"
+  /** Every rebuild empties the cache first, so every body is built again (24e): the shapes are right, the work isn't. */
+  | "full-replay";
 
-export const DESIGN_FAULTS: readonly DesignFault[] = ["no-settle", "leak-bodies", "save-drops-kept", "cache-by-feature", "scene-drops-body"];
+export const DESIGN_FAULTS: readonly DesignFault[] = ["no-settle", "leak-bodies", "save-drops-kept", "cache-by-feature", "scene-drops-body", "full-replay"];
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
 /** The messages a design with no body is refused with until 24d3 shows one. */
@@ -132,7 +136,15 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
   let state: State = { doc: partDocument("box", 40, 30, 20), meta: {} };
   let undo: string[] = [];
   let redo: string[] = [];
-  let cache = new BodyCache(kernel);
+  // The rebuild's cache asks the kernel through `counted`, so `builds` sees its body_build calls and no one else's.
+  let built = 0;
+  const counted: KernelCalls = {
+    call: ((op: string, ...args: unknown[]) => {
+      if (op === "body_build") built++;
+      return (kernel.call as (op: string, ...a: unknown[]) => Promise<unknown>)(op, ...args);
+    }) as KernelCalls["call"],
+  };
+  let cache = new BodyCache(counted);
   const bodies = new Map<string, ModelBody>();
 
   const curveOf = (doc: DesignDocument, sketch: string, id: string | null): SketchCurve | undefined =>
@@ -321,7 +333,8 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
   }
 
   async function rebuild(): Promise<Rebuild> {
-    if (fs.has("leak-bodies")) cache = new BodyCache(kernel);
+    if (fs.has("leak-bodies")) cache = new BodyCache(counted);
+    if (fs.has("full-replay")) await cache.clear();
     return read(await rebuildTimeline(state.doc, cache, kernel), cache, true);
   }
 
@@ -356,6 +369,7 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
       return { kind: "done", ids: r.made };
     },
     rebuild,
+    builds: () => built,
     async rebuildFromScratch() {
       const fresh = new BodyCache(kernel);
       try {

@@ -210,7 +210,9 @@ export type ModelFault =
   | "lost-sketch-fails"
   | "kept-not-forgotten"
   | "save-drops-kept"
-  | "warning-dropped";
+  | "warning-dropped"
+  | "full-replay"
+  | "body-kept-by-item";
 
 export const MODEL_FAULTS: readonly ModelFault[] = [
   "reorder-past-dependency",
@@ -235,6 +237,8 @@ export const MODEL_FAULTS: readonly ModelFault[] = [
   "kept-not-forgotten",
   "save-drops-kept",
   "warning-dropped",
+  "full-replay",
+  "body-kept-by-item",
 ];
 
 /** "item-3/side:curve-5": a face name as one string, for maps and messages. */
@@ -555,6 +559,51 @@ function settle(before: ModelDoc, doc: ModelDoc, faults: ReadonlySet<ModelFault>
     if (item.kept !== undefined || was === undefined || outlineProblem(was) !== null || faults.has("lost-sketch-fails")) continue;
     item.kept = { shape: JSON.parse(JSON.stringify(was.shape)), curves: [...(was.curves as string[])] };
   }
+}
+
+/**
+ * What each built body is made from (step 24e), for checking that a
+ * rebuild builds only what changed. `spec`: everything the body is built
+ * from, its item's id left out (two presets of one size, or two extrudes of
+ * one sketch by one distance, are one build): a preset's kind and sizes, an
+ * extrude's distance and the shape it is built from (its sketch's, or its
+ * kept shape while the sketch is lost) with that shape's curve ids, which
+ * decide its side names. `shape`: the solid alone, the polygon's corners
+ * sorted, so the same solid drawn from another corner or with other curve
+ * ids has the same one. A body cache keyed by what it builds from must
+ * build at least the bodies whose `shape` the last rebuild didn't hold and
+ * at most those whose `spec` it didn't.
+ */
+export function bodyKeys(doc: ModelDoc, r: Rebuild): Map<string, { spec: string; shape: string }> {
+  const out = new Map<string, { spec: string; shape: string }>();
+  const byId = new Map(doc.items.map((i) => [i.id, i]));
+  const solid = (s: ModelShape) =>
+    JSON.stringify(s.kind === "polygon" ? { kind: s.kind, corners: [...s.corners].map((c) => [...c]).sort((a, b) => a[0] - b[0] || a[1] - b[1]) } : s);
+  for (const id of r.order) {
+    const res = r.results[id];
+    const item = byId.get(id);
+    if (res.status !== "built" || res.body === undefined || item === undefined) continue;
+    if (item.kind === "extrude") {
+      const from = res.warning ? item.kept : (byId.get(item.sketch) as SketchItem | undefined);
+      if (from === undefined) throw new Error(`harness: ${id} is built from nothing`);
+      out.set(id, {
+        spec: JSON.stringify(["extrude", from.shape, from.curves, item.distance]),
+        shape: JSON.stringify(["extrude", solid(from.shape), item.distance]),
+      });
+    } else if (item.kind !== "sketch") {
+      const { id: _, suppressed: __, ...sizes } = item;
+      out.set(id, { spec: JSON.stringify(sizes), shape: JSON.stringify(sizes) });
+    }
+  }
+  return out;
+}
+
+/** The fewest and the most bodies a cache holding `before`'s bodies must build to give `after` (see `bodyKeys`). */
+export function buildBounds(before: Iterable<{ spec: string; shape: string }>, after: Iterable<{ spec: string; shape: string }>): { least: number; most: number } {
+  const had = [...before];
+  const now = [...after];
+  const fresh = (k: "spec" | "shape") => new Set(now.map((x) => x[k]).filter((x) => !had.some((h) => h[k] === x))).size;
+  return { least: fresh("shape"), most: fresh("spec") };
 }
 
 // ---------------------------------------------------------------- edits
