@@ -22,5 +22,45 @@ export function launch() {
   // and Mesa's software GL.
   if (browserName === "firefox") options.firefoxUserPrefs = { "webgl.force-enabled": true, "webgl.disabled": false, "webgl.enable-webgl2": true };
   if (process.env.E2E_HEADED) options.headless = false;
-  return ENGINES[browserName].launch(options);
+  return ENGINES[browserName].launch(options).then(underTestCSP);
+}
+
+/**
+ * The app's Content Security Policy (index.html, audit S10) refuses strings
+ * run as script, and Playwright's waitForFunction polls by evaluating one in
+ * the page, so every context these tests open bypasses the policy unless it
+ * passes `bypassCSP: false`. e2e/framing.mjs does, and checks the app under
+ * the real policy there (the kernel's WebAssembly, what it refuses).
+ * WebKit's bypassCSP ignores a policy given in a <meta> tag, so there the
+ * app's page is served with that tag taken out instead.
+ */
+function underTestCSP(browser) {
+  const newContext = browser.newContext.bind(browser);
+  const newPage = browser.newPage.bind(browser);
+  browser.newContext = async (options = {}) => {
+    const context = await newContext({ bypassCSP: true, ...options });
+    if (context && options.bypassCSP !== false && STRIP_META_CSP) await stripMetaCSP(context);
+    return context;
+  };
+  browser.newPage = async (options = {}) => {
+    const page = await newPage({ bypassCSP: true, ...options });
+    if (options.bypassCSP !== false && STRIP_META_CSP) await stripMetaCSP(page.context());
+    return page;
+  };
+  return browser;
+}
+
+const STRIP_META_CSP = browserName === "webkit";
+const META_CSP = /<meta http-equiv="Content-Security-Policy"[^>]*>/;
+
+/** Serves the app's HTML pages to `context` without the CSP <meta> tag. */
+function stripMetaCSP(context) {
+  return context.route(
+    (url) => url.protocol.startsWith("http") && (url.pathname.endsWith("/") || url.pathname.endsWith(".html")),
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      await route.fulfill({ response, body: body.replace(META_CSP, "") });
+    },
+  );
 }

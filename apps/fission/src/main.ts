@@ -10,6 +10,8 @@
 // scene and the same project and selection. Change notes (X5) show over
 // each pane's viewport, for the workspace in that pane.
 /// <reference types="vite/client" />
+// First, before any module that starts work: a framed page stops here (audit S10).
+import "./frame-guard.ts";
 import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
