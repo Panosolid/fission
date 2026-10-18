@@ -1,5 +1,5 @@
 // The typed-size boxes (sketch feel SF4) floating by the pointer while a
-// line or rectangle is drawn: one box per size (typed-entry.ts
+// line, rectangle or arc is drawn: one box per size (typed-entry.ts
 // `typedFields`), each showing the live size until something is typed
 // in it, then a padlock while its text is a size it accepts. The boxes
 // only show and report; the workspace decides what the locks do.
@@ -7,7 +7,7 @@
 // the point, Escape empties the boxes and leaves them (a second Escape,
 // outside, ends the line as before). Styles: src/styles/typed-entry.css.
 
-import { readAngle, readLength, shownValue, type Locks, type Reading, type TypedField } from "./typed-entry.ts";
+import { readAngle, readLength, readSweep, shownValue, type Locks, type Reading, type TypedField } from "./typed-entry.ts";
 
 export interface TypedBoxEvents {
   /** The locks changed (a box's text now reads as a size, or no longer does). */
@@ -19,9 +19,9 @@ export interface TypedBoxEvents {
 }
 
 /** Each box's label (read by people and the e2e test) and how its text is read. */
-export const FIELD_LABELS: Record<TypedField, string> = { length: "Length", angle: "Angle", width: "Width", height: "Height" };
-const UNITS: Record<TypedField, string> = { length: "mm", angle: "°", width: "mm", height: "mm" };
-const read = (field: TypedField, text: string): Reading => (field === "angle" ? readAngle(text) : readLength(text));
+export const FIELD_LABELS: Record<TypedField, string> = { length: "Length", angle: "Angle", width: "Width", height: "Height", radius: "Radius", sweep: "Arc angle" };
+const UNITS: Record<TypedField, string> = { length: "mm", angle: "°", width: "mm", height: "mm", radius: "mm", sweep: "°" };
+const read = (field: TypedField, text: string): Reading => (field === "angle" ? readAngle(text) : field === "sweep" ? readSweep(text) : readLength(text));
 
 export interface TypedBoxes {
   /** Shows these fields (in this order) by the point (x, y) in the host's pixels, each not typed in showing its live value; no fields hides the boxes. */
