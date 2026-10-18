@@ -762,8 +762,9 @@ test("Design's timeline edits on the real kernel, hand-worked (24e2): suppress, 
   await cache.clear();
   assert.equal(await kernel.call("body_count"), start);
 });
-pending("each planted bug of MODEL_FAULTS, planted by hand once in Design's code, is caught by its check (recorded in the substep's line)", "24e");
+// Each of MODEL_FAULTS planted by hand in Design's code (24e3): planted/run.ts plants them one at a time in the source
+// and runs these sessions; planted/model-faults.ts records the check that caught each (test/planted.test.ts keeps it current).
 pending("the timeline in the browser at 1280 and 375 px in Chromium, Firefox and WebKit: rows in build order, the marker dragged and tapped, suppress and delete from a row, failed items marked; pixel probes for each body drawn", "24f");
 pending("editing an early feature rebuilds everything after it; references re-resolve through their names; one that can't shows a warning on the item holding it", "25a");
-pending("project-fuzz with timelines (items, marker, suppressed, failed items) opens, shows and saves byte-identical; history-fuzz with timeline edits", "25b");
+pending("project-fuzz with timelines (items, marker, suppressed, failed items) opens, shows and saves byte-identical", "25b");
 pending("naming success rate (references the model says survive, resolved to the right face) in tests/baseline.json at 100%, with the owner's OK", "25b");
