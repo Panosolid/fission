@@ -23,8 +23,12 @@ const url = "http://localhost:4183/";
 const browser = await launch();
 const errors = [];
 
+// Every check's pages are closed when it ends: a guide left open keeps drawing every frame, and a run's worth of them
+// starves the machine (page loads then time out).
+const open = [];
 async function fresh({ width = 1280, height = 800, touch = false, reducedMotion = "no-preference", query = "", init, clock = false } = {}) {
   const context = await browser.newContext({ viewport: { width, height }, hasTouch: touch, isMobile: touch, reducedMotion });
+  open.push(context);
   const page = await context.newPage();
   // A hand-turned clock for frame-by-frame checks: until window.stepper.hold() the page runs as normal; after it, the
   // page's time stands still and its animation frames wait until the test calls window.stepper.step(ms), which moves
@@ -93,6 +97,8 @@ async function check(name, fn) {
   } catch (e) {
     failed = true;
     console.log(`FAIL ${name}\n  ${e.message.split("\n").join("\n  ")}`);
+  } finally {
+    await Promise.all(open.splice(0).map((c) => c.close()));
   }
 }
 
