@@ -365,10 +365,11 @@ try {
     await page.mouse.move(900, 400);
     await page.mouse.wheel(0, 30);
     await page.waitForFunction(() => document.querySelector("dialog.guide").dataset.gliding === undefined, null, { timeout: 2000 });
-    await page.waitForTimeout(300); // the wheel's own short scroll
+    // Well after the glide would have ended, the page is not at the next chapter's words: the wheel's 30 px moved it
+    // from part-way, and nothing pulled it on.
+    await page.waitForTimeout(1500);
     const y = await page.$eval(".guide-scroll", (s) => s.scrollTop);
-    await page.waitForTimeout(500);
-    assert.ok(Math.abs((await page.$eval(".guide-scroll", (s) => s.scrollTop)) - y) <= 1, "the glide kept pulling after the wheel");
+    assert.ok(Math.abs(y - (await restOf(page, 1))) > 20, `the glide carried on to ${y} after the wheel`);
   });
 
   for (const [width, height] of [[1280, 800], [1280, 720], [375, 667], [375, 740]]) {

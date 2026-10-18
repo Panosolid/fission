@@ -24,7 +24,8 @@ import { GUIDE_FOV, aimCamera, buildScene, type GuideScene } from "./scenes.ts";
 
 const SPIN = 0.07; // radians a second when motion is allowed
 const BLEND_MS = 700; // how long one scene takes to fade into the next
-const NARROW_TOP = 0.35; // on a narrow screen a card starts no higher than this far down, leaving the scene the band above
+const NARROW_TOP = 0.35; // where a scene is framed above the words when no card says otherwise
+const NARROW_MIN_TOP = 0.2; // on a narrow screen a card starts no higher than this far down (the words are short enough to sit lower with the usual fonts; a wide font may need the room)
 const WORDS_TOP = 72; // px below the top where the last chapter's long, unpinned list comes to rest (just under the bar)
 
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -212,7 +213,7 @@ export function openGuide(opener?: HTMLElement | null): GuideDialog {
     const thin = narrow();
     cards.forEach((card, i) => {
       if (CHAPTERS[i].id === "words") return;
-      card.style.top = thin ? `${Math.round(Math.max(NARROW_TOP * h, h - card.offsetHeight - 12))}px` : "";
+      card.style.top = thin ? `${Math.round(Math.max(NARROW_MIN_TOP * h, h - card.offsetHeight - 12))}px` : "";
     });
     sections[0].style.paddingTop = thin ? cards[0].style.top : "";
     rests = sections.map((s, i) => {
