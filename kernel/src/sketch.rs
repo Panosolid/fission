@@ -288,8 +288,10 @@ pub enum Open {
     /// (each circle is one).
     SeveralLoops { loops: usize },
     /// One loop, but not a valid profile (it crosses or touches itself, a
-    /// sliver, a line doubling back…): the profile check's reason.
-    NotAProfile { reason: String },
+    /// sliver, a line doubling back…): the profile check's reason, and the
+    /// sketch curves of the pieces it names, in its order (none when it
+    /// names the loop as a whole).
+    NotAProfile { reason: String, curves: Vec<SketchCurve> },
 }
 
 impl fmt::Display for Open {
@@ -303,7 +305,7 @@ impl fmt::Display for Open {
             Open::SeveralLoops { loops } => {
                 write!(f, "the sketch makes {loops} separate loops; for now a sketch makes one outline")
             }
-            Open::NotAProfile { reason } => write!(f, "the curves close up but are not a valid outline: {reason}"),
+            Open::NotAProfile { reason, .. } => write!(f, "the curves close up but are not a valid outline: {reason}"),
         }
     }
 }
@@ -425,11 +427,22 @@ pub fn sketch_outline(lines: &[Line], circles: &[Circle], arcs: &[Arc]) -> Resul
 }
 
 /// The profile as a closed outline if it passes the profile rules, else
-/// open with their reason.
+/// open with their reason and the sketch curves of the pieces they name
+/// (`sources[k]` is piece k's; the profile has one loop).
 fn profiled(profile: Profile, sources: Vec<Source>) -> Result<SketchOutline, KernelError> {
     match check_profile(&profile) {
         Ok(_) => Ok(SketchOutline::Closed(profile, sources)),
-        Err(KernelError::InvalidInput { message: reason, .. }) => Ok(SketchOutline::Open(Open::NotAProfile { reason })),
+        Err(KernelError::InvalidInput { message: reason, inputs }) => {
+            // Each sketch curve is one piece, so no curve is named twice.
+            let curves = inputs
+                .into_iter()
+                .filter_map(|input| match input {
+                    Input::Piece { boundary: 0, piece } => sources.get(piece).map(|s| s.curve),
+                    _ => None,
+                })
+                .collect();
+            Ok(SketchOutline::Open(Open::NotAProfile { reason, curves }))
+        }
         Err(e) => Err(e),
     }
 }
@@ -830,8 +843,12 @@ mod tests {
         // A bow tie: four corners, every corner joins two ends, but lines 1
         // and 3 cross at (5,5).
         let bow = ring(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]);
-        let Open::NotAProfile { reason } = open(&bow) else { panic!() };
+        let Open::NotAProfile { reason, mut curves } = open(&bow) else { panic!() };
         assert!(reason.contains("apart"), "{reason}");
+        // The two crossing lines are named, each once: line 0 (0,0)→(10,10)
+        // and line 2 (10,0)→(0,10).
+        curves.sort_by_key(|c| format!("{c:?}"));
+        assert_eq!(curves, vec![SketchCurve::Line(0), SketchCurve::Line(2)]);
         // Two lines back and forth between the same two points: a loop of two
         // corners, refused by the profile check.
         let twice = [line((0.0, 0.0), (5.0, 0.0)), line((5.0, 0.0), (0.0, 0.0))];
@@ -958,7 +975,7 @@ mod tests {
         assert_eq!(Open::LooseEnd { at: v(1.5, -2.0) }.to_string(), "the end at (1.5, -2) is not joined to another line or arc");
         assert_eq!(Open::SeveralLoops { loops: 2 }.to_string(), "the sketch makes 2 separate loops; for now a sketch makes one outline");
         assert_eq!(
-            Open::NotAProfile { reason: "x".into() }.to_string(),
+            Open::NotAProfile { reason: "x".into(), curves: vec![SketchCurve::Line(1)] }.to_string(),
             "the curves close up but are not a valid outline: x"
         );
     }

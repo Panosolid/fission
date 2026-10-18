@@ -325,7 +325,9 @@ function boxKernel(): KernelCalls {
     edge_faces: [[0, 4], [0, 3], [5, 0], [2, 0], [1, 2], [1, 5], [3, 1], [4, 1], [2, 5], [4, 2], [3, 4], [5, 3]],
     errors: [],
   };
-  return { call: ((op: string) => (op === "make_box" ? Promise.resolve(view) : Promise.reject(new Error(`no ${op} in this test`)))) as KernelCalls["call"] };
+  // Design builds through the body store (step 24d2): one box kept as handle 1, its view asked of it.
+  const answers: Record<string, unknown> = { make_box: view, body_build: 1, body_view: view, body_free: undefined };
+  return { call: ((op: string) => (op in answers ? Promise.resolve(answers[op]) : Promise.reject(new Error(`no ${op} in this test`)))) as KernelCalls["call"] };
 }
 
 test("Design asleep draws no selection and no kernel reply; on wake it draws the selection made meanwhile and builds again", async () => {

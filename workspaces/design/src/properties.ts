@@ -60,6 +60,7 @@ const HTML = `
   </dl>
   <p id="stale-note" hidden>Out of date: these numbers are for the last part that built.</p>
   <p id="error"></p>
+  <p id="kept-warning" class="kept kept-warning" role="status" hidden></p>
   <section id="downstream" hidden>
     <h2>Downstream</h2>
     <div id="downstream-chips" role="group" aria-label="What other workspaces make from this design"></div>
@@ -85,6 +86,8 @@ export interface PropertiesPanel {
   /** The built body's numbers and validation; clears the error line. */
   showBody(view: BodyView): void;
   showError(message: string): void;
+  /** An extrude built from its kept shape (step 24d2): what happened and why, or "" for none. */
+  showWarning(message: string): void;
   /** Dims the body's numbers while stale; says so in words when the rebuild failed. */
   markStale(stale: boolean, failed: boolean): void;
   /** The verbs the action registry offers for the selection, as buttons (none hides the row). */
@@ -142,6 +145,10 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
     },
     showError(message) {
       $("error").textContent = message;
+    },
+    showWarning(message) {
+      $("kept-warning").textContent = message;
+      $("kept-warning").hidden = message === "";
     },
     markStale(stale, failed) {
       $("stats").classList.toggle("stale", stale);

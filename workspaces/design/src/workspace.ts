@@ -18,7 +18,8 @@ import { showTimelineBar } from "./timeline-bar.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts";
-import { featureNames, type BodyNames } from "./naming.ts";
+import { nameBody, outlineCurves, type BodyNames } from "./naming.ts";
+import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
 import { bodyReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
@@ -245,12 +246,42 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
 
   // The body is built from the part's feature intent (document.ts); an extrude of a sketch asks the kernel for the outline (extrude.ts).
   // Its faces and edges are named from the spec it was built from (naming.ts).
-  const build = latestOnly(async (doc: DesignDocument) => {
-    const feature = lastFeature(doc);
-    const spec = await featureSpec(kernel, doc, feature);
-    const view = await buildSpec(kernel, spec);
-    return { view, names: featureNames(doc, feature, spec, view) };
+  // The whole timeline is rebuilt on the kernel's body store (step 24d2,
+  // rebuild.ts): a feature whose spec is unchanged keeps its body, and
+  // bodies no feature holds are freed. Rebuilds run one after another, so
+  // one never frees a body another is about to show.
+  const bodies = new BodyCache(kernel);
+  let rebuilds: Promise<unknown> = Promise.resolve();
+  const build = latestOnly((doc: DesignDocument) => {
+    const next = rebuilds.then(() => buildPart(doc));
+    rebuilds = next.catch(() => {});
+    return next;
   });
+  /** The part's body, its names and, when it is built from a kept shape, the warning; or throws why it has none. */
+  async function buildPart(doc: DesignDocument) {
+    const feature = lastFeature(doc);
+    const result = (await rebuildTimeline(doc, bodies, kernel)).results[feature.id];
+    if (result.status === "failed") throw new Error(result.message);
+    if (result.status !== "built" || result.body === undefined || result.spec === undefined) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
+    const spec = result.spec;
+    const view = await bodies.view(result.body);
+    const names = nameBody(feature.id, view, "extrude" in spec ? outlineCurves(spec.extrude.profile, result.curves) : () => null);
+    return { view, names, kept: result.warning && { feature: feature.id, label: feature.provenance.self.label, warning: result.warning } };
+  }
+  /** The part built from a kept shape (the owner's rule): shown on its timeline row and, once the sketch is finished, in the panel. */
+  let keptNow: { feature: string; label: string; warning: KeptWarning } | undefined;
+  function showKept() {
+    const words = keptNow && `${keptNow.label} keeps its last shape. ${keptNow.warning.message}.`;
+    // While its sketch is being edited, no warning: the outline status says what is open (the owner's rule: a warning after Finish Sketch).
+    const drawing = mode.kind === "edit" && editingSketch?.id === keptNow?.warning.sketch;
+    panel.showWarning(drawing ? "" : (words ?? ""));
+    for (const row of ctx.browser.querySelectorAll<HTMLElement>(".tree-row")) {
+      const marked = keptNow !== undefined && (row.dataset.node === keptNow.feature || row.dataset.node === keptNow.warning.sketch);
+      if (marked) row.title = words!;
+      else if (row.classList.contains("kept")) row.removeAttribute("title");
+      row.classList.toggle("kept", marked);
+    }
+  }
 
   /** Never shows stale numbers unmarked: dims them while out of date, and says so if the rebuild failed. */
   function markStale(failed = false) {
@@ -323,6 +354,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   async function show(doc: DesignDocument, kind: PartKind) {
     browser(ctx.browser, doc, selectRow);
     if (ctx.timeline) showTimelineBar(ctx.timeline, doc);
+    showKept();
     drawSketches();
     showSelection();
     markStale();
@@ -334,6 +366,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!shown) return void (missed = true);
       missed = false;
       const { view, names } = value;
+      keptNow = value.kept;
+      showKept();
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
@@ -367,6 +401,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     } catch (e) {
       if (!shown) return void (missed = true);
       missed = false;
+      keptNow = undefined;
+      showKept();
       panel.showError(e instanceof Error ? e.message : String(e));
       markStale(true);
     }
@@ -418,6 +454,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ctx.projectChanged(label);
     browser(ctx.browser, next, selectRow);
     if (ctx.timeline) showTimelineBar(ctx.timeline, next);
+    showKept(); // the rows are new: mark them again until the rebuild says otherwise
     markStale();
     // The part extrudes this sketch: rebuild it from the edited lines (a live link; an open sketch fails with the kernel's reason).
     if (lastFeature(next).dependsOn.includes(sketchId)) void show(next, shape);
@@ -484,6 +521,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     sketchBar.hide();
     modelling(true);
     drawSketches();
+    showKept();
   }
 
   /** Finish Sketch (the toolbar's or the panel's): back to modelling, the camera at the home view (as the owner's CAD suite does, not the view from before the sketch). */
@@ -653,14 +691,26 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (mode.kind !== "edit" || toolChanges !== changes) return;
       // The click lands where the hover showed it would: where it was rounded to (free or on the grid), or on the point or line-up snap.ts finds.
       const snapped = snapOnSketch(designDoc(), mode.tool, at, rounded, pointer.pixel).at;
-      const done = clickAt(designDoc(), mode.tool, snapped);
+      const before = designDoc();
+      const done = clickAt(before, mode.tool, snapped);
+      // The owner's rule (rebuild.ts): an extrude whose sketch this edit breaks keeps the sketch as it was, in the same undo step.
+      let next = done.doc;
+      if (done.drew) {
+        try {
+          next = await settleKept(kernel, before, done.doc);
+        } catch (e) {
+          return sketchBox.showError(e instanceof Error ? e.message : String(e));
+        }
+        // Undo, Escape or a tool change while the kernel looked: the click was for a sketch that is no longer there.
+        if (mode.kind !== "edit" || toolChanges !== changes || designDoc() !== before) return;
+      }
       sketchBox.showError(done.note ?? "");
       mode.tool = done.tool;
       // The pointer is still there: what it snaps to now, with the new point and the tool's next step.
       mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel);
       mode.pointer = mode.snap.at;
       mode.pixel = pointer.pixel;
-      if (done.drew) applySketchEdit(done.doc, drawStep(done.tool), done.tool.sketch);
+      if (done.drew) applySketchEdit(next, drawStep(done.tool), done.tool.sketch);
       drawSketches();
       if (done.drew) await showOutline();
     });
@@ -753,6 +803,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       putAwayByRestore = ctx.history.restoring();
       if (!putAwayByRestore) editingSketch = null;
       sleep();
+      void bodies.clear();
       viewport.showSketches([]);
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties, ctx.timeline]) slot?.replaceChildren();
     },
