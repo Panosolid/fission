@@ -29,6 +29,7 @@ Rust geometry kernel, compiled to WebAssembly with wasm-pack. Read with the root
 - `tests/regressions/`: proptest failure seeds and `stateful/*.json` minimal failing chains (committed; replayed forever by `saved_regressions_still_pass`).
 - `scripts/overnight.sh` (Tier 3 run), `scripts/endless.sh` (the same, round after round with random seeds, into `endless-results/`).
 - `../prototypes/oracle/compare.py`: OpenCascade oracle comparison for bodies the harness writes (box, cylinder, sphere, extrusion).
+- `../prototypes/oracle/sketch_outline.py`: an independent model of `sketch_outline` (exact fractions for lines; arcs walked exactly and measured for faults); `sketch_outline_check.py` runs 10,000 seeded sketches (polygons, broken ones, 0.9×/1.1× threshold cases, arcs, circles) through `examples/sketch_outline_json.rs` (the app's `sketch_outline_of`, numbers passed as bits) and needs every answer to agree; `test_sketch_outline.py` (CI's `kernel` job) holds the hand-worked cases, that run, and planted breaks it must catch.
 
 ## Commands
 
