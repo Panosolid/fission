@@ -78,6 +78,7 @@ export function openGuide(opener?: HTMLElement | null): GuideDialog {
     </div>
     <header class="guide-bar">
       <h1 id="guide-title" class="guide-title">How Panoshape works</h1>
+      <a class="guide-licences" href="third-party-licences.txt" target="_blank" rel="noopener" title="The licences of the free code Panoshape is built with, and their notices">Licences</a>
       <button type="button" class="guide-close">Close</button>
       <div class="guide-progress" aria-hidden="true"><i></i></div>
     </header>
