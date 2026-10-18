@@ -31,25 +31,6 @@ const shots = process.env.E2E_SHOTS;
 
 const until = (page, fn, arg, what) => page.waitForFunction(fn, arg, { timeout: 5000 }).catch(async () => assert.fail(`${what}: timed out`));
 
-// TEMPORARY (24f6, Firefox at 375 px): the pointer, mouse and touch events a failing drag hold saw, added to its message.
-const EVENTS = ["pointerdown", "pointermove", "pointerup", "pointercancel", "gotpointercapture", "lostpointercapture", "mousedown", "mousemove", "mouseup", "touchstart", "touchmove", "touchend", "touchcancel", "dragstart", "selectstart", "click"];
-async function heard(page, fn) {
-  await page.evaluate((types) => {
-    window.__heard = [];
-    if (window.__listening) return;
-    window.__listening = true;
-    for (const t of types)
-      document.addEventListener(t, (e) => window.__heard.push(`${t}/${e.pointerType ?? "-"}/${e.buttons ?? "-"}/${e.defaultPrevented ? "p" : ""}/${String(e.target?.className || e.target?.nodeName).slice(0, 24)}@${Math.round(e.clientX ?? -1)}`), { capture: true });
-  }, EVENTS);
-  try {
-    return await fn();
-  } catch (e) {
-    const log = await page.evaluate(() => window.__heard.join(" ")).catch(() => "?");
-    e.message += `\n  events: ${log}\n  touch: ${await page.evaluate(() => [navigator.maxTouchPoints, "ontouchstart" in window, matchMedia("(pointer: coarse)").matches].join(","))}`;
-    throw e;
-  }
-}
-
 async function fresh(width, touch) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
@@ -441,18 +422,23 @@ try {
       await page.context().close();
     });
 
-    await check(`the rollback marker (24f5): the four buttons, dragged with the mouse${tap ? ", a tap between items" : ""}; rolled-back items greyed in the bar and the browser; one undo step each, pixels probed (${width} px)`, async () => {
-      const page = await fresh(width, tap);
+    // Playwright's Firefox gives the mouse of a touch page mouse events but no pointer events (CI on #181 logged
+    // mousedown and mousemove on the marker and items, no pointerdown), so its mouse can't drag there; a real mouse
+    // gives pointer events in every engine. So in Firefox the drag checks at 375 px use the mouse on a page without
+    // touch; Chromium and WebKit drag there on a touch page (Chromium with a finger), with the taps between items.
+    const dragTap = tap && browserName !== "firefox";
+    await check(`the rollback marker (24f5): the four buttons, dragged with the mouse${dragTap ? ", a tap between items" : ""}; rolled-back items greyed in the bar and the browser; one undo step each, pixels probed (${width} px)`, async () => {
+      const page = await fresh(width, dragTap);
       const layout = LAYOUTS[width];
       const V = layout.volume;
-      await addSquare(page, tap, layout);
+      await addSquare(page, dragTap, layout);
       const greyRows = () => page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-rolled-back', (rows) => rows.map((r) => r.dataset.node));
       const state = async () => ({ bar: await bar(page), drawn: await drawn(page, layout), volume: await page.textContent("#volume"), grey: await greyRows() });
       /** Each button: [which, off ("true") or on (null)], in the bar's order. */
       const buttons = () => page.$$eval("#timeline .timeline-marker-buttons [data-button]", (bs) => bs.map((b) => [b.dataset.button, b.getAttribute("aria-disabled")]));
-      const button = (b) => press(page, `#timeline [data-button="${b}"]`, tap);
-      const undo = async () => press(page, "#undo", tap);
-      const redo = async () => press(page, "#redo", tap);
+      const button = (b) => press(page, `#timeline [data-button="${b}"]`, dragTap);
+      const undo = async () => press(page, "#undo", dragTap);
+      const redo = async () => press(page, "#redo", dragTap);
       const MOVE = "Move the rollback marker";
       const settled = (want) => until(page, (w) => document.querySelector("#volume")?.textContent === w, want, `the panel showing ${want}`);
 
@@ -492,7 +478,7 @@ try {
       assert.deepEqual(await buttons(), [["start", "true"], ["back", "true"], ["forward", null], ["end", null]]);
       if (shots) await page.screenshot({ path: `${shots}/marker-start-${width}.png` });
       // An off button changes nothing (forced: Playwright won't press an aria-disabled one).
-      await (tap ? page.tap('#timeline [data-button="back"]', { force: true }) : page.click('#timeline [data-button="back"]', { force: true }));
+      await (dragTap ? page.tap('#timeline [data-button="back"]', { force: true }) : page.click('#timeline [data-button="back"]', { force: true }));
       await page.waitForTimeout(150);
       assert.deepEqual(await bar(page), atStart.bar);
       await undo();
@@ -519,12 +505,10 @@ try {
       const drag = async (toX, { hold } = {}) => {
         const m = await markerBox();
         const y = m.y + m.height / 2;
-        await heard(page, async () => {
-          await page.mouse.move(m.x + m.width / 2, y);
-          await page.mouse.down();
-          await page.mouse.move(toX, y, { steps: 8 });
-          if (hold) await hold();
-        });
+        await page.mouse.move(m.x + m.width / 2, y);
+        await page.mouse.down();
+        await page.mouse.move(toX, y, { steps: 8 });
+        if (hold) await hold();
         await page.mouse.up();
       };
       await drag(await gapX("feature-1", "sketch-2"), {
@@ -571,7 +555,7 @@ try {
         assert.deepEqual(await state(), want);
       }
 
-      if (tap) {
+      if (dragTap) {
         // 6. Taps between items on a touch screen: the gap's middle, which is the row itself, not an item.
         const tapGap = async (x) => {
           const box = await boxOf("feature-1");
@@ -601,15 +585,15 @@ try {
         assert.deepEqual((await state()).bar, all.bar);
       }
 
-      if (!tap) {
+      if (!dragTap) {
         await button("end");
         await settled(V);
       }
       assert.deepEqual(await state(), all);
       // 7. While a new sketch is edited (Sketch 2, last), going to the start would roll it back: off, with why, and
       // a drag there is refused with the same words; stepping back to just after it is still allowed.
-      await press(page, "#create-sketch", tap);
-      await press(page, "#sketch-plane-XY", tap);
+      await press(page, "#create-sketch", dragTap);
+      await press(page, "#sketch-plane-XY", dragTap);
       await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
       const words = "The marker can't go before Sketch 2 while it is being edited: finish the sketch first";
       assert.equal(await page.getAttribute('#timeline [data-button="start"]', "aria-disabled"), "true");
@@ -626,21 +610,21 @@ try {
       await page.context().close();
     });
 
-    await check(`dragging an item to a new place (24f6): moved, refused before what it is built from or after what is built from it, the line and the words while dragged; the browser's Timeline rows select their body; one undo step each, pixels probed (${width} px${tap ? ", a finger on the picked item" : ""})`, async () => {
-      const page = await fresh(width, tap);
+    await check(`dragging an item to a new place (24f6): moved, refused before what it is built from or after what is built from it, the line and the words while dragged; the browser's Timeline rows select their body; one undo step each, pixels probed (${width} px${dragTap ? (browserName === "chromium" ? ", a finger on the picked item" : ", taps") : ""})`, async () => {
+      const page = await fresh(width, dragTap);
       const layout = LAYOUTS[width];
       const V = layout.volume;
-      await addSquare(page, tap, layout);
+      await addSquare(page, dragTap, layout);
       const state = async () => ({ bar: await bar(page), drawn: await drawn(page, layout), volume: await page.textContent("#volume") });
-      const undo = async () => press(page, "#undo", tap);
-      const redo = async () => press(page, "#redo", tap);
+      const undo = async () => press(page, "#undo", dragTap);
+      const redo = async () => press(page, "#redo", dragTap);
       const settled = (want) => until(page, (w) => document.querySelector("#volume")?.textContent === w, want, `the panel showing ${want}`);
       const boxOf = (id) => page.locator(`#timeline [data-item="${id}"]`).boundingBox();
       const line = () => page.$eval("#timeline .timeline-reorder-line", (l) => [l.dataset.place, l.dataset.state]).catch(() => null);
       const note = () => page.$eval("#timeline .timeline-reorder-note", (n) => (n.hidden ? "" : n.textContent)).catch(() => null);
       // The finger drags only in Chromium, through its DevTools touch input (Playwright has no touch drag);
       // Firefox and WebKit drag with the mouse at phone width too.
-      const finger = tap && browserName === "chromium" ? await page.context().newCDPSession(page) : null;
+      const finger = dragTap && browserName === "chromium" ? await page.context().newCDPSession(page) : null;
       /**
        * Item `id` dragged to the client x `to()` gives with the mouse, or with a finger after a tap has picked it
        * (measured once picked: its ⋯ beside it moves the items after it); `hold` runs while it is held there.
@@ -659,12 +643,10 @@ try {
           if (hold) await hold();
           await finger.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
         } else {
-          await heard(page, async () => {
-            await page.mouse.move(x, y);
-            await page.mouse.down();
-            await page.mouse.move(toX, y, { steps: 8 });
-            if (hold) await hold();
-          });
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          await page.mouse.move(toX, y, { steps: 8 });
+          if (hold) await hold();
           await page.mouse.up();
         }
       };
@@ -732,7 +714,7 @@ try {
       // empty. One Undo brings the box back.
       await undo();
       await settled(V);
-      await press(page, '#timeline [data-button="back"]', tap);
+      await press(page, '#timeline [data-button="back"]', dragTap);
       await settled("24,000 mm³");
       assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "|", "feature-11 rolled back"]);
       await drag("feature-1", past("feature-11"));
@@ -742,12 +724,12 @@ try {
       await undo();
       await settled("24,000 mm³");
       assert.deepEqual(await state(), { bar: ["feature-1", "sketch-2", "|", "feature-11 rolled back"], drawn: { box: true, square: false }, volume: "24,000 mm³" });
-      await press(page, '#timeline [data-button="end"]', tap);
+      await press(page, '#timeline [data-button="end"]', dragTap);
       await settled(V);
       assert.deepEqual(await state(), all);
 
       // 5. A press on an item that moves 3 px (under 5) is no drag: it picks the item, nothing recorded.
-      if (!tap) {
+      if (!dragTap) {
         const step = await undoTitle(page);
         const b = await boxOf("sketch-2");
         await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
@@ -777,12 +759,12 @@ try {
 
       // 7. The browser's Timeline rows select their body (24f6): the box's row selects Body 1 (its row lit too) and only
       // the box's faces; Sketch 1's row selects nothing (sketches are not selectable yet).
-      if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press(page, "#browser-toggle", tap);
+      if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press(page, "#browser-toggle", dragTap);
       await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => (d.open = true)));
       const boxRow = '#browser [data-node="timeline"] .tree-row[data-node="feature-1"]';
       assert.equal(await page.$eval(boxRow, (r) => r.tagName), "BUTTON");
       assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="sketch-2"]', (r) => r.tagName), "SPAN");
-      await press(page, boxRow, tap);
+      await press(page, boxRow, dragTap);
       await until(page, () => document.querySelector('#browser .tree-row[data-node="body-1"]')?.getAttribute("aria-current") === "true", null, "Body 1 lit");
       assert.equal(await page.getAttribute(boxRow, "aria-current"), "true");
       assert.equal(await page.getAttribute('#browser [data-node="timeline"] .tree-row[data-node="feature-11"]', "aria-current"), null);
