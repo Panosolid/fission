@@ -165,6 +165,11 @@ function fileSketch(file, index) {
 const XS = [-10, 0, 10, 20, 30, 40];
 const YS = [-10, 0, 10, 20, 30, 40];
 
+/** Folds the browser floating over the view's corner (SF3d), as a person drawing near that corner does; at phone width it is behind its toggle already. */
+async function foldBrowser(page) {
+  if (await page.isVisible("#browser .browser-fold > summary")) await page.click("#browser .browser-fold > summary");
+}
+
 /**
  * One random step of drawing; returns words for the step list. A click
  * that changes nothing on screen (a first click on a point already there)
@@ -243,6 +248,7 @@ async function session(seed) {
     watch(page);
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    await foldBrowser(page);
 
     // Sketch 1: about SHAPES shapes, messily.
     await startSketch(page);
@@ -303,6 +309,7 @@ async function session(seed) {
     await other.close();
 
     // Carrying on after the reload: Sketch 2, drawn messily on top of Sketch 1's segments.
+    await foldBrowser(page); // open again after the reload
     await startSketch(page);
     const two = sketchModel(finished);
     await agree(page, two, `${where()}: an empty Sketch 2`);

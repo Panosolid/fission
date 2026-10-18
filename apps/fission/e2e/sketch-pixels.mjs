@@ -36,8 +36,8 @@ const BLUE = 60;
 /** Golden-image tolerance: a pixel differs past CHANNEL (of 255) in any channel; at most MAX_PIXELS may. */
 const CHANNEL = 32;
 const MAX_PIXELS = 50;
-/** The view cube, drawn into the canvas's top right corner with text from the fonts installed: left out (the smoke test checks it). */
-const IGNORE = [{ x: 760 - 120, y: 0, width: 120, height: 120 }];
+/** The view cube, drawn into the canvas's top right corner with text from the fonts installed: left out (the smoke test checks it). Measured from the right edge, so a wider view (SF3d) still leaves out the cube. */
+const ignoreFor = (width) => [{ x: width - 120, y: 0, width: 120, height: 120 }];
 
 // The drawing, in sketch millimetres: clear of the view cube, the box's edges and each other.
 const RECT = [[10, 10], [30, 20]];
@@ -103,7 +103,7 @@ function golden(name, img) {
     return null;
   }
   const want = decodePng(readFileSync(file));
-  const result = compareImages(want, img, { channel: CHANNEL, maxPixels: MAX_PIXELS, ignore: IGNORE });
+  const result = compareImages(want, img, { channel: CHANNEL, maxPixels: MAX_PIXELS, ignore: ignoreFor(want.width) });
   if (result.ok) return null;
   writeFileSync(new URL(`${name}.actual.png`, shotsDir), encodePng(img));
   // In CI, the actual image in the log too, so a baseline from the CI browser can be taken from it.
@@ -145,7 +145,7 @@ try {
   await page.goto(url + "#design");
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   // The canvas's size comes from the bars above it, whose height follows the fonts installed (CI's are
-  // a pixel shorter): pin them, so the canvas is 760 × 710 everywhere and the golden images line up.
+  // a pixel shorter): pin them, so the canvas is 980 × 678 everywhere (760 × 710 before SF3d) and the golden images line up.
   await page.addStyleTag({ content: "#topbar, #toolbar { height: 45px !important; min-height: 0 !important; overflow: hidden; }" });
   await page.click("#create-sketch");
   await page.click("#sketch-plane-XY");
@@ -191,7 +191,7 @@ try {
     });
     await check("chromium: the golden image comparison catches the canvas moved 2 px (it can fail)", () => {
       const want = decodePng(readFileSync(new URL("sketch-editing-chromium.png", shotsDir)));
-      const r = compareImages(want, moved(editing, 2), { channel: CHANNEL, maxPixels: MAX_PIXELS, ignore: IGNORE });
+      const r = compareImages(want, moved(editing, 2), { channel: CHANNEL, maxPixels: MAX_PIXELS, ignore: ignoreFor(want.width) });
       assert.ok(!r.ok && r.differing > 10 * MAX_PIXELS, `a 2 px move changed only ${r.differing} pixels`);
     });
     await page.click("#sketch-finish");

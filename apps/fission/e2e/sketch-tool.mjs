@@ -52,7 +52,13 @@ async function fresh(width = 1280, touch = false) {
     const volume = await page.evaluate(() => document.querySelector("#volume")?.textContent ?? "(none)").catch(() => "(unreadable)");
     throw new Error(`the page never showed the default box's 24,000 mm³ (volume "${volume}"): ${e.message}`);
   });
+  await foldBrowser(page);
   return page;
+}
+
+/** Folds the browser floating over the view's corner (SF3d), as a person drawing near that corner does; at phone width it is behind its toggle already. */
+async function foldBrowser(page) {
+  if (await page.isVisible("#browser .browser-fold > summary")) await page.click("#browser .browser-fold > summary");
 }
 
 // The 40 × 30 × 20 box from (0, 0, 0): framed about its centre, radius half its diagonal.
@@ -187,7 +193,7 @@ try {
     assert.equal(await page.textContent("#sketch-name"), "Sketch 1");
     assert.equal(await undoTitle(page), "Undo Create sketch (Ctrl+Z)");
     assert.equal(await data(page, "planes"), "", "the planes go once one is picked");
-    assert.ok(await page.isVisible('[data-node="sketches/sketch-2"]'), "the browser lists it");
+    assert.notEqual(await page.$('#browser [data-node="sketches/sketch-2"]'), null, "the browser lists it (folded away for drawing, foldBrowser)");
     await status(page, "Nothing drawn yet.");
     await page.check("#sketch-grid-snap"); // grid snap, off by default since SF1
     // Each click a little off a grid node lands on the node (grid 10).
