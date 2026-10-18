@@ -8,7 +8,10 @@
 // failed item red in the bar and the browser, and (24f4) a design with no
 // body: both solids suppressed, or every item deleted, shown as an empty
 // view with the panel saying so, a width typed then adding a new box at the
-// marker. After every edit: the bar's flags, the undo
+// marker. 24f5: the marker moved by the four playback buttons, dragged with
+// the mouse, and tapped between items at 375 px; rolled-back items greyed
+// in the bar and the browser; refused while a sketch it would roll back is
+// edited. After every edit: the bar's flags, the undo
 // step's name, and pixel probes on both bodies' top faces (a suppressed or
 // rolled-back body's pixels show the background, its return shows it
 // again); one Undo and one Redo for each. Pixels are probed through the
@@ -414,6 +417,189 @@ try {
       await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "the extrude undone");
       assert.deepEqual(await bar(page), ["sketch-12", "|"]);
       assert.equal(await page.textContent("#volume"), "—");
+
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+
+    await check(`the rollback marker (24f5): the four buttons, dragged with the mouse${tap ? ", a tap between items" : ""}; rolled-back items greyed in the bar and the browser; one undo step each, pixels probed (${width} px)`, async () => {
+      const page = await fresh(width, tap);
+      const layout = LAYOUTS[width];
+      const V = layout.volume;
+      await addSquare(page, tap, layout);
+      const greyRows = () => page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-rolled-back', (rows) => rows.map((r) => r.dataset.node));
+      const state = async () => ({ bar: await bar(page), drawn: await drawn(page, layout), volume: await page.textContent("#volume"), grey: await greyRows() });
+      /** Each button: [which, off ("true") or on (null)], in the bar's order. */
+      const buttons = () => page.$$eval("#timeline .timeline-marker-buttons [data-button]", (bs) => bs.map((b) => [b.dataset.button, b.getAttribute("aria-disabled")]));
+      const button = (b) => press(page, `#timeline [data-button="${b}"]`, tap);
+      const undo = async () => press(page, "#undo", tap);
+      const redo = async () => press(page, "#redo", tap);
+      const MOVE = "Move the rollback marker";
+      const settled = (want) => until(page, (w) => document.querySelector("#volume")?.textContent === w, want, `the panel showing ${want}`);
+
+      // The states the marker gives, worked out from the timeline Box, Sketch 1, Extrude 1: after Extrude 1 (place 3)
+      // everything is built; after Sketch 1 (2) the square is not; after the box (1) neither is the sketch; at the start
+      // (0) nothing is built, the view empty. Rolled-back items are greyed in the bar and their browser rows.
+      const all = { bar: ["feature-1", "sketch-2", "feature-11", "|"], drawn: { box: true, square: true }, volume: V, grey: [] };
+      const atSketch = { bar: ["feature-1", "sketch-2", "|", "feature-11 rolled back"], drawn: { box: true, square: false }, volume: "24,000 mm³", grey: ["feature-11"] };
+      const atBox = { bar: ["feature-1", "|", "sketch-2 rolled back", "feature-11 rolled back"], drawn: { box: true, square: false }, volume: "24,000 mm³", grey: ["sketch-2", "feature-11"] };
+      const atStart = { bar: ["|", "feature-1 rolled back", "sketch-2 rolled back", "feature-11 rolled back"], drawn: { box: false, square: false }, volume: "—", grey: ["feature-1", "sketch-2", "feature-11"] };
+      assert.deepEqual(await state(), all);
+      assert.deepEqual(await buttons(), [["start", null], ["back", null], ["forward", "true"], ["end", "true"]]);
+      assert.equal(await page.getAttribute('#timeline [data-button="end"]', "title"), "Go to the end: The marker is already at the end");
+
+      // 1. Step back: after Sketch 1. One undo step each way.
+      await button("back");
+      await undoIs(page, MOVE);
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), atSketch);
+      assert.deepEqual(await buttons(), [["start", null], ["back", null], ["forward", null], ["end", null]]);
+      // The browser's row greyed (24f5), as its item on the bar is.
+      assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="feature-11"]', (r) => getComputedStyle(r).opacity), "0.45");
+      assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="sketch-2"]', (r) => getComputedStyle(r).opacity), "1");
+      await undo();
+      await undoIs(page, "Extrude Sketch 1");
+      await settled(V);
+      assert.deepEqual(await state(), all);
+      await redo();
+      await undoIs(page, MOVE);
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), atSketch);
+
+      // 2. Go to the start: nothing built, the view empty; start and back off.
+      await button("start");
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "nothing on screen");
+      assert.deepEqual(await state(), atStart);
+      assert.deepEqual(await buttons(), [["start", "true"], ["back", "true"], ["forward", null], ["end", null]]);
+      if (shots) await page.screenshot({ path: `${shots}/marker-start-${width}.png` });
+      // An off button changes nothing (forced: Playwright won't press an aria-disabled one).
+      await (tap ? page.tap('#timeline [data-button="back"]', { force: true }) : page.click('#timeline [data-button="back"]', { force: true }));
+      await page.waitForTimeout(150);
+      assert.deepEqual(await bar(page), atStart.bar);
+      await undo();
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), atSketch);
+      await redo();
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "nothing on screen again");
+      assert.deepEqual(await state(), atStart);
+
+      // 3. Step forward: after the box. 4. Go to the end: everything.
+      await button("forward");
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), atBox);
+      await button("end");
+      await settled(V);
+      assert.deepEqual(await state(), all);
+      assert.equal(await undoTitle(page), `Undo ${MOVE} (Ctrl+Z)`);
+
+      // 5. The marker dragged with the mouse, from the end to between the box and Sketch 1: drawn there while dragged,
+      // the items after it greyed, and one undo step when let go. The drop place is worked out from where the items are.
+      const boxOf = (id) => page.locator(`#timeline [data-item="${id}"]`).boundingBox();
+      const markerBox = () => page.locator("#timeline .timeline-bar-marker").boundingBox();
+      const gapX = async (a, b) => ((await boxOf(a)).x + (await boxOf(a)).width + (await boxOf(b)).x) / 2;
+      const drag = async (toX, { hold } = {}) => {
+        const m = await markerBox();
+        const y = m.y + m.height / 2;
+        await page.mouse.move(m.x + m.width / 2, y);
+        await page.mouse.down();
+        await page.mouse.move(toX, y, { steps: 8 });
+        if (hold) await hold();
+        await page.mouse.up();
+      };
+      await drag(await gapX("feature-1", "sketch-2"), {
+        hold: async () => {
+          assert.deepEqual(await bar(page), atBox.bar, "while dragged the marker stands where it would drop");
+          assert.equal(await page.$eval("#timeline .timeline-bar", (l) => l.dataset.dragging), "true");
+          if (shots) await page.screenshot({ path: `${shots}/marker-drag-${width}.png` });
+        },
+      });
+      await undoIs(page, MOVE);
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), atBox);
+      await undo();
+      await settled(V);
+      assert.deepEqual(await state(), all);
+      await redo();
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), atBox);
+      // Dragged to the left of the box's middle: the start.
+      const b1 = await boxOf("feature-1");
+      await drag(b1.x + b1.width * 0.25);
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "dragged to the start");
+      assert.deepEqual(await state(), atStart);
+      // Dragged past the last item's middle: the end.
+      const b3 = await boxOf("feature-11");
+      await drag(b3.x + b3.width * 0.75);
+      await settled(V);
+      assert.deepEqual(await state(), all);
+      // A press on the marker that moves 3 px (under 5) is no drag: nothing recorded.
+      const before = await undoTitle(page);
+      const m = await markerBox();
+      await page.mouse.move(m.x + m.width / 2, m.y + m.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(m.x + m.width / 2 - 3, m.y + m.height / 2, { steps: 3 });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+      assert.deepEqual(await bar(page), all.bar);
+      assert.equal(await undoTitle(page), before);
+      // Four Undos go back through the three drags and Go to the end, so the press added no step.
+      for (const want of [atStart, atBox, all, atBox]) {
+        await undo();
+        await settled(want.volume);
+        if (want === atStart) await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "undone to the start");
+        assert.deepEqual(await state(), want);
+      }
+
+      if (tap) {
+        // 6. Taps between items on a touch screen: the gap's middle, which is the row itself, not an item.
+        const tapGap = async (x) => {
+          const box = await boxOf("feature-1");
+          const y = box.y + box.height / 2;
+          assert.equal(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.className, [x, y]), "timeline-bar", "a gap is the row, not an item");
+          await page.touchscreen.tap(x, y);
+        };
+        await tapGap(await gapX("sketch-2", "feature-11"));
+        await undoIs(page, MOVE);
+        await settled("24,000 mm³");
+        assert.deepEqual(await state(), atSketch);
+        if (shots) await page.screenshot({ path: `${shots}/marker-tap-${width}.png` });
+        await undo();
+        await settled("24,000 mm³");
+        assert.deepEqual(await state(), atBox);
+        await redo();
+        await settled("24,000 mm³");
+        assert.deepEqual(await state(), atSketch);
+        // A tap on an item picks it (its ⋯ shows) and moves nothing.
+        await page.tap('#timeline [data-item="feature-1"]');
+        await until(page, () => document.querySelector('#timeline [data-more="feature-1"]'), null, "the ⋯");
+        assert.deepEqual((await bar(page)), atSketch.bar);
+        // Just past the last item (the gap after it): the end.
+        const b = await boxOf("feature-11");
+        await tapGap(b.x + b.width + 3);
+        await settled(V);
+        assert.deepEqual((await state()).bar, all.bar);
+      }
+
+      if (!tap) {
+        await button("end");
+        await settled(V);
+      }
+      assert.deepEqual(await state(), all);
+      // 7. While a new sketch is edited (Sketch 2, last), going to the start would roll it back: off, with why, and
+      // a drag there is refused with the same words; stepping back to just after it is still allowed.
+      await press(page, "#create-sketch", tap);
+      await press(page, "#sketch-plane-XY", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+      const words = "The marker can't go before Sketch 2 while it is being edited: finish the sketch first";
+      assert.equal(await page.getAttribute('#timeline [data-button="start"]', "aria-disabled"), "true");
+      assert.equal(await page.getAttribute('#timeline [data-button="start"]', "title"), `Go to the start: ${words}`);
+      const step = await undoTitle(page);
+      const bb = await boxOf("feature-1");
+      await drag(bb.x + 2);
+      await until(page, (w) => document.querySelector("#error")?.textContent === w, words, "the refusal shown");
+      assert.equal(await undoTitle(page), step, "nothing recorded");
+      assert.equal(await page.evaluate(() => document.querySelector("#viewport").dataset.sketching), "true", "still sketching");
+      assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "feature-11", "sketch-12", "|"], "the marker drawn back where it is");
 
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();

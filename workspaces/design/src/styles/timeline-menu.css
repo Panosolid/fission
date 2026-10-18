@@ -2,3 +2,5 @@
    row in the browser's Timeline group red, as its item on the bar is. The
    menu itself is delete-ask.css's row menu. */
 .timeline-menu.timeline-menu-failed { color: #ff6b6b; }
+/* Step 24f5: a row after the rollback marker greyed, as its item on the bar is. */
+.timeline-menu.timeline-menu-rolled-back { opacity: 0.45; }

@@ -20,3 +20,15 @@
 .timeline-bar .timeline-bar-item:focus-visible { outline: 2px solid #4aa8ff; outline-offset: 1px; }
 .timeline-bar .timeline-bar-more-slot { flex-shrink: 0; display: inline-flex; }
 .timeline-bar .timeline-bar-more:not(#none) { min-width: 28px; height: 22px; padding: 0 6px; background: #2a2e35; border: 1px solid #4aa8ff; border-radius: 3px; color: #e6e9ee; line-height: 1; cursor: pointer; }
+/* Step 24f5: the marker is dragged: its grab area reaches the items on
+   either side (3 px margin and 2 px gap), and a drag shows where it would
+   drop. At phone width the gaps widen, so a tap between two items lands
+   between them (tapPlace) rather than on one. The playback buttons before
+   the items are timeline-marker.css's. */
+.timeline-bar .timeline-bar-marker { position: relative; cursor: ew-resize; touch-action: none; }
+.timeline-bar .timeline-bar-marker::before { content: ""; position: absolute; inset: -4px -5px; }
+.timeline-bar[data-dragging="true"] { cursor: ew-resize; }
+.timeline-bar[data-dragging="true"] .timeline-bar-marker { background: #8fc3ff; box-shadow: 0 0 0 2px rgba(74, 168, 255, 0.35); }
+@media (max-width: 640px) {
+  .timeline-bar { gap: 12px; }
+}
