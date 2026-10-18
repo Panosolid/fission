@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createSelection } from "@fission/core";
 import { nameBody } from "../src/naming.ts";
 import { pickChange, type SelectionChange } from "../src/picking.ts";
-import { BOX_VIEW } from "./views.ts";
+import { BOX_VIEW, onlyBody } from "./views.ts";
 
-const box = nameBody("feature-1", BOX_VIEW, () => null);
+const box = onlyBody(BOX_VIEW, nameBody("feature-1", BOX_VIEW, () => null));
 
 test("a pick on a face names that face of the feature on screen", () => {
   // The default box's top face is kernel face 1 (primitives.rs lists the
@@ -60,7 +60,7 @@ test("before a body is built, or on a face or edge with no name, a click changes
   // Past the box's faces (an index the names don't cover), and a face the kernel gave no role.
   assert.deepEqual(pickChange({ face: 6, shift: false }, box), { change: "keep" });
   const unnamed = nameBody("feature-1", { ...BOX_VIEW, face_roles: [null, ...BOX_VIEW.face_roles.slice(1)] } as typeof BOX_VIEW, () => null);
-  assert.deepEqual(pickChange({ face: 0, shift: true }, unnamed), { change: "keep" });
+  assert.deepEqual(pickChange({ face: 0, shift: true }, onlyBody(BOX_VIEW, unnamed)), { change: "keep" });
   // Empty space still clears.
   assert.deepEqual(pickChange({ face: null, shift: false }, null), { change: "clear" });
 });
