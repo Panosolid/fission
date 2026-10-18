@@ -58,7 +58,6 @@ const seedList = (text) => text.split(",").flatMap((part) => {
  * MONKEY_KNOWN=0 turns every mark off, to see the bug fail.
  */
 const KNOWN_BUGS = process.env.MONKEY_KNOWN === "0" ? {} : {
-  "body-panel": "with two or more bodies, the Feature and Body panels show the last body's feature, volume and topology whichever body is selected",
   "grid-after-undo": "a grid size typed in a sketch, then Undo before the kernel answers, throws \"Cannot set properties of null (setting 'grid')\"",
 };
 /** Known bugs that show as an uncaught error, by the error's words. */
@@ -121,7 +120,8 @@ function offered() {
     if (e.tagName === "INPUT" && e.type !== "button" && e.type !== "file") inputs.push({ sel: s, type: e.type, local });
     else if (e.tagName !== "INPUT" && e.tagName !== "SELECT") targets.push({ sel: s, hot: e.matches(HOT), cold: e.matches(COLD), local });
   }
-  const rows = [...document.querySelectorAll("#browser .tree-row[data-node]")].filter(usable).map((e) => ({ sel: sel(e), sketch: e.dataset.node.startsWith("sketches/"), body: /^body-\d+$/.test(e.dataset.node) }));
+  // Browser rows and the timeline bar's items (24f3: a right-click opens the item's menu: marker here, suppress, delete).
+  const rows = [...document.querySelectorAll("#browser .tree-row[data-node], #timeline li[data-item]")].filter(usable).map((e) => ({ sel: sel(e), sketch: (e.dataset.node ?? e.dataset.item).startsWith("sketch"), body: /^body-\d+$/.test(e.dataset.node ?? "") }));
   const prompt = [...document.querySelectorAll('[id^="sketch-plane-"]')].some(usable);
   return { targets, inputs, rows, prompt, sketching: document.querySelector("#viewport")?.dataset.sketching === "true" };
 }
@@ -354,7 +354,6 @@ async function act(s, a) {
       if (bodyIds.length !== view.bodies) return false; // the per-step check reports that
       const blocks = [];
       const wrong = []; // every disagreement, so the message shows the whole pattern
-      const panel = []; // the Feature and Body panels' part of it (KNOWN_BUGS["body-panel"])
       for (const [k, id] of bodyIds.entries()) {
         await page.evaluate((k) => document.querySelector(`#browser .tree-row[data-node="body-${k + 1}"]`).click(), k);
         await settle(page);
@@ -369,16 +368,16 @@ async function act(s, a) {
         const f = design.timeline.features.find((x) => x.id === id);
         const name = `Body ${k + 1} (${f.intent.summary})`;
         if (got.selection !== `body:${id}`) wrong.push(`clicking ${name} selected "${got.selection}"`);
-        if (got.intent !== f.intent.summary) panel.push(`with ${name} selected the Feature panel says "${got.intent}"`);
+        if (got.intent !== f.intent.summary) wrong.push(`with ${name} selected the Feature panel says "${got.intent}"`);
         const faces = /faces ([\d,]*)/.exec(got.highlight)?.[1].split(",").filter(Boolean).map(Number) ?? [];
         const shownFaces = Number(/(\d+) F/.exec(got.topology)?.[1]);
         if (!got.stale) {
           const want = modelVolume(design, f);
           const volume = Number(got.volume.replace(/[^\d.]/g, ""));
           // The panel rounds to a few figures (fmt in properties.ts); 0.5% is far inside the gap between any two different bodies the monkey makes, and far outside the kernel's 1e-6 relative volume error.
-          if (want !== null && !(Math.abs(volume - want) <= 0.005 * want)) panel.push(`with ${name} selected the Body panel shows ${got.volume}, but that body is ${want.toPrecision(6)} mm³`);
+          if (want !== null && !(Math.abs(volume - want) <= 0.005 * want)) wrong.push(`with ${name} selected the Body panel shows ${got.volume}, but that body is ${want.toPrecision(6)} mm³`);
           // With every body selected (one body alone) the app lights none of them on purpose (scene.ts), so the count is checked from two bodies up.
-          if (bodyIds.length > 1 && faces.length !== shownFaces) panel.push(`with ${name} selected ${faces.length} faces light up, but the Body panel says it has ${shownFaces}`);
+          if (bodyIds.length > 1 && faces.length !== shownFaces) wrong.push(`with ${name} selected ${faces.length} faces light up, but the Body panel says it has ${shownFaces}`);
         }
         blocks.push(faces);
       }
@@ -390,10 +389,6 @@ async function act(s, a) {
         next = faces.at(-1) + 1;
       }
       await page.keyboard.press("Escape");
-      const differ = new Set(bodyIds.map((id) => design.timeline.features.find((x) => x.id === id).intent.summary)).size > 1;
-      if (!KNOWN_BUGS["body-panel"]) wrong.push(...panel);
-      else if (panel.length) s.known.add("body-panel");
-      else if (differ) wrong.push(`the known bug "${KNOWN_BUGS["body-panel"]}" no longer shows with ${bodyIds.length} different bodies: it looks fixed, so remove its mark in KNOWN_BUGS`);
       if (wrong.length) fail("selection agrees", wrong.join("; "));
       return true;
     }

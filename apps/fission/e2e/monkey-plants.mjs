@@ -56,7 +56,7 @@ export const MONKEY_PLANTS = {
   "body-row-off-by-one": {
     what: "a Bodies row selects the next body",
     expect: "selection agrees",
-    edits: [{ file: "workspaces/design/src/workspace.ts", find: "(bodyFeatures(doc)[Number(body[1]) - 1]);", replace: "(bodyFeatures(doc)[Number(body[1]) % bodyFeatures(doc).length]);" }],
+    edits: [{ file: "workspaces/design/src/browser.ts", find: "(bodyFeatures(doc)[Number(body[1]) - 1]);", replace: "(bodyFeatures(doc)[Number(body[1]) % bodyFeatures(doc).length]);" }],
   },
   "top-bar-spills-on-phone": {
     what: "at phone width the top bar is wider than the window",

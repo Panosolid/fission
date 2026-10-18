@@ -1,6 +1,6 @@
 {
   "seed": 0,
-  "what": "Selecting Body 1 or 2 of three shows the last body's feature, volume and topology (found by Ben, caught on main ea39d90 by the selection check); moves to e2e/regressions/ with its fix",
+  "what": "Selecting Body 1 or 2 of three showed the last body's feature, volume and topology (found by Ben; fixed by #167, the panel follows the selected body)",
   "actions": [
     {
       "do": "open",
