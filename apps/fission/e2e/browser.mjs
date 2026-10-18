@@ -31,11 +31,36 @@ export function launch() {
  * the page, so every context these tests open bypasses the policy unless it
  * passes `bypassCSP: false`. e2e/framing.mjs does, and checks the app under
  * the real policy there (the kernel's WebAssembly, what it refuses).
+ * WebKit's bypassCSP ignores a policy given in a <meta> tag, so there the
+ * app's page is served with that tag taken out instead.
  */
 function underTestCSP(browser) {
   const newContext = browser.newContext.bind(browser);
   const newPage = browser.newPage.bind(browser);
-  browser.newContext = (options = {}) => newContext({ bypassCSP: true, ...options });
-  browser.newPage = (options = {}) => newPage({ bypassCSP: true, ...options });
+  browser.newContext = async (options = {}) => {
+    const context = await newContext({ bypassCSP: true, ...options });
+    if (context && options.bypassCSP !== false && STRIP_META_CSP) await stripMetaCSP(context);
+    return context;
+  };
+  browser.newPage = async (options = {}) => {
+    const page = await newPage({ bypassCSP: true, ...options });
+    if (options.bypassCSP !== false && STRIP_META_CSP) await stripMetaCSP(page.context());
+    return page;
+  };
   return browser;
+}
+
+const STRIP_META_CSP = browserName === "webkit";
+const META_CSP = /<meta http-equiv="Content-Security-Policy"[^>]*>/;
+
+/** Serves the app's HTML pages to `context` without the CSP <meta> tag. */
+function stripMetaCSP(context) {
+  return context.route(
+    (url) => url.protocol.startsWith("http") && (url.pathname.endsWith("/") || url.pathname.endsWith(".html")),
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      await route.fulfill({ response, body: body.replace(META_CSP, "") });
+    },
+  );
 }
