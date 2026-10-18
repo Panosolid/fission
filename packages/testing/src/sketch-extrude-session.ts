@@ -198,9 +198,22 @@ export function clearlySimple(shape: LoopShape): boolean {
     for (let j = i + 1; j < n; j++) {
       let p = sides[i].pts;
       let q = sides[j].pts;
-      if (j === i + 1) q = q.slice(1);
-      if (i === 0 && j === n - 1) p = p.slice(1);
-      if (j === i + 1 && n === 2) p = p.slice(0, -1);
+      // Next-door sides touch at their shared corner, so one piece there is
+      // left out: an arc's, never a straight side (one piece, the whole
+      // side; issue #140). Two straight sides can only meet away from their
+      // corner by doubling back, which the turn check refuses.
+      const straight = (pts: XY[]) => pts.length === 2;
+      if ((j === i + 1 || (i === 0 && j === n - 1)) && straight(p) && straight(q)) continue;
+      // Side i's end is side j's start.
+      if (j === i + 1) {
+        if (!straight(q)) q = q.slice(1);
+        else p = p.slice(0, -1);
+      }
+      // Side 0's start is side n − 1's end.
+      if (i === 0 && j === n - 1) {
+        if (!straight(p)) p = p.slice(1);
+        else q = q.slice(0, -1);
+      }
       for (let u = 0; u + 1 < p.length; u++) for (let v = 0; v + 1 < q.length; v++) if (segmentDistance(p[u], p[u + 1], q[v], q[v + 1]) <= margin) return false;
     }
   return true;
