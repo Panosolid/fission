@@ -33,7 +33,7 @@ export const SECONDS = {
   "assistant.mjs": 25,
   "guide.mjs": 262,
   "layout.mjs": 4,
-  "typed-entry.mjs": 18,
+  "typed-entry.mjs": 37,
   "journeys.mjs": 9,
 };
 export const UNKNOWN = 30;
