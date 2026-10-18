@@ -5,7 +5,7 @@
 import type { GeometryReference, ViewportHighlight } from "@fission/core";
 import { profileLabel, type ReadyProfile } from "./document.ts";
 import { readDesignReference, readProfileReference, resolveReference } from "./references.ts";
-import { bodyOf, resolveInScene, type Scene } from "./scene.ts";
+import { bodyOf, resolveInScene, type Scene, type ShownBody } from "./scene.ts";
 
 /**
  * The viewport highlight for these items on the bodies shown (`scene`,
@@ -72,8 +72,8 @@ export function referenceLabel(ref: GeometryReference): string {
 
 /**
  * One row per selected item, in selection order, from the bodies shown
- * (`scene`, null before the first build): a body is "Body n" by its place
- * in build order; a face or edge no shown body has, or a body not shown,
+ * (`scene`, null before the first build): a body is "Body n", its
+ * browser row's number; a face or edge no shown body has, or a body not shown,
  * says so instead of a type. A profile is named from `profiles` (the
  * document's), as the browser names it, of type "outline"; one the
  * document no longer has says so.
@@ -87,13 +87,29 @@ export function selectionRows(items: readonly GeometryReference[], scene: Scene 
     const r = readDesignReference(item);
     if (!r) return { name: referenceLabel(item), type: NOT_ON_BODY, id: item.id };
     const b = scene === null ? -1 : bodyOf(scene, item);
-    if (r.kind === "body") return b >= 0 ? { name: `Body ${b + 1}`, type: "solid", id: item.id } : { name: "Body", type: scene ? NOT_ON_BODY : "…", id: item.id };
+    if (r.kind === "body") return b >= 0 ? { name: `Body ${scene!.bodies[b].place}`, type: "solid", id: item.id } : { name: "Body", type: scene ? NOT_ON_BODY : "…", id: item.id };
     const shown = b >= 0 ? scene!.bodies[b] : undefined;
     const i = shown ? resolveReference(item, shown.names) : null;
     const types = r.kind === "face" ? shown?.view.face_types : shown?.view.edge_types;
     const type = i !== null && types ? types[i] : undefined;
     return { name: referenceLabel(item), type: type ?? (scene ? NOT_ON_BODY : "…"), id: item.id };
   });
+}
+
+/**
+ * The body the properties panel's Feature and Body sections describe: the
+ * one the newest selected item is on (the body itself, or a face or edge
+ * of it), else the last body shown, the part the Parameters edit; null
+ * with no body shown. Items on no shown body (a profile, a body that did
+ * not build) are passed over.
+ */
+export function panelBody(items: readonly GeometryReference[], scene: Scene | null): ShownBody | null {
+  if (scene === null || scene.bodies.length === 0) return null;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const b = bodyOf(scene, items[i]);
+    if (b >= 0) return scene.bodies[b];
+  }
+  return scene.bodies[scene.bodies.length - 1];
 }
 
 /**
