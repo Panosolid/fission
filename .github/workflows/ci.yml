@@ -13,9 +13,15 @@ on:
 # A newer commit on the same branch cancels the run still testing an older
 # one: auto-merge only looks at the head's checks, so the old run's answer
 # can't matter, and its runners go to the new run. main's runs always finish.
+# The group names the repository the branch lives in, so a fork's pull
+# request from a branch called main or claude/x can't cancel our runs.
 concurrency:
-  group: ci-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Read-only token by default; a job that writes says so itself.
+permissions:
+  contents: read
 
 jobs:
   kernel:

@@ -36,6 +36,10 @@ on:
         description: "Minutes of fuzzing per reader"
         default: "45"
 
+# Read-only token by default; a job that writes says so itself.
+permissions:
+  contents: read
+
 concurrency:
   group: fuzzing-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: false
@@ -58,6 +62,7 @@ jobs:
         # A debug build (the tests' own profile), so overflow checks are on.
         # The job fails when a round found something; collect still runs.
         run: |
+          case $MINUTES in ""|*[!0-9]*) echo "minutes must be a whole number"; exit 1;; esac
           cargo test --test fuzz_stl --no-run
           FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) cargo test --test fuzz_stl fuzz_stl_random -- --nocapture
       - uses: actions/upload-artifact@v4
@@ -82,7 +87,9 @@ jobs:
         env:
           MINUTES: ${{ inputs.minutes || '45' }}
           FISSION_FUZZ_OUT: ${{ runner.temp }}/fuzz
-        run: FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) npm run fuzz -w @fission/testing
+        run: |
+          case $MINUTES in ""|*[!0-9]*) echo "minutes must be a whole number"; exit 1;; esac
+          FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) npm run fuzz -w @fission/testing
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -115,7 +122,9 @@ jobs:
         env:
           MINUTES: ${{ inputs.minutes || '45' }}
           FISSION_FUZZ_OUT: ${{ runner.temp }}/fuzz
-        run: FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) npm run sessions -w @fission/testing
+        run: |
+          case $MINUTES in ""|*[!0-9]*) echo "minutes must be a whole number"; exit 1;; esac
+          FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) npm run sessions -w @fission/testing
       - uses: actions/setup-python@v5
         if: always()
         with:
@@ -164,7 +173,9 @@ jobs:
         working-directory: kernel
         env:
           MINUTES: ${{ inputs.minutes || '45' }}
-        run: fuzz/run.sh ${{ matrix.target }} $(( MINUTES * 60 )) "$RUNNER_TEMP/fuzz"
+        run: |
+          case $MINUTES in ""|*[!0-9]*) echo "minutes must be a whole number"; exit 1;; esac
+          fuzz/run.sh ${{ matrix.target }} $(( MINUTES * 60 )) "$RUNNER_TEMP/fuzz"
       - uses: actions/setup-python@v5
         if: always()
         with:

@@ -41,6 +41,10 @@ on:
         type: boolean
         default: false
 
+# Read-only token by default; a job that writes says so itself.
+permissions:
+  contents: read
+
 # The nightly run has its own group, and every branch its own, so runs started
 # from threads during the day never cancel the night's run. A new run on a
 # thread's branch cancels the one still running or waiting there, which tests
@@ -69,6 +73,7 @@ jobs:
           MINUTES: ${{ inputs.minutes || '290' }}
           MUTANTS: ${{ inputs.mutants }}
         run: |
+          case $MINUTES in ""|*[!0-9]*) echo "minutes must be a whole number"; exit 1;; esac
           now=$(date +%s)
           if [ "$NIGHTLY" = true ]; then
             # 22:35 UTC of the day the run started (it is meant to start at
