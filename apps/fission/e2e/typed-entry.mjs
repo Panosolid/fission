@@ -10,7 +10,12 @@
 // second Escape ends it; letters typed in a box never reach the tool keys.
 // The rectangle's Width and Height the same way. At 375 px with taps: the
 // boxes whole on screen, a line typed by length and angle. Screenshots
-// at 1280 and 375 px go to E2E_SHOTS when set. Run with `npm run e2e`
+// at 1280 and 375 px go to E2E_SHOTS when set. The arcs too: the hint by
+// the pointer at each click ("Specify next point", "Place point on arc"),
+// a 3-point arc's end typed by length and angle with no boxes for its
+// point on the arc, a centre arc's start typed by radius and angle and its
+// end by a typed 270° arc angle the way the pointer went (the preview first),
+// and at 375 px with taps the boxes and hint whole on screen. Run with `npm run e2e`
 // (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
@@ -239,6 +244,105 @@ await check("375 px with taps: the boxes on screen, a line typed by length and a
   if (shots) await page.screenshot({ path: `${shots}/typed-entry-375.png` });
   await page.keyboard.press("Enter");
   await points(page, "20,15 20,40");
+  await page.close();
+});
+
+const hintIs = (page, want) => until(page, (w) => { const h = document.getElementById("sketch-hint"); return h && !h.hidden && h.textContent === w; }, want, `hint "${want}"`).catch(async (e) => assert.fail(`${e.message} (shown: "${await page.textContent("#sketch-hint")}", hidden ${await page.$eval("#sketch-hint", (h) => h.hidden)})`));
+const previewCount = (page, n, what) => until(page, (w) => (document.querySelector("#viewport").dataset.sketchPreview ?? "").split(" | ").length === w, n, what);
+
+await check("1280 px: a 3-point arc, its end typed 20 mm at 0°, then a point on the arc with no boxes", async () => {
+  const page = await fresh();
+  await sketch(page);
+  await page.keyboard.press("a");
+  await hover(page, [3, 3]);
+  await hintIs(page, "Place start point");
+  assert.equal(await boxesShown(page), false);
+  await clickPlane(page, [0, 0]);
+  await points(page, "0,0");
+  await hover(page, [6, 8]);
+  await hintIs(page, "Specify next point");
+  assert.deepEqual(await page.$$eval(".typed-entry-name", (e) => e.map((x) => x.textContent)), ["Length", "Angle"]);
+  assert.equal(await page.getAttribute("#typed-length", "placeholder"), "10", "the live length to (6, 8)");
+  await page.keyboard.type("20");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("0");
+  await page.keyboard.press("Enter");
+  // Start (0, 0), end 20 along 0°: (20, 0), whatever the pointer.
+  await points(page, "0,0 20,0");
+  assert.equal(await boxesShown(page), false, "no boxes for the point on the arc");
+  await hover(page, [10, 10]);
+  await hintIs(page, "Place point on arc");
+  // Through (10, 10): the half circle round (10, 0), 32 segments.
+  await previewCount(page, 32, "the half circle's preview");
+  if (shots) await page.screenshot({ path: `${shots}/arc-3point-1280.png` });
+  await clickPlane(page, [10, 10]);
+  // Counter-clockwise from (20, 0) over the top to (0, 0) round (10, 0): ids start, end, centre.
+  await points(page, "20,0 0,0 10,0");
+  assert.match(await undoLabel(page), /^Undo Draw arc/);
+  await hintIs(page, "Place start point");
+  await page.close();
+});
+
+await check("1280 px: a centre arc, its start typed radius 10 at 90°, its end typed 270° the way the pointer went", async () => {
+  const page = await fresh();
+  await sketch(page);
+  await page.click("#sketch-create");
+  await page.hover("#sketch-menu-group-arc");
+  await page.click("#sketch-menu-centre");
+  await hover(page, [21, 12]);
+  await hintIs(page, "Place centre point");
+  await clickPlane(page, [20, 10]);
+  await points(page, "20,10");
+  await hover(page, [25, 12]);
+  await hintIs(page, "Place start point");
+  assert.deepEqual(await page.$$eval(".typed-entry-name", (e) => e.map((x) => x.textContent)), ["Radius", "Angle"]);
+  await page.keyboard.type("10");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("90");
+  await page.keyboard.press("Enter");
+  // 10 along 90° from (20, 10): (20, 20).
+  await points(page, "20,10 20,20");
+  // A little counter-clockwise from straight up (to the left), then 270 typed: three quarters that way.
+  await hover(page, [19, 20]);
+  await hover(page, [17, 19]);
+  await hintIs(page, "Place end point");
+  assert.deepEqual(await page.$$eval(".typed-entry-name", (e) => e.map((x) => x.textContent)), ["Arc angle"]);
+  await page.keyboard.type("270");
+  assert.equal(await locked(page, "sweep"), true, "the padlock");
+  await previewCount(page, 50, "three quarters: 48 segments and two radius lines");
+  if (shots) await page.screenshot({ path: `${shots}/arc-centre-typed-1280.png` });
+  await page.keyboard.press("Enter");
+  // 270° counter-clockwise from 90° is 360°: the end at (30, 10).
+  await points(page, "20,20 30,10 20,10");
+  assert.match(await undoLabel(page), /^Undo Draw centre arc/);
+  await page.close();
+});
+
+await check("375 px with taps: an arc's end typed, the boxes and hint on screen", async () => {
+  const page = await fresh(375, true);
+  await sketch(page, true);
+  await page.keyboard.press("a");
+  await clickPlane(page, [10, 10], TOP, true);
+  await points(page, "10,10");
+  await hintIs(page, "Specify next point");
+  for (const sel of ["#typed-entry", "#sketch-hint"]) {
+    const b = await page.locator(sel).boundingBox();
+    assert.ok(b.x >= 0 && b.x + b.width <= 375, `${sel} inside the screen's width: ${b.x} to ${b.x + b.width}`);
+  }
+  const t = await page.locator("#typed-entry").boundingBox();
+  const h = await page.locator("#sketch-hint").boundingBox();
+  assert.ok(h.y + h.height <= t.y || t.y + t.height <= h.y, "the hint and the boxes don't overlap");
+  await page.locator("#typed-length").tap();
+  await page.keyboard.type("20");
+  await page.locator("#typed-angle").tap();
+  await page.keyboard.type("0");
+  if (shots) await page.screenshot({ path: `${shots}/arc-typed-375.png` });
+  await page.keyboard.press("Enter");
+  await points(page, "10,10 30,10");
+  await clickPlane(page, [20, 20], TOP, true);
+  await points(page, "30,10 10,10 20,10");
+  const scroll = await page.evaluate(() => document.documentElement.scrollWidth);
+  assert.ok(scroll <= 375, `no sideways scroll (${scroll} px)`);
   await page.close();
 });
 
