@@ -31,6 +31,25 @@ const shots = process.env.E2E_SHOTS;
 
 const until = (page, fn, arg, what) => page.waitForFunction(fn, arg, { timeout: 5000 }).catch(async () => assert.fail(`${what}: timed out`));
 
+// TEMPORARY (24f6, Firefox at 375 px): the pointer, mouse and touch events a failing drag hold saw, added to its message.
+const EVENTS = ["pointerdown", "pointermove", "pointerup", "pointercancel", "gotpointercapture", "lostpointercapture", "mousedown", "mousemove", "mouseup", "touchstart", "touchmove", "touchend", "touchcancel", "dragstart", "selectstart", "click"];
+async function heard(page, fn) {
+  await page.evaluate((types) => {
+    window.__heard = [];
+    if (window.__listening) return;
+    window.__listening = true;
+    for (const t of types)
+      document.addEventListener(t, (e) => window.__heard.push(`${t}/${e.pointerType ?? "-"}/${e.buttons ?? "-"}/${e.defaultPrevented ? "p" : ""}/${String(e.target?.className || e.target?.nodeName).slice(0, 24)}@${Math.round(e.clientX ?? -1)}`), { capture: true });
+  }, EVENTS);
+  try {
+    return await fn();
+  } catch (e) {
+    const log = await page.evaluate(() => window.__heard.join(" ")).catch(() => "?");
+    e.message += `\n  events: ${log}\n  touch: ${await page.evaluate(() => [navigator.maxTouchPoints, "ontouchstart" in window, matchMedia("(pointer: coarse)").matches].join(","))}`;
+    throw e;
+  }
+}
+
 async function fresh(width, touch) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
@@ -500,10 +519,12 @@ try {
       const drag = async (toX, { hold } = {}) => {
         const m = await markerBox();
         const y = m.y + m.height / 2;
-        await page.mouse.move(m.x + m.width / 2, y);
-        await page.mouse.down();
-        await page.mouse.move(toX, y, { steps: 8 });
-        if (hold) await hold();
+        await heard(page, async () => {
+          await page.mouse.move(m.x + m.width / 2, y);
+          await page.mouse.down();
+          await page.mouse.move(toX, y, { steps: 8 });
+          if (hold) await hold();
+        });
         await page.mouse.up();
       };
       await drag(await gapX("feature-1", "sketch-2"), {
@@ -638,10 +659,12 @@ try {
           if (hold) await hold();
           await finger.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
         } else {
-          await page.mouse.move(x, y);
-          await page.mouse.down();
-          await page.mouse.move(toX, y, { steps: 8 });
-          if (hold) await hold();
+          await heard(page, async () => {
+            await page.mouse.move(x, y);
+            await page.mouse.down();
+            await page.mouse.move(toX, y, { steps: 8 });
+            if (hold) await hold();
+          });
           await page.mouse.up();
         }
       };
