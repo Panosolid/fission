@@ -343,13 +343,13 @@ test("Design asleep draws no selection and no kernel reply; on wake it draws the
   assert.equal(calls, 1);
   assert.equal(error(), "", "a reply arriving asleep is not drawn");
   assert.deepEqual(drawn(), NO_HIGHLIGHT, "sleep takes the selection's colours off the viewport");
-  // The body selected in another workspace meanwhile: drawn on wake (worked
-  // out: the body alone gives { body: true, faces: [], edges: [] }; nothing
-  // built, so no face could be).
+  // The body selected in another workspace meanwhile: nothing drawn while
+  // asleep, and on wake still nothing, since no body was ever built here
+  // (24d3b: only a shown body can be tinted; the next test draws it).
   ctx.selection.set([{ kind: "body", id: "body:feature-1" as StableId }]);
   assert.deepEqual(drawn(), NO_HIGHLIGHT, "nothing drawn while asleep");
   view.wake!();
-  assert.deepEqual(drawn(), { body: true, faces: [], edges: [] });
+  assert.deepEqual(drawn(), NO_HIGHLIGHT);
   await settle();
   assert.equal(calls, 2, "the missed build runs again on wake");
   assert.match(error()!, /no kernel in this test/);
@@ -358,6 +358,25 @@ test("Design asleep draws no selection and no kernel reply; on wake it draws the
   view.wake!();
   await settle();
   assert.equal(calls, 2, "waking with nothing missed builds nothing");
+  view.unmount();
+});
+
+test("a body selected while Design sleeps through its first build is drawn once wake builds it", async () => {
+  const ctx = testContext();
+  ctx.kernel = boxKernel();
+  const view = plugins.find((p) => p.id === "design")!.mount(ctx);
+  const drawn = () => shownHighlights.get(ctx.viewport);
+  // Asleep before the first build's reply: the box is not drawn, so the body
+  // selected meanwhile can't be tinted yet.
+  view.sleep!();
+  await settle();
+  ctx.selection.set([{ kind: "body", id: "body:feature-1" as StableId }]);
+  view.wake!();
+  assert.deepEqual(drawn(), NO_HIGHLIGHT, "nothing built is on screen yet");
+  // Wake builds again and draws the box with its body tinted (worked out:
+  // the only body shown, selected whole, is { body: true }).
+  await settle();
+  assert.deepEqual(drawn(), { body: true, faces: [], edges: [] });
   view.unmount();
 });
 
