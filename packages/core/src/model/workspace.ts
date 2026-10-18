@@ -61,6 +61,8 @@ export interface WorkspaceContext {
   browser: HTMLElement;
   /** The panel right of the viewport: details of what is being edited; placeholders show their page here. Empty when shown; leave it empty on hide. */
   properties: HTMLElement;
+  /** The thin row along the bottom, under the view, for a workspace with a timeline (Design's, SF3d); left out or left empty, it takes no room. Empty when shown; leave it empty on hide. */
+  timeline?: HTMLElement;
   viewport: SharedViewport;
   /** The one conversion layer between workspaces. */
   representations: RepresentationRegistry;
