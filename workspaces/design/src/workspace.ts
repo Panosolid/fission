@@ -967,9 +967,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     input.addEventListener("input", () => update(shape === "sketch-extrude" && SIZE_KEYS[i] === "height" ? DISTANCE_STEP : `Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])),
   );
   listen();
-  update();
+  const first = update();
   enterSketch(); // after an Undo or Redo inside a sketch: still in it
   return {
+    ready: first.then(
+      () => {},
+      () => {},
+    ),
     sleep,
     run,
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).

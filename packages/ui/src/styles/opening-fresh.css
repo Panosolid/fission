@@ -1,0 +1,6 @@
+/* Start fresh instead (security audit S2): beside "Opening the last
+   project…" in the top bar's notice while a big project takes long to
+   open. Shaped like the notice's Dismiss button; naming it by id outweighs
+   the bar's own "#topbar button" padding. */
+.opening-fresh#opening-fresh { padding: 2px 8px; font-size: 12px; border: 1px solid #2a2e35; border-radius: 4px; color: #e6e8eb; }
+.opening-fresh[hidden] { display: none; }

@@ -115,6 +115,13 @@ export interface MountedWorkspace {
   run?(command: Command): void | Promise<void>;
   /** Gone for good (a project opened, its pane closed): stops listening if awake, and empties every slot it filled. */
   unmount(): void;
+  /**
+   * Settles once the workspace has shown the project it mounted on (Design:
+   * built and drawn it, or said why it can't), never rejecting. The shell
+   * waits for it before it keeps an opened project or counts the last one
+   * as reopened (security audit S2). Leave out when mounting shows it at once.
+   */
+  ready?: Promise<void>;
 }
 
 export interface WorkspacePlugin {
