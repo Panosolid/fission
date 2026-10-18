@@ -144,9 +144,15 @@ fn view_parts(body: &Body, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
         face_roles: body.faces.iter().map(|f| f.role.map(FaceRoleOut::from)).collect(),
         face_areas: faces.iter().map(|m| m.area).collect(),
         face_centroids: faces.iter().map(|m| m.centroid.to_array()).collect(),
-        edge_faces: body.edge_faces().iter().map(|uses| edge_pair(uses)).collect(),
+        edge_faces: edge_faces(body),
         errors,
     }
+}
+
+/// Each edge's two faces, the one running it forwards first (`edge_pair`),
+/// by edge index: what `BodyView.edge_faces` holds.
+pub fn edge_faces(body: &Body) -> Vec<Option<[usize; 2]>> {
+    body.edge_faces().iter().map(|uses| edge_pair(uses)).collect()
 }
 
 /// The faces of an edge's two uses, the one running it forwards first, or
