@@ -202,8 +202,17 @@ try {
     const p = screenPoint(box, [30, 0]);
     assert.ok(reddest(await pixels(page, p, 1, 7)) < 30, "orbiting left the x axis where it was, so this check could not fail");
     await page.click("#sketch-look-at");
-    await settle(page);
-    await probeSketchView(page, "after Look at");
+    // The turn back is animated; on CI's software renderer the wider SF3d canvas draws slower frames, so
+    // 400 ms can catch it a few pixels short. Probe again for up to 3 s; the last try's failure stands.
+    for (let tries = 0; ; tries++) {
+      await settle(page);
+      try {
+        await probeSketchView(page, "after Look at");
+        break;
+      } catch (e) {
+        if (tries >= 7) throw e;
+      }
+    }
     await page.context().close();
   });
 
