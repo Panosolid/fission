@@ -386,18 +386,23 @@ pub enum SketchOutlineOut {
 
 impl Serialize for SketchOutlineOut {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-        let mut map = s.serialize_map(None)?;
+        // A struct, not a map: serde-wasm-bindgen turns a map into a JavaScript Map, which has no `open` key.
+        use serde::ser::SerializeStruct;
         match self {
-            SketchOutlineOut::Closed(p) => map.serialize_entry("closed", p)?,
+            SketchOutlineOut::Closed(p) => {
+                let mut out = s.serialize_struct("SketchOutlineOut", 1)?;
+                out.serialize_field("closed", p)?;
+                out.end()
+            }
             SketchOutlineOut::Open(why, invalid) => {
-                map.serialize_entry("open", why)?;
+                let mut out = s.serialize_struct("SketchOutlineOut", 1 + usize::from(invalid.is_some()))?;
+                out.serialize_field("open", why)?;
                 if let Some(curves) = invalid {
-                    map.serialize_entry("invalid", curves)?;
+                    out.serialize_field("invalid", curves)?;
                 }
+                out.end()
             }
         }
-        map.end()
     }
 }
 

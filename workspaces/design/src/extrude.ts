@@ -56,7 +56,10 @@ export function setExtrudeDistance(doc: DesignDocument, distance: number, id?: s
   const old = id === undefined ? lastFeature(doc) : doc.timeline.features.find((f) => f.id === id);
   if (!old) throw new Error(`there is no feature ${shown(id)} in the design`);
   if (!isSketchExtrude(old)) throw new Error(`${old.intent.summary} is not an extrude of a sketch`);
-  const sketchLabel = sketchItem(doc, old.intent.parameters.sketch as string).provenance.self.label;
+  // Its sketch may be gone (deleted: the extrude keeps its last shape, 24d2); its summary then names it as the extrude remembers it.
+  const sketchId = old.intent.parameters.sketch as string;
+  const there = doc.timeline.features.some((f) => f.id === sketchId);
+  const sketchLabel = there ? sketchItem(doc, sketchId).provenance.self.label : (old.provenance.from.find((p) => p.id === sketchId)?.label ?? sketchId);
   const feature: Feature = { ...old, intent: { ...old.intent, parameters: { ...old.intent.parameters, distance }, summary: summary(sketchLabel, distance) } };
   return { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f) => (f === old ? feature : f)) } };
 }
