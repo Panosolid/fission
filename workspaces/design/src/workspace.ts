@@ -15,7 +15,8 @@ import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { bodyFeatures, browserTree, type BrowserNode } from "./browser.ts";
 import { showTimelineBar } from "./timeline-bar.ts";
-import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
+import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
+import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
@@ -206,6 +207,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let keepCamera = ctx.history.restoring() || putAwayByRestore;
   putAwayByRestore = false;
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command), () => startSketch(), () => startExtrude());
+  const fresh = startFresh(ctx.toolbar, { current: () => designDoc(), confirm: () => void clearDesign() });
   const { kernel, viewport } = ctx;
   /** On screen (awake); false while asleep (X7) and after unmount. */
   let shown = true;
@@ -359,9 +361,25 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     await show(doc, kind);
   }
 
+  /**
+   * Start fresh (start-fresh.ts), once its dialog is confirmed: out of any
+   * sketch or Extrude panel, the selection cleared, the panel back to the
+   * box at its default sizes, and the fresh design as one undo step, framed.
+   */
+  function clearDesign() {
+    leaveExtrude();
+    if (mode.kind !== "none") leaveSketch();
+    ctx.selection.clear();
+    shape = "box";
+    inputs.forEach((input, i) => (input.value = DEFAULT_SIZES[SIZE_KEYS[i]]));
+    framedKind = null; // a new part: frame it
+    return update(START_FRESH_STEP, undefined, freshDesign());
+  }
+
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
   async function show(doc: DesignDocument, kind: PartKind) {
     browser(ctx.browser, doc, selectRow);
+    fresh.showFor(doc);
     if (ctx.timeline) showTimelineBar(ctx.timeline, doc);
     showKept();
     drawSketches();
@@ -481,6 +499,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     saved = { doc: next, shape, sizes: inputs.map((i) => i.value) };
     ctx.projectChanged(label);
     browser(ctx.browser, next, selectRow);
+    fresh.showFor(next);
     if (ctx.timeline) showTimelineBar(ctx.timeline, next);
     showKept(); // the rows are new: mark them again until the rebuild says otherwise
     markStale();

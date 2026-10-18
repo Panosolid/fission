@@ -36,7 +36,7 @@ export function parameterRows(shape: PartKind): ParameterRow[] {
 }
 
 // The ids are read by the e2e test (#width, #stats[data-stale], #action-note…).
-const DEFAULT_SIZES: Record<SizeKey, string> = { width: "40", depth: "30", height: "20" };
+export const DEFAULT_SIZES: Record<SizeKey, string> = { width: "40", depth: "30", height: "20" };
 const HTML = `
   <h2>Selection</h2>
   <p id="selection-empty">Nothing selected: click a face or an edge, or Body 1 in the browser.</p>

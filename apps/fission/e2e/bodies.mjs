@@ -4,7 +4,10 @@
 // each top face), the view frames both, the browser's Bodies group lists
 // Body 1 and Body 2, a click on either top face selects that body's face by
 // its stable name, and Body 2's row tints only its own faces. The same at
-// 375 px with taps. Screenshots go to E2E_SHOTS when set. Run with
+// 375 px with taps. Start fresh (start-fresh.ts) with both bodies there:
+// it asks, Cancel and Escape change nothing, confirmed it leaves the fresh
+// box alone, and one Undo brings everything back. Screenshots go to
+// E2E_SHOTS when set. Run with
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
@@ -75,6 +78,27 @@ const green = ([r, g, b]) => g - (r + b) / 2;
 const selection = (page) => page.evaluate(() => document.body.dataset.selection ?? "");
 const bodyRows = (page) => page.$$eval('[data-node="bodies"] .tree-row', (rows) => rows.map((r) => `${r.dataset.node} ${r.textContent.trim()}`));
 
+/** Sketches a 10 × 10 square (two opposite corners on the grid, by the rectangle tool) and extrudes it: a second body. */
+async function addSquare(page, { square, distance, volume }, tap) {
+  // A 10 × 10 square by the rectangle tool: two opposite corners on the grid.
+  await press(page, "#create-sketch", tap);
+  await press(page, "#sketch-plane-XY", tap);
+  await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+  // While a sketch is edited Start fresh is out of the way, as the other modelling buttons are.
+  assert.equal(await page.isVisible("#start-fresh"), false, "Start fresh hidden while sketching");
+  await page.check("#sketch-grid-snap");
+  await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0));
+  await press(page, "#sketch-tool-rectangle", tap);
+  for (const p of [square[0], square[2]]) await clickPlane(page, p, TOP, tap);
+  await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "the square closed");
+  await press(page, "#sketch-extrude", tap);
+  await page.fill("#extrude-distance", String(distance));
+  await press(page, "#extrude-ok", tap);
+  // The panel shows the part, the last body (LAYOUTS).
+  await until(page, (v) => document.querySelector("#volume")?.textContent === v, volume, `the second body, ${volume}`);
+  await until(page, () => document.querySelector("#viewport").dataset.sketching !== "true", null, "the sketch finished");
+}
+
 let failed = 0;
 async function check(name, fn) {
   try {
@@ -106,21 +130,7 @@ const LAYOUTS = [
 for (const { width, tap, square, distance, volume, centre, radius: want, top2 } of LAYOUTS) {
   await check(`two bodies drawn, framed, listed and picked (${width} px${tap ? ", taps" : ""})`, async () => {
     const page = await fresh(width, tap);
-    // A 10 × 10 square by the rectangle tool: two opposite corners on the grid.
-    await press(page, "#create-sketch", tap);
-    await press(page, "#sketch-plane-XY", tap);
-    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
-    await page.check("#sketch-grid-snap");
-    await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0));
-    await press(page, "#sketch-tool-rectangle", tap);
-    for (const p of [square[0], square[2]]) await clickPlane(page, p, TOP, tap);
-    await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "the square closed");
-    await press(page, "#sketch-extrude", tap);
-    await page.fill("#extrude-distance", String(distance));
-    await press(page, "#extrude-ok", tap);
-    // The panel shows the part, the last body (LAYOUTS).
-    await until(page, (v) => document.querySelector("#volume")?.textContent === v, volume, `the second body, ${volume}`);
-    await until(page, () => document.querySelector("#viewport").dataset.sketching !== "true", null, "the sketch finished");
+    await addSquare(page, { square, distance, volume }, tap);
 
     // The panels may have scrolled the page at phone width: back to the top.
     await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
@@ -168,6 +178,80 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
     assert.ok(green(lit2) > green(box2) + 20, `body 2 tinted: ${lit2} vs ${box2}`);
     assert.ok(Math.abs(green(lit1) - green(box1)) < 6, `body 1 untouched: ${lit1} vs ${box1}`);
     if (shots) await page.screenshot({ path: `${shots}/bodies-${width}-selected.png` });
+    if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+    await page.context().close();
+  });
+
+  await check(`Start fresh clears both bodies and the sketch after asking, as one undo step (${width} px${tap ? ", taps" : ""})`, async () => {
+    const page = await fresh(width, tap);
+    const state = () =>
+      page.evaluate(() => ({
+        volume: document.querySelector("#volume")?.textContent,
+        sketches: document.querySelectorAll('#browser [data-node^="sketches/"]').length,
+        timeline: document.querySelectorAll("#timeline [data-item]").length,
+        button: [document.getElementById("start-fresh").disabled, document.getElementById("start-fresh").title],
+        open: document.getElementById("start-fresh-dialog").open,
+        undo: document.getElementById("undo").title,
+      }));
+    const ALREADY = "Nothing to clear: this is the design a new project starts with.";
+    const ON = "Clear the whole design and start again from a new one. It asks first, and Undo brings it back.";
+    // A new design is already fresh: the button is off and says why.
+    assert.deepEqual((await state()).button, [true, ALREADY]);
+    await addSquare(page, { square, distance, volume }, tap);
+    assert.deepEqual(await bodyRows(page), ["body-1 Body 1", "body-2 Body 2"]);
+    const before = await state();
+    assert.equal(before.sketches, 1);
+    assert.deepEqual(before.button, [false, ON]);
+
+    // Asks first, naming what goes: the box and Extrude 1 are features, Sketch 1 a sketch.
+    const ask = async () => {
+      await page.locator("#start-fresh").scrollIntoViewIfNeeded();
+      await press(page, "#start-fresh", tap);
+      await until(page, () => document.getElementById("start-fresh-dialog").open, null, "the dialog");
+    };
+    await ask();
+    assert.equal(
+      await page.textContent("#start-fresh-words"),
+      "This clears everything in the design (1 sketch and 2 features) and starts again from the 40 × 30 × 20 mm box a new design opens with. Undo brings it all back.",
+    );
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "start-fresh-cancel", "Cancel has the focus");
+    const box = await page.locator("#start-fresh-dialog").boundingBox();
+    assert.ok(box.x >= 0 && box.x + box.width <= width, `the dialog fits the screen: ${box.x} to ${box.x + box.width} of ${width}`);
+    if (shots) await page.screenshot({ path: `${shots}/start-fresh-${width}-ask.png` });
+    // Cancel, then Escape: each closes it and nothing changes (Escape doesn't clear the selection behind it either).
+    await press(page, "#start-fresh-cancel", tap);
+    assert.deepEqual(await state(), before);
+    await ask();
+    await page.keyboard.press("r"); // the rectangle tool's key, never reaching the app behind the dialog
+    await page.keyboard.press("Escape");
+    await until(page, () => !document.getElementById("start-fresh-dialog").open, null, "closed by Escape");
+    assert.deepEqual(await state(), before);
+    assert.deepEqual(await bodyRows(page), ["body-1 Body 1", "body-2 Body 2"]);
+
+    // Confirmed: the fresh box alone, 40 · 30 · 20 = 24,000 mm³, one body, no sketch, one timeline item; the button off again.
+    await ask();
+    await press(page, "#start-fresh-confirm", tap);
+    await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "the fresh box");
+    const after = await state();
+    assert.deepEqual(after, { volume: "24,000 mm³", sketches: 0, timeline: 1, button: [true, ALREADY], open: false, undo: "Undo Start fresh (Ctrl+Z)" });
+    assert.deepEqual(await bodyRows(page), ["body-1 Body 1"]);
+    // Framed on the box alone: [0, 40] × [0, 30] × [0, 20], radius √(40² + 30² + 20²)/2 = √2900/2.
+    await until(page, (r) => Math.abs(Number(document.querySelector("#viewport").dataset.framedRadius) - r) < 1e-6, Math.sqrt(2900) / 2, "framed on the box");
+    // Body 2 is gone from the screen: where its top was is the background (sampled 60 mm under the floor's middle).
+    await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
+    const view = { toward: [0.6, -0.8, 0.55], up: [0, 0, 1], centre: [20, 15, 10], radius: Math.sqrt(2900) / 2 };
+    const empty = await colourAt(page, [20, 15, -60], view);
+    assert.ok(differs(await colourAt(page, [20, 15, 20], view), empty), "the box is drawn");
+    if (shots) await page.screenshot({ path: `${shots}/start-fresh-${width}-after.png` });
+
+    // One undo step: a single Undo brings both bodies and the sketch back; Redo clears them again.
+    await press(page, "#undo", tap);
+    await until(page, (v) => document.querySelector("#volume")?.textContent === v, volume, "undone");
+    assert.deepEqual({ ...(await state()), undo: "" }, { ...before, undo: "" });
+    assert.deepEqual(await bodyRows(page), ["body-1 Body 1", "body-2 Body 2"]);
+    await press(page, "#redo", tap);
+    await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "redone");
+    assert.deepEqual(await bodyRows(page), ["body-1 Body 1"]);
     if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
     await page.context().close();
   });

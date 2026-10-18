@@ -1,0 +1,17 @@
+/* Start fresh (start-fresh.ts): the toolbar's Design group with its
+   button, and the dialog inside it that asks before the design is cleared.
+   The confirm button is the warning red of something that clears work;
+   Cancel keeps the plain look and has the focus. ":not(#none)" lifts a
+   rule over the base layout's "#workspace button" while every selector
+   still starts with .start-fresh. */
+.start-fresh #start-fresh:disabled:not(#none) { opacity: 0.45; cursor: default; }
+.start-fresh dialog { max-width: min(420px, calc(100vw - 32px)); padding: 16px 18px; background: #1c1f24; color: #e6e9ee; border: 1px solid #353a43; border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
+.start-fresh dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.start-fresh dialog h2 { margin: 0 0 8px; font-size: 1.1em; }
+.start-fresh dialog p { margin: 0 0 14px; line-height: 1.45; color: #c4cbd5; }
+.start-fresh .start-fresh-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.start-fresh #start-fresh-confirm:not(#none) { background: #6b2328; border-color: #e0656d; font-weight: 600; }
+.start-fresh #start-fresh-confirm:not(#none):hover { background: #82292f; }
+@media (max-width: 640px) {
+  .start-fresh button:not(#none) { min-height: 44px; }
+}
