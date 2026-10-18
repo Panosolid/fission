@@ -1,0 +1,145 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Untitled",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 12,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "end": "point-4",
+              "id": "line-5",
+              "kind": "line",
+              "start": "point-3"
+            },
+            {
+              "end": "point-6",
+              "id": "line-7",
+              "kind": "line",
+              "start": "point-4"
+            },
+            {
+              "end": "point-8",
+              "id": "line-9",
+              "kind": "line",
+              "start": "point-6"
+            },
+            {
+              "end": "point-3",
+              "id": "line-10",
+              "kind": "line",
+              "start": "point-8"
+            }
+          ],
+          "id": "sketch-2",
+          "points": [
+            {
+              "id": "point-3",
+              "x": 50,
+              "y": 0
+            },
+            {
+              "id": "point-4",
+              "x": 60,
+              "y": 0
+            },
+            {
+              "id": "point-6",
+              "x": 60,
+              "y": 10
+            },
+            {
+              "id": "point-8",
+              "x": 50,
+              "y": 10
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "depth": 30,
+                "height": 20,
+                "width": 40
+              },
+              "summary": "Box: 40 × 30 × 20 mm",
+              "type": "box"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (box)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 1 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-2"
+            ],
+            "id": "feature-11",
+            "intent": {
+              "parameters": {
+                "distance": 10,
+                "sketch": "sketch-2"
+              },
+              "summary": "Extrude Sketch 1 by 10 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-2",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-11",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 3
+    }
+  }
+}
