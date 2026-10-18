@@ -268,10 +268,18 @@ test("wiring, hand-worked: a tap between two items on a touch screen puts the ma
   // The same spot with a mouse: nothing (the mouse drags the marker instead).
   tap(lay(slot, THREE), 163, "mouse");
   assert.equal(acts.length, 1);
-  // A tap on item 2 picks it and moves nothing.
+  // A tap on item 2's middle (row 50: 13 px from either gap's middle, past TAP_REACH) picks it and moves nothing.
   tap(slot.querySelector('[data-item="sketch-2"]')!, 150, "touch");
   assert.deepEqual(picks, ["sketch-2"]);
   assert.equal(acts.length, 1);
+  // A phone moves a tap near an item onto it (touch adjustment): down in the gap at row 63, the click on item 3's
+  // middle. Judged where the finger came down: place 2, and item 3 is not picked.
+  const item3 = slot.querySelector('[data-item="feature-3"]')!;
+  item3.dispatchEvent(pointer(window, "pointerdown", 163, { pointerType: "touch" }));
+  item3.dispatchEvent(pointer(window, "pointerup", 163, { pointerType: "touch" }));
+  item3.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: 176, clientY: 775 }) as unknown as Event);
+  assert.deepEqual(acts, [{ kind: "marker", place: 2 }, { kind: "marker", place: 2 }]);
+  assert.deepEqual(picks, ["sketch-2"]);
 });
 
 test("wiring: the click a drag's release makes is not a click on what is under the pointer then", async () => {
@@ -331,13 +339,14 @@ const GESTURES: Gesture[] = ["drag", "touch-drag", "small", "cancel", "tap", "cl
 
 /**
  * One session: a design of `n` boxes, the marker somewhere, laid out with
- * random widths (16 to 40 px), gaps (2 to 14 px) and scroll, then random
+ * random widths, gaps (2 to 14 px) and scroll, then random
  * gestures. The model, written from the owner's rules and not from the
  * code: a drag (5 px or more, mouse or finger) dropped between the middles
  * of items p − 1 and p is a marker drop at p; a press that moves less, a
- * cancelled drag, a mouse click and a tap on an item move nothing; a tap
- * inside the gap before item p (or before the first, or after the last) is
- * a drop at p; a button is that button. Half the actions are recorded as
+ * cancelled drag and a mouse click move nothing; a tap on an item's middle
+ * picks it; a tap inside the gap before item p (or before the first, or
+ * after the last) is a drop at p and picks nothing, even when the phone
+ * moved it onto the nearest item; a button is that button. Half the actions are recorded as
  * the app would (`barEdit`, the bar drawn from the new document); after
  * every gesture the bar must show the document's marker and greying,
  * whatever was dragged on screen. Returns the first difference, or null.
@@ -350,7 +359,9 @@ export function gestureSession(b: typeof bar, seed: number, count = 60): string 
   const p0 = Math.floor(r() * (n + 1));
   doc = moveMarker(doc, p0 === 0 ? "start" : p0 === n ? null : doc.timeline.features[p0 - 1].id);
   let acts: BarAction[] = [];
+  let picks: string[] = [];
   const wiring: Parameters<typeof bar.showTimelineBar>[2] = {
+    onPick: (id) => void picks.push(id),
     onAction: (a) => {
       acts.push(a);
       const res = b.barEdit(doc, a);
@@ -363,7 +374,8 @@ export function gestureSession(b: typeof bar, seed: number, count = 60): string 
     const edges: Edge[] = [];
     let x = 12;
     for (let i = 0; i < n; i++) {
-      const w = 16 + Math.floor(r() * 25);
+      // Wider than 2 × TAP_REACH (the bar's are 24 px), so an item's middle is no gap's.
+      const w = 18 + Math.floor(r() * 23);
       edges.push({ left: x, right: x + w });
       x += w + 2 + Math.floor(r() * 13);
     }
@@ -377,7 +389,9 @@ export function gestureSession(b: typeof bar, seed: number, count = 60): string 
     const start = client(r() * x);
     const fail = (m: string) => `seed ${seed} gesture ${s} (${g}, place ${p} of ${n}, scrolled ${scroll}): ${m}`;
     acts = [];
+    picks = [];
     let want: BarAction[] = [];
+    let wantPicks: string[] = [];
     if (g === "drag" || g === "touch-drag" || g === "cancel") {
       // Between the middles around place p, a drop on the next item's middle 1 time in 4 (it goes before that item).
       const lo = p === 0 ? mid(0) - 30 : mid(p - 1);
@@ -406,9 +420,13 @@ export function gestureSession(b: typeof bar, seed: number, count = 60): string 
       const [a, z] = p === 0 ? [edges[0].left - 6, edges[0].left] : p === n ? [edges[n - 1].right, edges[n - 1].right + 6] : [edges[p - 1].right, edges[p].left];
       const at = client(a + (0.05 + 0.9 * r()) * (z - a));
       const pointerType = g === "tap" ? "touch" : "mouse";
-      list.dispatchEvent(pointer(window, "pointerdown", at, { pointerType }));
-      list.dispatchEvent(pointer(window, "pointerup", at, { pointerType }));
-      list.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: at, clientY: 775 }) as unknown as Event);
+      // Half the taps are moved by the phone onto the nearest item, the click at that item's middle (touch adjustment).
+      const k = p === 0 ? 0 : p === n ? n - 1 : r() < 0.5 ? p - 1 : p;
+      const moved = g === "tap" && r() < 0.5;
+      const target = moved ? slot.querySelector(`[data-item="${doc.timeline.features[k].id}"]`)! : list;
+      target.dispatchEvent(pointer(window, "pointerdown", at, { pointerType }));
+      target.dispatchEvent(pointer(window, "pointerup", at, { pointerType }));
+      target.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: moved ? client(mid(k)) : at, clientY: 775 }) as unknown as Event);
       if (g === "tap") want = [{ kind: "marker", place: p }];
     } else if (g === "tap-item") {
       const k = Math.min(p, n - 1);
@@ -417,6 +435,7 @@ export function gestureSession(b: typeof bar, seed: number, count = 60): string 
       item.dispatchEvent(pointer(window, "pointerdown", at, { pointerType: "touch" }));
       item.dispatchEvent(pointer(window, "pointerup", at, { pointerType: "touch" }));
       item.dispatchEvent(new window.MouseEvent("click", { bubbles: true, clientX: at, clientY: 775 }) as unknown as Event);
+      wantPicks = [doc.timeline.features[k].id];
     } else {
       const button = (["start", "back", "forward", "end"] as const)[p % 4];
       const el = slot.querySelector(`[data-button="${button}"]`) as HTMLElement;
@@ -426,6 +445,7 @@ export function gestureSession(b: typeof bar, seed: number, count = 60): string 
       want = [{ kind: "button", button }];
     }
     if (JSON.stringify(acts) !== JSON.stringify(want)) return fail(`the bar sent ${JSON.stringify(acts)}, the model ${JSON.stringify(want)}`);
+    if (JSON.stringify(picks) !== JSON.stringify(wantPicks)) return fail(`picked ${JSON.stringify(picks)}, the model ${JSON.stringify(wantPicks)}`);
     const shown = timelineBarItems(doc);
     if (markerPlace(slot) !== shown.marker) return fail(`the marker is drawn at place ${markerPlace(slot)}, the document's is ${shown.marker}`);
     if (JSON.stringify(greyed(slot)) !== JSON.stringify(shown.items.map((i) => i.rolledBack))) return fail(`greyed ${JSON.stringify(greyed(slot))}, the document's ${JSON.stringify(shown.items.map((i) => i.rolledBack))}`);
@@ -455,7 +475,13 @@ const WIRING_PLANTS: { name: string; find: string; replace: string; caught: stri
   // A cancelled drag dropped anyway.
   { name: "cancel-drops", find: 'if (e.type === "pointerup") act({ kind: "marker", place });', replace: 'if (e.type !== "") act({ kind: "marker", place });', caught: "the bar sent" },
   // A mouse click between items moving the marker, as a tap does.
-  { name: "mouse-taps", find: 'if (pointer !== "touch" || (e.target as Element).closest', replace: 'if ((e.target as Element).closest', caught: "the bar sent" },
+  { name: "mouse-taps", find: 'if (press.type !== "touch" || (e.target as Element).closest', replace: 'if ((e.target as Element).closest', caught: "the bar sent" },
+  // Taps whose target is an item ignored (the bug the browser check found): a tap the phone moved onto an item picks it.
+  { name: "taps-on-items-ignored", find: '(e.target as Element).closest(".timeline-bar-more-slot")) return;', replace: '(e.target as Element).closest(".timeline-bar-item, .timeline-bar-more-slot")) return;', caught: "the bar sent" },
+  // A tap moved onto an item by the phone (its touch adjustment) judged where the click says, on the item: nothing moves.
+  { name: "tap-judged-by-click", find: "const place = tapPlace(barEdges(list), press.x - list", replace: "const place = tapPlace(barEdges(list), (e as MouseEvent).clientX - list", caught: "the bar sent" },
+  // The tap's pick not stopped: the item it was moved onto is picked as well.
+  { name: "tap-also-picks", find: "      e.stopPropagation(); // not a pick of the item the tap was moved onto\n", replace: "", caught: "picked" },
   // No redraw when the app records nothing: a dragged marker left where it was dropped.
   { name: "no-redraw", find: "if (list.isConnected) showTimelineBar(slot, doc, wiring);", replace: "", caught: "the marker is drawn at place" },
   // The drag's greying not following the marker.

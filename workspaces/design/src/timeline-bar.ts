@@ -437,14 +437,22 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
     }
   });
   if (marker === items.length) list.append(markerRow());
-  // A tap between two items on a touch screen puts the marker there (24f5, `tapPlace`); a tap on an item picks it instead.
-  let pointer = "";
-  list.addEventListener("pointerdown", (e) => (pointer = e.pointerType));
-  list.addEventListener("click", (e) => {
-    if (pointer !== "touch" || (e.target as Element).closest(".timeline-bar-item, .timeline-bar-more-slot")) return;
-    const place = tapPlace(barEdges(list), e.clientX - list.getBoundingClientRect().left, list.scrollLeft);
-    if (place !== null) act({ kind: "marker", place });
-  });
+  // A tap between two items on a touch screen puts the marker there (24f5, `tapPlace`); a tap on an item picks it
+  // instead, whatever the target: a phone moves a tap near an item onto the item (its touch adjustment), so a
+  // tap in a narrow gap arrives as a click on an item, at a point moved onto it. Judged where the finger came down.
+  let press: { type: string; x: number } = { type: "", x: 0 };
+  list.addEventListener("pointerdown", (e) => (press = { type: e.pointerType, x: e.clientX }), { capture: true });
+  list.addEventListener(
+    "click",
+    (e) => {
+      if (press.type !== "touch" || (e.target as Element).closest(".timeline-bar-more-slot")) return;
+      const place = tapPlace(barEdges(list), press.x - list.getBoundingClientRect().left, list.scrollLeft);
+      if (place === null) return;
+      e.stopPropagation(); // not a pick of the item the tap was moved onto
+      act({ kind: "marker", place });
+    },
+    { capture: true },
+  );
   // The four playback buttons before the items (24f5), each off when it would do nothing or roll back the sketch being edited.
   const buttons = document.createElement("div");
   buttons.className = "timeline-bar-buttons";
