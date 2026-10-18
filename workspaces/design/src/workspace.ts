@@ -17,6 +17,8 @@ import { bodyFeatures, browserTree, type BrowserNode } from "./browser.ts";
 import { showTimelineBar } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
+import { deleteAsk, planDelete } from "./delete-ask.ts";
+import { itemName, TIMELINE_STEPS } from "./timeline-edits.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
@@ -132,9 +134,11 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
  * details/summary). A row for selectable geometry (Body 1, a profile) is a button
  * that selects it (Shift adds or takes out); the others are plain rows
  * until features (step 24) and origin planes (step 21) can be selected.
+ * A sketch's row in the Sketches group opens its menu (Delete, 24e4) on a
+ * right-click, or from its ⋯ button for touch and the keyboard.
  * Rebuilt on every edit; folding is kept by id.
  */
-function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void) {
+function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void) {
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
@@ -166,7 +170,29 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
         row.textContent = n.label;
         row.dataset.node = n.id;
         if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
-        li.append(row);
+        if (n.id.startsWith("sketches/")) {
+          // The row's menu: a right-click at the pointer, or the ⋯ button under itself.
+          row.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            onMenu(n.id, { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY });
+          });
+          const more = document.createElement("button");
+          more.type = "button";
+          more.className = "delete-ask-more";
+          more.dataset.more = n.id; // read by the e2e test
+          more.textContent = "⋯";
+          more.title = `${n.label}: more`;
+          more.setAttribute("aria-label", `${n.label} options`);
+          more.setAttribute("aria-haspopup", "menu");
+          more.addEventListener("click", () => {
+            const r = more.getBoundingClientRect();
+            onMenu(n.id, { x: r.left, y: r.bottom });
+          });
+          const line = document.createElement("div");
+          line.className = "delete-ask delete-ask-row";
+          line.append(row, more);
+          li.append(line);
+        } else li.append(row);
       }
       ul.append(li);
     }
@@ -208,6 +234,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   putAwayByRestore = false;
   const buttons = toolbar(ctx.toolbar, (b) => run(b.command), () => startSketch(), () => startExtrude());
   const fresh = startFresh(ctx.toolbar, { current: () => designDoc(), confirm: () => void clearDesign() });
+  const deleting = deleteAsk(ctx.toolbar);
   const { kernel, viewport } = ctx;
   /** On screen (awake); false while asleep (X7) and after unmount. */
   let shown = true;
@@ -376,9 +403,48 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(START_FRESH_STEP, undefined, freshDesign());
   }
 
+  /** A sketch row's menu (24e4): Delete for that sketch. */
+  function openRowMenu(node: string, at: { x: number; y: number }) {
+    const id = node.slice("sketches/".length);
+    const item = designDoc().timeline.features.find((f) => f.id === id);
+    if (item) deleting.menu(itemName(item), at, () => void deleteFromBrowser(id));
+  }
+
+  /**
+   * Deletes item `id` (24e4, the owner's rule): at once when nothing is
+   * built from it, else after the box asks, naming what is built from it
+   * and what happens to each. The document recorded is the one the box
+   * was worked out from (`planDelete`), as one undo step ("Delete Sketch
+   * 1"); nothing is recorded if the design changed in between.
+   */
+  async function deleteFromBrowser(id: string) {
+    const before = designDoc();
+    const item = before.timeline.features.find((f) => f.id === id);
+    if (!item) return;
+    let plan;
+    try {
+      plan = await planDelete(kernel, before, id);
+    } catch (e) {
+      return panel.showError(e instanceof Error ? e.message : String(e));
+    }
+    if (designDoc() !== before) return;
+    const go = () => {
+      if (designDoc() !== before) return;
+      leaveExtrude();
+      if (mode.kind !== "none") leaveSketch();
+      // The part the panel shows may now be another feature (an extrude with nothing to keep fails).
+      const part = partOf(plan.next);
+      shape = part.shape;
+      for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+      void update(TIMELINE_STEPS.delete(itemName(item)), undefined, plan.next);
+    };
+    if (plan.ask) deleting.ask(plan.ask, go);
+    else go();
+  }
+
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
   async function show(doc: DesignDocument, kind: PartKind) {
-    browser(ctx.browser, doc, selectRow);
+    browser(ctx.browser, doc, selectRow, openRowMenu);
     fresh.showFor(doc);
     if (ctx.timeline) showTimelineBar(ctx.timeline, doc);
     showKept();
@@ -498,7 +564,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ctx.project.workspaces.design = next;
     saved = { doc: next, shape, sizes: inputs.map((i) => i.value) };
     ctx.projectChanged(label);
-    browser(ctx.browser, next, selectRow);
+    browser(ctx.browser, next, selectRow, openRowMenu);
     fresh.showFor(next);
     if (ctx.timeline) showTimelineBar(ctx.timeline, next);
     showKept(); // the rows are new: mark them again until the rebuild says otherwise
