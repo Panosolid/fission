@@ -29,8 +29,10 @@ export function syncGraph(graph: DependencyGraph, doc: DesignDocument, before: D
     graph.set({ id: p.id, label: `Profile ${p.id}`, workspace: "design", cost: "cheap" });
     if (differs(p)) changed.push({ id: p.id, label: `Profile ${p.id}`, kind: "profile" });
   }
+  // An input no longer in the document (an extrude's deleted sketch) is not read: the extrude builds from its kept shape (24d2).
+  const present = new Set([...doc.profiles, ...doc.timeline.features].map((x) => x.id));
   for (const f of doc.timeline.features) {
-    graph.set({ id: f.id, label: f.intent.summary, workspace: "design", cost: "cheap" }, f.dependsOn);
+    graph.set({ id: f.id, label: f.intent.summary, workspace: "design", cost: "cheap" }, f.dependsOn.filter((d) => present.has(d)));
     if (differs(f)) changed.push({ id: f.id, label: f.intent.summary, kind: f.intent.type });
   }
   graph.set({ id: PART_VIEW, label: "Volume, area and mesh", workspace: "design", cost: "cheap" }, [lastFeature(doc).id]);

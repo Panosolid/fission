@@ -113,7 +113,7 @@ const namedCurves = (inputs: readonly KernelInput[], ids: CurveIds): string[] =>
   inputs.flatMap((i) => (i.input === "line" || i.input === "arc" || i.input === "circle" ? (ids[i.input][i.index] ?? []) : []));
 
 /** What a sketch's points and curves make: the outline, or why there is none, from the kernel's fields. */
-async function outlineOf(kernel: KernelCalls, content: KeptShape): Promise<{ outline: Outline } | { lost: "open-outline" | "invalid-outline"; message: string; curves: string[] }> {
+async function outlineOf(kernel: KernelCalls, content: KeptShape): Promise<{ outline: Outline } | { lost: "open-outline" | "invalid-outline"; message: string; curves: string[]; refused?: true }> {
   const ids = idsOf(content);
   const c = sketchCurves({ id: "", points: content.points, curves: content.curves, constraints: [] });
   try {
@@ -123,7 +123,7 @@ async function outlineOf(kernel: KernelCalls, content: KeptShape): Promise<{ out
     return { lost: "open-outline", message: out.open, curves: [] };
   } catch (e) {
     // A curve the kernel refuses outright (a line of length 0): the outline is invalid there.
-    if (e instanceof KernelError && e.kind === "invalid-input" && namedCurves(e.inputs, ids).length > 0) return { lost: "invalid-outline", message: e.message, curves: namedCurves(e.inputs, ids) };
+    if (e instanceof KernelError && e.kind === "invalid-input" && namedCurves(e.inputs, ids).length > 0) return { lost: "invalid-outline", message: e.message, curves: namedCurves(e.inputs, ids), refused: true };
     throw e;
   }
 }
@@ -189,31 +189,53 @@ async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string
       return { status: "built", body: await cache.body(spec), spec };
     }
     const sketchId = f.intent.parameters.sketch as string;
-    const distance = f.intent.parameters.distance as number;
     const item = doc.timeline.features.find((x) => x.id === sketchId);
-    const lost = (cause: LostCause, message: string, curves: string[]) => keptBody(keptOf(doc, f), sketchId, distance, { cause, sketch: sketchId, message, curves }, cache, kernel);
-    if (item === undefined) return await lost("deleted-input", `${sketchId} was deleted`, []);
     const input = done[sketchId];
-    if (input?.status === "suppressed") return { status: "failed", cause: "suppressed-input", input: sketchId, message: `${item.provenance.self.label} is suppressed` };
-    if (input?.status !== "built") return { status: "failed", cause: "failed-input", input: sketchId, message: `${item.provenance.self.label} is not built` };
-    // The kernel extrudes along +Z: a sketch on XZ or YZ needs placing, which comes with sketches on other planes (step 26).
-    if (item.intent.parameters.plane !== "XY") return { status: "failed", cause: "error", message: `${item.provenance.self.label} is on the ${item.intent.parameters.plane} plane, and only sketches on the XY plane can be extruded so far` };
-    const content = contentOf(doc, sketchId)!;
-    const out = await outlineOf(kernel, content);
-    if (!("outline" in out)) return await lost(out.lost, out.message, out.curves);
-    const spec: BodySpec = { extrude: { profile: out.outline, distance } };
-    return { status: "built", body: await cache.body(spec), spec, curves: idsOf(content) };
+    if (item !== undefined && input?.status === "suppressed") return { status: "failed", cause: "suppressed-input", input: sketchId, message: `${item.provenance.self.label} is suppressed` };
+    if (item !== undefined && input?.status !== "built") return { status: "failed", cause: "failed-input", input: sketchId, message: `${item.provenance.self.label} is not built` };
+    const made = await extrudeSpec(kernel, doc, f);
+    if ("status" in made) return made;
+    return { status: "built", body: await cache.body(made.spec), ...made };
   } catch (e) {
     return { status: "failed", cause: "error", message: words(e) };
   }
 }
 
+/** What an extrude of a sketch is built from, and the warning when that is its kept shape. */
+export interface ExtrudeSpec {
+  spec: BodySpec;
+  curves: CurveIds;
+  warning?: KeptWarning;
+}
+
+/**
+ * An extrude of a sketch's spec by the owner's rule: its sketch's outline
+ * now, else its kept shape with a warning, else failed with the cause.
+ * Suppression and the marker are the timeline's (`rebuildTimeline`); this
+ * is the one place the rule is applied, so Design's view, the Extrude
+ * panel and what other workspaces are handed (`featureSpec`) all agree.
+ */
+export async function extrudeSpec(kernel: KernelCalls, doc: DesignDocument, f: Feature): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
+  const sketchId = f.intent.parameters.sketch as string;
+  const distance = f.intent.parameters.distance as number;
+  const item = doc.timeline.features.find((x) => x.id === sketchId);
+  const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, { cause, sketch: sketchId, message, curves }, kernel);
+  // The extrude's provenance names the sketch it was made from, so a deleted one is still called by its label.
+  if (item === undefined) return await lost("deleted-input", `${f.provenance.from.find((r) => r.id === sketchId)?.label ?? sketchId} was deleted`, []);
+  // The kernel extrudes along +Z: a sketch on XZ or YZ needs placing, which comes with sketches on other planes (step 26).
+  if (item.intent.parameters.plane !== "XY") return { status: "failed", cause: "error", message: `${item.provenance.self.label} is on the ${item.intent.parameters.plane} plane, and only sketches on the XY plane can be extruded so far` };
+  const content = contentOf(doc, sketchId)!;
+  const out = await outlineOf(kernel, content);
+  // A curve the kernel refused is named in its own words ("line 1 must be …"), as before 24d2; an outline that doesn't close says whose.
+  if (!("outline" in out)) return await lost(out.lost, out.refused ? out.message : `${item.provenance.self.label} has no closed outline: ${out.message}`, out.curves);
+  return { spec: { extrude: { profile: out.outline, distance } }, curves: idsOf(content) };
+}
+
 /** An extrude whose sketch is lost: its kept shape with the warning, or failed with the cause when it has none. */
-async function keptBody(kept: KeptShape | undefined, sketch: string, distance: number, warning: KeptWarning, cache: BodyCache, kernel: KernelCalls): Promise<FeatureResult> {
-  if (kept === undefined) return { status: "failed", cause: warning.cause, input: sketch, message: warning.message, curves: warning.curves };
+async function keptSpec(kept: KeptShape | undefined, distance: number, warning: KeptWarning, kernel: KernelCalls): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
+  if (kept === undefined) return { status: "failed", cause: warning.cause, input: warning.sketch, message: warning.message, curves: warning.curves };
   const out = await outlineOf(kernel, kept);
   // A kept shape made an outline when it was kept; one that doesn't (a hand-edited file) fails the extrude with the kernel's words.
   if (!("outline" in out)) return { status: "failed", cause: "error", message: `the kept shape makes no outline: ${out.message}` };
-  const spec: BodySpec = { extrude: { profile: out.outline, distance } };
-  return { status: "built", body: await cache.body(spec), spec, curves: idsOf(kept), warning };
+  return { spec: { extrude: { profile: out.outline, distance } }, curves: idsOf(kept), warning };
 }

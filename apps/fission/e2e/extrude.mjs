@@ -5,7 +5,9 @@
 // in the 3D view, with only "Extrude by" in the parameters; a typed
 // distance rebuilds it; Undo and Redo; a preset after it; an open sketch
 // and no sketch at all keep OK off and say why; Escape cancels. The same at
-// 375 px wide with taps. Screenshots go to E2E_SHOTS when set. Run with
+// 375 px wide with taps. A lost sketch's extrude keeps its last shape with
+// a warning (24d2), opened from a file until sketches can be edited after
+// an extrude. Screenshots go to E2E_SHOTS when set. Run with
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
@@ -219,6 +221,71 @@ try {
     if (shots) await page.screenshot({ path: `${shots}/extrude-done-375.png`, fullPage: true });
     await page.tap("#undo");
     await volume(page, "24,000 mm³");
+    await page.context().close();
+  });
+
+  await check("a lost sketch's extrude keeps its last shape with a warning, red on its timeline rows; with no kept shape it fails with the kernel's reason (24d2)", async () => {
+    const page = await fresh();
+    await drawn(page, [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]);
+    await status(page, "4 lines, a closed outline.");
+    await page.click("#sketch-extrude");
+    await page.press("#extrude-distance", "Enter");
+    await volume(page, "12,000 mm³");
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
+    const saved = JSON.parse(await download.path().then((p) => import("node:fs").then((fs) => fs.readFileSync(p, "utf8"))));
+    /** Opens `saved` with its design changed by `edit`, as a file from outside. */
+    const open = async (edit) => {
+      const project = structuredClone(saved);
+      edit(project.workspaces.design);
+      await page.setInputFiles("#open-file", { name: "kept.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(project)) });
+    };
+    const design = saved.workspaces.design;
+    const sketch = design.sketches[0];
+    const extrude = design.timeline.features.find((f) => f.intent.parameters?.sketch === sketch.id);
+    const lines = sketch.curves.filter((c) => c.kind === "line");
+    assert.equal(lines.length, 4, "the rectangle's four lines");
+    const kept = { [extrude.id]: { points: sketch.points, curves: sketch.curves } };
+    const warning = () => page.evaluate(() => { const w = document.querySelector("#kept-warning"); return w.hidden ? null : w.textContent; });
+    const red = () => page.$$eval(".tree-row.kept", (rows) => rows.map((r) => r.dataset.node));
+
+    // One side deleted, the rectangle kept: the part is still 40 · 30 · 10 = 12,000 mm³, with the kernel's reason in the warning.
+    await open((d) => {
+      d.sketches[0].curves = sketch.curves.filter((c) => c.id !== lines[0].id);
+      d.kept = kept;
+    });
+    await until(page, () => !document.querySelector("#kept-warning").hidden, null, "the warning");
+    await volume(page, "12,000 mm³");
+    assert.match(await warning(), /^Extrude 1 keeps its last shape\. Sketch 1 has no closed outline: .*not joined/);
+    assert.equal(await page.textContent("#error"), "");
+    assert.deepEqual((await red()).sort(), [extrude.id, sketch.id].sort(), "the extrude's and the sketch's timeline rows are red");
+    if (shots) await page.screenshot({ path: `${shots}/extrude-kept-1280.png` });
+    // A distance typed while lost: the kept rectangle by 25 mm, 1200 · 25 = 30,000 mm³, still warned.
+    await page.fill("#height", "25");
+    await volume(page, "30,000 mm³");
+    assert.match(await warning(), /^Extrude 1 keeps its last shape\./);
+
+    // The sketch deleted outright: the same part, the warning says so.
+    await open((d) => {
+      d.timeline.features = d.timeline.features.filter((f) => f.id !== sketch.id);
+      d.sketches = [];
+      d.kept = kept;
+    });
+    await until(page, (w) => document.querySelector("#kept-warning").textContent === w, "Extrude 1 keeps its last shape. Sketch 1 was deleted.", "the deleted warning");
+    await volume(page, "12,000 mm³");
+    assert.deepEqual(await red(), [extrude.id], "only the extrude's row: the sketch has none");
+
+    // The same side deleted with nothing kept (the shape was never closed when it was lost): no part, the kernel's reason, no warning.
+    await open((d) => (d.sketches[0].curves = sketch.curves.filter((c) => c.id !== lines[0].id)));
+    await until(page, () => /^Sketch 1 has no closed outline: .*not joined/.test(document.querySelector("#error").textContent), null, "the reason");
+    assert.equal(await warning(), null);
+    assert.deepEqual(await red(), []);
+
+    // The sketch whole again: built from it, nothing kept, no warning.
+    await open(() => {});
+    await volume(page, "12,000 mm³");
+    await until(page, () => document.querySelector("#error").textContent === "", null, "no error");
+    assert.equal(await warning(), null);
+    assert.deepEqual(await red(), []);
     await page.context().close();
   });
 

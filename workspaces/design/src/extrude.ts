@@ -2,15 +2,18 @@
 // new extrude feature after the sketch, depending on it, whose intent is
 // `{ sketch, distance }`. The outline is never stored: the kernel finds it
 // from the sketch's lines every time the feature is built, so an edit to
-// the sketch rebuilds the solid (a live link), and a sketch that no longer
-// closes makes the build fail with the kernel's reason.
+// the sketch rebuilds the solid (a live link). A sketch that no longer
+// closes leaves the extrude its last shape with a warning (the owner's
+// rule, step 24d2, rebuild.ts), or fails it with the kernel's reason when
+// it never closed.
 //
 // Every extrude is a new body ("New body", step 24d1) until booleans join
 // them: it is added to the timeline at the marker and replaces nothing.
 
 import type { BodySpec, Feature, KernelCalls } from "@fission/core";
-import { insertAt, insertItem, isSketchExtrude, isSketchItem, lastFeature, shown, specOf, type DesignDocument } from "./document.ts";
-import { sketchItem, sketchOutline } from "./sketch.ts";
+import { insertAt, insertItem, isSketchExtrude, lastFeature, shown, specOf, type DesignDocument } from "./document.ts";
+import { extrudeSpec } from "./rebuild.ts";
+import { sketchItem } from "./sketch.ts";
 
 /** How far a new extrude goes until the user types another distance (mm). */
 export const DEFAULT_DISTANCE = 10;
@@ -66,17 +69,14 @@ export function setExtrudeDistance(doc: DesignDocument, distance: number, id?: s
 
 /**
  * The body a feature builds, as the kernel's BodySpec. An extrude of a
- * sketch asks the kernel for the sketch's outline now (never stored);
- * every other feature is read from its intent alone (specOf).
+ * sketch asks the kernel for the sketch's outline now (never stored), or
+ * uses its kept shape (`extrudeSpec`); every other feature is read from
+ * its intent alone (specOf).
  */
 export async function featureSpec(kernel: KernelCalls, doc: DesignDocument, feature: Feature): Promise<BodySpec> {
   if (!isSketchExtrude(feature)) return specOf(doc, feature);
-  const { sketch, distance } = feature.intent.parameters;
-  const item = doc.timeline.features.find((f) => f.id === sketch && isSketchItem(f));
-  if (!item) throw new Error(`${feature.intent.summary}: its sketch ${shown(sketch)} is missing`);
-  // The kernel extrudes along +Z: a sketch on XZ or YZ needs placing, which comes with sketches on other planes (step 26).
-  if (item.intent.parameters.plane !== "XY")
-    throw new Error(`${feature.intent.summary}: ${item.provenance.self.label} is on the ${shown(item.intent.parameters.plane)} plane, and only sketches on the XY plane can be extruded so far`);
-  if (typeof distance !== "number") throw new Error(`${feature.intent.summary}: distance must be a number`);
-  return { extrude: { profile: await sketchOutline(kernel, doc, sketch as string), distance } };
+  // The owner's rule (rebuild.ts): a lost sketch's extrude is built from its kept shape.
+  const made = await extrudeSpec(kernel, doc, feature);
+  if ("status" in made) throw new Error(made.message);
+  return made.spec;
 }
