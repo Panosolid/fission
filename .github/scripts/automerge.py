@@ -36,9 +36,12 @@ MAIN = "main"
 PREFIX = "claude/"
 HOLD = "hold"
 # The jobs of ci.yml that gate a merge; a head without all of them has not
-# been tested. (ci.yml's coverage job only reports; e2e stands for its
-# e2e shares, which don't count on their own.)
+# been tested. (ci.yml's coverage job only reports; e2e is the gate over
+# its e2e (k/3) shares.)
 REQUIRED_CHECKS = ("kernel", "app", "e2e", "mutants-in-diff", "baseline")
+# ci.yml's matrix jobs whose shares ("e2e (2/3)", "mutants-shard (0)") a
+# required job gathers (e2e, mutants-in-diff).
+SHARDS = ("e2e", "mutants-shard")
 PASSING = ("success", "skipped", "neutral")
 MAX_ACTIONS = 20
 
@@ -46,8 +49,13 @@ MAX_ACTIONS = 20
 def counts(check):
     """Does this check decide whether a head may merge? CI's jobs and any other
     app's checks do; other workflows here (hours of random testing started on
-    a branch, this workflow itself) don't, or they would hold up the queue."""
-    return check.get("app", {}).get("slug") != "github-actions" or check["name"] in REQUIRED_CHECKS
+    a branch, this workflow itself) don't, or they would hold up the queue.
+    A share of a required job ("e2e (2/3)", "mutants-shard (0)") counts too:
+    the job over the shares only appears once every share has finished, and
+    until then the head is being tested, not untested (as "none" it would be
+    sent to CI again, and the new run would cancel this one)."""
+    return check.get("app", {}).get("slug") != "github-actions" or check["name"] in REQUIRED_CHECKS or (
+        " (" in check["name"] and check["name"].split(" (")[0] in SHARDS)
 
 
 def ci_state(check_runs):

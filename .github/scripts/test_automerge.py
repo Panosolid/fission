@@ -49,8 +49,22 @@ class CiState(unittest.TestCase):
         self.assertEqual(ci_state(rest), "none")
         self.assertEqual(ci_state(rest + [check("e2e", conclusion="failure")]), "failure")
         self.assertEqual(ci_state(rest + [check("e2e", "queued", None)]), "pending")
-        # The shares only report through the gate.
-        self.assertEqual(ci_state(rest + [check("e2e (1/3)", conclusion="failure")]), "none")
+        # The gate job only appears once every share has finished, so while
+        # a share still runs the head is being tested, not untested: "none"
+        # there would start a second run that cancels this one, over and over.
+        self.assertEqual(ci_state(rest + [check("e2e (1/3)"), check("e2e (2/3)", "in_progress", None)]), "pending")
+        self.assertEqual(ci_state(rest + [check("e2e (1/3)", conclusion="failure"), check("e2e (2/3)")]), "failure")
+        self.assertEqual(ci_state(rest + [check("e2e (1/3)"), check("e2e (2/3)"), check("e2e")]), "success")
+        # The same for the mutation shards under mutants-in-diff, which can run
+        # long after kernel and app are done.
+        self.assertEqual(ci_state([check("kernel"), check("app"), check("e2e"), check("baseline"),
+                                   check("mutants-shard (0)", "in_progress", None)]), "pending")
+        self.assertEqual(ci_state([check("kernel"), check("app"), check("e2e"), check("baseline"),
+                                   check("mutants-shard (0)", conclusion="failure")]), "failure")
+        # Other matrix jobs still don't count: CI's browsers (reported only)
+        # and the nightly fuzzing's kernel targets, whatever their name starts with.
+        self.assertEqual(ci_state(both + [check("browsers (firefox)", "in_progress", None),
+                                          check("kernel (extrude)", conclusion="failure")]), "success")
         # On a push run the job is skipped, which passes; the coverage
         # report never blocks.
         self.assertEqual(ci_state(both + [check("mutants-in-diff", conclusion="skipped"),
