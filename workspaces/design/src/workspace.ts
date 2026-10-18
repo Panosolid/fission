@@ -19,7 +19,7 @@ import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
 import { deleteAsk } from "./delete-ask.ts";
 import { itemName } from "./timeline-edits.ts";
-import { chooseEntry, menuEntries, type MenuHost } from "./timeline-menu.ts";
+import { chooseBarAction, chooseEntry, menuEntries, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
@@ -431,17 +431,31 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         showBar(designDoc());
       },
       onMenu: (id, at) => openMenu(id, at),
+      // 24f5: the playback buttons, the marker dragged and a tap between items, each one undo step.
+      editing: editingId(),
+      onAction: (a) => {
+        if (a.kind === "menu") return;
+        try {
+          chooseBarAction(menuHost, a, editingId());
+        } catch (err) {
+          panel.showError(err instanceof Error ? err.message : String(err));
+        }
+      },
     });
   }
 
-  /** The bar's items and the browser's Timeline rows red for every failed item (24f3). */
+  /** The bar's items and the browser's Timeline rows red for every failed item (24f3), and greyed for every item after the marker (24f5). */
   function showFailed(doc: DesignDocument) {
     showBar(doc);
-    const failed = new Set(timelineBarItems(doc, failedNow).items.filter((i) => i.failed).map((i) => i.id));
+    const { items } = timelineBarItems(doc, failedNow);
+    const failed = new Set(items.filter((i) => i.failed).map((i) => i.id));
+    const rolledBack = new Set(items.filter((i) => i.rolledBack).map((i) => i.id));
     for (const row of ctx.browser.querySelectorAll<HTMLElement>('[data-node="timeline"] .tree-row')) {
-      const on = failed.has(row.dataset.node!);
-      row.classList.toggle("timeline-menu", on);
-      row.classList.toggle("timeline-menu-failed", on);
+      const red = failed.has(row.dataset.node!);
+      const grey = rolledBack.has(row.dataset.node!);
+      row.classList.toggle("timeline-menu", red || grey);
+      row.classList.toggle("timeline-menu-failed", red);
+      row.classList.toggle("timeline-menu-rolled-back", grey);
     }
   }
 
@@ -659,6 +673,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     modelling(false);
     sketchBar.show(editingSketch.tool);
     drawSketches();
+    showBar(doc); // the playback buttons that would roll the sketch back are off (24f5)
     void showOutline();
   }
 
@@ -687,6 +702,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     modelling(true);
     drawSketches();
     showKept();
+    showBar(designDoc());
   }
 
   /** Finish Sketch (the toolbar's or the panel's): back to modelling, the camera at the home view (as the owner's CAD suite does, not the view from before the sketch). */
