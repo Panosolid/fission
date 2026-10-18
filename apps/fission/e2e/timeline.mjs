@@ -430,7 +430,7 @@ try {
       const greyRows = () => page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-rolled-back', (rows) => rows.map((r) => r.dataset.node));
       const state = async () => ({ bar: await bar(page), drawn: await drawn(page, layout), volume: await page.textContent("#volume"), grey: await greyRows() });
       /** Each button: [which, off ("true") or on (null)], in the bar's order. */
-      const buttons = () => page.$$eval("#timeline .timeline-bar-buttons [data-button]", (bs) => bs.map((b) => [b.dataset.button, b.getAttribute("aria-disabled")]));
+      const buttons = () => page.$$eval("#timeline .timeline-marker-buttons [data-button]", (bs) => bs.map((b) => [b.dataset.button, b.getAttribute("aria-disabled")]));
       const button = (b) => press(page, `#timeline [data-button="${b}"]`, tap);
       const undo = async () => press(page, "#undo", tap);
       const redo = async () => press(page, "#redo", tap);

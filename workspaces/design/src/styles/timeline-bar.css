@@ -4,7 +4,7 @@
    names are for screen readers and the tooltip; the row scrolls sideways
    inside itself when the items outgrow it. Each rule starts with
    .timeline-bar, so it styles this feature alone. */
-.timeline-bar { display: flex; align-items: center; gap: 2px; margin: 0; padding: 4px 12px; list-style: none; height: 32px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.timeline-bar { display: flex; align-items: center; gap: 2px; margin: 0; padding: 4px 12px; list-style: none; height: 32px; background: #1c1f24; border-top: 1px solid #2a2e35; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .timeline-bar .timeline-bar-item { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border: 1px solid #353a43; border-radius: 3px; background: #262a31; color: #8fc3ff; }
 .timeline-bar .timeline-bar-item[data-icon="sketch"] { color: #c9d1d9; }
 .timeline-bar .timeline-bar-item[data-rolled-back="true"] { opacity: 0.4; }
@@ -20,19 +20,11 @@
 .timeline-bar .timeline-bar-item:focus-visible { outline: 2px solid #4aa8ff; outline-offset: 1px; }
 .timeline-bar .timeline-bar-more-slot { flex-shrink: 0; display: inline-flex; }
 .timeline-bar .timeline-bar-more:not(#none) { min-width: 28px; height: 22px; padding: 0 6px; background: #2a2e35; border: 1px solid #4aa8ff; border-radius: 3px; color: #e6e9ee; line-height: 1; cursor: pointer; }
-/* Step 24f5: the row holds the four playback buttons (go to the start,
-   step back, step forward, go to the end) and then the items, which scroll
-   on their own. The marker is dragged: its grab area reaches the items on
+/* Step 24f5: the marker is dragged: its grab area reaches the items on
    either side (3 px margin and 2 px gap), and a drag shows where it would
    drop. At phone width the gaps widen, so a tap between two items lands
-   between them (tapPlace) rather than on one. */
-.timeline-bar-row { display: flex; align-items: center; min-width: 0; background: #1c1f24; border-top: 1px solid #2a2e35; }
-.timeline-bar-row .timeline-bar { flex: 1 1 auto; min-width: 0; }
-.timeline-bar-buttons { display: flex; flex-shrink: 0; gap: 2px; padding-left: 12px; }
-.timeline-bar-buttons .timeline-bar-button:not(#none) { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0; background: #262a31; border: 1px solid #353a43; border-radius: 3px; color: #c9d1d9; cursor: pointer; }
-.timeline-bar-buttons .timeline-bar-button:not(#none):hover { border-color: #4aa8ff; }
-.timeline-bar-buttons .timeline-bar-button:not(#none):focus-visible { outline: 2px solid #4aa8ff; outline-offset: 1px; }
-.timeline-bar-buttons .timeline-bar-button[aria-disabled="true"]:not(#none) { opacity: 0.4; cursor: default; border-color: #353a43; }
+   between them (tapPlace) rather than on one. The playback buttons before
+   the items are timeline-marker.css's. */
 .timeline-bar .timeline-bar-marker { position: relative; cursor: ew-resize; touch-action: none; }
 .timeline-bar .timeline-bar-marker::before { content: ""; position: absolute; inset: -4px -5px; }
 .timeline-bar[data-dragging="true"] { cursor: ew-resize; }

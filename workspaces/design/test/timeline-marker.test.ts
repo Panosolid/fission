@@ -311,7 +311,7 @@ test("wiring: the click a drag's release makes is not a click on what is under t
 test("wiring: the four buttons before the items, in order, each off greyed with why, each click sent to the app", () => {
   const acts: BarAction[] = [];
   const { slot } = barIn(withMarker(threeItems(), "start"), { onAction: (a) => void acts.push(a) });
-  const buttons = [...slot.querySelectorAll<HTMLElement>(".timeline-bar-buttons [data-button]")];
+  const buttons = [...slot.querySelectorAll<HTMLElement>(".timeline-marker-buttons [data-button]")];
   assert.deepEqual(
     buttons.map((b) => [b.dataset.button, b.getAttribute("aria-label"), b.getAttribute("aria-disabled"), b.title]),
     [
@@ -322,7 +322,7 @@ test("wiring: the four buttons before the items, in order, each off greyed with 
     ],
   );
   // The buttons come before the row of items, outside it.
-  assert.equal(slot.querySelector(".timeline-bar-row")!.firstElementChild!.className, "timeline-bar-buttons");
+  assert.equal(slot.querySelector(".timeline-marker")!.firstElementChild!.className, "timeline-marker-buttons");
   assert.equal(slot.querySelector(".timeline-bar [data-button]"), null);
   for (const b of buttons) b.click();
   assert.deepEqual(acts.map((a) => a.kind === "button" && a.button), ["start", "back", "forward", "end"]);

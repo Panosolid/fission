@@ -455,13 +455,13 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
   );
   // The four playback buttons before the items (24f5), each off when it would do nothing or roll back the sketch being edited.
   const buttons = document.createElement("div");
-  buttons.className = "timeline-bar-buttons";
+  buttons.className = "timeline-marker-buttons";
   buttons.setAttribute("role", "group");
   buttons.setAttribute("aria-label", "Rollback marker");
   for (const b of playbackButtons(doc, wiring.editing ?? null)) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "timeline-bar-button";
+    button.className = "timeline-marker-button";
     button.dataset.button = b.button; // read by the e2e test
     button.setAttribute("aria-label", b.label);
     button.title = b.off ? `${b.label}: ${b.off}` : b.label;
@@ -473,7 +473,7 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
     buttons.append(button);
   }
   const row = document.createElement("div");
-  row.className = "timeline-bar-row";
+  row.className = "timeline-marker";
   row.append(buttons, list);
   slot.replaceChildren(row);
 }
