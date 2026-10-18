@@ -1,0 +1,19 @@
+{
+  "seed": 0,
+  "what": "Selecting Body 1 or 2 of three showed the last body's feature, volume and topology (found by Ben; fixed by #167, the panel follows the selected body)",
+  "actions": [
+    {
+      "do": "open",
+      "edit": "add-solid",
+      "at": 1
+    },
+    {
+      "do": "open",
+      "edit": "add-solid",
+      "at": 2
+    },
+    {
+      "do": "select-bodies"
+    }
+  ]
+}
