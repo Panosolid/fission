@@ -96,6 +96,11 @@ function pixels(page, { x, y }, w = 1, h = 1) {
 /** How much redder than green and blue a pixel is, the most across a strip; the same for green. */
 const reddest = (list) => Math.max(...list.map(([r, g, b]) => r - Math.max(g, b)));
 const greenest = (list) => Math.max(...list.map(([r, g, b]) => g - Math.max(r, b)));
+/**
+ * How much green a one-pixel line puts across a strip: a line between two pixel centres is drawn half in
+ * each (CI's renderer split the y axis 37 + 37 where this machine drew 29 + 59), so the excess is summed.
+ */
+const greenTotal = (list) => list.reduce((s, [r, g, b]) => s + Math.max(0, g - Math.max(r, b)), 0);
 const brightness = (list) => list.reduce((s, [r, g, b]) => s + (r + g + b) / 3, 0) / list.length;
 /** A few frames for the camera's damping and the grid to settle. */
 const settle = (page) => page.waitForTimeout(400);
@@ -118,12 +123,14 @@ async function probeSketchView(page, what) {
     assert.ok(greenest(await pixels(page, p, 1, 7)) < 30, `${what}: (${x}, 0) is green`);
   }
   for (const y of [20, -4]) {
+    // The summed measure can fail: the same strip 3 mm off the axis holds no green line.
+    assert.ok(greenTotal(await pixels(page, screenPoint(box, [3, y]), 7, 1)) < 20, `${what}: green 3 mm off the y axis at (3, ${y})`);
     const p = screenPoint(box, [0, y]);
-    if (greenest(await pixels(page, p, 7, 1)) <= 50) {
+    if (greenTotal(await pixels(page, p, 7, 1)) <= 50) {
       // Where the green line is instead, across 121 px of that row, so a failure says how far off it is.
       const row = await pixels(page, p, 121, 1);
       const greens = row.flatMap(([r, g, b], i) => (g - Math.max(r, b) > 50 ? [i - 60] : []));
-      assert.fail(`${what}: no green y axis at (0, ${y}); green at ${JSON.stringify(greens)} px from there; row ${JSON.stringify(row.filter((_, i) => i % 10 === 0))}`);
+      assert.fail(`${what}: no green y axis at (0, ${y}) (green ${greenTotal(await pixels(page, p, 7, 1))} across 7 px); green at ${JSON.stringify(greens)} px from there; row ${JSON.stringify(row.filter((_, i) => i % 10 === 0))}`);
     }
   }
   // Half way between two axes, nowhere near an axis: neither colour.
@@ -207,17 +214,8 @@ try {
     const p = screenPoint(box, [30, 0]);
     assert.ok(reddest(await pixels(page, p, 1, 7)) < 30, "orbiting left the x axis where it was, so this check could not fail");
     await page.click("#sketch-look-at");
-    // The turn back is animated; on CI's software renderer the wider SF3d canvas draws slower frames, so
-    // 400 ms can catch it a few pixels short. Probe again for up to 3 s; the last try's failure stands.
-    for (let tries = 0; ; tries++) {
-      await settle(page);
-      try {
-        await probeSketchView(page, "after Look at");
-        break;
-      } catch (e) {
-        if (tries >= 7) throw e;
-      }
-    }
+    await settle(page);
+    await probeSketchView(page, "after Look at");
     await page.context().close();
   });
 
