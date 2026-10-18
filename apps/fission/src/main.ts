@@ -1,6 +1,7 @@
 // The app shell: one project, one kernel, one viewport, and a switcher
 // between workspaces. Each workspace fills the layout slots around the
-// shared viewport (toolbar above, browser left, properties right); the
+// shared viewport (toolbar above, browser floating over its top left,
+// properties right, a workspace's timeline in a thin row along the bottom); the
 // viewport is shared, so switching keeps the camera and what is on screen.
 // Workspaces stay warm (X7): each gets slots of its own the first time it is
 // shown in a pane, and switching swaps whole slots in and out and puts the
@@ -73,6 +74,7 @@ const ctx: WorkspaceContext = {
   toolbar: $("toolbar"),
   browser: $("browser"),
   properties: $("properties"),
+  timeline: $("timeline"),
   viewport: pane(viewer.main),
   representations,
   actions,
@@ -185,30 +187,27 @@ if (new URLSearchParams(location.search).has("test-hooks"))
 type Page = WorkspaceId | "community";
 let current: Page = "design";
 
-// Warm workspaces (X7). Each pane has three slots, found by id
-// (#toolbar or #split-toolbar…); a workspace mounted in a pane gets three
-// elements of its own that take the slots' place in the page while it is
+// Warm workspaces (X7). Each pane has four slots, found by id
+// (#toolbar or #split-toolbar…; the timeline row along the bottom from
+// SF3d); a workspace mounted in a pane gets four elements of its own that take the slots' place in the page while it is
 // shown (same id, role and label, so the layout and :empty rules apply
 // unchanged). Asleep, its elements are out of the page, kept as they are.
 type PaneId = "main" | "split";
-type Slots = Pick<WorkspaceContext, "toolbar" | "browser" | "properties">;
+type Slots = Required<Pick<WorkspaceContext, "toolbar" | "browser" | "properties" | "timeline">>;
+const SLOT_KEYS = ["toolbar", "browser", "properties", "timeline"] as const;
 const SLOT_IDS: Record<PaneId, Record<keyof Slots, string>> = {
-  main: { toolbar: "toolbar", browser: "browser", properties: "properties" },
-  split: { toolbar: "split-toolbar", browser: "split-browser", properties: "split-properties" },
+  main: { toolbar: "toolbar", browser: "browser", properties: "properties", timeline: "timeline" },
+  split: { toolbar: "split-toolbar", browser: "split-browser", properties: "split-properties", timeline: "split-timeline" },
 };
 /** Puts `slots` in the page in place of whatever fills `pane`'s slots now. */
 function placeSlots(pane: PaneId, slots: Slots) {
-  for (const key of ["toolbar", "browser", "properties"] as const) {
+  for (const key of SLOT_KEYS) {
     const now = $(SLOT_IDS[pane][key]);
     if (now !== slots[key]) now.replaceWith(slots[key]);
   }
 }
-/** Three empty slots shaped like `pane`'s (an element's attributes, no children). */
-const emptySlots = (pane: PaneId): Slots => ({
-  toolbar: $(SLOT_IDS[pane].toolbar).cloneNode(false) as HTMLElement,
-  browser: $(SLOT_IDS[pane].browser).cloneNode(false) as HTMLElement,
-  properties: $(SLOT_IDS[pane].properties).cloneNode(false) as HTMLElement,
-});
+/** Four empty slots shaped like `pane`'s (an element's attributes, no children). */
+const emptySlots = (pane: PaneId): Slots => Object.fromEntries(SLOT_KEYS.map((key) => [key, $(SLOT_IDS[pane][key]).cloneNode(false) as HTMLElement])) as Slots;
 const pool = new WarmPool<WorkspaceId, PaneId, { slots: Slots; view: MountedWorkspace }>({
   mount(pane, id) {
     const slots = emptySlots(pane);

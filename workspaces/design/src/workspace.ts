@@ -14,6 +14,7 @@ import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, type BrowserNode } from "./browser.ts";
+import { showTimelineBar } from "./timeline-bar.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts";
@@ -166,7 +167,18 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
     }
     return ul;
   };
-  slot.replaceChildren(list(browserTree(doc)));
+  // The whole panel folds too (SF3d): it floats over the view, so folding it gives the view back.
+  const fold = document.createElement("details");
+  fold.className = "browser-fold";
+  fold.dataset.node = "browser";
+  fold.open = !folded.has("browser");
+  fold.addEventListener("toggle", () => {
+    if (fold.isConnected) fold.open ? folded.delete("browser") : folded.add("browser");
+  });
+  const title = document.createElement("summary");
+  title.textContent = "Browser";
+  fold.append(title, list(browserTree(doc)));
+  slot.replaceChildren(fold);
 }
 
 function mount(ctx: WorkspaceContext): MountedWorkspace {
@@ -310,6 +322,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
   async function show(doc: DesignDocument, kind: PartKind) {
     browser(ctx.browser, doc, selectRow);
+    if (ctx.timeline) showTimelineBar(ctx.timeline, doc);
     drawSketches();
     showSelection();
     markStale();
@@ -404,6 +417,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     saved = { doc: next, shape, sizes: inputs.map((i) => i.value) };
     ctx.projectChanged(label);
     browser(ctx.browser, next, selectRow);
+    if (ctx.timeline) showTimelineBar(ctx.timeline, next);
     markStale();
     // The part extrudes this sketch: rebuild it from the edited lines (a live link; an open sketch fails with the kernel's reason).
     if (lastFeature(next).dependsOn.includes(sketchId)) void show(next, shape);
@@ -740,7 +754,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!putAwayByRestore) editingSketch = null;
       sleep();
       viewport.showSketches([]);
-      for (const slot of [ctx.toolbar, ctx.browser, ctx.properties]) slot.replaceChildren();
+      for (const slot of [ctx.toolbar, ctx.browser, ctx.properties, ctx.timeline]) slot?.replaceChildren();
     },
   };
 }
