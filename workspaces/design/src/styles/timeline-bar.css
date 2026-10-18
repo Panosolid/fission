@@ -12,3 +12,11 @@
 .timeline-bar .timeline-bar-item[data-suppressed="true"]::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; border-top: 1.5px solid #ff6b6b; transform: rotate(-35deg); }
 .timeline-bar .timeline-bar-marker { flex-shrink: 0; width: 4px; height: 24px; margin: 0 3px; border-radius: 2px; background: #4aa8ff; }
 .timeline-bar .timeline-bar-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Step 24f3: a failed item red; an item focused or picked outlined; the
+   picked item's ⋯ beside it, which opens its menu (a phone's way to it).
+   ":not(#none)" lifts a rule over the base layout's "#workspace button". */
+.timeline-bar .timeline-bar-item[data-failed="true"] { color: #ff6b6b; border-color: #e0656d; background: #3a2226; }
+.timeline-bar .timeline-bar-item { cursor: pointer; }
+.timeline-bar .timeline-bar-item:focus-visible { outline: 2px solid #4aa8ff; outline-offset: 1px; }
+.timeline-bar .timeline-bar-more-slot { flex-shrink: 0; display: inline-flex; }
+.timeline-bar .timeline-bar-more:not(#none) { min-width: 28px; height: 22px; padding: 0 6px; background: #2a2e35; border: 1px solid #4aa8ff; border-radius: 3px; color: #e6e9ee; line-height: 1; cursor: pointer; }
