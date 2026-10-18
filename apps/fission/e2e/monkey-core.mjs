@@ -50,27 +50,33 @@ export const SKIP_TARGETS = new Set(["#guide-open", "#assistant-toggle", 'button
 
 /**
  * The next action, from a snapshot of the page: `targets` (what can be
- * clicked: buttons, menu rows, folds, each with a descriptor `sel`),
- * `inputs` (boxes that take typing, each `sel` and `type`), `rows` (tree
- * rows a right-click opens a menu on), `sketching` and whether a file was
- * saved yet (`haveSave`). Probes are actions too, so a replay repeats them.
+ * clicked: buttons, menu rows, folds, each with a descriptor `sel`, and
+ * `hot`, `cold` and `local` marks), `inputs` (boxes that take typing, each
+ * `sel`, `type` and `local`), `rows` (tree rows a right-click opens a menu
+ * on, `sketch` for a sketch's), `prompt` (the plane prompt is up),
+ * `sketching` and whether a file was saved yet (`haveSave`). Probes are actions too, so a replay repeats them.
  * Coordinates on the view are fractions of its box, so a replay at another
  * size still lands inside it.
  */
 export function nextAction(random, page) {
   const targets = page.targets.filter((t) => !SKIP_TARGETS.has(t.sel));
+  // A user mostly carries on with what is in front of them: picks a plane at the plane prompt, draws and types lengths in a sketch.
+  const typing = page.inputs.some((i) => i.local);
   const weights = {
-    click: targets.length ? 30 : 0,
-    type: page.inputs.length ? 14 : 0,
+    click: targets.length ? (page.prompt ? 60 : 30) : 0,
+    type: page.inputs.length ? (typing ? 30 : 14) : 0,
     canvas: page.sketching ? 40 : 12,
+    hover: page.sketching ? 15 : 3,
     drag: 4,
     wheel: 2,
     key: 12,
     menu: page.rows.length ? 5 : 0,
-    resize: 2,
+    row: page.rows.length ? 6 : 0,
+    resize: 3,
     open: page.haveSave ? 6 : 0,
     reload: 1,
     "undo-redo": 7,
+    "select-bodies": 4,
     "round-trip": 3,
     unstick: 4,
   };
@@ -95,12 +101,22 @@ export function nextAction(random, page) {
       return { do: "canvas", x: frac(), y: frac(), double: random() < 0.05 };
     case "drag":
       return { do: "drag", x: frac(), y: frac(), x2: frac(), y2: frac(), button: pick(random, ["left", "middle", "right"]), shift: random() < 0.3 };
+    case "hover":
+      return { do: "hover", x: frac(), y: frac() };
     case "wheel":
       return { do: "wheel", x: frac(), y: frac(), dy: pick(random, [-400, -100, 100, 400]) };
     case "key":
       return { do: "key", key: pick(random, KEYS) };
-    case "menu":
-      return { do: "menu", sel: pick(random, page.rows).sel };
+    case "menu": {
+      // A sketch's row has the menu with Delete (and the delete-ask box behind it), so it is the one most often tried.
+      const sketches = page.rows.filter((r) => r.sketch);
+      return { do: "menu", sel: (sketches.length && random() < 0.7 ? pick(random, sketches) : pick(random, page.rows)).sel };
+    }
+    case "row": {
+      // A left click on a browser row; a body's row selects that body, so those are picked most.
+      const bodies = page.rows.filter((r) => r.body);
+      return { do: "click", sel: (bodies.length && random() < 0.7 ? pick(random, bodies) : pick(random, page.rows)).sel };
+    }
     case "resize":
       return { do: "resize", size: pick(random, SIZES) };
     case "open":
@@ -111,7 +127,14 @@ export function nextAction(random, page) {
 }
 
 /** Edits a user could make to a saved file before opening it (24f's timeline edits, ahead of their buttons, and plain damage). */
-export const FILE_EDITS = ["same", "suppress", "suppress", "suppress", "marker", "marker", "marker-start", "no-marker", "swap", "drop", "bad-number", "truncate"];
+export const FILE_EDITS = ["same", "suppress", "suppress", "suppress", "marker", "marker", "marker-start", "no-marker", "swap", "drop", "bad-number", "truncate", "add-solid", "add-solid", "add-solid"];
+
+/** The solids "add-solid" appends: a body of its own each (24d1), as the app writes them (document.ts's presets). */
+const ADDED = [
+  (n) => ({ type: "box", parameters: { width: 10 + n, depth: 20, height: 5 }, summary: `Box: ${10 + n} × 20 × 5 mm`, label: "box" }),
+  (n) => ({ type: "cylinder", parameters: { diameter: 8 + n, height: 30 }, summary: `Cylinder: ⌀${8 + n} × 30 mm`, label: "cylinder" }),
+  (n) => ({ type: "sphere", parameters: { diameter: 12 + n }, summary: `Sphere: ⌀${12 + n} mm`, label: "sphere" }),
+];
 
 /**
  * The saved text with `edit` made to its Design timeline; `at` picks the
@@ -122,6 +145,14 @@ export function editFile(text, edit, at) {
   const file = JSON.parse(text);
   const design = file.workspaces?.design;
   const features = design?.timeline?.features ?? [];
+  if (edit === "add-solid" && design) {
+    const n = design.nextId;
+    const { label, ...intent } = ADDED[at % ADDED.length](n);
+    const id = `feature-${n}`;
+    features.push({ dependsOn: [], id, intent, provenance: { from: [], self: { id, label: `Feature ${n} (${label})`, workspace: "design" } }, suppressed: false });
+    design.nextId = n + 1;
+    return JSON.stringify(file, null, 2);
+  }
   if (!features.length || edit === "same") return JSON.stringify(file, null, 2);
   const i = at % features.length;
   const f = features[i];
@@ -163,10 +194,54 @@ export function expectedView(design) {
     if (s === undefined || s.f.intent.type !== "sketch") return Object.hasOwn(kept, f.id);
     return active(s.i);
   };
+  const solids = features.filter((f, i) => f.intent.type !== "sketch" && builds(f, i));
   return {
     items: features.map((f, i) => ({ id: f.id, suppressed: f.suppressed === true, rolledBack: i >= stop })),
-    bodies: features.filter((f, i) => f.intent.type !== "sketch" && builds(f, i)).length,
+    bodies: solids.length,
+    bodyIds: solids.map((f) => f.id),
   };
+}
+
+/** The area inside a sketch's curves when they are one circle or one closed loop of lines (shoelace), else null. */
+export function outlineArea(content) {
+  const points = new Map((content.points ?? []).map((p) => [p.id, p]));
+  const curves = content.curves ?? [];
+  if (curves.length === 1 && curves[0].kind === "circle") return Math.PI * curves[0].radius ** 2;
+  if (curves.length < 3 || curves.some((c) => c.kind !== "line")) return null;
+  // Walk the loop: each point must have exactly two lines, and the walk must use every line.
+  const ends = new Map();
+  for (const c of curves) for (const p of [c.start, c.end]) ends.set(p, [...(ends.get(p) ?? []), c]);
+  if ([...ends.values()].some((l) => l.length !== 2)) return null;
+  let at = curves[0].start;
+  let line = curves[0];
+  let twice = 0;
+  for (let used = 0; used < curves.length; used++) {
+    const next = line.start === at ? line.end : line.start;
+    const [a, b] = [points.get(at), points.get(next)];
+    if (!a || !b) return null;
+    twice += a.x * b.y - b.x * a.y;
+    at = next;
+    line = ends.get(at).find((c) => c !== line);
+  }
+  return at === curves[0].start ? Math.abs(twice) / 2 : null;
+}
+
+/**
+ * A solid's volume worked out from the file alone, or null when this model
+ * can't say (a preset profile, an arc): w·d·h for a box, π(d/2)²h for a
+ * cylinder, (4/3)π(d/2)³ for a sphere, and for an extrude of a sketch its
+ * outline's area (outlineArea) times the distance; a sketch that is gone
+ * gives its kept shape.
+ */
+export function modelVolume(design, f) {
+  const p = f.intent.parameters;
+  if (f.intent.type === "box") return p.width * p.depth * p.height;
+  if (f.intent.type === "cylinder") return Math.PI * (p.diameter / 2) ** 2 * p.height;
+  if (f.intent.type === "sphere") return (4 / 3) * Math.PI * (p.diameter / 2) ** 3;
+  if (f.intent.type !== "extrude" || !Object.hasOwn(p, "sketch")) return null;
+  const content = (design.sketches ?? []).find((s) => s.id === p.sketch) ?? design.kept?.[f.id];
+  const area = content ? outlineArea(content) : null;
+  return area === null ? null : area * Math.abs(p.distance);
 }
 
 /**

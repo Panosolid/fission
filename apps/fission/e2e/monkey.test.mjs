@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { documentRules, editFile, expectedView, nextAction, rng, shrink, signature, SKIP_TARGETS, weighted } from "./monkey-core.mjs";
+import { documentRules, editFile, expectedView, modelVolume, nextAction, outlineArea, rng, shrink, signature, SKIP_TARGETS, weighted } from "./monkey-core.mjs";
 import { MONKEY_PLANTS } from "./monkey-plants.mjs";
 
 /** A box, Sketch 2 on XY, and an extrude of Sketch 2: the smallest file with both kinds of body. */
@@ -50,6 +50,7 @@ test("what a file should show, worked by hand", () => {
       { id: "feature-3", suppressed: false, rolledBack: false },
     ],
     bodies: 2,
+    bodyIds: ["feature-1", "feature-3"],
   });
   // The marker on Sketch 2: the extrude after it is rolled back, leaving the box alone (1 body).
   const marked = design();
@@ -71,6 +72,41 @@ test("what a file should show, worked by hand", () => {
   assert.equal(expectedView(gone).bodies, 1);
   gone.kept = { "feature-3": { points: [], curves: [] } };
   assert.equal(expectedView(gone).bodies, 2);
+});
+
+test("volumes from the file, worked by hand", () => {
+  const d = design();
+  const [box, , extrude] = d.timeline.features;
+  assert.equal(modelVolume(d, box), 24000); // 40 × 30 × 20
+  const near = (a, b) => assert.ok(Math.abs(a - b) <= 1e-12 * b, `${a} is not ${b}`); // the two sides round π products in a different order
+  near(modelVolume(d, extrude), 250 * Math.PI); // a circle of radius 5 (area 25π) by 10
+  // A right triangle with legs 3 and 4, its lines in any direction: area 3 × 4 / 2 = 6.
+  const tri = {
+    points: [{ id: "a", x: 0, y: 0 }, { id: "b", x: 3, y: 0 }, { id: "c", x: 0, y: 4 }],
+    curves: [{ kind: "line", start: "a", end: "b" }, { kind: "line", start: "c", end: "b" }, { kind: "line", start: "c", end: "a" }],
+  };
+  assert.equal(outlineArea(tri), 6);
+  // One line short of a loop, or an arc in it: the model can't say.
+  assert.equal(outlineArea({ ...tri, curves: tri.curves.slice(0, 2) }), null);
+  assert.equal(outlineArea({ ...tri, curves: [...tri.curves.slice(0, 2), { kind: "arc", start: "c", end: "a" }] }), null);
+  near(modelVolume(d, { intent: { type: "cylinder", parameters: { diameter: 10, height: 2 } } }), 50 * Math.PI); // π·5²·2
+  near(modelVolume(d, { intent: { type: "sphere", parameters: { diameter: 6 } } }), 36 * Math.PI); // (4/3)π·3³
+  // The sketch gone: the kept shape's area counts.
+  const gone = design();
+  gone.sketches = [];
+  gone.kept = { "feature-3": tri };
+  assert.equal(modelVolume(gone, gone.timeline.features[2]), 60); // 6 × 10
+});
+
+test("add-solid appends a body with the next id", () => {
+  const text = JSON.stringify({ workspaces: { design: design() } });
+  const d = JSON.parse(editFile(text, "add-solid", 1)).workspaces.design; // 1: a cylinder
+  assert.equal(d.nextId, 7);
+  const f = d.timeline.features.at(-1);
+  assert.equal(f.id, "feature-6");
+  assert.deepEqual(f.intent, { type: "cylinder", parameters: { diameter: 14, height: 30 }, summary: "Cylinder: ⌀14 × 30 mm" });
+  assert.deepEqual(documentRules(d), []);
+  assert.equal(expectedView(d).bodies, 3);
 });
 
 test("a good file keeps every rule, and each broken rule is named", () => {
@@ -124,7 +160,7 @@ test("a failure's kind ignores its numbers", () => {
 });
 
 test("the next action is the same for the same seed, and never a skipped button", () => {
-  const page = { targets: [...SKIP_TARGETS].map((sel) => ({ sel })).concat([{ sel: "#extrude", hot: true }, { sel: "#ok" }]), inputs: [{ sel: "#width", type: "number" }], rows: [], sketching: false, haveSave: true };
+  const page = { prompt: false, targets: [...SKIP_TARGETS].map((sel) => ({ sel })).concat([{ sel: "#extrude", hot: true }, { sel: "#ok" }]), inputs: [{ sel: "#width", type: "number" }], rows: [], sketching: false, haveSave: true };
   const run = (seed) => {
     const random = rng(seed);
     return Array.from({ length: 300 }, () => nextAction(random, page));

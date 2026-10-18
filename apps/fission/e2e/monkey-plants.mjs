@@ -1,6 +1,6 @@
 // Proof that the monkey tester (monkey.mjs) catches bugs before its clean
 // runs are trusted: each plant below is a deliberate mistake in the real
-// app's code, one for each of the monkey's checks, plus three of the
+// app's code, one or more for each of the monkey's checks, plus three of the
 // timeline model's plants (packages/testing/planted/model-faults.ts). For
 // each, this edits the source in place, builds the app into a folder of its
 // own (vite only; the kernel's WASM is already built) and puts the file
@@ -53,6 +53,11 @@ export const MONKEY_PLANTS = {
     what: "at phone width the sketch has no Finish Sketch on screen",
     expect: "never stuck",
     edits: [{ file: SKETCHBAR, find: ".sketchbar.sketchbar-finish:not(#none) { margin-left: auto; }", replace: ".sketchbar.sketchbar-finish:not(#none) { margin-left: auto; }\n@media (max-width: 640px) { #finish-sketch, .sketch .sketch-finish, #sketch-cancel { display: none !important; } }" }],
+  },
+  "body-row-off-by-one": {
+    what: "a Bodies row selects the next body",
+    expect: "selection agrees",
+    edits: [{ file: "workspaces/design/src/workspace.ts", find: "(bodyFeatures(doc)[Number(body[1]) - 1]);", replace: "(bodyFeatures(doc)[Number(body[1]) % bodyFeatures(doc).length]);" }],
   },
   "bar-spills-on-phone": {
     what: "at phone width the timeline bar is wider than the window",

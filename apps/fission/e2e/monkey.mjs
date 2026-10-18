@@ -17,7 +17,9 @@
 //   - the page never scrolls sideways.
 // And, as steps of their own: Undo then Redo gives the same file and the
 // same Undo label; Save, Open that file gives the same file back; a reload
-// brings the same file back from the browser's store; Escape closes every
+// brings the same file back from the browser's store; selecting each body
+// in turn selects that body, names its feature, shows its volume (worked
+// from the file) and lights only its own block of faces; Escape closes every
 // dialog and a sketch can always be finished, leaving Create sketch ready.
 //
 // Every run is seeded. A failure prints the seed and the actions; the
@@ -28,13 +30,14 @@
 //
 // Environment: FISSION_SEED (one seed) or MONKEY_SEEDS ("1-40" or "3,7"),
 // default 1-3; MONKEY_STEPS, default 60; MONKEY_REPLAY=<file> replays one
-// action list; MONKEY_SHRINK=0 skips shrinking; MONKEY_PORT (default 4210);
+// action list; MONKEY_SHRINK=0 skips shrinking; MONKEY_KNOWN=0 fails on the
+// known bugs too (KNOWN_BUGS); MONKEY_PORT (default 4210);
 // MONKEY_OUT serves another build folder than dist (the plants build there).
 // Run after `npm run build`: node e2e/monkey.mjs
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { preview } from "vite";
 import { launch } from "./browser.mjs";
-import { documentRules, editFile, expectedView, nextAction, rng, shrink, signature } from "./monkey-core.mjs";
+import { documentRules, editFile, expectedView, modelVolume, nextAction, rng, shrink, signature } from "./monkey-core.mjs";
 
 const PORT = Number(process.env.MONKEY_PORT || 4210);
 const STEPS = Number(process.env.MONKEY_STEPS || 60);
@@ -46,6 +49,17 @@ const seedList = (text) => text.split(",").flatMap((part) => {
   const [a, b] = part.split("-").map(Number);
   return b === undefined ? [a] : Array.from({ length: b - a + 1 }, (_, i) => a + i);
 });
+
+/**
+ * App bugs already reported and being fixed, by name: the check that finds
+ * one still runs, and a run where it shows says so at the end instead of
+ * failing, so the hunt carries on past it; once the bug no longer shows,
+ * the run fails until the mark is removed (as sketch-tool.mjs's `known`).
+ * MONKEY_KNOWN=0 turns every mark off, to see the bug fail.
+ */
+const KNOWN_BUGS = process.env.MONKEY_KNOWN === "0" ? {} : {
+  "body-panel": "with two or more bodies, the Feature and Body panels show the last body's feature, volume and topology whichever body is selected",
+};
 
 class Failure extends Error {
   constructor(check, message) {
@@ -68,7 +82,7 @@ async function open(browser) {
   page.on("dialog", (d) => d.dismiss().catch(() => {}));
   await page.goto(url);
   await page.waitForSelector('#timeline li[data-item]', { timeout: 20000 });
-  return { context, page, errors, saved: null, savedName: "Untitled.fission.json" };
+  return { context, page, errors, saved: null, savedName: "Untitled.fission.json", known: new Set() };
 }
 
 /** In the page: what can be clicked, typed into and right-clicked now, each with a selector a replay can find again. */
@@ -104,8 +118,9 @@ function offered() {
     if (e.tagName === "INPUT" && e.type !== "button" && e.type !== "file") inputs.push({ sel: s, type: e.type, local });
     else if (e.tagName !== "INPUT" && e.tagName !== "SELECT") targets.push({ sel: s, hot: e.matches(HOT), cold: e.matches(COLD), local });
   }
-  const rows = [...document.querySelectorAll("#browser .tree-row[data-node]")].filter(usable).map((e) => ({ sel: sel(e) }));
-  return { targets, inputs, rows, sketching: document.querySelector("#viewport")?.dataset.sketching === "true" };
+  const rows = [...document.querySelectorAll("#browser .tree-row[data-node]")].filter(usable).map((e) => ({ sel: sel(e), sketch: e.dataset.node.startsWith("sketches/"), body: /^body-\d+$/.test(e.dataset.node) }));
+  const prompt = [...document.querySelectorAll('[id^="sketch-plane-"]')].some(usable);
+  return { targets, inputs, rows, prompt, sketching: document.querySelector("#viewport")?.dataset.sketching === "true" };
 }
 
 /** In the page: what the Design view shows now (null when Design is not on screen). */
@@ -160,7 +175,9 @@ async function openFile(s, text, name) {
   await chooser.setFiles({ name, mimeType: "application/json", buffer: Buffer.from(text) });
 }
 
-const canonical = (text) => JSON.stringify(JSON.parse(text));
+/** JSON with every object's keys sorted, so key order (which the writer sorts anyway) never counts as a change. */
+const sortKeys = (v) => (Array.isArray(v) ? v.map(sortKeys) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v);
+const canonical = (text) => JSON.stringify(sortKeys(JSON.parse(text)));
 /** The first place two JSON values differ, for a message. */
 function firstDifference(a, b, path = "") {
   if (JSON.stringify(a) === JSON.stringify(b)) return null;
@@ -250,6 +267,11 @@ async function act(s, a) {
       if (a.shift) await page.keyboard.up("Shift");
       return true;
     }
+    case "hover": {
+      const b = await viewBox(page);
+      await page.mouse.move(b.x + a.x * b.w, b.y + a.y * b.h, { steps: 3 });
+      return true;
+    }
     case "wheel": {
       const b = await viewBox(page);
       await page.mouse.move(b.x + a.x * b.w, b.y + a.y * b.h);
@@ -313,6 +335,58 @@ async function act(s, a) {
       same("save then open gives the same file", before, await save(s));
       return true;
     }
+    case "select-bodies": {
+      // Each body in turn, by its Bodies row: the selection, the Feature panel, the Body panel's volume and the highlighted faces must all be that body's.
+      const view = await settle(page);
+      if (!view.design || view.sketching || view.dialogs.length || view.extruding || !s.saved) return false;
+      const design = JSON.parse(s.saved).workspaces.design;
+      const { bodyIds } = expectedView(design);
+      if (bodyIds.length !== view.bodies) return false; // the per-step check reports that
+      const blocks = [];
+      const wrong = []; // every disagreement, so the message shows the whole pattern
+      const panel = []; // the Feature and Body panels' part of it (KNOWN_BUGS["body-panel"])
+      for (const [k, id] of bodyIds.entries()) {
+        await page.evaluate((k) => document.querySelector(`#browser .tree-row[data-node="body-${k + 1}"]`).click(), k);
+        await settle(page);
+        const got = await page.evaluate(() => ({
+          selection: document.body.dataset.selection ?? "",
+          intent: document.getElementById("intent")?.textContent ?? "",
+          volume: document.getElementById("volume")?.textContent ?? "",
+          topology: document.getElementById("topology")?.textContent ?? "",
+          stale: document.getElementById("stats")?.dataset.stale === "true",
+          highlight: document.querySelector("#viewport").dataset.highlight ?? "",
+        }));
+        const f = design.timeline.features.find((x) => x.id === id);
+        const name = `Body ${k + 1} (${f.intent.summary})`;
+        if (got.selection !== `body:${id}`) wrong.push(`clicking ${name} selected "${got.selection}"`);
+        if (got.intent !== f.intent.summary) panel.push(`with ${name} selected the Feature panel says "${got.intent}"`);
+        const faces = /faces ([\d,]*)/.exec(got.highlight)?.[1].split(",").filter(Boolean).map(Number) ?? [];
+        const shownFaces = Number(/(\d+) F/.exec(got.topology)?.[1]);
+        if (!got.stale) {
+          const want = modelVolume(design, f);
+          const volume = Number(got.volume.replace(/[^\d.]/g, ""));
+          // The panel rounds to a few figures (fmt in properties.ts); 0.5% is far inside the gap between any two different bodies the monkey makes, and far outside the kernel's 1e-6 relative volume error.
+          if (want !== null && !(Math.abs(volume - want) <= 0.005 * want)) panel.push(`with ${name} selected the Body panel shows ${got.volume}, but that body is ${want.toPrecision(6)} mm³`);
+          // With every body selected (one body alone) the app lights none of them on purpose (scene.ts), so the count is checked from two bodies up.
+          if (bodyIds.length > 1 && faces.length !== shownFaces) panel.push(`with ${name} selected ${faces.length} faces light up, but the Body panel says it has ${shownFaces}`);
+        }
+        blocks.push(faces);
+      }
+      // joinBodies (scene.ts) numbers each body's faces after the previous body's, so the bodies' faces are back-to-back blocks in order.
+      let next = 0;
+      for (const [k, faces] of blocks.entries()) {
+        if (!faces.length) continue;
+        if (faces.some((x, i) => x !== faces[0] + i) || faces[0] !== next) wrong.push(`Body ${k + 1} lights faces ${faces[0]}..${faces.at(-1)}, but its faces should start at ${next}, after the bodies before it`);
+        next = faces.at(-1) + 1;
+      }
+      await page.keyboard.press("Escape");
+      const differ = new Set(bodyIds.map((id) => design.timeline.features.find((x) => x.id === id).intent.summary)).size > 1;
+      if (!KNOWN_BUGS["body-panel"]) wrong.push(...panel);
+      else if (panel.length) s.known.add("body-panel");
+      else if (differ) wrong.push(`the known bug "${KNOWN_BUGS["body-panel"]}" no longer shows with ${bodyIds.length} different bodies: it looks fixed, so remove its mark in KNOWN_BUGS`);
+      if (wrong.length) fail("selection agrees", wrong.join("; "));
+      return true;
+    }
     case "unstick": {
       for (let i = 0; i < 4; i++) {
         await page.keyboard.press("Escape");
@@ -368,10 +442,10 @@ async function run(browser, { actions, random, steps }) {
       if (process.env.MONKEY_VERBOSE) console.log(`  ${i + 1}. ${did ? "" : "(not on the page) "}${JSON.stringify(a)}`);
       await check(s);
     }
-    return { actions: done, failure: null };
+    return { actions: done, failure: null, known: [...s.known] };
   } catch (e) {
     const failure = e instanceof Failure ? { check: e.check, message: e.detail } : { check: "the tester itself", message: e.stack ?? String(e) };
-    return { actions: done, failure };
+    return { actions: done, failure, known: [...s.known] };
   } finally {
     await s.context.close();
   }
@@ -383,7 +457,8 @@ async function main() {
   const results = here("./monkey-results/");
   let failed = 0;
   const report = async (name, seed, out) => {
-    if (!out.failure) return console.log(`${name}: pass (${out.actions.length} actions)`);
+    const known = out.known.length ? `; known bug seen: ${out.known.join(", ")}` : "";
+    if (!out.failure) return console.log(`${name}: pass (${out.actions.length} actions${known})`);
     failed++;
     console.log(`${name}: FAIL at action ${out.actions.length}: ${out.failure.check}: ${out.failure.message}`);
     let list = out.actions;

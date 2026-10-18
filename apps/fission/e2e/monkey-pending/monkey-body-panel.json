@@ -1,0 +1,19 @@
+{
+  "seed": 0,
+  "what": "Selecting Body 1 or 2 of three shows the last body's feature, volume and topology (found by Ben, caught on main ea39d90 by the selection check); moves to e2e/regressions/ with its fix",
+  "actions": [
+    {
+      "do": "open",
+      "edit": "add-solid",
+      "at": 1
+    },
+    {
+      "do": "open",
+      "edit": "add-solid",
+      "at": 2
+    },
+    {
+      "do": "select-bodies"
+    }
+  ]
+}
