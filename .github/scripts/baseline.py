@@ -3,7 +3,8 @@
 Measures the kernel's key operations (kernel/examples/baseline.rs: peak
 heap and allocations from a counting allocator, instructions from
 callgrind) and the app's (packages/testing/baseline/app.ts: JavaScript heap
-kept, the kernel's WebAssembly memory, time relative to a fixed workload),
+kept, the kernel's WebAssembly memory, time relative to a fixed workload, and
+the kernel calls and bodies built by one edit of a 20-feature part),
 compares each with the baseline and prints a table. Margins live in the
 baseline file ("margins", one per kind of metric, the kind being the last
 part of the metric's name):

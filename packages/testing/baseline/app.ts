@@ -9,7 +9,12 @@
 //   so this is the high-water mark);
 // - `relative_time`: the fastest of 25 runs divided by the fastest of a fixed
 //   JavaScript workload timed in the same process, so a faster or slower
-//   machine mostly cancels out (still noisy; CI only flags it).
+//   machine mostly cancels out (still noisy; CI only flags it);
+// - `rebuild_20_arcs_edit_first` (step 24d3c, `rebuild.ts`): one sketch
+//   edit on a part of 20 extrudes with arcs, timed as above, and counted
+//   exactly: `body_builds` (1 with a working cache) and `kernel_calls`.
+//   FISSION_BASELINE_FAULT=full-replay or outline-twice plants a bug there
+//   (`REBUILD_FAULTS`), to see the check fail.
 // Needs the WASM build (`npm run kernel` in apps/fission).
 // Run: node --expose-gc --experimental-strip-types --no-warnings packages/testing/baseline/app.ts
 import { readFileSync } from "node:fs";
@@ -17,6 +22,8 @@ import { createHistory, emptyProject, projectFromJson, projectToJson, type Proje
 import { designWorkspace, partDocument } from "@fission/design";
 import * as wasm from "../../core/src/kernel/wasm/fission_kernel.js";
 import { READERS } from "../src/project-fuzz.ts";
+import { nodeKernel } from "../src/node-kernel.ts";
+import { BodyCache, countingKernel, editFirst, REBUILD_FAULTS, rebuildPart, showEdit, type RebuildFault } from "./rebuild.ts";
 import { seeded } from "../src/index.ts";
 
 const gc = (globalThis as { gc?: () => void }).gc;
@@ -97,4 +104,34 @@ for (const [name, f] of Object.entries(OPERATIONS)) {
 // The kernel's WebAssembly memory after every kernel operation above ran
 // 3 + 3 + 25 times, always in the same order.
 out.kernel_memory = { wasm_bytes: exports.memory.buffer.byteLength };
+
+// The rebuild after one edit (async: the kernel answers with promises, as
+// the worker does). Each run moves the first sketch's corner the other
+// way, so every run is a real edit with one body to build.
+const fault = process.env.FISSION_BASELINE_FAULT as RebuildFault | undefined;
+if (fault !== undefined && !REBUILD_FAULTS.includes(fault)) throw new Error(`FISSION_BASELINE_FAULT is ${fault}, not one of ${REBUILD_FAULTS.join(", ")}`);
+{
+  const kernel = countingKernel(nodeKernel());
+  const cache = new BodyCache(kernel);
+  const part = rebuildPart();
+  let doc = (await showEdit(kernel, cache, part.doc, part.doc)).doc;
+  let shift = 0;
+  const edit = async () => {
+    shift = shift === 0 ? 2 : 0;
+    doc = (await showEdit(kernel, cache, doc, editFirst(part, shift), fault)).doc;
+  };
+  for (let i = 0; i < 3; i++) await edit(); // warm the JIT
+  const [calls, builds] = [kernel.calls, kernel.builds];
+  await edit();
+  const metrics: Record<string, number> = { kernel_calls: kernel.calls - calls, body_builds: kernel.builds - builds };
+  let best = Infinity;
+  for (let i = 0; i < 25; i++) {
+    const t = process.hrtime.bigint();
+    await edit();
+    best = Math.min(best, Number(process.hrtime.bigint() - t));
+  }
+  metrics.relative_time = Math.round((best / fastest(calibration, 25)) * 10000) / 10000;
+  out.rebuild_20_arcs_edit_first = metrics;
+  await cache.clear();
+}
 console.log(JSON.stringify(out, null, 2));
