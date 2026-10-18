@@ -15,7 +15,7 @@ test("Design's timeline data matches the model over 12 seeds × 150 steps, reach
     const counts = runDataSession(randomSession(seed, STEPS));
     for (const [k, v] of Object.entries(counts)) total[k] = (total[k] ?? 0) + v;
   }
-  for (const k of ["op:add-sketch", "op:add-extrude", "op:add-preset", "op:set-size", "op:suppress", "op:marker", "op:undo", "op:redo", "op:save-open", "nothing-built"])
+  for (const k of ["op:add-sketch", "op:add-extrude", "op:add-preset", "op:set-size", "op:suppress", "op:marker", "op:undo", "op:redo", "op:save-open", "nothing-built", "save-open:nothing-built"])
     assert.ok((total[k] ?? 0) >= 5, `${k} reached ${total[k] ?? 0} times: ${JSON.stringify(total)}`);
 });
 

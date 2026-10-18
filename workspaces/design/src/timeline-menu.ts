@@ -4,37 +4,21 @@
 // from 24f2's `itemMenu` and `barEdit`. Each choice is recorded as one
 // undo step with its `TIMELINE_STEPS` name; a delete records 24e4's
 // settled document (`planDelete`) and asks first through its box when
-// something is built from the item. An edit that would leave no body is
-// off, with the reason, until the app can show a design with no body
-// (`lastFeature` refuses one). `workspace.ts` is the host: it records,
-// asks and shows the refusal.
+// something is built from the item. An edit that leaves no body is made
+// like any other (24f4: the app shows a design with no body as an empty
+// view). `workspace.ts` is the host: it records, asks and shows the refusal.
 
 import type { KernelCalls } from "@fission/core";
-import { builds, isSketchItem, type DesignDocument } from "./document.ts";
+import type { DesignDocument } from "./document.ts";
 import { planDelete, type DeleteQuestion } from "./delete-ask.ts";
 import { barEdit, itemMenu, type MenuEntry } from "./timeline-bar.ts";
 
-/** Why an edit that would leave nothing built is off. */
-export const NO_BODY = "This would leave no body, and Fission can't show a design with no body yet";
-
-/** Whether no solid feature of `doc` builds: the app has nothing to show (`lastFeature` refuses it). */
-export function leavesNoBody(doc: DesignDocument): boolean {
-  return !doc.timeline.features.some((f) => !isSketchItem(f) && builds(doc, f));
-}
-
 /**
- * Item `id`'s menu with sketch `editing` open (its id) or none: `itemMenu`,
- * with Move the marker here, Suppress and Unsuppress also off when they
- * would leave no body. Delete is judged when chosen, on the document it
- * would record (an extrude whose sketch goes may keep its last shape,
- * which only `planDelete` knows).
+ * Item `id`'s menu with sketch `editing` open (its id) or none: 24f2's
+ * `itemMenu` as it is (from 24f4 nothing is off for leaving no body).
  */
 export function menuEntries(doc: DesignDocument, id: string, editing: string | null = null): MenuEntry[] {
-  return itemMenu(doc, id, editing).map((e) => {
-    if (e.off !== null || e.action === "delete") return e;
-    const r = barEdit(doc, { kind: "menu", id, action: e.action }, editing);
-    return r.kind === "edit" && leavesNoBody(r.doc) ? { ...e, off: NO_BODY } : e;
-  });
+  return itemMenu(doc, id, editing);
 }
 
 /** What the menu needs from the app. */
@@ -67,7 +51,6 @@ export async function chooseEntry(host: MenuHost, id: string, action: MenuEntry[
   if (r.kind === "edit") return host.record(r.step, r.doc);
   const plan = await planDelete(host.kernel, before, id);
   if (host.current() !== before) return;
-  if (leavesNoBody(plan.next)) return host.refuse(NO_BODY);
   const go = () => {
     if (host.current() === before) host.record(r.step, plan.next);
   };

@@ -92,7 +92,10 @@ export function partCommand(project: Project): Command[] {
   const doc = project.workspaces.design as DesignDocument | undefined;
   if (!doc) return [];
   try {
-    const { shape, sizes } = partOf(doc);
+    const part = partOf(doc);
+    // A design with no body (24f4) has no part to describe.
+    if (!part) return [];
+    const { shape, sizes } = part;
     // An extrude of a sketch (step 21d) has no set_part that makes it.
     if (shape === "sketch-extrude") return [];
     return [{ op: "set_part", shape, ...sizes }];

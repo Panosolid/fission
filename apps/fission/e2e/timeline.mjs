@@ -4,9 +4,11 @@
 // (a right-click on an item with the mouse; at 375 px a tap on the item,
 // then its ⋯) and from the browser's Timeline rows (a right-click, or the
 // row's ⋯): Suppress and Unsuppress, Move the marker here, Delete (at once
-// when nothing is built from the item, asking first when something is), an
-// entry that would leave no body shown off with why, and a failed item red
-// in the bar and the browser. After every edit: the bar's flags, the undo
+// when nothing is built from the item, asking first when something is), a
+// failed item red in the bar and the browser, and (24f4) a design with no
+// body: both solids suppressed, or every item deleted, shown as an empty
+// view with the panel saying so, a width typed then adding a new box at the
+// marker. After every edit: the bar's flags, the undo
 // step's name, and pixel probes on both bodies' top faces (a suppressed or
 // rolled-back body's pixels show the background, its return shows it
 // again); one Undo and one Redo for each. Pixels are probed through the
@@ -141,7 +143,7 @@ async function check(name, fn) {
 
 try {
   for (const { width, tap } of [{ width: 1280, tap: false }, { width: 375, tap: true }]) {
-    await check(`the timeline's item menu from the bar and the browser: suppress, the marker, delete, an entry off, failed red; one undo step each, pixels probed (${width} px${tap ? ", taps" : ""})`, async () => {
+    await check(`the timeline's item menu from the bar and the browser: suppress, the marker, delete, failed red, no body (24f4); one undo step each, pixels probed (${width} px${tap ? ", taps" : ""})`, async () => {
       const page = await fresh(width, tap);
       const layout = LAYOUTS[width];
       const V = layout.volume;
@@ -258,19 +260,61 @@ try {
       await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "undone");
       assert.deepEqual(await state(), all);
 
-      // 4. Suppress the box: the square alone; then suppressing Extrude 1 would leave no body, so it is off and says why.
+      // 4. Suppress the box: the square alone; then suppressing Extrude 1 leaves no body (24f4): on, and the view is empty.
       await rowMenu("feature-1");
       await choose("suppress");
       await undoIs(page, "Suppress Feature 1 (box)");
       await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "the square is the part");
-      assert.deepEqual((await state()).drawn, { box: false, square: true });
+      const squareOnly = { bar: ["feature-1 suppressed", "sketch-2", "feature-11", "|"], drawn: { box: false, square: true }, volume: V, red: [] };
+      assert.deepEqual(await state(), squareOnly);
       await barMenu("feature-11");
-      assert.equal(await page.isDisabled("#row-menu-suppress"), true);
-      assert.equal(await page.textContent("#row-menu-suppress .delete-ask-off"), "This would leave no body, and Fission can't show a design with no body yet");
-      if (shots) await page.screenshot({ path: `${shots}/entry-off-${width}.png` });
-      await page.keyboard.press("Escape");
-      await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed by Escape");
-      assert.equal(await undoTitle(page), "Undo Suppress Feature 1 (box) (Ctrl+Z)");
+      assert.equal(await page.isDisabled("#row-menu-suppress"), false);
+      assert.equal(await page.locator("#row-menu-suppress .delete-ask-off").count(), 0, "no reason it is off");
+      await choose("suppress");
+      await undoIs(page, "Suppress Extrude 1");
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "nothing on screen");
+      const noBody = { bar: ["feature-1 suppressed", "sketch-2", "feature-11 suppressed", "|"], drawn: { box: false, square: false }, volume: "—", red: [] };
+      assert.deepEqual(await state(), noBody);
+      // The panel says there is no body, how to add one, and shows no error; no shape is pressed.
+      assert.equal(await page.textContent("#intent"), "No body: nothing in the timeline builds");
+      assert.equal(await page.isVisible("#no-part"), true);
+      assert.equal(await page.textContent("#error"), "");
+      assert.deepEqual(await page.$$eval('#toolbar [data-op="set_part"][aria-pressed="true"]', (bs) => bs.length), 0);
+      if (shots) await page.screenshot({ path: `${shots}/no-body-${width}.png` });
+      // The toolbar's STL has nothing to save, and says why.
+      if (await page.isVisible('#toolbar [data-op="export_stl"]')) {
+        await press(page, '#toolbar [data-op="export_stl"]', tap);
+        await until(page, () => document.querySelector("#action-note")?.textContent === "There is no body to download: nothing in the timeline builds.", null, "STL with no body");
+      }
+      // One undo step each way.
+      await undo();
+      await undoIs(page, "Suppress Feature 1 (box)");
+      await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "the square back");
+      assert.deepEqual(await state(), squareOnly);
+      assert.equal(await page.isVisible("#no-part"), false);
+      await redo();
+      await undoIs(page, "Suppress Extrude 1");
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "nothing on screen again");
+      assert.deepEqual(await state(), noBody);
+      // A width typed adds a new box at the marker (the end): feature-12, 45 × 30 × 20 = 27,000 mm³, drawn where the box was.
+      await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0));
+      await page.fill("#width", "45");
+      await until(page, () => document.querySelector("#volume")?.textContent === "27,000 mm³", null, "the new box");
+      await undoIs(page, "Change width");
+      assert.deepEqual(await state(), { bar: ["feature-1 suppressed", "sketch-2", "feature-11 suppressed", "feature-12", "|"], drawn: { box: true, square: false }, volume: "27,000 mm³", red: [] });
+      // The new box is framed (a new shape), so the camera stays there once it is undone: the box's top may now
+      // sit over a grid line, not the plain background, so its pixel is checked to have left the box's colour.
+      const [, boxColour] = await colours(page, [BOX_TOP]);
+      await undo();
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "the new box undone");
+      const { drawn: _, ...rest } = await state();
+      const { drawn: __, ...want } = noBody;
+      assert.deepEqual(rest, want);
+      const [, boxNow, squareNow] = await colours(page, [BOX_TOP, layout.top]);
+      assert.ok(differs(boxNow, boxColour), `the box's pixel ${boxNow} is still its colour ${boxColour}`);
+      // A top face is lit the same whichever body it is, so the square's spot must not show it either.
+      assert.ok(differs(squareNow, boxColour), `the square's pixel ${squareNow} shows a top face`);
+      await undo();
       await undo();
       await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "undone");
       assert.deepEqual(await state(), all);
@@ -297,6 +341,19 @@ try {
       assert.deepEqual(await state(), all);
       assert.equal(await undoTitle(page), step, "nothing recorded");
       assert.equal(await menuOpen(), false);
+
+      // 7. Every item deleted, last first (24f4): an empty timeline and an empty view; three Undos give everything back.
+      for (const [id, step] of [["feature-11", "Delete Extrude 1"], ["sketch-2", "Delete Sketch 1"], ["feature-1", "Delete Feature 1 (box)"]]) {
+        await barMenu(id);
+        await choose("delete");
+        await undoIs(page, step);
+      }
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "nothing left");
+      assert.deepEqual(await state(), { bar: ["|"], drawn: { box: false, square: false }, volume: "—", red: [] });
+      if (shots) await page.screenshot({ path: `${shots}/emptied-${width}.png` });
+      for (let k = 0; k < 3; k++) await undo();
+      await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "all back");
+      assert.deepEqual(await state(), all);
 
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();

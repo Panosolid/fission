@@ -13,9 +13,10 @@
 //   and the marker, are the model's (ids mapped through the edits' new ids);
 // - every new id is one no state undo or redo can reach held, ids are
 //   unique and the counter is above them all;
-// - Design's part (`lastFeature`) is the model's last solid item that builds;
+// - Design's part (`partFeature`) is the model's last solid item that
+//   builds, or none when the model builds nothing;
 // - save, open and save again is byte-identical, and opening gives the same
-//   document; a document with nothing built is refused with its message.
+//   document, a document with nothing built too (24f4: it opens with no body).
 // 24d2 replaces this with Design's timeline as a full `TimelineSubject` on
 // the real kernel; `DATA_FAULTS` are planted bugs proving each check fails.
 
@@ -31,8 +32,8 @@ import {
   insertPreset,
   isSketchExtrude,
   isSketchItem,
-  lastFeature,
   partDocument,
+  partFeature,
   readDesignDocument,
   setExtrudeDistance,
   shapeOf,
@@ -59,18 +60,17 @@ export type DataFault =
 
 export const DATA_FAULTS: readonly DataFault[] = ["extrude-replaces", "insert-ignores-marker", "save-drops-marker", "part-ignores-suppressed", "preset-edit-new-id", "distance-to-part"];
 
-/** The checks each planted bug must fail (a lost marker fails the round trip, or opens a document that should be refused). */
+/** The checks each planted bug must fail (a lost marker fails the round trip). */
 export const DATA_FAULT_CHECK: Record<DataFault, readonly string[]> = {
   "extrude-replaces": ["items differ from the model"],
   "insert-ignores-marker": ["items differ from the model"],
-  "save-drops-marker": ["save and open changed the document", "a document with nothing built was opened"],
+  "save-drops-marker": ["save and open changed the document"],
   "part-ignores-suppressed": ["the part differs from the model"],
   "preset-edit-new-id": ["items differ from the model"],
   "distance-to-part": ["items differ from the model"],
 };
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
-const NOTHING_BUILT = /^Error: can't open the design workspace's data: Design data builds no body: /;
 
 /** One item as both sides describe it: kind, input, sizes, suppressed. */
 type Row = string;
@@ -163,11 +163,7 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
       const end = marker === undefined ? features.length : marker === "start" ? 0 : features.findIndex((f) => f.id === marker) + 1;
       return [...features.slice(0, end)].reverse().find((f) => !isSketchItem(f))?.id ?? null;
     }
-    try {
-      return lastFeature(doc).id;
-    } catch {
-      return null;
-    }
+    return partFeature(doc)?.id ?? null;
   };
   /** Puts a new item last, as the planted bug does. */
   const last = (doc: DesignDocument, id: string): DesignDocument => {
@@ -200,7 +196,8 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
         const f = doc.timeline.features.find((x) => x.id === id)!;
         if (isSketchExtrude(f)) {
           // Planted bug: the distance goes to the part when the part is an extrude.
-          const wrong = fs.has("distance-to-part") && part(doc) !== null && isSketchExtrude(lastFeature(doc));
+          const at = partFeature(doc);
+          const wrong = fs.has("distance-to-part") && at !== null && isSketchExtrude(at);
           return { doc: wrong ? setExtrudeDistance(doc, op.value) : setExtrudeDistance(doc, op.value, id), made: [] };
         }
         const { shape, sizes } = shapeOf(doc, f);
@@ -241,15 +238,15 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
       const text = save(side.doc);
       try {
         side.doc = projectFromJson(text, DESIGN).workspaces.design as DesignDocument;
-        side.undo = [];
-        side.redo = [];
-        model.undo = [];
-        model.redo = [];
-        count("op:save-open");
       } catch (e) {
-        if (!NOTHING_BUILT.test(String(e))) fail("a saved document was refused", String(e));
-        count("refused:nothing-built");
+        return fail("a saved document was refused", String(e));
       }
+      side.undo = [];
+      side.redo = [];
+      model.undo = [];
+      model.redo = [];
+      count("op:save-open");
+      if (partFeature(side.doc) === null) count("save-open:nothing-built");
     } else if (resolved.kind === "edit") {
       const op = resolved.op;
       const want = applyOp(model, op);
@@ -316,16 +313,15 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
     const want = modelPart(model.doc);
     const got = part(side.doc);
     if ((got === null ? null : name(got)) !== want) fail("the part differs from the model", `Design ${got === null ? "none" : name(got)}, model ${want ?? "none"}`);
-    // Saved and opened: the same document, the same text again; nothing built is refused with its reason.
+    // Saved and opened: the same document, the same text again; nothing built too (24f4).
+    if (want === null) count("nothing-built");
     const text = save(side.doc);
     let opened: DesignDocument;
     try {
       opened = projectFromJson(text, DESIGN).workspaces.design as DesignDocument;
     } catch (e) {
-      if (want === null && NOTHING_BUILT.test(String(e))) return void count("nothing-built");
       return fail("a saved document was refused", String(e));
     }
-    if (want === null) fail("a document with nothing built was opened", "it should be refused until 24d3 can show it");
     if (canonical(opened) !== canonical(side.doc)) fail("save and open changed the document", `${canonical(side.doc)} became ${canonical(opened)}`);
     if (save(opened) !== text) fail("save and open changed the document", "the second save differs from the first");
   });
