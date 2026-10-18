@@ -1194,6 +1194,56 @@ try {
     }
   });
 
+  await check("Save and Open pressed while the app is still reopening the stored project wait for it", async () => {
+    // Found by the monkey tester (seed 109, CPU slowed): Save pressed just after a reload wrote the
+    // empty project the app starts from, with no design in it, and a file opened then was replaced by the stored one.
+    const context = await browser.newContext({ viewport: { width: 1000, height: 640 } }); // two tabs sharing one storage
+    const kept = await context.newPage();
+    kept.on("pageerror", (e) => consoleErrors.push(e.message));
+    try {
+      await kept.goto(url + "#design");
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await kept.fill("#width", "50");
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³"); // 50·30·20
+      await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
+      // A second tab of the same browser holds a write on the store, so the reloaded app waits to read it.
+      const holder = await context.newPage();
+      await holder.route(`${url}hold`, (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><title>hold</title>" }));
+      await holder.goto(`${url}hold`);
+      await holder.evaluate(
+        () =>
+          new Promise((held) => {
+            const req = indexedDB.open("fission");
+            req.onsuccess = () => {
+              const db = req.result;
+              const tx = db.transaction([...db.objectStoreNames], "readwrite");
+              const store = tx.objectStore(db.objectStoreNames[0]);
+              const spin = () => { if (!window.release) store.get("hold").onsuccess = spin; }; // a transaction with a request pending stays open
+              spin();
+              tx.oncomplete = () => db.close();
+              held();
+            };
+          }),
+      );
+      await kept.reload({ waitUntil: "domcontentloaded" });
+      const download = kept.waitForEvent("download");
+      await kept.click("#save");
+      const wide = JSON.parse(readFileSync("e2e/saved.fission.json", "utf8"));
+      wide.workspaces.design.timeline.features[0].intent.parameters.width = 60;
+      await kept.setInputFiles("#open-file", { name: "wide.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(wide)) });
+      await holder.evaluate(() => (window.release = true));
+      const file = JSON.parse(readFileSync(await (await download).path(), "utf8"));
+      assert.deepEqual(file.workspaces.design?.timeline.features[0].intent.parameters, { width: 50, depth: 30, height: 20 }, "Save waited for the stored project");
+      // Opened after the stored project came back, so it stays: 60·30·20 = 36000.
+      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "36,000 mm³");
+      await kept.waitForTimeout(500); // nothing replaces it a moment later
+      assert.equal(await kept.textContent("#volume"), "36,000 mm³");
+      assert.equal(await kept.inputValue("#width"), "60");
+    } finally {
+      await context.close();
+    }
+  });
+
   // Reads IndexedDB keys in a page, straight from the database (not through the app).
   const storedKeys = (p) =>
     p.evaluate(async () => {
