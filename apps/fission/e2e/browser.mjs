@@ -22,5 +22,20 @@ export function launch() {
   // and Mesa's software GL.
   if (browserName === "firefox") options.firefoxUserPrefs = { "webgl.force-enabled": true, "webgl.disabled": false, "webgl.enable-webgl2": true };
   if (process.env.E2E_HEADED) options.headless = false;
-  return ENGINES[browserName].launch(options);
+  return ENGINES[browserName].launch(options).then(underTestCSP);
+}
+
+/**
+ * The app's Content Security Policy (index.html, audit S10) refuses strings
+ * run as script, and Playwright's waitForFunction polls by evaluating one in
+ * the page, so every context these tests open bypasses the policy unless it
+ * passes `bypassCSP: false`. e2e/framing.mjs does, and checks the app under
+ * the real policy there (the kernel's WebAssembly, what it refuses).
+ */
+function underTestCSP(browser) {
+  const newContext = browser.newContext.bind(browser);
+  const newPage = browser.newPage.bind(browser);
+  browser.newContext = (options = {}) => newContext({ bypassCSP: true, ...options });
+  browser.newPage = (options = {}) => newPage({ bypassCSP: true, ...options });
+  return browser;
 }
