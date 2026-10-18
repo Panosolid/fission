@@ -12,7 +12,11 @@
 //! - every face has one role, exactly the roles the shape must have, with
 //!   the area and centroid the harness works out from the shape itself
 //!   (step 24b, `face_model`), and moves and turns carry each face's role
-//!   and centroid with it (`check_faces`);
+//!   and centroid with it (`check_faces`), measured on the baked body and,
+//!   more tightly, in the body's own frame (`Placed::face_masses`, 24d3);
+//! - every edge joins two faces, the one walking it forwards first
+//!   (`edge_faces`), checked against the loops and by geometry
+//!   (`check_edge_pairs`);
 //! - replaying the same chain gives bit-identical bodies and meshes.
 //!
 //! Values are biased towards coincidences (a 0.5 grid, values reused from
@@ -46,7 +50,7 @@ use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_
 use fission_kernel::placed::Placed;
 use fission_kernel::sketch;
 use fission_kernel::stl;
-use fission_kernel::face_mass::face_masses;
+use fission_kernel::face_mass::{face_masses, FaceMass};
 use fission_kernel::geom::Curve;
 use fission_kernel::topology::{Body, FaceRole, Piece as PieceId};
 use fission_kernel::validate::validate;
@@ -1520,7 +1524,15 @@ fn check_face_model(shape: &Shape, body: &Body, m: &Measure) -> Result<(), Strin
 fn check_faces(s: &Slot) -> Result<(), String> {
     let Some(b) = &s.body else { return Ok(()) };
     let baked = b.baked();
-    let world = face_masses(&baked);
+    baked_faces_off(s, b, &baked)?;
+    placed_centroids_off(s, &b.face_masses())?;
+    check_edge_pairs(&b.body, &baked)
+}
+
+/// `check_faces` on the baked body: roles kept, centroids and areas where
+/// the harness's matrix puts them, with the allowances above.
+fn baked_faces_off(s: &Slot, b: &Placed, baked: &Body) -> Result<(), String> {
+    let world = face_masses(baked);
     let local = face_masses(&b.body);
     let now = body_reach(b) + s.affine.translation.abs().max_element();
     let (lo, hi) = baked.bounds();
@@ -1533,12 +1545,95 @@ fn check_faces(s: &Slot) -> Result<(), String> {
         }
         let expected = s.affine.transform_point3(s.start_faces[f]);
         let off = expected.distance(w.centroid);
-        let allowed = delta + tolerance::MASS_PROPS_REL * size + corner_rounding(s, b, &baked, f) * face_lever(s, b, f, l.area);
+        let allowed = delta + tolerance::MASS_PROPS_REL * size + corner_rounding(s, b, baked, f) * face_lever(s, b, f, l.area);
         if off.is_nan() || off > allowed {
             return Err(format!("face {f} ({role:?}) centroid is at {} but should be at {expected} ({off:e} off, {allowed:e} allowed)", w.centroid));
         }
         if !tolerance::measure_eq(l.area, w.area, 4.0 * size * delta + 1e-9 * l.area) {
             return Err(format!("face {f} ({role:?}) area {} became {}", l.area, w.area));
+        }
+    }
+    Ok(())
+}
+
+/// What `Placed::face_masses` gives (step 24d3, measured in the body's own
+/// frame, only the centroid carried out) must be where the harness's matrix
+/// puts the unplaced face's centroid, allowing only the placement's own
+/// rounding (`check_position`'s) and MASS_PROPS_REL of the part's size for
+/// the centroid itself; no lever term for corners rounded far out, since
+/// no corner is moved. `got` is passed in so a test can hand it broken
+/// answers.
+fn placed_centroids_off(s: &Slot, got: &[fission_kernel::face_mass::FaceMass]) -> Result<(), String> {
+    let Some(b) = &s.body else { return Ok(()) };
+    if got.len() != b.body.faces.len() {
+        return Err(format!("{} face centroids for {} faces", got.len(), b.body.faces.len()));
+    }
+    let allowed = placed_centroid_allowance(s, b);
+    for (f, m) in got.iter().enumerate() {
+        let expected = s.affine.transform_point3(s.start_faces[f]);
+        let off = expected.distance(m.centroid);
+        if off.is_nan() || off > allowed {
+            return Err(format!("face {f} ({:?}) placed centroid is at {} but should be at {expected} ({off:e} off, {allowed:e} allowed)", b.body.faces[f].role, m.centroid));
+        }
+    }
+    Ok(())
+}
+
+fn placed_centroid_allowance(s: &Slot, b: &Placed) -> f64 {
+    let now = body_reach(b) + s.affine.translation.abs().max_element();
+    let (lo, hi) = b.bounds();
+    4.0 * tolerance::rounding_slack(now.max(s.reach)) * (s.steps as f64 + 1.0) + tolerance::MASS_PROPS_REL * (hi - lo).length()
+}
+
+/// Every edge joins two faces (`edge_faces`, 24c1), the same two its
+/// coedges are in, the first the one walking it forwards; and the baked
+/// body has the same pairs. Which face walks it forwards is checked by
+/// geometry, not by the loops: a face's interior lies to the left of an
+/// edge it walks forwards (normal × tangent points into it), so its
+/// centroid c satisfies (c − m) · (n × t) > 0 at the edge's midpoint m. That
+/// holds for every face the harness makes but an extrude's caps, which need
+/// not be convex: a box's rectangles and a cylinder's discs (half the width
+/// across), a sphere's halves (r/2 above or below the equator), and every
+/// side band, whose centroid is d/2 up from a cap edge and, from an upright,
+/// along its piece (a line's midpoint, or an arc's centroid, (1 − cos θ)/θ
+/// · r along the tangent where it starts). Measured in the local frame.
+fn check_edge_pairs(local: &Body, baked: &Body) -> Result<(), String> {
+    let pairs = fission_kernel::edge_faces(local);
+    if fission_kernel::edge_faces(baked) != pairs {
+        return Err("placing the body changed which faces its edges join".into());
+    }
+    edge_pairs_off(local, &pairs)
+}
+
+fn edge_pairs_off(body: &Body, pairs: &[Option<[usize; 2]>]) -> Result<(), String> {
+    if pairs.len() != body.edges.len() {
+        return Err(format!("{} edge pairs for {} edges", pairs.len(), body.edges.len()));
+    }
+    let mut uses = vec![(vec![], vec![]); body.edges.len()];
+    for (f, face) in body.faces.iter().enumerate() {
+        for c in face.loops.iter().flat_map(|l| &l.coedges) {
+            if c.reversed { uses[c.edge].1.push(f) } else { uses[c.edge].0.push(f) }
+        }
+    }
+    let centroids = face_masses(body);
+    for (e, pair) in pairs.iter().enumerate() {
+        let Some([f, g]) = *pair else { return Err(format!("edge {e} joins no two faces")) };
+        if (uses[e].0.as_slice(), uses[e].1.as_slice()) != (&[f][..], &[g][..]) {
+            return Err(format!("edge {e} joins faces {f} > {g}, but its loops say {:?} > {:?}", uses[e].0, uses[e].1));
+        }
+        let edge = &body.edges[e];
+        let mid = 0.5 * (edge.t0 + edge.t1);
+        let (m, t) = (edge.curve.eval(mid), edge.curve.tangent(mid));
+        for (face, along) in [(f, t), (g, -t)] {
+            if matches!(body.faces[face].role, Some(FaceRole::Start | FaceRole::End)) {
+                continue;
+            }
+            let sense = if body.faces[face].sense { 1.0 } else { -1.0 };
+            let n = body.faces[face].surface.normal_at(m) * sense;
+            if (centroids[face].centroid - m).dot(n.cross(along)) <= 0.0 {
+                let way = if face == f { "forwards" } else { "backwards" };
+                return Err(format!("edge {e}: face {face} ({:?}) is said to walk it {way}, but lies on its right", body.faces[face].role));
+            }
         }
     }
     Ok(())
@@ -2504,9 +2599,107 @@ fn a_long_thin_face_far_out_is_allowed_its_rounding() {
     for dir in [DVec3::X, DVec3::Y, DVec3::Z] {
         for (k, pass) in [(0.9, true), (1.1, false)] {
             s.start_faces[f] = affine.inverse().transform_point3(centroid + dir * (k * allowed));
-            assert_eq!(check_faces(&s).is_ok(), pass, "{k} × {allowed:e} along {dir}: {:?}", check_faces(&s));
+            let got = baked_faces_off(&s, &placed, &baked);
+            assert_eq!(got.is_ok(), pass, "{k} × {allowed:e} along {dir}: {got:?}");
         }
     }
+}
+
+#[test]
+fn placed_face_centroids_need_no_allowance_for_far_corners() {
+    // Step 24d3: the same 1 km × 36 mm × 1.1 µm box 100 km out as above,
+    // measured in its own frame with only the centroid carried out
+    // (`Placed::face_masses`), lands within the placement's own rounding
+    // and the size allowance: no lever term.
+    let base = primitives::make_box(999999.999999, 36.0, 0.0011).unwrap();
+    let (flip, pivot) = (DVec3::new(1.0, 1.0, 0.0), DVec3::new(0.0, -7.0, 0.0));
+    let axis = DVec3::new(0.0, 0.7231947291110354, -0.9344924436458961);
+    let (angle, by) = (9.590236344901994, DVec3::new(0.0, 99999999.0, 0.0));
+    let built = transform::rotate(&Placed::new(base.clone()), DVec3::ZERO, flip, PI).unwrap();
+    let turned = transform::rotate(&built, pivot, axis, angle).unwrap();
+    let placed = transform::translate(&turned, by).unwrap();
+    let turn = glam::DAffine3::from_translation(pivot) * rotation(axis, angle) * glam::DAffine3::from_translation(-pivot);
+    let affine = glam::DAffine3::from_translation(by) * turn * rotation(flip, PI);
+    let mut s = placed_slot(&base, placed.clone(), affine, 3);
+    let good = placed.face_masses();
+    placed_centroids_off(&s, &good).unwrap();
+    // The allowance by hand: 4 × rounding_slack(reach) × (3 steps + 1) +
+    // MASS_PROPS_REL × the box's diagonal, with nothing for the strip's
+    // length over its width.
+    let (lo, hi) = placed.bounds();
+    let reach = (body_reach(&placed) + affine.translation.abs().max_element()).max(s.reach);
+    let allowed = 16.0 * tolerance::rounding_slack(reach) + tolerance::MASS_PROPS_REL * (hi - lo).length();
+    assert!(tolerance::rel_eq(placed_centroid_allowance(&s, &placed), allowed, tolerance::FP_REL));
+    // Planted bugs, each caught: measured on the baked body (the old way,
+    // ~1 mm off), the centroid left at home, or carried out twice.
+    let f = face_with(&base, FaceRole::Front);
+    let baked = face_masses(&placed.baked());
+    let home = face_masses(&placed.body);
+    let twice: Vec<_> = good.iter().map(|m| FaceMass { centroid: placed.placement.point(m.centroid), ..*m }).collect();
+    for (bug, got) in [("baked", baked), ("home", home), ("twice", twice)] {
+        let err = placed_centroids_off(&s, &got).expect_err(bug);
+        assert!(err.contains("placed centroid"), "{bug}: {err}");
+    }
+    let err = placed_centroids_off(&s, &good[1..]).unwrap_err();
+    assert!(err.contains("5 face centroids for 6 faces"), "{err}");
+    // The check's edge: an expected centroid 0.9× the allowance away
+    // passes, 1.1× fails, whichever way it is off.
+    for dir in [DVec3::X, DVec3::Y, DVec3::Z] {
+        for (k, pass) in [(0.9, true), (1.1, false)] {
+            s.start_faces[f] = affine.inverse().transform_point3(good[f].centroid + dir * (k * allowed));
+            let got = placed_centroids_off(&s, &good);
+            assert_eq!(got.is_ok(), pass, "{k} × {allowed:e} along {dir}: {got:?}");
+        }
+    }
+}
+
+#[test]
+fn edge_pairs_by_hand_and_broken() {
+    // A 1 × 2 × 3 box: 12 edges, each joining two of its six faces, the
+    // first walking it forwards. Its bottom face (z = 0, normal −Z) runs
+    // counter-clockwise seen from below, so the edge along x at y = 0, z = 0
+    // is walked by the bottom one way and by the front (y = 0) the other;
+    // the front's centroid (0.5, 0, 1.5) from that edge's midpoint
+    // (0.5, 0, 0) is (0, 0, 1.5), and the bottom's is (0, 1, 0): whichever
+    // walks it forwards has that offset on its left.
+    let b = primitives::make_box(1.0, 2.0, 3.0).unwrap();
+    let pairs = fission_kernel::edge_faces(&b);
+    edge_pairs_off(&b, &pairs).unwrap();
+    let (front, bottom) = (face_with(&b, FaceRole::Front), face_with(&b, FaceRole::Bottom));
+    let e = pairs.iter().position(|p| matches!(p, Some([f, g]) if [*f, *g] == [front, bottom] || [*f, *g] == [bottom, front])).unwrap();
+    let edge = &b.edges[e];
+    let t = edge.curve.tangent(0.5 * (edge.t0 + edge.t1));
+    // Forwards along +x: the front (normal −Y) has −Y × +X = +Z on its
+    // left, towards its centroid; along −x the bottom (−Z) has −Z × −X = +Y.
+    let forwards = if t.x > 0.0 { front } else { bottom };
+    assert_eq!(pairs[e].unwrap()[0], forwards, "{t}");
+    // A cylinder and a sphere pass too; so does every extrude the harness
+    // makes (checked in every case).
+    for body in [primitives::make_cylinder(2.0, 5.0).unwrap(), primitives::make_sphere(3.0).unwrap()] {
+        edge_pairs_off(&body, &fission_kernel::edge_faces(&body)).unwrap();
+    }
+    // Planted bugs, each caught by its own check: a pair swapped (the
+    // loops), the loops' answer flipped on the body too (the geometry), an
+    // edge with no pair, one pair missing, one face twice.
+    let mut swapped = pairs.clone();
+    swapped[e] = pairs[e].map(|[f, g]| [g, f]);
+    assert!(edge_pairs_off(&b, &swapped).unwrap_err().contains("its loops say"));
+    let mut flipped = b.clone();
+    for face in &mut flipped.faces {
+        for l in &mut face.loops {
+            l.coedges.iter_mut().filter(|c| c.edge == e).for_each(|c| c.reversed = !c.reversed);
+        }
+    }
+    assert!(edge_pairs_off(&flipped, &fission_kernel::edge_faces(&flipped)).unwrap_err().contains("lies on its right"));
+    let mut none = pairs.clone();
+    none[e] = None;
+    assert!(edge_pairs_off(&b, &none).unwrap_err().contains("joins no two faces"));
+    assert!(edge_pairs_off(&b, &pairs[1..]).unwrap_err().contains("11 edge pairs for 12 edges"));
+    let mut twice = pairs.clone();
+    twice[e] = Some([front, front]);
+    assert!(edge_pairs_off(&b, &twice).unwrap_err().contains("its loops say"));
+    // Placing keeps the pairs; a body whose pairs differ is caught.
+    assert!(check_edge_pairs(&b, &flipped).unwrap_err().contains("changed which faces"));
 }
 
 fn strip_with_bulges(pts: &[(f64, f64)], bulges: &[f64], dist: f64) -> Shape {
