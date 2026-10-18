@@ -509,7 +509,7 @@ try {
     await page.mouse.move(0, 0);
     await page.keyboard.press("a");
     assert.equal(await page.getAttribute("#sketch-tool-arc", "aria-pressed"), "true", "A chose Arc");
-    assert.equal(await page.getAttribute("#sketch-tool-arc", "title"), "Arc (A)");
+    assert.equal(await page.getAttribute("#sketch-tool-arc", "title"), "3-point arc (A)");
     assert.match(await page.textContent("#sketch-help"), /^Click the start, then the end, then a point the arc passes through/);
     // Start on the line's end (40, 0); a second click there says why and draws nothing.
     await at(page, [40.5, 1], TOP);
@@ -647,14 +647,14 @@ try {
     await page.context().close();
   });
 
-  await check("the tangent arc tool at 375 px with taps: five tool buttons fit and are 44 px, a line then a tangent arc", async () => {
+  await check("the tangent arc tool at 375 px with taps: six tool buttons fit and are 44 px, a line then a tangent arc", async () => {
     const page = await fresh(375, true);
     await page.tap("#create-sketch");
     await page.tap("#sketch-plane-XY");
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
     await page.check("#sketch-grid-snap"); // drawn on the 10 mm grid: grid snap, off by default since SF1 (Firefox clicks land on whole pixels, 0.1 mm off)
     await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
-    for (const id of ["sketch-tool-line", "sketch-tool-rectangle", "sketch-tool-circle", "sketch-tool-arc", "sketch-tool-tangent"]) {
+    for (const id of ["sketch-tool-line", "sketch-tool-rectangle", "sketch-tool-circle", "sketch-tool-arc", "sketch-tool-centre", "sketch-tool-tangent"]) {
       const b = await page.locator(`#${id}`).boundingBox();
       assert.ok(b.height >= 44, `${id} is ${b.height} px tall, at least 44 to tap`);
       assert.ok(b.x >= 0 && b.x + b.width <= 375, `${id} fits across the screen`);

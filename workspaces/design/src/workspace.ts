@@ -22,7 +22,7 @@ import { bodyReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
-import { clickAt, curveCount, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
@@ -448,7 +448,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     void showOutline();
   }
 
-  /** Line, Rectangle, Circle, Arc or Tangent arc (the panel's buttons, or L, R, C, A and T): what was part way through is dropped, as Escape would, except that a line chain and a tangent arc carry on from each other's last point (`switchTool`). */
+  /** Line, Rectangle, Circle or an arc (3-point, centre or tangent; the buttons and Create menu, or L, R, C, A and T): what was part way through is dropped, as Escape would, except that a line chain and a tangent arc carry on from each other's last point (`switchTool`). */
   function chooseTool(kind: ToolKind) {
     if (mode.kind !== "edit" || !editingSketch) return;
     editingSketch.tool = kind;
@@ -615,6 +615,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         mode.pointer = mode.snap = null;
         return drawSketches();
       }
+      // The centre arc follows which way the pointer goes round its centre, from every move (a reply the kernel drops as stale must not lose a turn).
+      mode.tool = hoverTool(mode.tool, at);
       // A hover off the modelling range just doesn't move the preview.
       void snapMove(at, mode.grid, pointer.pixel).then(({ current, value }) => {
         if (!current || mode.kind !== "edit") return;

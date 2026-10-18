@@ -24,3 +24,9 @@
   .sketchbar.sketchbar-create:not(#none) { flex-wrap: wrap; max-width: calc(100vw - 24px); flex-shrink: 0; }
   .sketchbar .sketchbar-menu button:not(#none) { min-height: 44px; align-items: center; }
 }
+/* The Arc row and its own menu of the three arcs, beside the row (under it
+   at phone width). The row is lit while one of its arcs is the tool in use. */
+.sketchbar .sketchbar-menu .sketchbar-menu-more { color: #8a919c; }
+.sketchbar .sketchbar-menu button.sketchbar-menu-holds:not(#none) { border-color: #4aa8ff; }
+.sketchbar .sketchbar-menu button[aria-expanded="true"]:not(#none) { background: #2e333b; }
+.sketchbar .sketchbar-submenu { z-index: 31; }
