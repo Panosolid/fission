@@ -7,7 +7,7 @@
 // camera at the home view (worked out here by hand), not the view from
 // before the sketch, from the toolbar and from the panel alike; Cancel at
 // the plane prompt moves no camera; Undo inside a sketch keeps its
-// toolbar. The same at 375 px with taps: all five tools on screen and 44
+// toolbar. The same at 375 px with taps: all six tools on screen and 44
 // px tall, the menu whole on screen. Screenshots at 1280 and 375 px go to
 // E2E_SHOTS when set. Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
@@ -20,7 +20,7 @@ const url = "http://localhost:4193/?test-hooks";
 const browser = await launch();
 const errors = [];
 const shots = process.env.E2E_SHOTS;
-const TOOLS = ["line", "rectangle", "circle", "arc", "tangent"];
+const TOOLS = ["line", "rectangle", "circle", "arc", "centre", "tangent"];
 
 async function fresh(width = 1280, touch = false) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
@@ -131,7 +131,8 @@ await check("the Create menu: every tool with its key, the tool in use ticked an
     assert.equal(await visible(page, "#sketch-create-menu"), true);
     assert.equal(await page.getAttribute("#sketch-create", "aria-expanded"), "true");
     const rows = await page.$$eval("#sketch-create-menu [role=menuitemradio]", (els) => els.map((e) => [e.querySelector("span").textContent, e.querySelector("kbd").textContent, e.getAttribute("aria-checked")]));
-    assert.deepEqual(rows, [["Line", "L", "true"], ["Rectangle", "R", "false"], ["Circle", "C", "false"], ["Arc", "A", "false"], ["Tangent arc", "T", "false"]]);
+    // The three arcs sit in the Arc row's own menu (centre-arc.mjs checks it opening).
+    assert.deepEqual(rows, [["Line", "L", "true"], ["Rectangle", "R", "false"], ["Circle", "C", "false"], ["3-point arc", "A", "false"], ["Centre arc", "", "false"], ["Tangent arc", "T", "false"]]);
     assert.equal(await page.evaluate(() => document.activeElement.id), "sketch-menu-line");
     // The menu hangs under its button, over the view.
     const button = await rect(page, "#sketch-create");
@@ -147,14 +148,16 @@ await check("the Create menu: every tool with its key, the tool in use ticked an
     assert.equal(await page.getAttribute("#sketch-tool-rectangle", "aria-pressed"), "true");
     assert.equal(await page.getAttribute("#sketch-tool-line", "aria-pressed"), "false");
     assert.match(await page.textContent("#sketch-help"), /^Click one corner, then the opposite corner/);
-    // Arrows: from Rectangle (row 1) Down twice is Arc (row 3); Enter chooses it.
+    // Arrows: from Rectangle (row 1) Down twice is the Arc row (row 3); Enter opens the arcs on 3-point arc, and Enter chooses it.
     await page.click("#sketch-create");
     assert.equal(await page.evaluate(() => document.activeElement.id), "sketch-menu-rectangle");
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "sketch-menu-group-arc");
+    await page.keyboard.press("Enter");
     assert.equal(await page.evaluate(() => document.activeElement.id), "sketch-menu-arc");
     await page.keyboard.press("Enter");
-    assert.equal(await page.getAttribute("#sketch-tool-arc", "aria-pressed"), "true", "Enter chose Arc");
+    assert.equal(await page.getAttribute("#sketch-tool-arc", "aria-pressed"), "true", "Enter chose 3-point arc");
     assert.equal(await visible(page, "#sketch-create-menu"), false);
     // Rectangle by its button; the first corner at (0, 0) on the grid.
     await page.click("#sketch-tool-rectangle");
@@ -271,7 +274,7 @@ await check("Undo inside a sketch keeps the sketch's toolbar and its tool; Extru
   }
 });
 
-await check("at 375 px with taps: all five tools on screen and 44 px tall, the menu whole on screen, Finish Sketch reached by the bar's scroll goes home, no sideways page scroll", async () => {
+await check("at 375 px with taps: all six tools on screen and 44 px tall, the menu whole on screen, Finish Sketch reached by the bar's scroll goes home, no sideways page scroll", async () => {
   const page = await fresh(375, true);
   try {
     await page.tap("#create-sketch");
@@ -285,7 +288,7 @@ await check("at 375 px with taps: all five tools on screen and 44 px tall, the m
     await page.tap("#sketch-create");
     const menu = await rect(page, "#sketch-create-menu");
     assert.ok(menu.left >= 0 && menu.right <= 375 && menu.bottom <= 800, `the menu on screen: ${JSON.stringify(menu)}`);
-    for (const t of TOOLS) assert.ok((await rect(page, `#sketch-menu-${t}`)).height >= 44, `the ${t} row is 44 px tall`);
+    for (const t of ["line", "rectangle", "circle", "group-arc"]) assert.ok((await rect(page, `#sketch-menu-${t}`)).height >= 44, `the ${t} row is 44 px tall`);
     if (shots) await page.screenshot({ path: `${shots}/sketch-toolbar-menu-375.png` });
     await page.tap("#sketch-menu-circle");
     assert.equal(await page.getAttribute("#sketch-tool-circle", "aria-pressed"), "true");
