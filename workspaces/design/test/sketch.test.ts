@@ -238,10 +238,12 @@ test("a file with sketches that breaks a rule is refused when it is opened, each
     [(d) => (d.timeline.features[1].intent.parameters.plane = "AB"), /sketch-2 is on AB, not a plane this Panoshape knows \(XY, XZ or YZ\)/],
     [(d) => d.sketches[0].points.push({ id: "point-3", x: 1, y: 1 }), /^Error: Design id point-3 is used twice$/],
     [(d) => (d.sketches[0].curves[0].id = "feature-1"), /^Error: Design id feature-1 is used twice$/],
-    // Every item a sketch: there is no part to show.
-    [(d) => d.timeline.features.shift(), /Design data has no part: every timeline item is a sketch/],
   ];
   for (const [edit, message] of cases) assert.throws(broken(edit), message);
+  // Every item a sketch is no longer refused (24f4): a design with no body, opened as one.
+  const sketchesOnly = broken((d) => d.timeline.features.shift())();
+  assert.deepEqual(sketchesOnly.timeline.features.map((f) => f.id), ["sketch-2"]);
+  assert.equal(partOf(sketchesOnly), null);
 });
 
 test("version 1 data holding version 2's fields is refused, not half-migrated", () => {

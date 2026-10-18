@@ -88,13 +88,8 @@ export interface TimelineSubject {
   /** A rebuild that ignores any cache; leave it out when there is none. */
   rebuildFromScratch?(): Maybe<Rebuild>;
   save(): Maybe<string>;
-  /**
-   * Opens saved text, with a fresh undo history, as opening a file does.
-   * "nothing built": refused because no body builds, which the harness
-   * accepts only when the model builds none (Design until 24d3); the
-   * subject then keeps what it had.
-   */
-  open(text: string): Maybe<void | "nothing built">;
+  /** Opens saved text, with a fresh undo history, as opening a file does; a document with nothing built too (Design from 24f4). */
+  open(text: string): Maybe<void>;
   /** The name of the face this name resolves to now, or null when it resolves to none. */
   resolve(name: FaceName): Maybe<FaceName | null>;
   /**
@@ -461,20 +456,16 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
     if (resolved.kind === "save-open") {
       const text = await subject.save();
       const before = await subject.rebuild();
-      const refused = await subject.open(text);
-      if (refused === "nothing built") {
-        const r = rebuild(model.doc);
-        const built = r.order.find((id) => { const x = r.results[id]; return x.status === "built" && x.body !== undefined; });
-        if (built !== undefined) fail("a saved document was refused", `nothing built, but the model builds ${built}`);
-        count("refused:nothing-built");
-      } else {
-        const d = rebuildDiff(before, await subject.rebuild());
-        if (d !== null) fail("save and open changed the rebuild", d);
-        if ((await subject.save()) !== text) fail("saving again changed the file", "the second save differs from the first");
-        model.undo = [];
-        model.redo = [];
-        count("op:save-open");
-      }
+      await subject.open(text);
+      const d = rebuildDiff(before, await subject.rebuild());
+      if (d !== null) fail("save and open changed the rebuild", d);
+      if ((await subject.save()) !== text) fail("saving again changed the file", "the second save differs from the first");
+      model.undo = [];
+      model.redo = [];
+      count("op:save-open");
+      // Nothing built opens like anything else (24f4).
+      const r = rebuild(model.doc);
+      if (!r.order.some((id) => r.results[id].status === "built" && r.results[id].body !== undefined)) count("save-open:nothing-built");
     } else if (resolved.kind === "hold-ref") {
       refs = [...refs.filter((n) => !sameName(n, resolved.name)), resolved.name].slice(-MAX_REFS);
       count("op:hold-ref");

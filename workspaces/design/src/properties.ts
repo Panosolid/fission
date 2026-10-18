@@ -37,6 +37,11 @@ export function parameterRows(shape: PartKind): ParameterRow[] {
 
 // The ids are read by the e2e test (#width, #stats[data-stale], #action-note…).
 export const DEFAULT_SIZES: Record<SizeKey, string> = { width: "40", depth: "30", height: "20" };
+/** The panel's words for a design with no body (24f4). */
+export const NO_BODY_FEATURE = "No body: nothing in the timeline builds";
+export const NO_PART = "No body to change: choosing a shape or typing a size adds a new body at the marker.";
+const NONE = "—";
+
 const HTML = `
   <h2>Selection</h2>
   <p id="selection-empty">Nothing selected: click a face or an edge, or a body in the browser.</p>
@@ -45,6 +50,7 @@ const HTML = `
   <div id="selection-actions" class="verbs" role="group" aria-label="Actions for the selection" hidden></div>
   <p id="action-note"></p>
   <h2>Parameters</h2>
+  <p id="no-part" hidden>${NO_PART}</p>
   ${SIZE_KEYS.map((k) => `<label id="${k}-row"><span id="${k}-label"></span> <input id="${k}" type="number" value="${DEFAULT_SIZES[k]}" step="any" /> mm</label>`).join("\n  ")}
   <h2>Feature</h2>
   <dl id="feature-info">
@@ -79,13 +85,16 @@ export interface PropertiesPanel {
   inputs: HTMLInputElement[];
   /** Labels and shows the size inputs for this shape. */
   setShape(shape: PartKind): void;
-  showFeature(feature: Feature): void;
+  /** The part's feature, or null for a design with no body (24f4). */
+  showFeature(feature: Feature | null): void;
   /** What is selected: one row per item, or the empty note. */
   showSelection(rows: readonly SelectionRow[]): void;
   /** Says what the last rebuild took out of the selection ("" hides the note). */
   showSelectionNote(text: string): void;
   /** A built body's name ("Body 3", the heading), numbers and validation, with its problems listed under them. */
   showBody(view: BodyView, name: string): void;
+  /** No body to describe (24f4): the numbers blank and the Parameters' note on how to add one. */
+  showNoBody(): void;
   /** Why the last rebuild failed, or "" once one builds. */
   showError(message: string): void;
   /** An extrude built from its kept shape (step 24d2): what happened and why, or "" for none. */
@@ -113,8 +122,9 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
       }
     },
     showFeature(feature) {
-      $("intent").textContent = feature.intent.summary;
-      $("provenance").textContent = describeProvenance(feature.provenance);
+      $("intent").textContent = feature === null ? NO_BODY_FEATURE : feature.intent.summary;
+      $("provenance").textContent = feature === null ? NONE : describeProvenance(feature.provenance);
+      $("no-part").hidden = feature !== null;
     },
     showSelection(rows) {
       const document = slot.ownerDocument;
@@ -146,6 +156,13 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
       status.className = view.errors.length === 0 ? "ok" : "bad";
       $("body-problems").textContent = view.errors.join("\n");
       $("body-problems").hidden = view.errors.length === 0;
+    },
+    showNoBody() {
+      $("body-heading").textContent = "Body";
+      for (const id of ["volume", "area", "topology", "status"]) $(id).textContent = NONE;
+      $("status").className = "";
+      $("body-problems").textContent = "";
+      $("body-problems").hidden = true;
     },
     showError(message) {
       $("error").textContent = message;

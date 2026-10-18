@@ -4,7 +4,7 @@
 // profile: the verb under a selected profile and Ctrl+C both run it (X6b).
 
 import { outlineToSvg, type Action, type ActionOutcome, type ActionRegistry, type ActionTarget, type RepresentationKind, type Selected, type WorkspaceContext } from "@fission/core";
-import { lastFeature, partOf, profileLabel, type DesignDocument } from "./document.ts";
+import { partFeature, partOf, profileLabel, type DesignDocument } from "./document.ts";
 import { featureSpec } from "./extrude.ts";
 import { bodyReference, readProfileReference } from "./references.ts";
 import { designObjects } from "./representations.ts";
@@ -56,7 +56,8 @@ export function representationsOf(ref: Selected, doc: DesignDocument | undefined
     return doc.profiles.some((p) => p.id === id) ? ["outline"] : [];
   }
   if (ref.kind !== "body") return [];
-  return ref.id === bodyReference(lastFeature(doc).id).id ? ["solid", "mesh"] : [];
+  const part = partFeature(doc);
+  return part !== null && ref.id === bodyReference(part.id).id ? ["solid", "mesh"] : [];
 }
 
 /** The selection as action targets. */
@@ -64,9 +65,13 @@ export function targetsOf(items: readonly Selected[], doc: DesignDocument | unde
   return items.map((ref) => ({ ref, representations: representationsOf(ref, doc) }));
 }
 
-/** The reference to the part's one body, for "the whole part" (the toolbar's STL button, the AI's export_stl). */
-export function partBody(doc: DesignDocument): Selected {
-  return bodyReference(lastFeature(doc).id);
+/** What the toolbar's STL button says for a design with no body (24f4). */
+export const NO_BODY_STL = "There is no body to download: nothing in the timeline builds.";
+
+/** The reference to the part's one body, for "the whole part" (the toolbar's STL button, the AI's export_stl); null for a design with no body (24f4). */
+export function partBody(doc: DesignDocument): Selected | null {
+  const part = partFeature(doc);
+  return part === null ? null : bodyReference(part.id);
 }
 
 /**
@@ -89,10 +94,12 @@ export function designActions(save: SaveFile = download, copy: CopySvg = copyToC
       if (!doc) return { message: "There is no part to download yet.", bad: true };
       if (targets.length !== 1) return { message: `Download STL takes one body, not ${targets.length} things.`, bad: true };
       if (!representationsOf(target, doc).includes("mesh")) return { message: `${target.id} is not a body of the part, so there is nothing to download.`, bad: true };
-      const shape = partOf(doc).shape;
+      // representationsOf offers a mesh only for the part, so there is one.
+      const part = partFeature(doc)!;
+      const shape = partOf(doc)!.shape;
       const kind = shape === "sketch-extrude" ? "extrude" : shape;
       try {
-        const file = await ctx.kernel.call("export_stl", await featureSpec(ctx.kernel, doc, lastFeature(doc)), kind);
+        const file = await ctx.kernel.call("export_stl", await featureSpec(ctx.kernel, doc, part), kind);
         save(file.bytes, `fission-${kind}.stl`);
         // Mark the part on screen too: every face moves in single precision.
         if (file.warning)

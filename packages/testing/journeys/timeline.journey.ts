@@ -577,6 +577,8 @@ test("seeded sessions: Design's timeline on the real kernel passes runSession fo
     // Step 24e: edits that build nothing and edits that build every changed body.
     "builds:none",
     "builds:most",
+    // Step 24f4: a design with nothing built saved and opened, like any other.
+    "save-open:nothing-built",
   ];
   const missing = wanted.filter((k) => !total[k]);
   assert.deepEqual(missing, [], `never reached: ${missing.join(", ")}`);

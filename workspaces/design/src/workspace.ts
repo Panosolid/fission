@@ -5,7 +5,7 @@
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import type { ShapeKind } from "./profiles.ts";
-import { isSketchItem, lastFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
+import { isSketchItem, partFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
 import { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
 import { extrudePanel } from "./extrude-panel.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
@@ -33,7 +33,7 @@ import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawSt
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
-import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
+import { COPY_SVG, DOWNLOAD_STL, NO_BODY_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
 /**
  * What the user last entered (as typed), kept while other workspaces are
@@ -218,9 +218,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shape = saved.shape;
     inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
   } else if (held) {
-    const part = partOf(held); // readDesignDocument checked it when the file was opened
-    shape = part.shape;
-    for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+    const part = partOf(held); // readDesignDocument checked it when the file was opened; null when it has no body (24f4)
+    if (part) {
+      shape = part.shape;
+      for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+    }
     loaded = held;
     framedKind = null; // an opened file is a new part: frame it (not after Undo or Redo: keepCamera)
   }
@@ -258,8 +260,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // The Feature and Body sections describe the selected body (else the last one), with the browser's number for it.
     const focus = panelBody(items, lastScene);
     const feature = focus && doc.timeline.features.find((f) => f.id === focus.feature);
-    panel.showFeature(feature ?? lastFeature(doc));
+    const part = partFeature(doc);
+    panel.showFeature(feature ?? part);
     if (focus && feature) panel.showBody(focus.view, `Body ${focus.place}`);
+    else if (part === null) panel.showNoBody(); // a design with no body (24f4)
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -290,14 +294,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * Every body the timeline built, joined for drawing (scene.ts, 24d3b)
    * and, when a body is built from a kept shape, the warning (the last
    * such); or throws why the part (the last solid feature) has no body.
+   * A design with no part (24f4) builds an empty scene.
    */
   async function buildPart(doc: DesignDocument) {
-    const feature = lastFeature(doc);
+    const feature = partFeature(doc);
     const build = await rebuildTimeline(doc, bodies, kernel);
     failedNow = new Set(Object.keys(build.results).filter((id) => build.results[id].status === "failed"));
-    const result = build.results[feature.id];
-    if (result.status === "failed") throw new Error(result.message);
-    if (result.status !== "built" || result.body === undefined || result.spec === undefined) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
+    const result = feature && build.results[feature.id];
+    if (result?.status === "failed") throw new Error(result.message);
+    if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
     const drawn = await shownBodies(doc, build, bodies);
     let kept: { feature: string; label: string; warning: KeptWarning } | undefined;
     for (const f of bodyFeatures(doc)) {
@@ -353,7 +358,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // The whole part's STL: the same verb a selected body offers, from the registry.
     if (command.op === "export_stl") {
       const doc = ctx.project.workspaces.design as DesignDocument | undefined;
-      return runAction(DOWNLOAD_STL, doc ? [partBody(doc)] : []);
+      const body = doc && partBody(doc);
+      if (!body) return panel.showActionNote(NO_BODY_STL, true);
+      return runAction(DOWNLOAD_STL, [body]);
     }
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
     const kind = command.shape as ShapeKind;
@@ -369,7 +376,6 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   async function update(label?: string, mergeKey?: string, next?: DesignDocument) {
     const kind = shape;
-    for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === kind));
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
     // The panel edits the part's one solid feature, keeping the sketches; the
@@ -377,6 +383,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // first edit. An extrude of a sketch has one size, its distance (the height box).
     const current = ctx.project.workspaces.design as DesignDocument | undefined;
     const doc = next ?? loaded ?? (kind === "sketch-extrude" && current ? setExtrudeDistance(current, Number(inputs[2].value)) : documentFor(partCommand(), current));
+    // No shape is pressed while the design has no body (24f4).
+    const pressed = partFeature(doc) === null ? null : kind;
+    for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === pressed));
     // An opened document is all new to the graph: out of date until it builds.
     const before = loaded ? null : (current ?? null);
     loaded = undefined;
@@ -462,10 +471,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     record(step, next) {
       leaveExtrude();
       if (mode.kind !== "none") leaveSketch();
-      // The part the panel shows may now be another feature (the last body that still builds).
+      // The part the panel shows may now be another feature (the last body that still builds), or none (24f4):
+      // then the boxes stay, and a size typed adds a preset of the shape shown (a box when it was an extrude).
       const part = partOf(next);
-      shape = part.shape;
-      for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+      if (part) {
+        shape = part.shape;
+        for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
+      } else if (shape === "sketch-extrude") shape = "box";
       void update(step, undefined, next);
     },
     ask: (q, go) => deleting.ask(q, go),
@@ -495,16 +507,18 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       ctx.graph.markFresh(PART_VIEW);
       markStale();
       viewport.showBody(scene.mesh);
+      const empty = scene.bodies.length === 0;
       // A different shape is a new part: frame it (not when Undo or Redo put
-      // it back: the camera stays unless the body no longer fits).
+      // it back: the camera stays unless the body no longer fits). With no
+      // body (24f4) the camera stays where it is, for the body's return.
       const newPart = kind !== framedKind && !keepCamera;
       keepCamera = false;
-      if (newPart || needsRefit(framed, viewport.bodyFraming())) {
+      if (!empty && (newPart || needsRefit(framed, viewport.bodyFraming()))) {
         framed = viewport.fit();
         viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
         viewport.element.dataset.fits = String(++fits);
       }
-      framedKind = kind;
+      if (!empty) framedKind = kind;
       panel.showError("");
       // Faces and edges the edit took off the body leave the selection, with a
       // note (17e); the rest follow their names, however the kernel numbers them now.
@@ -518,7 +532,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       panel.showSelectionNote(note);
       showSelection();
-      viewport.element.dataset.shape = kind; // read by the e2e test: what is on screen
+      viewport.element.dataset.shape = empty ? "none" : kind; // read by the e2e test: what is on screen
     } catch (e) {
       if (!shown) return void (missed = true);
       missed = false;
@@ -600,7 +614,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     showKept(); // the rows are new: mark them again until the rebuild says otherwise
     markStale();
     // The part extrudes this sketch: rebuild it from the edited lines (a live link; an open sketch fails with the kernel's reason).
-    if (lastFeature(next).dependsOn.includes(sketchId)) void show(next, shape);
+    if (partFeature(next)?.dependsOn.includes(sketchId)) void show(next, shape);
   }
 
   /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
@@ -785,7 +799,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const before = designDoc();
     const made = extrudeSketch(before, id, distance);
     try {
-      await buildSpec(kernel, await featureSpec(kernel, made.doc, lastFeature(made.doc)));
+      await buildSpec(kernel, await featureSpec(kernel, made.doc, made.doc.timeline.features.find((f) => f.id === made.id)!));
     } catch (e) {
       if (extruding?.sketch === id) extrudeBox.showError(e instanceof Error ? e.message : String(e));
       return;

@@ -22,7 +22,7 @@
 // shortest text that fails the same way.
 
 import { FORMAT_VERSION, MAX_NESTING, emptyProject, projectFromJson, projectToJson, type DataReader, type Project } from "@fission/core";
-import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, insertPreset, lastFeature, migrateDesignV1, migrateDesignV2, partDocument, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
+import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, insertPreset, migrateDesignV1, migrateDesignV2, partDocument, partFeature, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
@@ -96,7 +96,9 @@ function randomJson(r: SeededRandom, depth = 0): unknown {
  * chained, so they share points, circles (22b), some round a point
  * already there, and arcs (23a), some from a point already there;
  * sometimes the part extrudes one; from 24d1 several solid features and a
- * rollback marker), sometimes as the version 1 data saved before step 21b
+ * rollback marker; from 24f4 sometimes nothing built: the marker at the
+ * start, every solid suppressed, or everything deleted), sometimes as the
+ * version 1 data saved before step 21b
  * (no sketches, no counter), sometimes as version 2 (steps 21b to 24c,
  * which a save upgrades: its earlier solid features suppressed).
  */
@@ -133,6 +135,14 @@ function designData(r: SeededRandom, part: DesignDocument): unknown {
   if (r.next() < 0.2) return { ...doc, version: 2 };
   if (r.next() < 0.2) doc = { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f, i) => (i > 0 && r.next() < 0.3 ? { ...f, suppressed: true } : f)) } };
   if (r.next() < 0.3) doc = { ...doc, timeline: { ...doc.timeline, marker: pick(r, doc.timeline.features).id } };
+  // Nothing built (24f4): opens as a design with no body.
+  const none = r.next();
+  if (none < 0.05) doc = { ...doc, timeline: { ...doc.timeline, marker: "start" } };
+  else if (none < 0.1) doc = { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f) => (f.intent.type === "sketch" ? f : { ...f, suppressed: true })) } };
+  else if (none < 0.13) {
+    const { kept: _, ...rest } = doc;
+    doc = { ...rest, profiles: [], sketches: [], timeline: { features: [] } };
+  }
   return doc;
 }
 
@@ -298,8 +308,10 @@ export function checkText(text: string, readers: readonly DataReader[] = READERS
   if (design) {
     const shown = guard("showing the Design part", () => {
       // An extrude of a sketch needs the kernel for its outline; readDesignDocument checked its sketch and distance.
-      if (partOf(design).shape === "sketch-extrude") return null;
-      return specOf(design, lastFeature(design));
+      // A design with no body (24f4) has no part to show.
+      const part = partOf(design);
+      if (part === null || part.shape === "sketch-extrude") return null;
+      return specOf(design, partFeature(design)!);
     });
     if (isProblem(shown)) return shown;
   }
@@ -342,7 +354,7 @@ export interface Failure extends Problem {
 export function fuzzRound(seed: bigint, cases: number, readers: readonly DataReader[] = READERS) {
   const r = seeded(seed);
   const failures: Failure[] = [];
-  const counts = { opened: 0, refusedInvalidJson: 0, refusedOuter: 0, refusedByReader: 0, nested: 0, proto: 0 };
+  const counts = { opened: 0, openedNoBody: 0, refusedInvalidJson: 0, refusedOuter: 0, refusedByReader: 0, nested: 0, proto: 0 };
   for (let index = 0; index < cases; index++) {
     const text = makeCase(r);
     if (text.includes("[[[[[[[[[[")) counts.nested++;
@@ -353,8 +365,9 @@ export function fuzzRound(seed: bigint, cases: number, readers: readonly DataRea
       continue;
     }
     try {
-      projectFromJson(text, readers);
+      const design = projectFromJson(text, readers).workspaces.design as DesignDocument | undefined;
       counts.opened++;
+      if (design && partFeature(design) === null) counts.openedNoBody++;
     } catch (e) {
       const m = (e as Error).message;
       if (m.includes("not valid JSON")) counts.refusedInvalidJson++;

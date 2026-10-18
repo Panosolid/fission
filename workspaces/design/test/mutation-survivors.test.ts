@@ -6,7 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { idNumber, partDocument, readDesignDocument } from "../src/document.ts";
-import { addSketch } from "../src/sketch.ts";
+import { addSketch, drawRectangle } from "../src/sketch.ts";
+import { extrudeSketch } from "../src/extrude.ts";
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 /** A saved box part as plain data, the way a file holds it. */
@@ -96,4 +97,28 @@ test("a profile's id counts: one used twice, or at or above the counter, is refu
   refused({ ...d, profiles: [{ ...d.profiles[0], id: "feature-1" }] }, "Design id feature-1 is used twice");
   // Counter at 2, so profile-2 could be made again by the next new item.
   refused({ ...d, profiles: [{ ...d.profiles[0], id: "profile-2" }], timeline: { features: [{ ...d.timeline.features[0], dependsOn: ["profile-2"], intent: { ...d.timeline.features[0].intent, parameters: { ...d.timeline.features[0].intent.parameters, profile: "profile-2" } } }] } }, "Design data's nextId 2 is not above profile-2, so a new id could repeat it");
+});
+
+test("a profile whose depth is not a number is refused, even when its width is one (24f4's corrected range)", () => {
+  // Catches the depth half of shapeOf's check dropped: width 40 passes, depth "30" (text) must not.
+  const d = clone(partDocument("l-bracket", 40, 30, 20)) as Record<string, any>;
+  refused({ ...d, profiles: [{ ...d.profiles[0], depth: "30" }] }, "profile profile-1: width and depth must be numbers");
+  refused({ ...d, profiles: [{ ...d.profiles[0], depth: null }] }, "profile profile-1: width and depth must be numbers");
+});
+
+test("a kept shape's point ids count against the counter, not only its curves' (24f4's corrected range)", () => {
+  // Catches the kept points left out of the counter check. Sketch 1's
+  // rectangle (points 3, 4, 6, 8; lines 5, 7, 9, 10) kept for Extrude 1
+  // (feature-11), the sketch itself deleted, the counter at 12. Renaming
+  // point-8 to point-30 in the kept shape (and in the two lines ending
+  // there) leaves every curve id below 12, so only point-30 is at or above
+  // the counter: refused for it.
+  const s = addSketch(partDocument("box", 40, 30, 20));
+  const e = extrudeSketch(drawRectangle(s.doc, s.id, [0, 0], [40, 30]).doc, s.id, 10);
+  const kept = JSON.parse(JSON.stringify(e.doc.sketches[0]).replaceAll('"point-8"', '"point-30"'));
+  const gone = { ...clone(e.doc), sketches: [], timeline: { features: e.doc.timeline.features.filter((f) => f.id !== s.id) }, kept: { [e.id]: { points: kept.points, curves: kept.curves } } };
+  assert.equal(gone.nextId, 12);
+  refused(gone, "Design data's nextId 12 is not above point-30, so a new id could repeat it");
+  // Above the counter: it opens.
+  assert.equal(readDesignDocument({ ...gone, nextId: 31 }).nextId, 31);
 });
