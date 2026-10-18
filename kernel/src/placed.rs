@@ -6,8 +6,11 @@
 //! exactly what it was, and rounding from far-away trips or many turns
 //! lands only on where the body is, never on its shape. The world
 //! geometry is made on demand (`baked`), e.g. for the model-space check,
-//! and once for good where two bodies meet (booleans, step 44).
+//! and once for good where two bodies meet (booleans, step 44). Face areas
+//! and centroids (`face_masses`) are measured on the local geometry too,
+//! with only each centroid carried into the world.
 
+use crate::face_mass::{face_masses, FaceMass};
 use crate::geom::{Placement, Transform};
 use crate::mass::{mass_properties, MassProps};
 use crate::mesh::Mesh;
@@ -81,6 +84,20 @@ impl Placed {
         mass_properties(&self.body)
     }
 
+    /// Each face's area and centroid, by face index: measured on the local
+    /// geometry, then only the centroid is carried into the world. Measured
+    /// on the baked body instead, a long thin face far out takes its
+    /// corners' rounding there (~1e-8 mm at 100 km) times its length over
+    /// its width: about 1 mm on a 1 km strip 1.1 µm wide (seed8043b8edca9);
+    /// this way the only rounding the placement adds is its own, once.
+    pub fn face_masses(&self) -> Vec<FaceMass> {
+        let mut faces = face_masses(&self.body);
+        if !self.placement.is_identity() {
+            faces.iter_mut().for_each(|f| f.centroid = self.placement.point(f.centroid));
+        }
+        faces
+    }
+
     /// The local geometry's mesh, carried into the world. The same body
     /// always gets the same triangles, wherever it is.
     pub fn tessellate(&self, opts: &TessOptions) -> Result<Mesh, TessError> {
@@ -120,6 +137,65 @@ mod tests {
         assert!(points_eq(p.baked().vertices[far].point, DVec3::new(8.0, 21.0, 33.0)));
         // Volume and area as built: 6 and 2(2 + 6 + 3) = 22.
         assert!(crate::tolerance::eq(p.mass_properties().volume, 6.0) && crate::tolerance::eq(p.mass_properties().area, 22.0));
+    }
+
+    #[test]
+    fn face_centroids_are_measured_at_home_and_carried_out() {
+        use crate::topology::FaceRole::*;
+        // A 2 × 4 × 6 box spans [0, 2] × [0, 4] × [0, 6]; its Top (z = 6) is
+        // 2 × 4 = 8 with centroid (1, 2, 6), its Right (x = 2) 4 × 6 = 24 at
+        // (2, 2, 3), its Front (y = 0) 2 × 6 = 12 at (1, 0, 3). Turned a
+        // quarter turn about +Z ((x, y, z) → (−y, x, z)) and moved by
+        // (100, 0, −50): (1, 2, 6) → (−2, 1, 6) → (98, 1, −44);
+        // (2, 2, 3) → (−2, 2, 3) → (98, 2, −47); (1, 0, 3) → (0, 1, 3) →
+        // (100, 1, −47). Areas are unchanged.
+        let b = make_box(2.0, 4.0, 6.0).unwrap();
+        let p = Placed {
+            body: b.clone(),
+            placement: Placement::IDENTITY.turned(DVec3::ZERO, DVec3::Z, FRAC_PI_2).moved(DVec3::new(100.0, 0.0, -50.0)),
+        };
+        let faces = p.face_masses();
+        let at = |role| faces[b.faces.iter().position(|f| f.role == Some(role)).unwrap()];
+        for (role, area, centroid) in [(Top, 8.0, (98.0, 1.0, -44.0)), (Right, 24.0, (98.0, 2.0, -47.0)), (Front, 12.0, (100.0, 1.0, -47.0))] {
+            let m = at(role);
+            assert!(crate::tolerance::eq(m.area, area) && points_eq(m.centroid, DVec3::from(centroid)), "{role:?}: {m:?}");
+        }
+        // Unplaced, the same as the body's own.
+        assert_eq!(Placed { body: b.clone(), placement: Placement::IDENTITY }.face_masses(), face_masses(&b));
+    }
+
+    #[test]
+    fn a_long_thin_face_far_out_keeps_its_centroid() {
+        // Regression (stateful seed8043b8edca9): a box 1 km × 36 mm × 1.1 µm,
+        // turned π about (1, 1, 0), then about a slanted axis through
+        // (0, −7, 0), then moved 100 km out. Its Front, 1 km long and 1.1 µm
+        // wide, has centroid (L/2, 0, h/2) at home (L = 999 999.999 999,
+        // h = 0.0011). The placement maps that one point, rounding a few
+        // ulps at 1e8 (ulp 1.5e-8), as does the expected image through the
+        // three steps' own matrix, so the two agree to well within 1e-6 mm.
+        // Measured on the baked body, whose corners are each rounded to
+        // ~1e-8 there, the centroid tips about 1 mm along the strip.
+        use crate::topology::FaceRole::Front;
+        let (l, h) = (999_999.999_999, 0.0011);
+        let base = make_box(l, 36.0, h).unwrap();
+        let (flip, pivot) = (DVec3::new(1.0, 1.0, 0.0), DVec3::new(0.0, -7.0, 0.0));
+        let axis = DVec3::new(0.0, 0.7231947291110354, -0.9344924436458961);
+        let (angle, by) = (9.590236344901994, DVec3::new(0.0, 99_999_999.0, 0.0));
+        let p = crate::ops::transform::rotate(&Placed::new(base.clone()), DVec3::ZERO, flip, std::f64::consts::PI).unwrap();
+        let p = crate::ops::transform::rotate(&p, pivot, axis, angle).unwrap();
+        let p = crate::ops::transform::translate(&p, by).unwrap();
+        let turn = |u: DVec3, a: f64| glam::DAffine3::from_axis_angle(u.normalize(), a);
+        let matrix = glam::DAffine3::from_translation(by)
+            * glam::DAffine3::from_translation(pivot)
+            * turn(axis, angle)
+            * glam::DAffine3::from_translation(-pivot)
+            * turn(flip, std::f64::consts::PI);
+        let expected = matrix.transform_point3(DVec3::new(l / 2.0, 0.0, h / 2.0));
+        let f = base.faces.iter().position(|f| f.role == Some(Front)).unwrap();
+        let off = p.face_masses()[f].centroid.distance(expected);
+        assert!(off < 1e-6, "{off:e}");
+        let baked = face_masses(&p.baked())[f].centroid.distance(expected);
+        assert!(baked > 0.1, "the baked body's centroid is {baked:e} off, this one {off:e}");
     }
 
     #[test]

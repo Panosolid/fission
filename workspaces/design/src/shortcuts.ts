@@ -14,7 +14,12 @@ export const DESIGN_SHORTCUTS: readonly ShortcutSpec[] = [
   { id: "sketch-circle", keys: "C", label: "Circle tool (in a sketch)" },
   { id: "sketch-arc", keys: "A", label: "3-point arc tool (in a sketch)" },
   { id: "sketch-tangent", keys: "T", label: "Tangent arc tool (in a sketch)" },
+  // Sketch feel SF4: while a line or rectangle is part drawn, a digit, point or minus starts typing its size; otherwise the key does what it would.
+  ...[..."0123456789.-"].map((k) => ({ id: `type-size-${k}`, keys: k, label: "Type a length or width (while drawing a line or rectangle)" })),
 ];
+
+/** The character a typed-size shortcut starts the box with, or null for any other shortcut. */
+export const typedSizeKey = (id: string): string | null => (/^type-size-[0-9.-]$/.test(id) ? id.slice(-1) : null);
 
 /** The sketch tool a shortcut chooses, or null for any other shortcut. */
 export function sketchToolKey(id: string): "line" | "rectangle" | "circle" | "arc" | "tangent" | null {
