@@ -19,7 +19,7 @@
 // navigation.mjs, since a body leaving may refit the view. Screenshots go
 // to E2E_SHOTS when set. Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
-import { launch } from "./browser.mjs";
+import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 
@@ -600,6 +600,172 @@ try {
       assert.equal(await undoTitle(page), step, "nothing recorded");
       assert.equal(await page.evaluate(() => document.querySelector("#viewport").dataset.sketching), "true", "still sketching");
       assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "feature-11", "sketch-12", "|"], "the marker drawn back where it is");
+
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+
+    await check(`dragging an item to a new place (24f6): moved, refused before what it is built from or after what is built from it, the line and the words while dragged; the browser's Timeline rows select their body; one undo step each, pixels probed (${width} px${tap ? ", a finger on the picked item" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      const layout = LAYOUTS[width];
+      const V = layout.volume;
+      await addSquare(page, tap, layout);
+      const state = async () => ({ bar: await bar(page), drawn: await drawn(page, layout), volume: await page.textContent("#volume") });
+      const undo = async () => press(page, "#undo", tap);
+      const redo = async () => press(page, "#redo", tap);
+      const settled = (want) => until(page, (w) => document.querySelector("#volume")?.textContent === w, want, `the panel showing ${want}`);
+      const boxOf = (id) => page.locator(`#timeline [data-item="${id}"]`).boundingBox();
+      const line = () => page.$eval("#timeline .timeline-reorder-line", (l) => [l.dataset.place, l.dataset.state]).catch(() => null);
+      const note = () => page.$eval("#timeline .timeline-reorder-note", (n) => (n.hidden ? "" : n.textContent)).catch(() => null);
+      // The finger drags only in Chromium, through its DevTools touch input (Playwright has no touch drag);
+      // Firefox and WebKit drag with the mouse at phone width too.
+      const finger = tap && browserName === "chromium" ? await page.context().newCDPSession(page) : null;
+      /**
+       * Item `id` dragged to the client x `to()` gives with the mouse, or with a finger after a tap has picked it
+       * (measured once picked: its ⋯ beside it moves the items after it); `hold` runs while it is held there.
+       */
+      const drag = async (id, to, { hold } = {}) => {
+        if (finger) {
+          if (!(await page.$(`#timeline [data-more="${id}"]`))) await page.tap(`#timeline [data-item="${id}"]`);
+          await until(page, (i) => document.querySelector(`#timeline [data-item="${i}"]`)?.classList.contains("timeline-reorder-picked"), id, `${id} picked`);
+        }
+        const b = await boxOf(id);
+        const [x, y] = [b.x + b.width / 2, b.y + b.height / 2];
+        const toX = await to();
+        if (finger) {
+          await finger.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+          for (let k = 1; k <= 8; k++) await finger.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + ((toX - x) * k) / 8, y }] });
+          if (hold) await hold();
+          await finger.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        } else {
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          await page.mouse.move(toX, y, { steps: 8 });
+          if (hold) await hold();
+          await page.mouse.up();
+        }
+      };
+      const past = (id) => async () => ((b) => b.x + b.width * 0.75)(await boxOf(id));
+      const before = (id) => async () => ((b) => b.x + b.width * 0.25)(await boxOf(id));
+
+      // Box, Sketch 1, Extrude 1 (built from Sketch 1), everything built; the panel shows the last body, the square.
+      const all = { bar: ["feature-1", "sketch-2", "feature-11", "|"], drawn: { box: true, square: true }, volume: V };
+      assert.deepEqual(await state(), all);
+
+      // 1. The box dragged past Extrude 1's middle: place 3, the end. While held, a blue line past Extrude 1 and no words.
+      // Let go: Sketch 1, Extrude 1, box, one undo step; both bodies still drawn, the box now the last body in the panel.
+      await drag("feature-1", past("feature-11"), {
+        hold: async () => {
+          assert.deepEqual(await line(), ["3", "moves"]);
+          assert.equal(await note(), "");
+          assert.equal(await page.$eval('#timeline [data-item="feature-1"]', (li) => li.classList.contains("timeline-reorder-dragged")), true);
+          if (shots) await page.screenshot({ path: `${shots}/reorder-drag-${width}.png` });
+        },
+      });
+      const MOVE_BOX = "Move Feature 1 (box) in the timeline";
+      await undoIs(page, MOVE_BOX);
+      await settled("24,000 mm³");
+      const moved = { bar: ["sketch-2", "feature-11", "feature-1", "|"], drawn: { box: true, square: true }, volume: "24,000 mm³" };
+      assert.deepEqual(await state(), moved);
+      assert.equal(await line(), null, "the line gone");
+      // The browser's Timeline rows in the new order, numbered again.
+      assert.deepEqual(await page.$$eval('#browser [data-node="timeline"] .tree-row', (rs) => rs.map((r) => r.textContent)), ["1. Sketch 1 on the XY plane", `2. Extrude Sketch 1 by ${layout.distance} mm`, "3. Box: 40 × 30 × 20 mm"]);
+      await undo();
+      await settled(V);
+      assert.deepEqual(await state(), all);
+      await redo();
+      await undoIs(page, MOVE_BOX);
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), moved);
+
+      // 2. Extrude 1 dragged before Sketch 1 (place 0): while held, the line red and the reorder's words above the bar,
+      // inside the screen. Let go: refused, the same words in the error line, nothing recorded, nothing moved.
+      const BEFORE = "Extrude 1 can't go before Sketch 1: it is built from Sketch 1";
+      await drag("feature-11", before("sketch-2"), {
+        hold: async () => {
+          assert.deepEqual(await line(), ["0", "refused"]);
+          assert.equal(await note(), BEFORE);
+          const n = await page.locator("#timeline .timeline-reorder-note").boundingBox();
+          assert.ok(n.x >= 0 && n.x + n.width <= width && n.y >= 0, `the words fit the screen: ${JSON.stringify(n)}`);
+          const t = await page.locator("#timeline").boundingBox();
+          assert.ok(n.y + n.height <= t.y + 1, "the words stand above the bar");
+          if (shots) await page.screenshot({ path: `${shots}/reorder-refused-${width}.png` });
+        },
+      });
+      await until(page, (w) => document.querySelector("#error")?.textContent === w, BEFORE, "the refusal shown");
+      assert.equal(await undoTitle(page), `Undo ${MOVE_BOX} (Ctrl+Z)`, "nothing recorded");
+      assert.deepEqual(await state(), moved);
+      assert.equal(await note(), null, "the words gone once let go");
+
+      // 3. Sketch 1 dragged past Extrude 1 (place 2): refused, Extrude 1 is built from it.
+      const AFTER = "Sketch 1 can't go after Extrude 1: Extrude 1 is built from it";
+      await drag("sketch-2", past("feature-11"), { hold: async () => assert.deepEqual([await line(), await note()], [["2", "refused"], AFTER]) });
+      await until(page, (w) => document.querySelector("#error")?.textContent === w, AFTER, "the refusal shown");
+      assert.equal(await undoTitle(page), `Undo ${MOVE_BOX} (Ctrl+Z)`, "nothing recorded");
+      assert.deepEqual(await state(), moved);
+
+      // 4. A drag past the marker rolls the item back. Undone to the start order, the marker stepped back after Sketch 1
+      // (Extrude 1 rolled back), the box dragged to the end: Sketch 1, marker, Extrude 1, box: nothing built, the view
+      // empty. One Undo brings the box back.
+      await undo();
+      await settled(V);
+      await press(page, '#timeline [data-button="back"]', tap);
+      await settled("24,000 mm³");
+      assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "|", "feature-11 rolled back"]);
+      await drag("feature-1", past("feature-11"));
+      await undoIs(page, MOVE_BOX);
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "nothing on screen");
+      assert.deepEqual(await state(), { bar: ["sketch-2", "|", "feature-11 rolled back", "feature-1 rolled back"], drawn: { box: false, square: false }, volume: "—" });
+      await undo();
+      await settled("24,000 mm³");
+      assert.deepEqual(await state(), { bar: ["feature-1", "sketch-2", "|", "feature-11 rolled back"], drawn: { box: true, square: false }, volume: "24,000 mm³" });
+      await press(page, '#timeline [data-button="end"]', tap);
+      await settled(V);
+      assert.deepEqual(await state(), all);
+
+      // 5. A press on an item that moves 3 px (under 5) is no drag: it picks the item, nothing recorded.
+      if (!tap) {
+        const step = await undoTitle(page);
+        const b = await boxOf("sketch-2");
+        await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(b.x + b.width / 2 + 3, b.y + b.height / 2, { steps: 3 });
+        await page.mouse.up();
+        await until(page, () => document.querySelector('#timeline [data-more="sketch-2"]'), null, "the item picked");
+        assert.equal(await undoTitle(page), step);
+        assert.deepEqual(await bar(page), all.bar);
+      }
+
+      // 6. A finger on an item that isn't picked scrolls the row and drags nothing.
+      if (finger) {
+        await page.tap('#timeline [data-item="sketch-2"]'); // pick Sketch 1, so the box is not picked
+        await until(page, () => document.querySelector('#timeline [data-more="sketch-2"]'), null, "Sketch 1 picked");
+        const step = await undoTitle(page);
+        const b = await boxOf("feature-1");
+        const [x, y] = [b.x + b.width / 2, b.y + b.height / 2];
+        await finger.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+        for (let k = 1; k <= 8; k++) await finger.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + 10 * k, y }] });
+        assert.equal(await line(), null, "no drag");
+        await finger.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await page.waitForTimeout(150);
+        assert.equal(await undoTitle(page), step);
+        assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "feature-11", "|"]);
+      }
+
+      // 7. The browser's Timeline rows select their body (24f6): the box's row selects Body 1 (its row lit too) and only
+      // the box's faces; Sketch 1's row selects nothing (sketches are not selectable yet).
+      if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press(page, "#browser-toggle", tap);
+      await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => (d.open = true)));
+      const boxRow = '#browser [data-node="timeline"] .tree-row[data-node="feature-1"]';
+      assert.equal(await page.$eval(boxRow, (r) => r.tagName), "BUTTON");
+      assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="sketch-2"]', (r) => r.tagName), "SPAN");
+      await press(page, boxRow, tap);
+      await until(page, () => document.querySelector('#browser .tree-row[data-node="body-1"]')?.getAttribute("aria-current") === "true", null, "Body 1 lit");
+      assert.equal(await page.getAttribute(boxRow, "aria-current"), "true");
+      assert.equal(await page.getAttribute('#browser [data-node="timeline"] .tree-row[data-node="feature-11"]', "aria-current"), null);
+      assert.equal(await page.getAttribute('#browser .tree-row[data-node="body-2"]', "aria-current"), null);
+      assert.equal(await page.textContent("#volume"), "24,000 mm³", "the panel shows the selected body");
+      if (shots) await page.screenshot({ path: `${shots}/row-selects-${width}.png` });
 
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();

@@ -58,9 +58,16 @@ export function browserTree(document: DesignDocument): BrowserNode[] {
   ];
 }
 
-/** The browser rows that stand for selectable geometry, and the reference each selects: "body-n" its body, a profile's row its outline. */
+/**
+ * The browser rows that stand for selectable geometry, and the reference
+ * each selects: "body-n" its body, a profile's row its outline, and (step
+ * 24f6) a Timeline row of a solid feature that builds the body it makes,
+ * the same as its Body row. A sketch's row selects nothing yet (sketches
+ * are not selectable geometry), nor does an item that builds no body.
+ */
 export function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
   const body = /^body-(\d+)$/.exec(node);
   if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodyFeatures(doc)[Number(body[1]) - 1]);
+  if (bodyFeatures(doc).some((f) => f.id === node)) return bodyReference(node);
   return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
 }
