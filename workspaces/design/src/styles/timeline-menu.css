@@ -1,0 +1,4 @@
+/* The timeline's item menu (timeline-menu.ts, step 24f3): a failed item's
+   row in the browser's Timeline group red, as its item on the bar is. The
+   menu itself is delete-ask.css's row menu. */
+.timeline-menu.timeline-menu-failed { color: #ff6b6b; }

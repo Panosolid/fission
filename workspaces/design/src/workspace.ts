@@ -14,11 +14,12 @@ import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { bodyFeatures, browserTree, rowReference, type BrowserNode } from "./browser.ts";
-import { showTimelineBar } from "./timeline-bar.ts";
+import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
-import { deleteAsk, planDelete } from "./delete-ask.ts";
-import { itemName, TIMELINE_STEPS } from "./timeline-edits.ts";
+import { deleteAsk } from "./delete-ask.ts";
+import { itemName } from "./timeline-edits.ts";
+import { chooseEntry, menuEntries, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
@@ -131,6 +132,8 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
  * Rebuilt on every edit; folding is kept by id.
  */
 function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void) {
+  // Rows with the timeline's item menu (24f3): every Timeline row by its item's id, and each sketch's row in Sketches.
+  const items = new Set(doc.timeline.features.map((f) => f.id));
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
@@ -162,7 +165,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
         row.textContent = n.label;
         row.dataset.node = n.id;
         if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
-        if (n.id.startsWith("sketches/")) {
+        if (items.has(n.id) || n.id.startsWith("sketches/")) {
           // The row's menu: a right-click at the pointer, or the ⋯ button under itself.
           row.addEventListener("contextmenu", (e) => {
             e.preventDefault();
@@ -291,6 +294,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   async function buildPart(doc: DesignDocument) {
     const feature = lastFeature(doc);
     const build = await rebuildTimeline(doc, bodies, kernel);
+    failedNow = new Set(Object.keys(build.results).filter((id) => build.results[id].status === "failed"));
     const result = build.results[feature.id];
     if (result.status === "failed") throw new Error(result.message);
     if (result.status !== "built" || result.body === undefined || result.spec === undefined) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
@@ -399,50 +403,80 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(START_FRESH_STEP, undefined, freshDesign());
   }
 
-  /** A sketch row's menu (24e4): Delete for that sketch. */
+  /** The items the last rebuild failed (24f3: red in the bar and the browser's Timeline rows); the data's own failures are added by `timelineBarItems`. */
+  let failedNow: ReadonlySet<string> = new Set();
+  /** The bar's item whose ⋯ shows (a click or tap picked it). */
+  let picked: string | null = null;
+  /** The sketch being edited, whose own Suppress and Delete are off. */
+  const editingId = () => (mode.kind === "edit" && editingSketch ? editingSketch.id : null);
+
+  /** The timeline bar for `doc`, wired to the item menu. */
+  function showBar(doc: DesignDocument) {
+    if (!ctx.timeline) return;
+    showTimelineBar(ctx.timeline, doc, {
+      failed: failedNow,
+      picked,
+      onPick: (id) => {
+        picked = picked === id ? null : id;
+        showBar(designDoc());
+      },
+      onMenu: (id, at) => openMenu(id, at),
+    });
+  }
+
+  /** The bar's items and the browser's Timeline rows red for every failed item (24f3). */
+  function showFailed(doc: DesignDocument) {
+    showBar(doc);
+    const failed = new Set(timelineBarItems(doc, failedNow).items.filter((i) => i.failed).map((i) => i.id));
+    for (const row of ctx.browser.querySelectorAll<HTMLElement>('[data-node="timeline"] .tree-row')) {
+      const on = failed.has(row.dataset.node!);
+      row.classList.toggle("timeline-menu", on);
+      row.classList.toggle("timeline-menu-failed", on);
+    }
+  }
+
+  /** A row's menu (24e4 for sketches, 24f3 for every timeline item): "sketches/<id>" or an item's id. */
   function openRowMenu(node: string, at: { x: number; y: number }) {
-    const id = node.slice("sketches/".length);
-    const item = designDoc().timeline.features.find((f) => f.id === id);
-    if (item) deleting.menu(itemName(item), at, () => void deleteFromBrowser(id));
+    openMenu(node.startsWith("sketches/") ? node.slice("sketches/".length) : node, at);
+  }
+
+  /** Item `id`'s menu (timeline-menu.ts): Move the marker here, Suppress or Unsuppress, Delete; an entry that is off says why. */
+  function openMenu(id: string, at: { x: number; y: number }) {
+    const doc = designDoc();
+    const item = doc.timeline.features.find((f) => f.id === id);
+    if (!item) return;
+    const editing = editingId();
+    const entries = menuEntries(doc, id, editing).map((e) => ({ ...e, run: () => void chooseEntry(menuHost, id, e.action, editing).catch((err) => panel.showError(err instanceof Error ? err.message : String(err))) }));
+    deleting.menu(itemName(item), at, entries);
   }
 
   /**
-   * Deletes item `id` (24e4, the owner's rule): at once when nothing is
-   * built from it, else after the box asks, naming what is built from it
-   * and what happens to each. The document recorded is the one the box
-   * was worked out from (`planDelete`), as one undo step ("Delete Sketch
-   * 1"); nothing is recorded if the design changed in between.
+   * How a menu choice reaches the project: the document recorded as one
+   * undo step (out of any sketch or Extrude panel first, the panel showing
+   * the part the edit leaves), the delete box asking first (24e4), and a
+   * refusal shown as the part's error line.
    */
-  async function deleteFromBrowser(id: string) {
-    const before = designDoc();
-    const item = before.timeline.features.find((f) => f.id === id);
-    if (!item) return;
-    let plan;
-    try {
-      plan = await planDelete(kernel, before, id);
-    } catch (e) {
-      return panel.showError(e instanceof Error ? e.message : String(e));
-    }
-    if (designDoc() !== before) return;
-    const go = () => {
-      if (designDoc() !== before) return;
+  const menuHost: MenuHost = {
+    kernel,
+    current: () => designDoc(),
+    record(step, next) {
       leaveExtrude();
       if (mode.kind !== "none") leaveSketch();
-      // The part the panel shows may now be another feature (an extrude with nothing to keep fails).
-      const part = partOf(plan.next);
+      // The part the panel shows may now be another feature (the last body that still builds).
+      const part = partOf(next);
       shape = part.shape;
       for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
-      void update(TIMELINE_STEPS.delete(itemName(item)), undefined, plan.next);
-    };
-    if (plan.ask) deleting.ask(plan.ask, go);
-    else go();
-  }
+      void update(step, undefined, next);
+    },
+    ask: (q, go) => deleting.ask(q, go),
+    refuse: (message) => panel.showError(message),
+  };
 
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
   async function show(doc: DesignDocument, kind: PartKind) {
     browser(ctx.browser, doc, selectRow, openRowMenu);
     fresh.showFor(doc);
-    if (ctx.timeline) showTimelineBar(ctx.timeline, doc);
+    showFailed(doc);
     showKept();
     drawSketches();
     showSelection();
@@ -455,6 +489,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const { scene } = value;
       keptNow = value.kept;
       showKept();
+      showFailed(doc);
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
@@ -489,6 +524,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       missed = false;
       keptNow = undefined;
       showKept();
+      if (designDoc() === doc) showFailed(doc);
       panel.showError(e instanceof Error ? e.message : String(e));
       markStale(true);
     }
@@ -560,7 +596,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ctx.projectChanged(label);
     browser(ctx.browser, next, selectRow, openRowMenu);
     fresh.showFor(next);
-    if (ctx.timeline) showTimelineBar(ctx.timeline, next);
+    showFailed(next);
     showKept(); // the rows are new: mark them again until the rebuild says otherwise
     markStale();
     // The part extrudes this sketch: rebuild it from the edited lines (a live link; an open sketch fails with the kernel's reason).
