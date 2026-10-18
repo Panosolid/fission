@@ -21,9 +21,10 @@
 //   when the model still has it, and to nothing when it doesn't, never to
 //   another face;
 // - saving and opening changes neither the rebuild nor the saved text.
-// Until step 24b the only subject is the model itself (`modelSubject`),
-// with bugs planted through `faults` to show each check can fail; 24d plugs
-// in Design's real timeline on the real kernel.
+// The model itself runs as a subject (`modelSubject`), with bugs planted
+// through `faults` to show each check can fail; from 24d2 Design's real
+// timeline on the real kernel runs too (journeys/timeline.journey.ts), so a
+// subject's answers may be promises.
 
 import { seeded, type SeededRandom } from "./index.ts";
 import {
@@ -69,18 +70,30 @@ export type SessionOp =
   | { op: "save-open" }
   | { op: "hold-ref"; pick: number };
 
+type Maybe<T> = T | Promise<T>;
+
 /** A timeline implementation under test. Ids in and out are its own; the harness maps the model's onto them. */
 export interface TimelineSubject {
-  apply(op: ConcreteOp): Applied;
-  rebuild(): Rebuild;
+  /** What the subject holds before the first step (Design always has a part), as edits and the ids each made, run on the model first. */
+  readonly initial?: readonly { op: ConcreteOp; ids: string[] }[];
+  apply(op: ConcreteOp): Maybe<Applied>;
+  rebuild(): Maybe<Rebuild>;
   /** A rebuild that ignores any cache; leave it out when there is none. */
-  rebuildFromScratch?(): Rebuild;
-  save(): string;
-  /** Opens saved text, with a fresh undo history, as opening a file does. */
-  open(text: string): void;
+  rebuildFromScratch?(): Maybe<Rebuild>;
+  save(): Maybe<string>;
+  /**
+   * Opens saved text, with a fresh undo history, as opening a file does.
+   * "nothing built": refused because no body builds, which the harness
+   * accepts only when the model builds none (Design until 24d3); the
+   * subject then keeps what it had.
+   */
+  open(text: string): Maybe<void | "nothing built">;
   /** The name of the face this name resolves to now, or null when it resolves to none. */
-  resolve(name: FaceName): FaceName | null;
+  resolve(name: FaceName): Maybe<FaceName | null>;
 }
+
+/** How the harness compares edges with the model's: to MATCH_REL unless the subject measures them on the display mesh (`edgeMatches` in the journeys). */
+export type EdgeClose = (got: { length: number; centroid: readonly number[] }, want: { length: number; centroid: readonly number[] }) => boolean;
 
 /**
  * Relative tolerance for volumes, areas and centroid coordinates, with a
@@ -285,10 +298,14 @@ export function resolveStep(doc: ModelDoc, step: SessionOp): Resolved {
 const sameName = (a: FaceName, b: FaceName) => faceKey(a) === faceKey(b);
 
 /** The first difference between two items' results, or null. */
-function resultDiff(a: ItemResult, b: ItemResult): string | null {
+const exactEdges: EdgeClose = (a, b) => close(a.length, b.length) && a.centroid.every((x, k) => close(x, b.centroid[k]));
+
+function resultDiff(a: ItemResult, b: ItemResult, edgeClose: EdgeClose = exactEdges): string | null {
   if (a.status !== b.status) return `${a.status} vs ${b.status}`;
   if (a.status === "failed" && b.status === "failed" && (a.cause !== b.cause || a.input !== b.input)) return `failed (${a.cause} ${a.input}) vs (${b.cause} ${b.input})`;
   if (a.status !== "built" || b.status !== "built") return null;
+  const warned = (r: typeof a) => (r.warning ? `kept, warning ${r.warning.cause} ${r.warning.input}` : "no warning");
+  if (warned(a) !== warned(b)) return `${warned(a)} vs ${warned(b)}`;
   if (!a.body || !b.body) return a.body || b.body ? `a body vs ${a.body ? "none" : "a body"}` : null;
   if (!close(a.body.volume, b.body.volume)) return `volume ${a.body.volume} vs ${b.body.volume}`;
   const keysA = a.body.faces.map((f) => faceKey(f.name)).sort();
@@ -304,17 +321,16 @@ function resultDiff(a: ItemResult, b: ItemResult): string | null {
   if (edgesA.join() !== edgesB.join()) return `edges [${edgesA.join(", ")}] vs [${edgesB.join(", ")}]`;
   for (const e of a.body.edges) {
     const g = b.body.edges.find((x) => edgeKey(x.name) === edgeKey(e.name))!;
-    if (!close(e.length, g.length)) return `${edgeKey(e.name)} length ${e.length} vs ${g.length}`;
-    if (!e.centroid.every((x, k) => close(x, g.centroid[k]))) return `${edgeKey(e.name)} centroid (${e.centroid.join(", ")}) vs (${g.centroid.join(", ")})`;
+    if (!edgeClose(e, g)) return `${edgeKey(e.name)} length ${e.length} vs ${g.length}, centroid (${e.centroid.join(", ")}) vs (${g.centroid.join(", ")})`;
   }
   return null;
 }
 
 /** The first difference between two rebuilds, or null. */
-export function rebuildDiff(a: Rebuild, b: Rebuild): string | null {
+export function rebuildDiff(a: Rebuild, b: Rebuild, edgeClose?: EdgeClose): string | null {
   if (a.order.join() !== b.order.join()) return `order [${a.order.join(", ")}] vs [${b.order.join(", ")}]`;
   for (const id of a.order) {
-    const d = resultDiff(a.results[id], b.results[id]);
+    const d = resultDiff(a.results[id], b.results[id], edgeClose);
     if (d !== null) return `${id}: ${d}`;
   }
   return null;
@@ -334,6 +350,7 @@ function translateRebuild(r: Rebuild, to: (id: string) => string): Rebuild {
         : res.status === "built" && res.body
           ? {
               status: "built",
+              ...(res.warning && { warning: { cause: res.warning.cause, input: to(res.warning.input) } }),
               body: {
                 volume: res.body.volume,
                 faces: res.body.faces.map((f) => ({ ...f, name: nameTo(f.name, to) })),
@@ -367,7 +384,8 @@ function translateOp(op: ConcreteOp, to: (id: string) => string): ConcreteOp {
 }
 
 /** Every id a document holds: items and their curves. */
-const idsOf = (doc: ModelDoc): string[] => doc.items.flatMap((i) => [i.id, ...(i.kind === "sketch" ? i.curves.filter((c): c is string => c !== null) : [])]);
+const idsOf = (doc: ModelDoc): string[] =>
+  doc.items.flatMap((i) => [i.id, ...(i.kind === "sketch" ? i.curves.filter((c): c is string => c !== null) : i.kind === "extrude" && i.kept ? i.kept.curves : [])]);
 
 /** The items that depend on `id`, directly or through others, and `id` itself. */
 function dependents(doc: ModelDoc, id: string): Set<string> {
@@ -391,10 +409,20 @@ const editedItem = (op: ConcreteOp): string | null =>
 /** How many face references a session holds at once. */
 const MAX_REFS = 8;
 
-/** Runs the steps on a fresh model and the subject, checking every step; throws a TimelineFailure at the first check that fails. */
-export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]): SessionCounts {
+/**
+ * Runs the steps on a fresh model and the subject, checking every step;
+ * throws a TimelineFailure at the first check that fails. `edgeClose`
+ * compares edges with the model's (exact by default).
+ */
+export async function runSession(subject: TimelineSubject, steps: readonly SessionOp[], edgeClose?: EdgeClose): Promise<SessionCounts> {
   const model: TimelineModel = createModel();
   const ids = new Map<string, string>(); // model id → subject id
+  for (const { op, ids: made } of subject.initial ?? []) {
+    const want = applyOp(model, op);
+    if (want.kind !== "done" || want.ids.length !== made.length) throw new Error(`harness: the subject's starting edit ${JSON.stringify(op)} is not one the model does`);
+    want.ids.forEach((id, k) => ids.set(id, made[k]));
+  }
+  model.undo = [];
   const to = (id: string) => {
     const s = ids.get(id);
     if (s === undefined) throw new Error(`harness: no subject id for ${id}`);
@@ -403,25 +431,35 @@ export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]
   const counts: SessionCounts = {};
   const count = (k: string) => (counts[k] = (counts[k] ?? 0) + 1);
   let refs: FaceName[] = [];
-  let prev: Rebuild = subject.rebuild();
+  let prev: Rebuild = await subject.rebuild();
 
-  steps.forEach((step, i) => {
+  for (const [i, step] of steps.entries()) {
     const fail = (check: string, detail: string): never => {
       throw new TimelineFailure(check, i, step, detail);
     };
     const resolved = resolveStep(model.doc, step);
-    if (resolved === null) return void count("skipped");
+    if (resolved === null) {
+      count("skipped");
+      continue;
+    }
     let edited: string | null = null;
     if (resolved.kind === "save-open") {
-      const text = subject.save();
-      const before = subject.rebuild();
-      subject.open(text);
-      const d = rebuildDiff(before, subject.rebuild());
-      if (d !== null) fail("save and open changed the rebuild", d);
-      if (subject.save() !== text) fail("saving again changed the file", "the second save differs from the first");
-      model.undo = [];
-      model.redo = [];
-      count("op:save-open");
+      const text = await subject.save();
+      const before = await subject.rebuild();
+      const refused = await subject.open(text);
+      if (refused === "nothing built") {
+        const r = rebuild(model.doc);
+        const built = r.order.find((id) => { const x = r.results[id]; return x.status === "built" && x.body !== undefined; });
+        if (built !== undefined) fail("a saved document was refused", `nothing built, but the model builds ${built}`);
+        count("refused:nothing-built");
+      } else {
+        const d = rebuildDiff(before, await subject.rebuild());
+        if (d !== null) fail("save and open changed the rebuild", d);
+        if ((await subject.save()) !== text) fail("saving again changed the file", "the second save differs from the first");
+        model.undo = [];
+        model.redo = [];
+        count("op:save-open");
+      }
     } else if (resolved.kind === "hold-ref") {
       refs = [...refs.filter((n) => !sameName(n, resolved.name)), resolved.name].slice(-MAX_REFS);
       count("op:hold-ref");
@@ -429,7 +467,7 @@ export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]
       const op = resolved.op;
       const subjectOp = translateOp(op, to);
       const want = applyOp(model, op);
-      const got = subject.apply(subjectOp);
+      const got = await subject.apply(subjectOp);
       // After the edit: what undo and redo can still reach (an id undone and then dropped from redo may come back).
       const reachable = new Set(
         [...model.undo, ...model.redo]
@@ -450,7 +488,7 @@ export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]
       if (want.kind === "done") edited = editedItem(op);
     }
 
-    const now = subject.rebuild();
+    const now = await subject.rebuild();
     const names = now.order.flatMap((id) => {
       const r = now.results[id];
       return r.status === "built" && r.body ? r.body.faces.map((f) => faceKey(f.name)) : [];
@@ -464,10 +502,10 @@ export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]
     const dupEdge = edgeNames.find((n, k) => edgeNames.indexOf(n) !== k);
     if (dupEdge !== undefined) fail("two edges share a name", dupEdge);
 
-    const d2 = rebuildDiff(now, subject.rebuild());
+    const d2 = rebuildDiff(now, await subject.rebuild());
     if (d2 !== null) fail("rebuilding twice differs", d2);
     if (subject.rebuildFromScratch) {
-      const d3 = rebuildDiff(now, subject.rebuildFromScratch());
+      const d3 = rebuildDiff(now, await subject.rebuildFromScratch());
       if (d3 !== null) fail("the rebuild differs from a rebuild from scratch", d3);
     }
     if (edited !== null) {
@@ -480,13 +518,13 @@ export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]
     }
 
     const expected = rebuild(model.doc);
-    const d4 = rebuildDiff(now, translateRebuild(expected, to));
+    const d4 = rebuildDiff(now, translateRebuild(expected, to), edgeClose);
     if (d4 !== null) fail("the rebuild differs from the model", d4);
 
     for (const ref of refs) {
       const there = resolveFace(expected, ref) !== null;
       const name = nameTo(ref, to);
-      const found = subject.resolve(name);
+      const found = await subject.resolve(name);
       if (there && (found === null || !sameName(found, name))) fail("a reference was lost", `${faceKey(name)} resolved to ${found ? faceKey(found) : "nothing"}`);
       if (!there && found !== null) fail("a broken reference resolved to another face", `${faceKey(name)} resolved to ${faceKey(found)}`);
       const owner = expected.results[ref.feature];
@@ -497,16 +535,17 @@ export function runSession(subject: TimelineSubject, steps: readonly SessionOp[]
       const r = expected.results[id];
       count(`status:${r.status}`);
       if (r.status === "failed") count(`cause:${r.cause}`);
+      if (r.status === "built" && r.warning) count(`warning:${r.warning.cause}`);
     }
     prev = now;
-  });
+  }
   return counts;
 }
 
 /** The first failure in `steps` on a fresh subject, or null. */
-export function failureOf(make: () => TimelineSubject, steps: readonly SessionOp[]): TimelineFailure | null {
+export async function failureOf(make: () => TimelineSubject, steps: readonly SessionOp[], edgeClose?: EdgeClose): Promise<TimelineFailure | null> {
   try {
-    runSession(make(), steps);
+    await runSession(make(), steps, edgeClose);
     return null;
   } catch (e) {
     if (e instanceof TimelineFailure) return e;
@@ -519,16 +558,16 @@ export function failureOf(make: () => TimelineSubject, steps: readonly SessionOp
  * steps dropped for as long as the same check still fails, so no one step
  * can be removed from the result (1-minimal).
  */
-export function shrinkSession(make: () => TimelineSubject, steps: readonly SessionOp[]): SessionOp[] {
-  const first = failureOf(make, steps);
+export async function shrinkSession(make: () => TimelineSubject, steps: readonly SessionOp[], edgeClose?: EdgeClose): Promise<SessionOp[]> {
+  const first = await failureOf(make, steps, edgeClose);
   if (first === null) return [...steps];
-  const same = (s: readonly SessionOp[]) => failureOf(make, s)?.check === first.check;
+  const same = async (s: readonly SessionOp[]) => (await failureOf(make, s, edgeClose))?.check === first.check;
   let cur = steps.slice(0, first.step + 1);
   for (let changed = true; changed; ) {
     changed = false;
     for (let k = cur.length - 1; k >= 0; k--) {
       const shorter = [...cur.slice(0, k), ...cur.slice(k + 1)];
-      if (same(shorter)) {
+      if (await same(shorter)) {
         cur = shorter;
         changed = true;
       }
@@ -558,7 +597,7 @@ export function modelSubject(faults: Iterable<ModelFault> = []): TimelineSubject
     if (fs.has("rebuild-drifts") && calls++ % 2 === 1)
       for (const id of r.order) {
         const res = r.results[id];
-        if (res.status === "built" && res.body) r.results[id] = { status: "built", body: { ...res.body, volume: res.body.volume * 1.001 } };
+        if (res.status === "built" && res.body) r.results[id] = { ...res, body: { ...res.body, volume: res.body.volume * 1.001 } };
       }
     if (fs.has("stale-extrude-cache"))
       for (const item of m.doc.items) {
@@ -578,6 +617,8 @@ export function modelSubject(faults: Iterable<ModelFault> = []): TimelineSubject
       const doc: ModelDoc = JSON.parse(JSON.stringify(m.doc));
       // Planted bug: the file forgets which items are suppressed.
       if (fs.has("save-drops-suppressed")) for (const i of doc.items) i.suppressed = false;
+      // Planted bug: the file forgets the extrudes' kept shapes.
+      if (fs.has("save-drops-kept")) for (const i of doc.items) if (i.kind === "extrude") delete i.kept;
       // Planted bug: each save stamps a counter into the file.
       return JSON.stringify(fs.has("save-stamps") ? { ...doc, saved: ++saves } : doc);
     },

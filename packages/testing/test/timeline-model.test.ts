@@ -9,6 +9,7 @@ import {
   edgeKey,
   edgeName,
   faceKey,
+  outlineProblem,
   polygonValid,
   rebuild,
   resolveFace,
@@ -16,6 +17,7 @@ import {
   type ConcreteOp,
   type ItemResult,
   type ModelBody,
+  type ModelDoc,
   type Point,
   type TimelineModel,
 } from "../src/timeline-model.ts";
@@ -246,10 +248,15 @@ test("suppress, the marker, delete: what the extrude says, and its names coming 
   run(m, { op: "add-preset", kind: "box", sizes: [1, 2, 3] });
   assert.deepEqual([rebuild(m.doc).order, m.doc.marker], [["item-1", "item-7", "item-6"], "item-7"]);
   run(m, { op: "marker", at: null });
-  // Deleting the sketch leaves the extrude, failed and naming it; undo brings both back with the same names.
+  // Deleting the sketch (the owner's rule): the extrude keeps its last shape, 40 × 30 × 10 = 12000 mm³ under the
+  // same names, with a warning naming the sketch; undo brings the sketch back and the warning goes.
   run(m, { op: "delete-item", item: "item-1" });
-  assert.deepEqual(results(m)["item-6"], { status: "failed", cause: "deleted-input", input: "item-1" });
+  const kept = results(m)["item-6"];
+  assert.deepEqual(kept.status === "built" && kept.warning, { cause: "deleted-input", input: "item-1" });
+  assert.equal(bodyOf(kept).volume, 12000);
+  assert.deepEqual(bodyOf(kept).faces.map((f) => faceKey(f.name)), names);
   run(m, { op: "undo" });
+  assert.equal((results(m)["item-6"] as { warning?: unknown }).warning, undefined);
   assert.deepEqual(bodyOf(results(m)["item-6"]).faces.map((f) => faceKey(f.name)), names);
   // Deleting the item the marker is on moves it to the one before.
   run(m, { op: "marker", at: "item-7" }, { op: "delete-item", item: "item-7" });
@@ -264,7 +271,10 @@ test("a side deleted and drawn again gets a new name; the old one resolves to no
   const old = { feature: "item-6", role: "side" as const, curve: "curve-2" };
   assert.ok(resolveFace(rebuild(m.doc), old));
   run(m, { op: "delete-curve", sketch: "item-1", curve: "curve-2" });
-  assert.deepEqual(results(m)["item-6"], { status: "failed", cause: "open-outline", input: "item-1" });
+  // The outline is open: the extrude keeps its last shape, whose bottom side is still curve-2's (40 × 10 = 400 mm² at (20, 0, 5)).
+  const kept = results(m)["item-6"];
+  assert.deepEqual(kept.status === "built" && kept.warning, { cause: "open-outline", input: "item-1" });
+  assert.deepEqual(resolveFace(rebuild(m.doc), old), { name: old, area: 400, centroid: [20, 0, 5] });
   const [redrawn] = run(m, { op: "redraw-curve", sketch: "item-1", index: 0 });
   // The counter was at 7 (item-6 was the last id), so the new line is curve-7.
   assert.deepEqual(redrawn, { kind: "done", ids: ["curve-7"] });
@@ -277,10 +287,80 @@ test("a corner moved so the outline crosses itself fails the extrude, and moving
   const m = createModel();
   run(m, { op: "add-sketch", shape: { kind: "polygon", corners: RECT } }, { op: "add-extrude", sketch: "item-1", distance: 10 });
   run(m, { op: "move-corner", sketch: "item-1", corner: 2, to: [-10, 15] });
-  assert.deepEqual(results(m)["item-6"], { status: "failed", cause: "invalid-outline", input: "item-1" });
+  // Crossing itself: the last shape, the 40 × 30 rectangle by 10 = 12000 mm³, with a warning.
+  const kept = results(m)["item-6"];
+  assert.deepEqual(kept.status === "built" && kept.warning, { cause: "invalid-outline", input: "item-1" });
+  assert.equal(bodyOf(kept).volume, 12000);
   // Corner 2 at (40, 15) instead: a trapezium with parallel sides 30 (at x = 0) and 15 (at x = 40), 40 apart: (30 + 15)/2 · 40 = 900 mm², × 10.
   run(m, { op: "move-corner", sketch: "item-1", corner: 2, to: [40, 15] });
   assert.equal(bodyOf(results(m)["item-6"]).volume, 9000);
+  assert.equal(m.doc.items[1].kind === "extrude" && m.doc.items[1].kept, undefined);
+});
+
+test("the owner's rule: a lost sketch's extrude keeps the shape it had just before, by its distance now, until the sketch makes an outline again", () => {
+  const m = createModel();
+  run(m, { op: "add-sketch", shape: { kind: "polygon", corners: RECT } }, { op: "add-extrude", sketch: "item-1", distance: 10 });
+  const warning = () => {
+    const r = results(m)["item-6"];
+    return r.status === "built" ? (r.warning ?? null) : r;
+  };
+  const volume = () => bodyOf(results(m)["item-6"]).volume;
+  const face = (curve: string) => resolveFace(rebuild(m.doc), { feature: "item-6", role: "side", curve });
+  // Corner 2 to (40, 15): the trapezium of the test above, 900 mm² × 10 = 9000 mm³.
+  run(m, { op: "move-corner", sketch: "item-1", corner: 2, to: [40, 15] });
+  assert.deepEqual([volume(), warning()], [9000, null]);
+  // Its right side (curve-3, (40, 0) → (40, 15)) deleted: the trapezium is kept, not the first rectangle.
+  // That side's face is 15 × 10 = 150 mm², centred at (40, 7.5, 5).
+  run(m, { op: "delete-curve", sketch: "item-1", curve: "curve-3" });
+  assert.deepEqual([volume(), warning()], [9000, { cause: "open-outline", input: "item-1" }]);
+  assert.deepEqual(face("curve-3"), { name: { feature: "item-6", role: "side", curve: "curve-3" }, area: 150, centroid: [40, 7.5, 5] });
+  // The distance typed while it is lost applies to the kept shape: 900 × 20 = 18000 mm³; the side is 15 × 20 = 300 mm² at half height 10.
+  run(m, { op: "set-size", item: "item-6", key: "distance", value: 20 });
+  assert.deepEqual([volume(), face("curve-3")?.area, face("curve-3")?.centroid], [18000, 300, [40, 7.5, 10]]);
+  // An edit to the still-open sketch doesn't reach the kept shape: corner 0 to (0, −10), still 18000.
+  run(m, { op: "move-corner", sketch: "item-1", corner: 0, to: [0, -10] });
+  assert.deepEqual([volume(), warning()], [18000, { cause: "open-outline", input: "item-1" }]);
+  // Suppressing the sketch fails the extrude, kept shape or not; unsuppressing brings the kept shape back.
+  run(m, { op: "suppress", item: "item-1", on: true });
+  assert.deepEqual(warning(), { status: "failed", cause: "suppressed-input", input: "item-1" });
+  run(m, { op: "suppress", item: "item-1", on: false });
+  assert.deepEqual([volume(), warning()], [18000, { cause: "open-outline", input: "item-1" }]);
+  // Side 1 drawn again (curve-7): built from the sketch now, corners (0, −10), (40, 0), (40, 15), (0, 30): a trapezium
+  // with parallel sides 40 (x = 0, −10 to 30) and 15 (x = 40, 0 to 15), 40 apart: (40 + 15)/2 · 40 = 1100 mm² × 20 = 22000 mm³.
+  // The kept shape is forgotten, so its side curve-3 resolves to nothing.
+  run(m, { op: "redraw-curve", sketch: "item-1", index: 1 });
+  assert.deepEqual([volume(), warning(), face("curve-3")], [22000, null, null]);
+  assert.ok(face("curve-7"));
+  // Undo brings the kept shape back (it is part of the document), redo forgets it again.
+  run(m, { op: "undo" });
+  assert.deepEqual([volume(), warning()], [18000, { cause: "open-outline", input: "item-1" }]);
+  run(m, { op: "redo" });
+  // The sketch deleted now: the shape just before, 22000 mm³, its side named by curve-7.
+  run(m, { op: "delete-item", item: "item-1" });
+  assert.deepEqual([volume(), warning()], [22000, { cause: "deleted-input", input: "item-1" }]);
+  assert.ok(face("curve-7"));
+});
+
+test("with no kept shape (a file whose extrude's sketch was already broken) the extrude fails with the cause; two corners in one place leave no loop", () => {
+  // As a file from before the rule could hold it: side curve-2 deleted, no kept shape.
+  const doc: ModelDoc = {
+    nextId: 7,
+    marker: null,
+    items: [
+      { id: "item-1", kind: "sketch", shape: { kind: "polygon", corners: RECT }, curves: [null, "curve-3", "curve-4", "curve-5"], suppressed: false },
+      { id: "item-6", kind: "extrude", sketch: "item-1", distance: 10, suppressed: false },
+    ],
+  };
+  assert.deepEqual(rebuild(doc).results["item-6"], { status: "failed", cause: "open-outline", input: "item-1" });
+  assert.deepEqual(rebuild({ ...doc, items: [doc.items[1]] }).results["item-6"], { status: "failed", cause: "deleted-input", input: "item-1" });
+  // A bow tie through one point: corners 2 and 5 both at (20, 20), so four line ends meet there, a branch, not one loop.
+  const curves = ["a", "b", "c", "d", "e", "f"];
+  const bowtie: Point[] = [[0, 0], [40, 0], [20, 20], [40, 40], [0, 40], [20, 20]];
+  assert.equal(outlineProblem({ shape: { kind: "polygon", corners: bowtie }, curves }), "open-outline");
+  // Corner 5 one grid step up, at (20, 21): the two tips are 1 mm apart and no two sides touch, so it is one valid loop.
+  assert.equal(outlineProblem({ shape: { kind: "polygon", corners: [...bowtie.slice(0, 5), [20, 21]] }, curves }), null);
+  // Two neighbouring corners in one place: a side of length 0, invalid (the kernel refuses that line).
+  assert.equal(outlineProblem({ shape: { kind: "polygon", corners: [[0, 0], [40, 0], [40, 0], [0, 30]] }, curves: curves.slice(0, 4) }), "invalid-outline");
 });
 
 test("ids are never reused while undo or redo can reach them; undo, redo and no-change edits follow the snapshot rules", () => {
