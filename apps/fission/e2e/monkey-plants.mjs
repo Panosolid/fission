@@ -20,7 +20,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const SKETCHBAR = "workspaces/design/src/styles/sketchbar.css";
-const BAR_CSS = "workspaces/design/src/styles/timeline-bar.css";
 
 /** What each plant breaks, and the monkey check that should catch it. */
 export const MONKEY_PLANTS = {
@@ -59,10 +58,11 @@ export const MONKEY_PLANTS = {
     expect: "selection agrees",
     edits: [{ file: "workspaces/design/src/workspace.ts", find: "(bodyFeatures(doc)[Number(body[1]) - 1]);", replace: "(bodyFeatures(doc)[Number(body[1]) % bodyFeatures(doc).length]);" }],
   },
-  "bar-spills-on-phone": {
-    what: "at phone width the timeline bar is wider than the window",
+  "top-bar-spills-on-phone": {
+    what: "at phone width the top bar is wider than the window",
     expect: "no sideways scrolling",
-    edits: [{ file: BAR_CSS, find: "/* The timeline along the bottom of the window (sketch feel SF3d): one thin", replace: "@media (max-width: 400px) { .timeline-bar { min-width: 420px; } }\n/* The timeline along the bottom of the window (sketch feel SF3d): one thin" }],
+    // The timeline bar and the toolbar scroll inside their own boxes, so a wide one never widens the page; the top bar does.
+    edits: [{ file: "packages/ui/src/theme.css", find: "#topbar h1 { font-size: 16px; margin: 0; white-space: nowrap; }", replace: "#topbar h1 { font-size: 16px; margin: 0; white-space: nowrap; }\n@media (max-width: 400px) { #topbar { min-width: 420px; } }" }],
   },
 };
 

@@ -59,7 +59,10 @@ const seedList = (text) => text.split(",").flatMap((part) => {
  */
 const KNOWN_BUGS = process.env.MONKEY_KNOWN === "0" ? {} : {
   "body-panel": "with two or more bodies, the Feature and Body panels show the last body's feature, volume and topology whichever body is selected",
+  "grid-after-undo": "a grid size typed in a sketch, then Undo before the kernel answers, throws \"Cannot set properties of null (setting 'grid')\"",
 };
+/** Known bugs that show as an uncaught error, by the error's words. */
+const KNOWN_ERRORS = { "grid-after-undo": /Cannot set properties of null \(setting 'grid'\)/ };
 
 class Failure extends Error {
   constructor(check, message) {
@@ -196,6 +199,11 @@ function same(check, before, after) {
 /** The checks after every step. */
 async function check(s) {
   const view = await settle(s.page);
+  for (const [name, words] of Object.entries(KNOWN_ERRORS))
+    if (KNOWN_BUGS[name] && s.errors.some((e) => words.test(e))) {
+      s.known.add(name);
+      s.errors.splice(0, s.errors.length, ...s.errors.filter((e) => !words.test(e)));
+    }
   if (s.errors.length) fail("no errors", s.errors.splice(0).join(" | "));
   if (view.sideways > 1) fail("no sideways scrolling", `the page is ${view.sideways} px wider than the window`);
   const text = await save(s);
