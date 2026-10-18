@@ -464,7 +464,8 @@ test("Design draws the selection, selects Body 1 from the browser, and stops dra
   row.click();
   assert.deepEqual(ctx.selection.items.map((r) => r.id), ["body:feature-1"]);
   assert.deepEqual(drawn(), { body: true, faces: [], edges: [] });
-  assert.deepEqual(lit(), ["body-1"]);
+  // The box's Timeline row selects the same body (24f6), so it is lit with Body 1's row.
+  assert.deepEqual(lit(), ["feature-1", "body-1"]);
   assert.deepEqual(listed(), ["Body 1 · solid body:feature-1"]);
   assert.equal((ctx.properties.querySelector("#selection-empty") as HTMLElement).hidden, true);
   // Shift on the row takes the body out again; a face pick unlights the row.
@@ -473,8 +474,13 @@ test("Design draws the selection, selects Body 1 from the browser, and stops dra
   row.click();
   ctx.viewport.onPick!({ face: 2, shift: false });
   assert.deepEqual(lit(), []);
-  // Origin and timeline rows select nothing yet: they are not buttons.
+  // Origin rows select nothing yet: they are not buttons. A solid's Timeline row is one (24f6), and selects its body.
   assert.equal(ctx.browser.querySelector("[data-node=origin-z]")!.tagName, "SPAN");
+  const timelineRow = ctx.browser.querySelector('[data-node="timeline"] .tree-row[data-node="feature-1"]') as HTMLElement;
+  assert.equal(timelineRow.tagName, "BUTTON");
+  timelineRow.click();
+  assert.deepEqual(ctx.selection.items.map((r) => r.id), ["body:feature-1"]);
+  assert.deepEqual(lit(), ["feature-1", "body-1"]);
   view.unmount();
   assert.deepEqual(drawn(), NO_HIGHLIGHT, "hide stops drawing the selection");
   ctx.selection.set([{ kind: "face", id: "face:feature-1/3" as StableId }]);

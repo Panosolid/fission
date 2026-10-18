@@ -22,3 +22,5 @@ export { rounding, snapOnSketch, SNAP_PIXELS, type Rounding, type Snap } from ".
 export { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS, type ReorderCause, type Reordered } from "./timeline-edits.ts";
 export { deleteAsk, deleteWords, listWords, planDelete, type DeleteAsk, type DeletePlan, type DeleteQuestion } from "./delete-ask.ts";
 export { BodyCache, rebuildTimeline, settleKept, type CurveIds, type FeatureResult, type KeptWarning, type LostCause, type TimelineBuild } from "./rebuild.ts";
+export { barEdit, timelineBarItems, type BarAction, type BarResult } from "./timeline-bar.ts";
+export { dropState, gapX, type DropState } from "./timeline-reorder.ts";
