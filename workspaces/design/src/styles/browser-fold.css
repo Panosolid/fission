@@ -1,0 +1,4 @@
+/* The browser's own fold (SF3d): the panel floats over the view, so its
+   title folds the whole tree away and gives the view back. */
+.browser-fold > summary { cursor: pointer; padding: 4px 2px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #b5bbc4; }
+.browser-fold[open] > summary { margin-bottom: 4px; border-bottom: 1px solid #2a2e35; }

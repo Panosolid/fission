@@ -1,0 +1,14 @@
+/* The timeline along the bottom of the window (sketch feel SF3d): one thin
+   row, the items as small icons in build order, the rollback marker a bar
+   between two, items after it greyed, a suppressed one crossed out. The
+   names are for screen readers and the tooltip; the row scrolls sideways
+   inside itself when the items outgrow it. Each rule starts with
+   .timeline-bar, so it styles this feature alone. */
+.timeline-bar { display: flex; align-items: center; gap: 2px; margin: 0; padding: 4px 12px; list-style: none; height: 32px; background: #1c1f24; border-top: 1px solid #2a2e35; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.timeline-bar .timeline-bar-item { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border: 1px solid #353a43; border-radius: 3px; background: #262a31; color: #8fc3ff; }
+.timeline-bar .timeline-bar-item[data-icon="sketch"] { color: #c9d1d9; }
+.timeline-bar .timeline-bar-item[data-rolled-back="true"] { opacity: 0.4; }
+.timeline-bar .timeline-bar-item[data-suppressed="true"] { color: #8a919c; }
+.timeline-bar .timeline-bar-item[data-suppressed="true"]::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; border-top: 1.5px solid #ff6b6b; transform: rotate(-35deg); }
+.timeline-bar .timeline-bar-marker { flex-shrink: 0; width: 4px; height: 24px; margin: 0 3px; border-radius: 2px; background: #4aa8ff; }
+.timeline-bar .timeline-bar-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
