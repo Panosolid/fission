@@ -1,0 +1,26 @@
+/* The sketch's own toolbar (sketch feel SF3b, sketch-toolbar.ts): the
+   Create menu and the tools at the left, a big Finish Sketch pushed to the
+   far right in the accent green of "done". ":not(#none)" lifts a rule over
+   the base layout's "#workspace button" while every selector still starts
+   with .sketchbar. */
+.sketchbar.sketchbar-finish:not(#none) { margin-left: auto; }
+.sketchbar #finish-sketch:not(#none) { background: #1f5f3f; border-color: #3ddc97; font-weight: 600; padding: 7px 16px; }
+.sketchbar #finish-sketch:not(#none):hover { background: #26744c; }
+.sketchbar .sketchbar-menu-button:not(#none) { background: none; border-color: transparent; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #b7c0cc; }
+.sketchbar .sketchbar-menu-button[aria-expanded="true"]:not(#none) { border-color: #4aa8ff; }
+/* The Create menu: fixed to the page under its button, so the toolbar's
+   sideways scroll at phone width never clips it. */
+.sketchbar .sketchbar-menu { position: fixed; z-index: 30; display: flex; flex-direction: column; min-width: 190px; padding: 4px; background: #1c1f24; border: 1px solid #353a43; border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); }
+.sketchbar .sketchbar-menu button:not(#none) { display: flex; justify-content: space-between; gap: 16px; background: none; border-color: transparent; text-align: left; }
+.sketchbar .sketchbar-menu button:not(#none):hover, .sketchbar .sketchbar-menu button:not(#none):focus { background: #2e333b; }
+.sketchbar .sketchbar-menu button[aria-checked="true"]:not(#none) { background: #23384f; border-color: #4aa8ff; }
+.sketchbar .sketchbar-menu kbd { font-family: ui-monospace, monospace; color: #8a919c; }
+/* Phone width: everything 44 px tall to tap, and the tools wrap inside the
+   screen's width (two rows) so all of them show at once; Extrude and
+   Finish Sketch follow by the toolbar's sideways scroll, and Finish is in
+   the sketch panel below as well. */
+@media (max-width: 640px) {
+  .sketchbar button:not(#none) { min-height: 44px; }
+  .sketchbar.sketchbar-create:not(#none) { flex-wrap: wrap; max-width: calc(100vw - 24px); flex-shrink: 0; }
+  .sketchbar .sketchbar-menu button:not(#none) { min-height: 44px; align-items: center; }
+}

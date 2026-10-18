@@ -2,7 +2,7 @@
 // Run with `npm test` (Node's built-in test runner).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { latestOnly } from "../src/kernel/kernel-client.ts";
+import { KernelError, kernelFailure, latestOnly } from "../src/kernel/kernel-client.ts";
 
 /** A promise we resolve by hand, to force replies out of order. */
 function deferred<T>() {
@@ -39,4 +39,37 @@ test("latestOnly passes errors through", async () => {
     throw new Error("width must be positive");
   });
   await assert.rejects(wrapped(), /width must be positive/);
+});
+
+test("kernelFailure keeps the kernel's kind, inputs and message", () => {
+  // What the WASM kernel throws: an Error with kind and inputs beside the message.
+  const thrown = Object.assign(new Error("width must be between 0.001 and 1000000 mm, got -1"), {
+    kind: "invalid-input",
+    inputs: [{ input: "param", name: "width" }],
+  });
+  const failure = kernelFailure(thrown);
+  assert.deepEqual(failure, { kind: "invalid-input", inputs: [{ input: "param", name: "width" }], message: "width must be between 0.001 and 1000000 mm, got -1" });
+  // Rebuilt on the main thread it is still an Error with the same message,
+  // so code that shows e.message keeps working.
+  const e = new KernelError(failure);
+  assert.ok(e instanceof Error);
+  assert.equal(e.message, failure.message);
+  assert.equal(e.kind, "invalid-input");
+  assert.deepEqual(e.inputs, failure.inputs);
+  // Printed as any Error was, which tests matching /^Error: …/ rely on.
+  assert.equal(String(e), "Error: width must be between 0.001 and 1000000 mm, got -1");
+});
+
+test("anything else thrown is an internal failure with no inputs", () => {
+  // A WASM crash: a plain Error with no kind.
+  assert.deepEqual(kernelFailure(new Error("unreachable")), { kind: "internal", inputs: [], message: "unreachable" });
+  // A kind the kernel never gives is not trusted, and neither are its inputs.
+  const odd = Object.assign(new Error("x"), { kind: "made-up", inputs: [{ input: "line", index: 0 }] });
+  assert.deepEqual(kernelFailure(odd), { kind: "internal", inputs: [], message: "x" });
+  // A known kind with inputs that aren't a list keeps the kind, no inputs.
+  const bare = Object.assign(new Error("y"), { kind: "unknown-body", inputs: "body" });
+  assert.deepEqual(kernelFailure(bare), { kind: "unknown-body", inputs: [], message: "y" });
+  // Not an Error at all.
+  assert.deepEqual(kernelFailure("text"), { kind: "internal", inputs: [], message: "text" });
+  assert.deepEqual(kernelFailure(null), { kind: "internal", inputs: [], message: "null" });
 });

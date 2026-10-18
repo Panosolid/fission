@@ -1,7 +1,7 @@
 //! Moving and rotating bodies. Both change only the body's placement, never
 //! its geometry (see `placed`).
 
-use super::KernelError;
+use super::{Input, KernelError};
 use crate::placed::Placed;
 use crate::tolerance::{ANGULAR, MAX_COORD};
 use crate::topology::Body;
@@ -11,7 +11,7 @@ use std::f64::consts::TAU;
 /// Moves a body by `offset`.
 pub fn translate(placed: &Placed, offset: DVec3) -> Result<Placed, KernelError> {
     if !offset.is_finite() {
-        return Err(KernelError::InvalidInput(format!("move distance must be finite, got {offset}")));
+        return Err(KernelError::invalid(Input::Param { name: "offset" }, format!("move distance must be finite, got {offset}")));
     }
     checked_place(Placed { body: placed.body.clone(), placement: placed.placement.moved(offset) })
 }
@@ -21,10 +21,13 @@ pub fn translate(placed: &Placed, offset: DVec3) -> Result<Placed, KernelError> 
 /// space (within ±MAX_COORD), like every point of every body.
 pub fn rotate(placed: &Placed, pivot: DVec3, axis: DVec3, angle: f64) -> Result<Placed, KernelError> {
     if !pivot.is_finite() || !axis.is_finite() || !angle.is_finite() {
-        return Err(KernelError::InvalidInput("rotation pivot, axis and angle must be finite".into()));
+        let params = ["pivot", "axis", "angle"].map(|name| Input::Param { name });
+        let finite = [pivot.is_finite(), axis.is_finite(), angle.is_finite()];
+        let inputs = params.into_iter().zip(finite).filter(|(_, ok)| !ok).map(|(p, _)| p).collect();
+        return Err(KernelError::InvalidInput { inputs, message: "rotation pivot, axis and angle must be finite".into() });
     }
     if pivot.abs().max_element() > MAX_COORD {
-        return Err(KernelError::InvalidInput(format!(
+        return Err(KernelError::invalid(Input::Param { name: "pivot" }, format!(
             "rotation pivot {pivot} is outside model space (±{MAX_COORD:e} mm)"
         )));
     }
@@ -32,7 +35,7 @@ pub fn rotate(placed: &Placed, pivot: DVec3, axis: DVec3, angle: f64) -> Result<
     // axis by its largest component.
     let unit = crate::geom::unit(axis).filter(|_| axis.abs().max_element() > ANGULAR);
     let Some(unit) = unit else {
-        return Err(KernelError::InvalidInput("rotation axis must not be zero".into()));
+        return Err(KernelError::invalid(Input::Param { name: "axis" }, "rotation axis must not be zero".into()));
     };
     // Reduce huge angles first so sin/cos stay accurate.
     checked_place(Placed { body: placed.body.clone(), placement: placed.placement.turned(pivot, unit, angle.rem_euclid(TAU)) })
@@ -60,9 +63,9 @@ pub(crate) fn check_in_model_space(body: &Body) -> Result<(), KernelError> {
 fn check_reach(lo: DVec3, hi: DVec3) -> Result<(), KernelError> {
     let reach = lo.abs().max(hi.abs()).max_element();
     if !reach.is_finite() || reach > MAX_COORD {
-        return Err(KernelError::InvalidInput(format!(
+        return Err(KernelError::InvalidInput { inputs: vec![], message: format!(
             "result would reach {reach:e} mm from the origin; the limit is {MAX_COORD:e} mm"
-        )));
+        ) });
     }
     Ok(())
 }
@@ -74,6 +77,24 @@ mod tests {
     use crate::placed::Placed;
     use crate::tolerance::{points_eq, MAX_COORD};
     use std::f64::consts::FRAC_PI_2;
+
+    #[test]
+    fn each_refusal_names_the_inputs_at_fault() {
+        let placed = Placed::new(make_box(1.0, 1.0, 1.0).unwrap());
+        let inputs = |r: Result<Placed, KernelError>| match r {
+            Err(KernelError::InvalidInput { inputs, .. }) => inputs,
+            other => panic!("expected InvalidInput, got {other:?}"),
+        };
+        let param = |name| Input::Param { name };
+        assert_eq!(inputs(translate(&placed, DVec3::new(f64::INFINITY, 0.0, 0.0))), vec![param("offset")]);
+        // Only the arguments that aren't finite.
+        assert_eq!(inputs(rotate(&placed, DVec3::ZERO, DVec3::Z, f64::NAN)), vec![param("angle")]);
+        assert_eq!(inputs(rotate(&placed, DVec3::NAN, DVec3::NAN, 1.0)), vec![param("pivot"), param("axis")]);
+        assert_eq!(inputs(rotate(&placed, DVec3::splat(2.0 * MAX_COORD), DVec3::Z, 1.0)), vec![param("pivot")]);
+        assert_eq!(inputs(rotate(&placed, DVec3::ZERO, DVec3::ZERO, 1.0)), vec![param("axis")]);
+        // Reaching beyond model space is the move as a whole: no one input.
+        assert_eq!(inputs(translate(&placed, DVec3::new(2.0 * MAX_COORD, 0.0, 0.0))), vec![]);
+    }
 
     #[test]
     fn move_by_hand() {
@@ -167,7 +188,7 @@ mod tests {
         // Each bad input is refused for its own reason (not by a later check
         // that happens to trip on the NaNs it produced).
         let reason = |r: Result<Placed, KernelError>| match r {
-            Err(KernelError::InvalidInput(m)) => m,
+            Err(KernelError::InvalidInput { message: m, .. }) => m,
             other => panic!("expected InvalidInput, got {other:?}"),
         };
         for r in [

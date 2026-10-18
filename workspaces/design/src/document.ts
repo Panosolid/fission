@@ -1,11 +1,15 @@
 // Design's part of the project: profiles, sketches and the timeline
 // (docs/document-model.md).
 //
-// Until the timeline (step 24) a part is ONE solid feature, with exactly
-// the intent, provenance and dependency structures step 24 uses; sketches
-// are timeline items of their own next to it (step 21b). The body is built
-// from the feature's intent (specOf), so the intent is the source of
-// truth, not a description written next to the geometry.
+// Version 3 (step 24d1): every solid feature is its own body ("New body",
+// until booleans join them), presets are ordinary features with ids from
+// the counter, and the rollback marker is saved with the timeline. A new
+// item goes in just after the marker and the marker moves onto it, the
+// model's rule (packages/testing/src/timeline-model.ts). Until 24d2 and
+// 24d3 rebuild and draw every body, the app builds and shows one: the last
+// solid feature that builds (`lastFeature`). Each body is built from its
+// feature's intent (specOf), so the intent is the source of truth, not a
+// description written next to the geometry.
 
 import type { BodySpec, Feature, Plane } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
@@ -75,14 +79,20 @@ export interface Sketch {
 export const SKETCH_PLANES = ["XY", "XZ", "YZ"] as const;
 export type SketchPlane = (typeof SKETCH_PLANES)[number];
 
+/**
+ * The rollback marker: the id of the last item built, or "start" when
+ * nothing is; left out when everything is built (docs/project-format.md).
+ */
+export type Marker = string;
+
 export interface DesignDocument {
   /** Version of this part of the project file (see docs/project-format.md). */
-  version: 2;
+  version: 3;
   /** The number the next new id gets. Ids are never reused, even after a delete (docs/document-model.md, section 2). */
   nextId: number;
   profiles: ReadyProfile[];
   sketches: Sketch[];
-  timeline: { features: Feature[] };
+  timeline: { features: Feature[]; marker?: Marker };
 }
 
 const profileNames: Record<ProfileKind, string> = {
@@ -98,80 +108,100 @@ const dims = (...ns: number[]) => ns.map(String).join(" × ");
 /** One profile's display name, e.g. "L-bracket profile". */
 export const profileLabel = (p: ReadyProfile) => `${profileNames[p.kind]} profile`;
 
+const SHAPE_TYPES = { box: "box", cylinder: "cylinder", sphere: "sphere" } as const;
+const isPrimitive = (kind: ShapeKind): kind is keyof typeof SHAPE_TYPES => Object.hasOwn(SHAPE_TYPES, kind);
+
 /**
- * The document for one part: feature #1 of a one-step timeline. Boxes,
- * cylinders and spheres are primitives (a cylinder's or sphere's width is
- * its diameter); other shapes extrude a ready-made profile by the height.
+ * A preset's feature with this id, and the ready-made profile it extrudes
+ * (with `profileId`) for a profile shape. Boxes, cylinders and spheres are
+ * primitives (a cylinder's or sphere's width is its diameter); other shapes
+ * extrude a ready-made profile by the height.
  */
-export function partDocument(kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
-  const self = (label: string) => ({ workspace: "design" as const, id: "feature-1", label });
+function presetFeature(id: string, profileId: string | undefined, kind: ShapeKind, w: number, d: number, h: number): { feature: Feature; profile?: ReadyProfile } {
+  const n = idNumber(id);
   const feature = (intent: Feature["intent"], dependsOn: string[] = [], from: Feature["provenance"]["from"] = []): Feature => ({
-    id: "feature-1",
+    id,
     intent,
-    provenance: { self: self(`Feature 1 (${intent.type})`), from },
+    provenance: { self: { workspace: "design", id, label: `Feature ${n ?? id} (${intent.type})` }, from },
     dependsOn,
     suppressed: false,
   });
-  if (kind === "box")
-    return doc([], feature({ type: "box", parameters: { width: w, depth: d, height: h }, summary: `Box: ${dims(w, d, h)} mm` }));
-  if (kind === "cylinder")
-    return doc([], feature({ type: "cylinder", parameters: { diameter: w, height: h }, summary: `Cylinder: ⌀${dims(w)} × ${h} mm` }));
-  if (kind === "sphere") return doc([], feature({ type: "sphere", parameters: { diameter: w }, summary: `Sphere: ⌀${w} mm` }));
-  const profile: ReadyProfile = { id: "profile-1", kind, width: w, depth: d, plane: XY_PLANE };
-  return doc(
-    [profile],
-    feature(
+  if (kind === "box") return { feature: feature({ type: "box", parameters: { width: w, depth: d, height: h }, summary: `Box: ${dims(w, d, h)} mm` }) };
+  if (kind === "cylinder") return { feature: feature({ type: "cylinder", parameters: { diameter: w, height: h }, summary: `Cylinder: ⌀${dims(w)} × ${h} mm` }) };
+  if (kind === "sphere") return { feature: feature({ type: "sphere", parameters: { diameter: w }, summary: `Sphere: ⌀${w} mm` }) };
+  if (profileId === undefined) throw new Error(`a ${kind} preset needs a profile id`);
+  const profile: ReadyProfile = { id: profileId, kind, width: w, depth: d, plane: XY_PLANE };
+  return {
+    profile,
+    feature: feature(
       { type: "extrude", parameters: { profile: profile.id, distance: h }, summary: `Extrude: ${profileLabel(profile)} ${dims(w, d)} mm, by ${h} mm` },
       [profile.id],
       [{ workspace: "design", id: profile.id, label: profileLabel(profile) }],
     ),
-  );
+  };
 }
 
-// A fresh part uses ids 1 (its feature and profile), so the counter starts at 2.
-const doc = (profiles: ReadyProfile[], feature: Feature): DesignDocument => ({ version: 2, nextId: 2, profiles, sketches: [], timeline: { features: [feature] } });
+/** The document for a new project: one preset, feature-1 (and profile-1 for a profile shape), the counter at 2. */
+export function partDocument(kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
+  const { feature, profile } = presetFeature("feature-1", "profile-1", kind, w, d, h);
+  return { version: 3, nextId: 2, profiles: profile ? [profile] : [], sketches: [], timeline: { features: [feature] } };
+}
+
+/** The index a new timeline item goes in at: just after the marker, first when it is at the start, else last. */
+export function insertAt(doc: DesignDocument): number {
+  const { features, marker } = doc.timeline;
+  if (marker === undefined) return features.length;
+  if (marker === "start") return 0;
+  return features.findIndex((f) => f.id === marker) + 1;
+}
+
+/** The timeline with a new item put in at the marker (insertAt); the marker, when there is one, moves onto it. */
+export function insertItem(doc: DesignDocument, item: Feature): DesignDocument["timeline"] {
+  const features = [...doc.timeline.features];
+  features.splice(insertAt(doc), 0, item);
+  return doc.timeline.marker === undefined ? { ...doc.timeline, features } : { ...doc.timeline, features, marker: item.id };
+}
 
 /**
- * The document with its part replaced by this shape and these sizes (the
- * panel and set_part), keeping its sketches where they are in the build
- * order. The part's feature takes the old part feature's place; until step
- * 32 there is only that one, and a preset shape's feature and profile are
- * always "feature-1" and "profile-1" (step 24 turns presets into ordinary
- * features with counter ids). The counter never goes back.
+ * A new preset feature (a new body), its ids from the counter, put in at
+ * the marker. A profile shape takes a second id for its ready-made profile.
  */
-export function withPart(previous: DesignDocument | null | undefined, kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
-  let fresh = partDocument(kind, w, d, h);
-  if (!previous) return fresh;
-  let nextId = Math.max(fresh.nextId, previous.nextId);
-  const old = lastFeature(previous);
-  // A preset edited keeps its feature's id and its profile's (the same
-  // feature, changed). After an extrude of a sketch (step 21d) the preset is
-  // a new feature: it takes new ids from the counter, so a link to the
-  // part's old feature-1 or profile-1 never lands on it. A profile the old
-  // part didn't have is profile-1 on the first part, else new.
-  const oldProfile = previous.profiles.find((p) => old.dependsOn.includes(p.id))?.id;
-  const ids = new Map<string, string>();
-  ids.set("feature-1", isSketchExtrude(old) ? `feature-${nextId++}` : old.id);
-  if (fresh.profiles.length > 0) ids.set("profile-1", oldProfile ?? (old.id === "feature-1" ? "profile-1" : `profile-${nextId++}`));
-  fresh = renamed(fresh, ids);
-  const part = fresh.timeline.features[0];
-  const features = previous.timeline.features.filter((f) => f === old || isSketchItem(f)).map((f) => (f === old ? part : f));
-  return { ...fresh, nextId, sketches: previous.sketches, timeline: { features } };
+export function insertPreset(doc: DesignDocument, kind: ShapeKind, w: number, d: number, h: number): { doc: DesignDocument; id: string } {
+  let nextId = doc.nextId;
+  const id = `feature-${nextId++}`;
+  const { feature, profile } = presetFeature(id, isPrimitive(kind) ? undefined : `profile-${nextId++}`, kind, w, d, h);
+  return { id, doc: { ...doc, nextId, profiles: profile ? [...doc.profiles, profile] : doc.profiles, timeline: insertItem(doc, feature) } };
 }
 
-/** A fresh part's document with its ids swapped as `ids` says (feature, profile, and the references between them). */
-function renamed(fresh: DesignDocument, ids: ReadonlyMap<string, string>): DesignDocument {
-  const id = (x: string) => ids.get(x) ?? x;
-  const [f] = fresh.timeline.features;
-  const parameters = typeof f.intent.parameters.profile === "string" ? { ...f.intent.parameters, profile: id(f.intent.parameters.profile) } : f.intent.parameters;
-  const feature: Feature = {
-    ...f,
-    id: id(f.id),
-    intent: { ...f.intent, parameters },
-    provenance: { self: { ...f.provenance.self, id: id(f.id) }, from: f.provenance.from.map((r) => ({ ...r, id: id(r.id) })) },
-    dependsOn: f.dependsOn.map(id),
-  };
-  return { ...fresh, profiles: fresh.profiles.map((p) => ({ ...p, id: id(p.id) })), timeline: { features: [feature] } };
+/**
+ * The document with the preset feature `id` changed to this shape and
+ * these sizes: the same feature, so it keeps its id, its place and its
+ * profile's id (a profile shape that had none takes one from the counter;
+ * a profile no feature uses any more goes).
+ */
+export function changePreset(doc: DesignDocument, id: string, kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
+  const old = doc.timeline.features.find((f) => f.id === id);
+  if (!old || isSketchItem(old) || isSketchExtrude(old)) throw new Error(`there is no preset ${shown(id)} in the design`);
+  let nextId = doc.nextId;
+  const oldProfile = old.dependsOn.find((p) => doc.profiles.some((x) => x.id === p));
+  const { feature, profile } = presetFeature(id, isPrimitive(kind) ? undefined : (oldProfile ?? `profile-${nextId++}`), kind, w, d, h);
+  const features = doc.timeline.features.map((f) => (f === old ? { ...feature, suppressed: old.suppressed } : f));
+  const used = new Set(features.flatMap((f) => f.dependsOn));
+  const kept = doc.profiles.flatMap((p) => (p.id === profile?.id ? [profile] : p.id !== oldProfile || used.has(p.id) ? [p] : []));
+  const profiles = profile && !kept.includes(profile) ? [...kept, profile] : kept;
+  return { ...doc, nextId, profiles, timeline: { ...doc.timeline, features } };
+}
+
+/**
+ * The document after the panel or set_part asks for this shape and these
+ * sizes: the part (`lastFeature`) changed in place when it is a preset,
+ * else (an extrude of a sketch) a new preset feature put in at the marker,
+ * so nothing already in the timeline is replaced. The counter never goes back.
+ */
+export function withPart(previous: DesignDocument | null | undefined, kind: ShapeKind, w: number, d: number, h: number): DesignDocument {
+  if (!previous) return partDocument(kind, w, d, h);
+  const part = lastFeature(previous);
+  return isSketchExtrude(part) ? insertPreset(previous, kind, w, d, h).doc : changePreset(previous, part.id, kind, w, d, h);
 }
 
 /**
@@ -226,12 +256,14 @@ export type PartSizes = Partial<Record<"width" | "depth" | "height", number>>;
 export type PartKind = ShapeKind | "sketch-extrude";
 
 /**
- * The shape and sizes a document's final feature was made from: the
- * inverse of partDocument, for the panel showing a loaded part. Throws a
- * clear message for a feature the panel can't show.
+ * The shape and sizes the part (`lastFeature`) was made from: the inverse
+ * of partDocument, for the panel showing a loaded part. Throws a clear
+ * message for a feature the panel can't show.
  */
-export function partOf(document: DesignDocument): { shape: PartKind; sizes: PartSizes } {
-  const f = lastFeature(document);
+export const partOf = (document: DesignDocument): { shape: PartKind; sizes: PartSizes } => shapeOf(document, lastFeature(document));
+
+/** The shape and sizes a solid feature was made from (presetFeature's inverse; an extrude of a sketch has its distance). */
+export function shapeOf(document: DesignDocument, f: Feature): { shape: PartKind; sizes: PartSizes } {
   switch (f.intent.type) {
     case "box":
       return { shape: "box", sizes: { width: num(f, "width"), depth: num(f, "depth"), height: num(f, "height") } };
@@ -250,6 +282,23 @@ export function partOf(document: DesignDocument): { shape: PartKind; sizes: Part
     default:
       throw new Error(`unknown feature type ${shown(f.intent.type)}`);
   }
+}
+
+/**
+ * Version 2 (steps 21b to 24c) showed one body, the last solid feature's,
+ * and had no rollback marker. In version 3 every solid feature is a body,
+ * so each solid feature but the last becomes suppressed: the design opens
+ * looking as it did, and nothing is lost (unsuppressing one brings it
+ * back). Ids, sizes and the counter are kept as they were.
+ */
+export function migrateDesignV2(d: Record<string, unknown>): Record<string, unknown> {
+  const timeline = d.timeline as Record<string, unknown> | undefined;
+  if (isRecord(timeline) && Object.hasOwn(timeline, "marker")) throw new Error("Design data says version 2 but has a timeline marker, which version 2 never had");
+  if (!isRecord(timeline) || !Array.isArray(timeline.features)) return { ...d, version: 3 };
+  const solids = timeline.features.filter((f) => !(isRecord(f) && isRecord(f.intent) && f.intent.type === "sketch"));
+  const last = solids.at(-1);
+  const features = timeline.features.map((f) => (solids.includes(f) && f !== last && isRecord(f) ? { ...f, suppressed: true } : f));
+  return { ...d, version: 3, timeline: { ...timeline, features } };
 }
 
 /**
@@ -317,12 +366,14 @@ function checkSketch(s: unknown, i: number): void {
 /**
  * Design's part of a loaded project, checked all the way down to the
  * numbers the panel shows, so a bad file is refused when it is opened
- * rather than failing later. Version 1 is migrated to version 2 first.
+ * rather than failing later. Version 1 is migrated to version 2, and
+ * version 2 to version 3 (migrateDesignV2), first.
  */
 export function readDesignDocument(data: unknown): DesignDocument {
   if (!isRecord(data)) throw new Error("Design data is missing");
-  const d = (data.version === 1 ? migrateDesignV1(data) : data) as Partial<DesignDocument>;
-  if (d.version !== 2) throw new Error(`Design data version ${shown(d.version)} is not one this Fission reads (1 or 2)`);
+  const v2 = data.version === 1 ? migrateDesignV1(data) : data;
+  const d = (v2.version === 2 ? migrateDesignV2(v2) : v2) as Partial<DesignDocument>;
+  if (d.version !== 3) throw new Error(`Design data version ${shown(d.version)} is not one this Fission reads (1, 2 or 3)`);
   if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features) || d.timeline.features.length === 0)
     throw new Error("Design data has no timeline");
   if (!Array.isArray(d.sketches)) throw new Error("Design data has no sketches list");
@@ -333,7 +384,11 @@ export function readDesignDocument(data: unknown): DesignDocument {
     const intent = (f as Partial<Feature> | null)?.intent;
     if (typeof f?.id !== "string" || typeof intent?.type !== "string" || typeof intent.summary !== "string" || typeof intent.parameters !== "object" || intent.parameters === null)
       throw new Error(`Design feature ${i + 1} has no id or intent`);
+    if (typeof f.suppressed !== "boolean") throw new Error(`Design feature ${f.id}: suppressed must be true or false, not ${shown(f.suppressed)}`);
   }
+  const marker = d.timeline.marker;
+  if (Object.hasOwn(d.timeline, "marker") && marker !== "start" && !d.timeline.features.some((f) => f.id === marker))
+    throw new Error(`Design timeline marker ${shown(marker)} is not "start" or the id of an item in the timeline`);
   d.sketches.forEach(checkSketch);
   // Each sketch has exactly one timeline item, on a plane this Fission knows, and each sketch item its sketch.
   const sketchIds = new Set(d.sketches.map((s) => s.id));
@@ -371,11 +426,30 @@ export function readDesignDocument(data: unknown): DesignDocument {
 }
 
 /**
- * The part's solid feature: the last timeline item that is not a sketch
- * (the only one until step 24, which builds every solid feature).
+ * Whether a timeline item builds: it is at or before the marker, not
+ * suppressed, and (an extrude of a sketch) its sketch builds too. The
+ * kernel judges the rest (an outline that doesn't close) when it builds.
+ * 24d2's rebuild replaces this with each item's real result.
+ */
+export function builds(document: DesignDocument, f: Feature): boolean {
+  const { features, marker } = document.timeline;
+  const at = features.indexOf(f);
+  if (at < 0 || f.suppressed) return false;
+  if (marker === "start" || (marker !== undefined && at > features.findIndex((x) => x.id === marker))) return false;
+  if (!isSketchExtrude(f)) return true;
+  const sketch = features.find((x) => x.id === f.intent.parameters.sketch && isSketchItem(x));
+  return sketch !== undefined && builds(document, sketch);
+}
+
+/**
+ * The part the app builds and shows until every body is drawn (24d3): the
+ * last solid feature that builds. Every solid feature is its own body in
+ * the data from version 3.
  */
 export function lastFeature(document: DesignDocument): Feature {
-  const f = [...document.timeline.features].reverse().find((x) => !isSketchItem(x));
-  if (!f) throw new Error("Design data has no part: every timeline item is a sketch");
+  const solids = document.timeline.features.filter((x) => !isSketchItem(x));
+  if (solids.length === 0) throw new Error("Design data has no part: every timeline item is a sketch");
+  const f = [...solids].reverse().find((x) => builds(document, x));
+  if (!f) throw new Error("Design data builds no body: every solid feature is suppressed or after the rollback marker, and this Fission can't show a design with no body yet");
   return f;
 }

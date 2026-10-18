@@ -1,0 +1,179 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Plate",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 18,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "end": "point-4",
+              "id": "line-5",
+              "kind": "line",
+              "start": "point-3"
+            },
+            {
+              "end": "point-6",
+              "id": "line-7",
+              "kind": "line",
+              "start": "point-4"
+            },
+            {
+              "end": "point-8",
+              "id": "line-9",
+              "kind": "line",
+              "start": "point-6"
+            },
+            {
+              "end": "point-3",
+              "id": "line-10",
+              "kind": "line",
+              "start": "point-8"
+            }
+          ],
+          "id": "sketch-2",
+          "points": [
+            {
+              "id": "point-3",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-4",
+              "x": 40,
+              "y": 0
+            },
+            {
+              "id": "point-6",
+              "x": 40,
+              "y": 30
+            },
+            {
+              "id": "point-8",
+              "x": 0,
+              "y": 30
+            }
+          ]
+        },
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "end": "point-14",
+              "id": "line-15",
+              "kind": "line",
+              "start": "point-13"
+            },
+            {
+              "centre": "point-16",
+              "end": "point-13",
+              "id": "arc-17",
+              "kind": "arc",
+              "start": "point-14"
+            }
+          ],
+          "id": "sketch-12",
+          "points": [
+            {
+              "id": "point-13",
+              "x": -10,
+              "y": 0
+            },
+            {
+              "id": "point-14",
+              "x": 10,
+              "y": 0
+            },
+            {
+              "id": "point-16",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 1 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-2"
+            ],
+            "id": "feature-11",
+            "intent": {
+              "parameters": {
+                "distance": 10,
+                "sketch": "sketch-2"
+              },
+              "summary": "Extrude Sketch 1 by 10 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-2",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-11",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [],
+            "id": "sketch-12",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 2 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-12",
+                "label": "Sketch 2",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 2
+    }
+  }
+}

@@ -1,6 +1,6 @@
 // Step 21d: extruding a sketch (docs/document-model.md, sections 3 and 6).
-// The extrude is a new feature after its sketch, depending on it, and until
-// step 24 it replaces the part's one solid feature. Volumes on the real
+// The extrude is a new feature after its sketch, depending on it, and from
+// step 24d1 a new body: it replaces nothing. Volumes on the real
 // kernel are in packages/testing/journeys/extrude-sketch.journey.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -36,7 +36,7 @@ function fakeKernel(answer: { closed: Outline } | { open: string }) {
   return { kernel, asked };
 }
 
-test("hand-worked: extruding Sketch 1 replaces the part with a new feature after the sketch", () => {
+test("hand-worked: extruding Sketch 1 adds a new feature after the sketch and keeps the box", () => {
   // The box is feature-1, so the counter is at 2. Sketch 1 takes sketch-2.
   // The first line makes point-3, point-4 and line-5; each next line one new
   // point and the line (6 and 7, 8 and 9); the closing line ends on point-3
@@ -46,8 +46,9 @@ test("hand-worked: extruding Sketch 1 replaces the part with a new feature after
   const made = extrudeSketch(doc, sketch, 10);
   assert.equal(made.id, "feature-11");
   assert.equal(made.doc.nextId, 12);
-  // The box is gone (one body until step 24); the extrude comes after its sketch.
-  assert.deepEqual(made.doc.timeline.features.map((f) => f.id), ["sketch-2", "feature-11"]);
+  // The box stays (every solid feature is its own body from 24d1); the extrude comes after its sketch.
+  assert.deepEqual(made.doc.timeline.features.map((f) => f.id), ["feature-1", "sketch-2", "feature-11"]);
+  assert.deepEqual(made.doc.timeline.features[0], doc.timeline.features[0]);
   assert.deepEqual(lastFeature(made.doc), {
     id: "feature-11",
     intent: { type: "extrude", parameters: { sketch: "sketch-2", distance: 10 }, summary: "Extrude Sketch 1 by 10 mm" },
@@ -58,16 +59,21 @@ test("hand-worked: extruding Sketch 1 replaces the part with a new feature after
   // The sketch is kept exactly as drawn.
   assert.deepEqual(made.doc.sketches, doc.sketches);
   assert.deepEqual(partOf(made.doc), { shape: "sketch-extrude", sizes: { height: 10 } });
-  assert.equal(extrudeStep(doc, sketch), "Replace the part with Extrude of Sketch 1");
+  assert.equal(extrudeStep(doc, sketch), "Extrude Sketch 1");
+  // A second extrude of the same sketch is Extrude 2, after the first: nothing is replaced.
+  const again = extrudeSketch(made.doc, sketch, 4);
+  assert.equal(again.id, "feature-12");
+  assert.deepEqual(again.doc.timeline.features.map((f) => [f.id, f.provenance.self.label]), [["feature-1", "Feature 1 (box)"], ["sketch-2", "Sketch 1"], ["feature-11", "Extrude 1"], ["feature-12", "Extrude 2"]]);
   // The document it was given is unchanged.
   assert.equal(doc.timeline.features[0].id, "feature-1");
 });
 
-test("extruding over a ready-made profile part drops the profile no feature uses any more", () => {
+test("extruding after a ready-made profile part keeps the part and its profile", () => {
   const { doc, sketch } = rectangle(partDocument("plate", 40, 30, 5));
   assert.deepEqual(doc.profiles.map((p) => p.id), ["profile-1"]);
   const made = extrudeSketch(doc, sketch, 3).doc;
-  assert.deepEqual(made.profiles, []);
+  assert.deepEqual(made.profiles, doc.profiles);
+  assert.deepEqual(made.timeline.features.map((f) => f.id), ["feature-1", "sketch-2", "feature-11"]);
   assert.doesNotThrow(() => readDesignDocument(structuredClone(made)));
 });
 
@@ -89,18 +95,24 @@ test("a typed distance changes the extrude and its summary, nothing else", () =>
   assert.deepEqual(longer.sketches, made.sketches);
   assert.equal(lastFeature(made).intent.parameters.distance, 10);
   // Only an extrude of a sketch has a distance to set this way.
-  assert.throws(() => setExtrudeDistance(doc, 5), /^Error: the part is Box: 10 × 10 × 10 mm, not an extrude of a sketch$/);
+  assert.throws(() => setExtrudeDistance(doc, 5), /^Error: Box: 10 × 10 × 10 mm is not an extrude of a sketch$/);
+  // Another extrude than the part, by id: only that one changes.
+  const two = extrudeSketch(made, sketch, 4).doc;
+  const first = setExtrudeDistance(two, 7, "feature-11");
+  assert.deepEqual(first.timeline.features.map((f) => f.intent.parameters.distance), [undefined, undefined, 7, 4]);
+  assert.throws(() => setExtrudeDistance(two, 7, "feature-99"), /^Error: there is no feature feature-99 in the design$/);
 });
 
 test("ids are never reused: extrude, back to a box, extrude again, every feature id new", () => {
-  // feature-11 is the first extrude. Back to a box: a link to the old
-  // feature-1 must not land on it, so it takes feature-12 from the counter
-  // (a plate would take a profile id too). The next extrude is feature-13.
+  // feature-11 is the first extrude. Back to a box from the panel: a new
+  // preset after it (nothing is replaced), so it takes feature-12 from the
+  // counter (a plate would take a profile id too). The next extrude is feature-13.
   const { doc, sketch } = rectangle();
   const one = extrudeSketch(doc, sketch, 10).doc;
   const box = withPart(one, "box", 20, 20, 20);
-  assert.deepEqual(box.timeline.features.map((f) => f.id), ["sketch-2", "feature-12"]);
-  assert.equal(box.timeline.features[1].provenance.self.id, "feature-12");
+  assert.deepEqual(box.timeline.features.map((f) => f.id), ["feature-1", "sketch-2", "feature-11", "feature-12"]);
+  assert.equal(box.timeline.features[3].provenance.self.id, "feature-12");
+  assert.equal(box.timeline.features[3].provenance.self.label, "Feature 12 (box)");
   assert.equal(box.nextId, 13);
   assert.deepEqual(partOf(box), { shape: "box", sizes: { width: 20, depth: 20, height: 20 } });
   // Editing that box keeps its id (the same feature, changed), as for any preset.
@@ -143,7 +155,7 @@ test("featureSpec refuses an open sketch with the kernel's reason, and a sketch 
   await assert.rejects(featureSpec(kernel, made, lastFeature(made)), /^Error: Sketch 1 has no closed outline: the line end at \(0, 0\) is not joined to another line$/);
   // On XZ the outline would need turning upright, which comes with step 26: refused, never built flat.
   const upright = structuredClone(made);
-  upright.timeline.features[0].intent.parameters.plane = "XZ";
+  upright.timeline.features[1].intent.parameters.plane = "XZ";
   await assert.rejects(featureSpec(kernel, upright, lastFeature(upright)), /Sketch 1 is on the XZ plane, and only sketches on the XY plane can be extruded so far/);
   // specOf alone can't build it: the outline needs the kernel.
   assert.throws(() => specOf(made, lastFeature(made)), /built through featureSpec/);
@@ -186,7 +198,7 @@ test("a file whose extrude breaks a rule is refused when it is opened, each with
     return () => readDesignDocument(d);
   };
   assert.doesNotThrow(broken(() => {}));
-  const extrude = (d: DesignDocument) => d.timeline.features[1];
+  const extrude = (d: DesignDocument) => d.timeline.features[2];
   const cases: [(d: DesignDocument) => void, RegExp][] = [
     // Built in order, the sketch must come first.
     [(d) => d.timeline.features.reverse(), /^Error: Design feature feature-11 extrudes sketch-2, which is not a sketch before it in the timeline$/],

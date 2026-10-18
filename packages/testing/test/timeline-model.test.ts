@@ -6,6 +6,8 @@ import assert from "node:assert/strict";
 import {
   applyOp,
   createModel,
+  edgeKey,
+  edgeName,
   faceKey,
   polygonValid,
   rebuild,
@@ -30,6 +32,11 @@ const face = (b: ModelBody, key: string) => {
   const f = b.faces.find((x) => faceKey(x.name) === key);
   assert.ok(f, `no face ${key} in [${b.faces.map((x) => faceKey(x.name)).join(", ")}]`);
   return f;
+};
+const edge = (b: ModelBody, key: string) => {
+  const e = b.edges.find((x) => edgeKey(x.name) === key);
+  assert.ok(e, `no edge ${key} in [${b.edges.map((x) => edgeKey(x.name)).join(", ")}]`);
+  return [e.length, e.centroid];
 };
 const RECT: Point[] = [
   [0, 0],
@@ -104,6 +111,88 @@ test("a clockwise rectangle: the same names on the same faces as the counter-clo
   assert.deepEqual([face(b, "item-6/side:curve-4").area, face(b, "item-6/side:curve-4").centroid], [400, [20, 0, 5]]);
   assert.deepEqual([face(b, "item-6/side:curve-3").area, face(b, "item-6/side:curve-3").centroid], [300, [40, 15, 5]]);
   assert.equal(b.volume, 12000);
+});
+
+test("edges are named by the two faces they join: a set of two, sorted, except between two sides, where the order says which corner", () => {
+  const a = { feature: "item-1", role: "side" as const, curve: "curve-3" };
+  const b = { feature: "item-1", role: "start" as const };
+  // "side:curve-3" < "start" as text, so the set is written in that order either way round.
+  assert.equal(edgeKey(edgeName(b, a, false)), "item-1/side:curve-3+start");
+  assert.equal(edgeKey(edgeName(a, b, false)), "item-1/side:curve-3+start");
+  const c = { feature: "item-1", role: "side" as const, curve: "curve-2" };
+  // Ordered: kept as given, so the two corners where two sides meet get different names.
+  assert.equal(edgeKey(edgeName(a, c, true)), "item-1/side:curve-3>side:curve-2");
+  assert.equal(edgeKey(edgeName(c, a, true)), "item-1/side:curve-2>side:curve-3");
+});
+
+test("a 40 × 30 × 20 box's 12 edges and a rectangle's extrude's 12, by hand", () => {
+  const m = createModel();
+  run(m, { op: "add-preset", kind: "box", sizes: [40, 30, 20] });
+  const box = bodyOf(results(m)["item-1"]);
+  assert.equal(box.edges.length, 12);
+  // Bottom and front meet along y = 0, z = 0: 40 long, centre (20, 0, 0). Top and right: x = 40, z = 20, 30 long, centre (40, 15, 20).
+  assert.deepEqual(edge(box, "item-1/bottom+front"), [40, [20, 0, 0]]);
+  assert.deepEqual(edge(box, "item-1/right+top"), [30, [40, 15, 20]]);
+  // Back and left: the upright at x = 0, y = 30, 20 high, centre (0, 30, 10).
+  assert.deepEqual(edge(box, "item-1/back+left"), [20, [0, 30, 10]]);
+
+  const n = createModel();
+  run(n, { op: "add-sketch", shape: { kind: "polygon", corners: RECT } }, { op: "add-extrude", sketch: "item-1", distance: 10 });
+  const b = bodyOf(results(n)["item-6"]);
+  // 4 sides: 4 edges in each cap and 4 uprights.
+  assert.equal(b.edges.length, 12);
+  // curve-2 runs (0, 0) → (40, 0): its edge in the start cap is 40 long, centre (20, 0, 0); in the end cap (20, 0, 10).
+  assert.deepEqual(edge(b, "item-6/side:curve-2+start"), [40, [20, 0, 0]]);
+  assert.deepEqual(edge(b, "item-6/end+side:curve-2"), [40, [20, 0, 10]]);
+  // Counter-clockwise, corner (40, 0) ends curve-2 and starts curve-3: the upright there, 10 high, centre (40, 0, 5).
+  assert.deepEqual(edge(b, "item-6/side:curve-2>side:curve-3"), [10, [40, 0, 5]]);
+  // Corner (0, 0) ends curve-5 (the left side, (0, 30) → (0, 0)) and starts curve-2.
+  assert.deepEqual(edge(b, "item-6/side:curve-5>side:curve-2"), [10, [0, 0, 5]]);
+});
+
+test("a clockwise rectangle's uprights: the side before each corner counter-clockwise comes first", () => {
+  const m = createModel();
+  run(m, { op: "add-sketch", shape: { kind: "polygon", corners: [...RECT].reverse() } }, { op: "add-extrude", sketch: "item-1", distance: 10 });
+  const b = bodyOf(results(m)["item-6"]);
+  // Corners (0,30), (40,30), (40,0), (0,0): curve-2 the top, curve-3 the right (down), curve-4 the bottom (to the left), curve-5 the left (up).
+  // Counter-clockwise round the same rectangle the bottom comes before (40, 0) and the right after it, so the upright
+  // there is curve-4 then curve-3, though as drawn curve-3 comes first.
+  assert.deepEqual(edge(b, "item-6/side:curve-4>side:curve-3"), [10, [40, 0, 5]]);
+  assert.ok(!b.edges.some((e) => edgeKey(e.name) === "item-6/side:curve-3>side:curve-4"));
+  // The bottom's edge in the start cap: (40, 0) → (0, 0), centre (20, 0, 0).
+  assert.deepEqual(edge(b, "item-6/side:curve-4+start"), [40, [20, 0, 0]]);
+});
+
+test("a slot's, a cylinder's and a sphere's edges by hand", () => {
+  const m = createModel();
+  run(
+    m,
+    { op: "add-sketch", shape: { kind: "slot", at: [0, 0], length: 20, radius: 5 } },
+    { op: "add-extrude", sketch: "item-1", distance: 2 },
+    { op: "add-preset", kind: "cylinder", sizes: [10, 4] },
+    { op: "add-preset", kind: "sphere", sizes: [6] },
+  );
+  const r = results(m);
+  // Slot round (0, 0) and (20, 0), radius 5: curve-2 the bottom line, curve-3 the right half circle, curve-4 the top, curve-5 the left.
+  const slot = bodyOf(r["item-6"]);
+  assert.equal(slot.edges.length, 12);
+  // The right half circle's edge in the end cap: π · 5 = 5π long; an arc's centroid is r sin(α)/α from its centre,
+  // α the half angle π/2, so 2r/π = 10/π to the right of (20, 0): (20 + 10/π, 0, 2).
+  const [len, at] = edge(slot, "item-6/end+side:curve-3") as [number, number[]];
+  assert.ok(near(len, 5 * Math.PI) && near(at[0], 20 + 10 / Math.PI) && at[1] === 0 && at[2] === 2, `${len} ${at}`);
+  // Counter-clockwise the bottom line ends at (20, −5), where the right half circle starts: upright 2 high, centre (20, −5, 1).
+  assert.deepEqual(edge(slot, "item-6/side:curve-2>side:curve-3"), [2, [20, -5, 1]]);
+  // And the left half circle ends at (0, −5), where the bottom starts.
+  assert.deepEqual(edge(slot, "item-6/side:curve-5>side:curve-2"), [2, [0, -5, 1]]);
+  // Cylinder ⌀10 × 4: two rims 10π long, round (0, 0, 0) and (0, 0, 4); no seam.
+  const cyl = bodyOf(r["item-7"]);
+  assert.deepEqual(cyl.edges.map((e) => edgeKey(e.name)).sort(), ["item-7/bottom+side", "item-7/side+top"]);
+  assert.ok(near(edge(cyl, "item-7/side+top")[0] as number, 10 * Math.PI));
+  assert.deepEqual(edge(cyl, "item-7/side+top")[1], [0, 0, 4]);
+  // Sphere ⌀6: one edge, the equator, 6π long round the centre.
+  const sph = bodyOf(r["item-8"]);
+  assert.deepEqual(sph.edges.map((e) => edgeKey(e.name)), ["item-8/lower+upper"]);
+  assert.ok(near(edge(sph, "item-8/lower+upper")[0] as number, 6 * Math.PI));
 });
 
 test("polygon rules are exact on the grid: a corner on another side, a cusp, and one grid step away", () => {

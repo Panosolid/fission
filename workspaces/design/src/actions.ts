@@ -6,7 +6,7 @@
 import { outlineToSvg, type Action, type ActionOutcome, type ActionRegistry, type ActionTarget, type RepresentationKind, type Selected, type WorkspaceContext } from "@fission/core";
 import { lastFeature, partOf, profileLabel, type DesignDocument } from "./document.ts";
 import { featureSpec } from "./extrude.ts";
-import { designReference, readProfileReference } from "./references.ts";
+import { bodyReference, readProfileReference } from "./references.ts";
 import { designObjects } from "./representations.ts";
 
 export const DOWNLOAD_STL = "design.download-stl";
@@ -56,7 +56,7 @@ export function representationsOf(ref: Selected, doc: DesignDocument | undefined
     return doc.profiles.some((p) => p.id === id) ? ["outline"] : [];
   }
   if (ref.kind !== "body") return [];
-  return ref.id === designReference("body", lastFeature(doc).id).id ? ["solid", "mesh"] : [];
+  return ref.id === bodyReference(lastFeature(doc).id).id ? ["solid", "mesh"] : [];
 }
 
 /** The selection as action targets. */
@@ -66,7 +66,7 @@ export function targetsOf(items: readonly Selected[], doc: DesignDocument | unde
 
 /** The reference to the part's one body, for "the whole part" (the toolbar's STL button, the AI's export_stl). */
 export function partBody(doc: DesignDocument): Selected {
-  return designReference("body", lastFeature(doc).id);
+  return bodyReference(lastFeature(doc).id);
 }
 
 /**

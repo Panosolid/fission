@@ -1,0 +1,107 @@
+[
+  {
+    "file": "packages/core/src/model/history.ts",
+    "mutator": "ArrayDeclaration",
+    "original": "[]",
+    "replacement": "[\"Stryker was here\"]",
+    "why": "The history starts with start(), which replaces entries before anything reads them."
+  },
+  {
+    "file": "packages/core/src/model/history.ts",
+    "mutator": "StringLiteral",
+    "original": "\"\"",
+    "replacement": "\"Stryker was here!\"",
+    "why": "The first entry's label is never shown: undoLabel reads entries[index] only when index > 0, redoLabel entries[index + 1], and a trim shifts the first entry out rather than relabelling it."
+  },
+  {
+    "file": "packages/core/src/model/history.ts",
+    "mutator": "BooleanLiteral",
+    "original": "false",
+    "replacement": "true",
+    "why": "After a step, lastWasRecord only lets the next record merge into the step's entry, whose merge key is undefined; a record merges only on an equal, defined key, so it never does."
+  },
+  {
+    "file": "packages/core/src/model/history.ts",
+    "mutator": "ConditionalExpression",
+    "original": "index > 0",
+    "replacement": "true",
+    "why": "lastWasRecord is true only straight after a push, which leaves index at 1 or more (a trim shifts one entry and lowers index by one after it was raised by one), so index > 0 always holds when it is reached."
+  },
+  {
+    "file": "packages/core/src/model/history.ts",
+    "mutator": "EqualityOperator",
+    "original": "index > 0",
+    "replacement": "index >= 0",
+    "why": "As above: index is at least 1 whenever lastWasRecord is true."
+  },
+  {
+    "file": "packages/core/src/model/project.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof v !== \"number\"",
+    "replacement": "false",
+    "why": "Number.isInteger is false for anything that is not a number, so the next test refuses the same values with the same message."
+  },
+  {
+    "file": "packages/core/src/model/project.ts",
+    "mutator": "MethodExpression",
+    "original": "Object.keys(x).sort().filter((key) => x[key] !== undefined)",
+    "replacement": "Object.keys(x).sort()",
+    "why": "JSON.stringify leaves out object keys whose value is undefined anyway; the filter only makes that explicit."
+  },
+  {
+    "file": "packages/core/src/model/project.ts",
+    "mutator": "ConditionalExpression",
+    "original": "x[key] !== undefined",
+    "replacement": "true",
+    "why": "As above: an undefined value is dropped by JSON.stringify either way."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ArrayDeclaration",
+    "original": "[]",
+    "replacement": "[\"Stryker was here\"]",
+    "why": "A text item has no id, so idNumber gives null for it and the counter is unchanged."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "MethodExpression",
+    "original": "items.map((x) => idNumber((x as { id?: unknown } | null)?.id)).filter((n) => n !== null)",
+    "replacement": "items.map(x => idNumber((x as { id?: unknown; } | null)?.id))",
+    "why": "Math.max counts a null as 0, and the counter is already at least max(0, ...) + 1."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ConditionalExpression",
+    "original": "n !== null",
+    "replacement": "true",
+    "why": "null >= nextId is 0 >= nextId, false for every nextId already checked to be 1 or more."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof x === \"number\"",
+    "replacement": "true",
+    "why": "Number.isFinite is false for anything that is not a number."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof c.centre !== \"string\"",
+    "replacement": "false",
+    "why": "The points set holds only text ids, so has() is false for a centre that is not text and the same message follows."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof p !== \"string\"",
+    "replacement": "false",
+    "why": "The points set holds only text ids, so has() is false for an arc point that is not text and the same message follows."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof end !== \"string\"",
+    "replacement": "false",
+    "why": "The points set holds only text ids, so has() is false for a line end that is not text and the same message follows."
+  }
+]

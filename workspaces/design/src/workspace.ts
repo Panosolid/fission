@@ -17,12 +17,14 @@ import { browserTree, type BrowserNode } from "./browser.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey } from "./shortcuts.ts";
-import { designReference, profileReference } from "./references.ts";
+import { featureNames, type BodyNames } from "./naming.ts";
+import { bodyReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { clickAt, curveCount, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
+import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
 import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
 
@@ -34,12 +36,6 @@ import { COPY_SVG, DOWNLOAD_STL, partBody, registerDesignActions, STL_OVERLAY, t
 let saved: { doc: DesignDocument; shape: PartKind; sizes: string[] } | null = null;
 let framed: Framing | null = null;
 let framedKind: PartKind | null = null;
-/**
- * The last body Design built, kept across mounts: Undo and Redo re-mount
- * Design on the restored project (step 20c), and the selection follows
- * only if the restored body is compared with the one that was on screen.
- */
-let lastBuilt: BodyView | null = null;
 /** Design was put away by an Undo or Redo made in another workspace: the next mount is that restore's, not an opened file's. */
 let putAwayByRestore = false;
 /**
@@ -71,6 +67,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   create.id = "create-sketch";
   create.textContent = "Create sketch";
   create.title = "Draw lines, rectangles, circles and arcs on a plane: pick the plane, then click.";
+  create.dataset.modelling = ""; // hidden while a sketch is edited (SF3b): the sketch's toolbar stands in
   create.addEventListener("click", onSketch);
   const extrude = document.createElement("button");
   extrude.type = "button";
@@ -83,6 +80,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   for (const group of toolbarGroups()) {
     const div = document.createElement("div");
     div.className = "tool-group";
+    div.dataset.modelling = "";
     div.setAttribute("role", "group");
     div.setAttribute("aria-label", group.name);
     const name = document.createElement("span");
@@ -110,7 +108,7 @@ const folded = new Set<string>();
 
 /** The browser rows that stand for selectable geometry, and the reference each selects. */
 function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  if (node === "body-1") return designReference("body", lastFeature(doc).id);
+  if (node === "body-1") return bodyReference(lastFeature(doc).id);
   return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
 }
 
@@ -199,6 +197,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let missed = false;
   /** The last body that built, for the selection's surface and curve types. */
   let lastView: BodyView | null = null;
+  /** Its faces' and edges' names (step 24c), which the selection holds. */
+  let lastNames: BodyNames | null = null;
   /** The note about items the last rebuild dropped, and whether that drop is being applied now. */
   let note = "";
   let settling = false;
@@ -215,9 +215,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!doc) return;
     const featureId = lastFeature(doc).id;
     const items = ctx.selection.items;
-    viewport.showSelection(highlightOf(items, featureId));
+    viewport.showSelection(highlightOf(items, featureId, lastNames));
     lightRows(ctx.browser, doc, items);
-    panel.showSelection(selectionRows(items, featureId, lastView, doc.profiles));
+    panel.showSelection(selectionRows(items, featureId, lastView, lastNames, doc.profiles));
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -232,7 +232,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // The body is built from the part's feature intent (document.ts); an extrude of a sketch asks the kernel for the outline (extrude.ts).
-  const build = latestOnly(async (doc: DesignDocument) => buildSpec(kernel, await featureSpec(kernel, doc, lastFeature(doc))));
+  // Its faces and edges are named from the spec it was built from (naming.ts).
+  const build = latestOnly(async (doc: DesignDocument) => {
+    const feature = lastFeature(doc);
+    const spec = await featureSpec(kernel, doc, feature);
+    const view = await buildSpec(kernel, spec);
+    return { view, names: featureNames(doc, feature, spec, view) };
+  });
 
   /** Never shows stale numbers unmarked: dims them while out of date, and says so if the rebuild failed. */
   function markStale(failed = false) {
@@ -310,10 +316,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const feature = lastFeature(doc);
     panel.showFeature(feature);
     try {
-      const { current, value: view } = await build(doc);
+      const { current, value } = await build(doc);
       if (!current) return;
       if (!shown) return void (missed = true);
       missed = false;
+      const { view, names } = value;
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
@@ -330,11 +337,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       framedKind = kind;
       panel.showBody(view);
-      // Faces and edges the edit renumbered leave the selection, with a note (17e).
-      // A fresh mount compares with the body Design last built (Undo and
-      // Redo: the selection follows when the faces are still the same ones).
-      const { kept, dropped } = survivors(ctx.selection.items, feature.id, lastView ?? lastBuilt, view, doc.profiles.map((p) => p.id));
-      lastView = lastBuilt = view;
+      // Faces and edges the edit took off the body leave the selection, with a
+      // note (17e); the rest follow their names, however the kernel numbers them now.
+      const { kept, dropped } = survivors(ctx.selection.items, names, doc.profiles.map((p) => p.id));
+      lastView = view;
+      lastNames = names;
       note = droppedNote(dropped);
       if (dropped.length > 0) {
         settling = true;
@@ -361,11 +368,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     cancel: () => leaveSketch(),
     grid: (typed) => void setGrid(typed),
     gridSnap: (on) => setGridSnap(on),
-    finish: () => leaveSketch(),
+    finish: () => finishSketch(),
     extrude: () => startExtrude(),
-    tool: (kind) => chooseTool(kind),
     lookAt: () => lookAtSketch(),
   });
+  /** The sketch's own toolbar (SF3b), standing in for the modelling buttons while a sketch is edited; Extrude stays. */
+  const sketchBar = sketchToolbar(ctx.toolbar, { tool: (kind) => chooseTool(kind), finish: () => finishSketch() });
+  /** Shows the modelling buttons (true) or the sketch's toolbar in their place (false). */
+  function modelling(on: boolean) {
+    for (const el of ctx.toolbar.querySelectorAll<HTMLElement>("[data-modelling]")) el.hidden = !on;
+  }
   const designDoc = () => ctx.project.workspaces.design as DesignDocument;
   /** Counts tool changes (a tool chosen, Escape, the sketch entered again): a click the kernel was still snapping across one is dropped. */
   let toolChanges = 0;
@@ -430,6 +442,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     mode = { kind: "edit", tool: startTool(editingSketch.tool, editingSketch.id), grid: editingSketch.grid, pointer: null, snap: null };
     toolChanges++;
     sketchBox.showEditing(sketchItem(doc, editingSketch.id).provenance.self.label, editingSketch.typed, gridSnap, editingSketch.tool);
+    modelling(false);
+    sketchBar.show(editingSketch.tool);
     drawSketches();
     void showOutline();
   }
@@ -442,17 +456,27 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     mode.snap = null;
     toolChanges++;
     sketchBox.showTool(kind);
+    sketchBar.showTool(kind);
     sketchBox.showError("");
     drawSketches();
   }
 
-  /** Cancel or Finish sketch: back to modelling; the sketch stays as drawn. */
+  /** Cancel, Finish sketch or Extrude: back to modelling; the sketch stays as drawn. */
   function leaveSketch() {
     mode = { kind: "none" };
     editingSketch = null;
     viewport.showPlanes([]);
     sketchBox.hide();
+    sketchBar.hide();
+    modelling(true);
     drawSketches();
+  }
+
+  /** Finish Sketch (the toolbar's or the panel's): back to modelling, the camera at the home view (as the owner's CAD suite does, not the view from before the sketch). */
+  function finishSketch() {
+    if (mode.kind !== "edit") return leaveSketch();
+    leaveSketch();
+    viewport.setView("home");
   }
 
   /** A grid size typed: the kernel judges it (snapping 0, 0 to it); a refused one keeps the grid and says why. */
@@ -634,7 +658,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!doc) return;
     // Choosing a plane for Create sketch: only an offered plane counts.
     if (mode.kind === "pick") return void (pick.plane && pickPlane(pick.plane as SketchPlane));
-    const c = pickChange(pick, lastFeature(doc).id);
+    const c = pickChange(pick, lastNames);
     if (c.change === "set") ctx.selection.set([c.item]);
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
     else if (c.change === "clear") ctx.selection.clear();
@@ -657,6 +681,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shown = false;
     viewport.onPick = null;
     viewport.onSketchPointer = null;
+    sketchBar.closeMenu();
     // Asleep, the sketches stay drawn as finished ones: no grid, no planes to pick.
     viewport.showPlanes([]);
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
@@ -678,6 +703,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
+      // Escape with the Create menu open closes the menu, and only that.
+      if (id === "clear-selection" && sketchBar.menuOpen) return sketchBar.closeMenu(), true;
       // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;

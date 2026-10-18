@@ -25,7 +25,7 @@ DISAGREE = """line 276: {"Extrude": {"dist": "66.0", "expect": null, "holes": []
   exact volume: fission 31.876169934868813, occ 31.87618745235322, allowed 1.56e-07
   bounds x: fission 1.0, occ 1.1
 line 300: {"Extrude": {"dist": "1.0", "expect": null, "holes": [], "outer": {"Path": {"bulges": ["0.0", "1.0", "0.0"], "pts": [["0", "0"], ["1", "0"], ["1", "1"]]}}}}
-  bounds y: fission 1.0, occ 1.1
+  bounds highest y: fission 1.0, occ 1.1
 occ-rounding, line 301: {"Box": {"w": "1.0", "d": "1.0", "h": "1.0"}}
   exact volume: fission 1.0, occ 1.1, exact 1.0, allowed 1e-09
 """
@@ -46,7 +46,7 @@ class Kinds(unittest.TestCase):
 
     def test_oracle_kinds(self):
         kinds = [k for k, _ in oracle_kinds(DISAGREE)]
-        # bounds x and bounds y are one check; the second profile has an
+        # bounds x and bounds highest y are one check; the second profile has an
         # arc; the occ-rounding block (only OpenCascade off) is no kind.
         self.assertEqual(kinds, ["OpenCascade disagrees, Extrude: exact volume",
                                  "OpenCascade disagrees, Extrude: bounds",

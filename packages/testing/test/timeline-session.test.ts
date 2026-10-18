@@ -84,6 +84,9 @@ const CAUGHT_BY: Record<ModelFault, string> = {
   "rebuild-drifts": "rebuilding twice differs",
   "resolve-last-body-only": "a reference was lost",
   "save-stamps": "saving again changed the file",
+  "uprights-as-given": "the rebuild differs from the model",
+  "cap-edges-swapped": "the rebuild differs from the model",
+  "end-edges-named-start": "two edges share a name",
 };
 
 /** The first seed whose session the planted bug fails, and how. */

@@ -140,6 +140,7 @@ name = "fission-kernel"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "js-sys",
  "libm",
  "proptest",
  "proptest-state-machine",

@@ -162,6 +162,7 @@ pub fn extrude(data: &[u8]) {
     assert!((view.area - surface).abs() <= slack, "area {} want {surface} (slack {slack:e})\n{profile:?} d={d}", view.area);
 
     check_roles(&body, &profile, d, &view);
+    check_edges(&body, &profile, d, &view);
 
     let mesh = tessellate(&body, &TessOptions::DISPLAY).unwrap();
     assert!(mesh.check_closed().is_ok(), "display mesh not closed\n{profile:?} d={d}");
@@ -177,7 +178,11 @@ pub fn sketch(data: &[u8]) {
     if let Ok(SketchOutline::Closed(profile, sources)) = sketching::sketch_outline(&lines, &circles, &arcs) {
         check_sources(&profile, &sources, &lines, &circles, &arcs);
         match extruding::extrude(&profile, 1.0) {
-            Ok(body) => check_roles(&body, &profile, 1.0, &view_body(&body).expect("an extruded body always meshes")),
+            Ok(body) => {
+                let view = view_body(&body).expect("an extruded body always meshes");
+                check_roles(&body, &profile, 1.0, &view);
+                check_edges(&body, &profile, 1.0, &view);
+            }
             Err(e) => panic!("a closed sketch outline did not extrude: {e}\n{lines:?}\n{circles:?}\n{arcs:?}"),
         }
     }
@@ -295,6 +300,78 @@ fn check_roles(body: &Body, profile: &Profile, d: f64, view: &fission_kernel::Bo
     assert!(off <= 1e-9 * reach + 1e-6 * size, "end cap is {rise} from the start cap, not d = {d}\n{profile:?}");
 }
 
+/// A loop's signed area, positive counter-clockwise, as `measure` works it.
+fn signed_area(b: &Boundary) -> f64 {
+    let Boundary::Path { corners, bulges } = b else { return 1.0 };
+    let n = corners.len();
+    let mut area = 0.0;
+    for i in 0..n {
+        let (p, q) = (corners[i] - corners[0], corners[(i + 1) % n] - corners[0]);
+        area += p.perp_dot(q) / 2.0;
+        let bulge = bulges.get(i).copied().unwrap_or(0.0);
+        if bulge != 0.0 {
+            let sweep = 4.0 * bulge.atan();
+            let r = p.distance(q) * (1.0 + bulge * bulge) / (4.0 * bulge.abs());
+            area += r * r / 2.0 * (sweep - sweep.sin());
+        }
+    }
+    area
+}
+
+/// Every edge of an extrude joins two faces, once each way (`edge_faces`,
+/// step 24c, checked against the loops themselves): a cap edge joins the
+/// start or end cap with one side and lies in that cap's plane, one per
+/// side and cap; an upright edge stands on a corner from z = 0 up to d and
+/// joins the sides either side of it, first the piece before the corner
+/// going round with the solid on the left (the profile's loops as given:
+/// counter-clockwise outer loops and clockwise holes keep their order,
+/// the others are walked backwards).
+fn check_edges(body: &Body, profile: &Profile, d: f64, view: &fission_kernel::BodyView) {
+    assert_eq!(view.edge_faces.len(), body.edges.len());
+    let mut uses = vec![(vec![], vec![]); body.edges.len()];
+    for (f, face) in body.faces.iter().enumerate() {
+        for c in face.loops.iter().flat_map(|l| &l.coedges) {
+            if c.reversed { uses[c.edge].1.push(f) } else { uses[c.edge].0.push(f) }
+        }
+    }
+    let loops: Vec<&Boundary> = std::iter::once(&profile.outer).chain(&profile.holes).collect();
+    let mut caps = std::collections::BTreeMap::new();
+    let mut corners = std::collections::BTreeSet::new();
+    for (e, pair) in view.edge_faces.iter().enumerate() {
+        let [f, g] = pair.unwrap_or_else(|| panic!("edge {e} joins no two faces\n{profile:?} d={d}"));
+        assert_eq!((uses[e].0.as_slice(), uses[e].1.as_slice()), (&[f][..], &[g][..]), "edge {e}\n{profile:?} d={d}");
+        let edge = &body.edges[e];
+        let (a, b) = (body.vertices[edge.start].point, body.vertices[edge.end].point);
+        let (rf, rg) = (body.faces[f].role.unwrap(), body.faces[g].role.unwrap());
+        match (rf, rg) {
+            (FaceRole::Side(p), FaceRole::Side(q)) => {
+                assert_eq!((a.z, b.z, a.x, a.y), (0.0, d, b.x, b.y), "edge {e} is no upright\n{profile:?} d={d}");
+                assert_eq!(p.boundary, q.boundary, "edge {e}\n{profile:?} d={d}");
+                let k = usize::from(p.boundary);
+                let Boundary::Path { corners: at, .. } = loops[k] else { panic!("an upright on a circle\n{profile:?}") };
+                let n = at.len();
+                let c = at.iter().position(|&x| x == a.truncate()).unwrap_or_else(|| panic!("edge {e} stands on no corner\n{profile:?} d={d}"));
+                // Corner c ends piece c − 1 and starts piece c as given.
+                let kept = (signed_area(loops[k]) > 0.0) == (k == 0);
+                let (before, after) = if kept { ((c + n - 1) % n, c) } else { (c, (c + n - 1) % n) };
+                assert_eq!((usize::from(p.piece), usize::from(q.piece)), (before, after), "edge {e} at corner {c}\n{profile:?} d={d}");
+                assert!(corners.insert((k, c)), "two uprights on corner {c}\n{profile:?} d={d}");
+            }
+            (FaceRole::Start | FaceRole::End, FaceRole::Side(p)) | (FaceRole::Side(p), FaceRole::Start | FaceRole::End) => {
+                let cap = if matches!(rf, FaceRole::Start | FaceRole::End) { rf } else { rg };
+                let z = if cap == FaceRole::Start { 0.0 } else { d };
+                assert_eq!((a.z, b.z), (z, z), "edge {e} is off its cap\n{profile:?} d={d}");
+                assert!(caps.insert((cap == FaceRole::Start, p.boundary, p.piece), e).is_none(), "two {cap:?} edges on {p:?}\n{profile:?} d={d}");
+            }
+            _ => panic!("edge {e} joins {rf:?} and {rg:?}\n{profile:?} d={d}"),
+        }
+    }
+    let sides = body.faces.len() - 2;
+    assert_eq!(caps.len(), 2 * sides, "{profile:?} d={d}");
+    let uprights: usize = loops.iter().map(|l| if let Boundary::Path { corners, .. } = l { corners.len() } else { 0 }).sum();
+    assert_eq!(corners.len(), uprights, "{profile:?} d={d}");
+}
+
 /// One move of the placed fuzzer: by an offset, or turn about a pivot.
 #[derive(Debug)]
 pub enum Move {
@@ -302,14 +379,39 @@ pub enum Move {
     Rotate { pivot: DVec3, axis: DVec3, angle: f64 },
 }
 
+/// The primitive the placed fuzzer starts from, as its bytes give it.
+#[derive(Debug, Clone, Copy)]
+pub enum Primitive {
+    Box(f64, f64, f64),
+    Cylinder(f64, f64),
+    Sphere(f64),
+}
+
+impl Primitive {
+    pub fn make(self) -> Result<Body, KernelError> {
+        match self {
+            Primitive::Box(w, d, h) => primitives::make_box(w, d, h),
+            Primitive::Cylinder(r, h) => primitives::make_cylinder(r, h),
+            Primitive::Sphere(r) => primitives::make_sphere(r),
+        }
+    }
+}
+
 /// The body (box, cylinder or sphere) and the moves the placed fuzzer's
 /// bytes describe.
 pub fn placed_input(data: &[u8]) -> (Result<Body, KernelError>, Vec<Move>) {
+    let (shape, moves) = placed_shape(data);
+    (shape.make(), moves)
+}
+
+/// The same, with the primitive as given rather than built (the
+/// OpenCascade oracle rebuilds it from these numbers).
+pub fn placed_shape(data: &[u8]) -> (Primitive, Vec<Move>) {
     let mut b = Bytes::new(data);
     let made = match b.byte() % 3 {
-        0 => primitives::make_box(b.num(), b.num(), b.num()),
-        1 => primitives::make_cylinder(b.num(), b.num()),
-        _ => primitives::make_sphere(b.num()),
+        0 => Primitive::Box(b.num(), b.num(), b.num()),
+        1 => Primitive::Cylinder(b.num(), b.num()),
+        _ => Primitive::Sphere(b.num()),
     };
     let mut moves = vec![];
     while !b.empty() {

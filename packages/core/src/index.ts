@@ -1,6 +1,6 @@
 // @fission/core: the shared document model and the bridge to the kernel.
-export { KernelClient, latestOnly, type KernelCalls, type KernelOps, type KernelRequest, type KernelResponse } from "./kernel/kernel-client.ts";
-export type { BodySpec, BodyView, DisplayMesh, FaceRole, Loop, Outline, OutlinePiece, SketchArc, SketchCircle, SketchLine, SketchOutline, StlFile } from "./kernel/kernel-types.ts";
+export { KernelClient, KernelError, kernelFailure, latestOnly, type KernelCalls, type KernelOps, type KernelRequest, type KernelResponse } from "./kernel/kernel-client.ts";
+export type { BodyHandle, BodySpec, BodyView, DisplayMesh, FaceRole, KernelErrorKind, KernelFailure, KernelInput, Loop, Outline, OutlinePiece, SketchArc, SketchCircle, SketchLine, SketchOutline, StlFile } from "./kernel/kernel-types.ts";
 // DRAFT model interfaces (see each file).
 export type { Material, MaterialLibrary } from "./model/material.ts";
 export { materialLibrary } from "./model/material.ts";

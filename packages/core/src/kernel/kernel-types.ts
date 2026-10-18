@@ -26,6 +26,15 @@ export interface BodyView {
   /** Each face's exact area (mm²) and centroid [x, y, z] (mm), by kernel face index. */
   face_areas: number[];
   face_centroids: [number, number, number][];
+  /**
+   * The two faces each edge joins, by kernel edge index (step 24c): first
+   * the face running the edge forwards, then the one running it backwards;
+   * null for an edge not used exactly once each way (only in a body that
+   * failed validation). An extrude's edge between two sides lists first the
+   * side before it going round the loop with the solid on the left
+   * (counter-clockwise round the outline seen from the end cap).
+   */
+  edge_faces: ([number, number] | null)[];
   errors: string[];
 }
 
@@ -115,4 +124,45 @@ export interface StlFile {
   rounding: number;
   /** Set when that rounding is more than the smallest feature. */
   warning: string | null;
+}
+
+/** A body the kernel keeps between calls (kernel/src/store.rs): a whole number from 1, never reused. Free it with body_free. */
+export type BodyHandle = number;
+
+/** What kind of failure a kernel call had (ErrorKind in kernel/src/api_error.rs). */
+export type KernelErrorKind =
+  /** The kernel refuses an input; the user's to fix. */
+  | "invalid-input"
+  /** A result failed validation: a kernel bug. */
+  | "invalid-result"
+  /** The call was malformed (wrong form, a handle that isn't a whole number from 1): the app's bug. */
+  | "bad-request"
+  /** A body handle the kernel doesn't hold: freed, or never made. */
+  | "unknown-body"
+  /** The kernel already holds its most bodies (MAX_LIVE_BODIES); free some. */
+  | "too-many-bodies"
+  /** Any other kernel failure (including a crash): a kernel bug. */
+  | "internal";
+
+/**
+ * Which input a failure is about (Input in kernel/src/ops/mod.rs), so the app
+ * can point at it without reading the message. Indices count from 0, as the
+ * app's lists do; a profile loop's `boundary` is 0 for the outer loop and k
+ * for hole k − 1, numbered as FaceRole numbers them.
+ */
+export type KernelInput =
+  | { input: "param"; name: string }
+  | { input: "profile" }
+  | { input: "loop"; boundary: number }
+  | { input: "piece"; boundary: number; piece: number }
+  | { input: "sketch" }
+  | { input: "line"; index: number }
+  | { input: "arc"; index: number }
+  | { input: "circle"; index: number };
+
+/** A failed kernel call in plain data, as it crosses from the worker. */
+export interface KernelFailure {
+  kind: KernelErrorKind;
+  inputs: KernelInput[];
+  message: string;
 }
