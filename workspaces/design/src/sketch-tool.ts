@@ -1,5 +1,5 @@
 // The sketch tools (line, step 21c; rectangle, step 22a; circle, step 22c;
-// 3-point arc, step 23b; tangent arc, step 23c): what a click on
+// 3-point arc, step 23b; tangent arc, step 23c; centre arc, centre-arc.ts): what a click on
 // the sketch plane does to the document, as pure functions the workspace
 // calls with a point the kernel has already rounded (where you clicked to
 // within half a pixel, or onto the grid with grid snap on) and snap.ts
@@ -11,7 +11,8 @@
 // the centre becomes a point. A 3-point arc is three clicks: its two ends,
 // then a point it passes through (`arcThrough`). A tangent arc is two: the
 // free end of a line or arc, then its own end (`tangentArc`); it leaves
-// along the curve it starts from, and chains like the line tool.
+// along the curve it starts from, and chains like the line tool. A centre
+// arc is three: its centre, its start, then its end (centre-arc.ts).
 //
 // Two clicks are at the same point only when their snapped coordinates are
 // equal: snap.ts puts a click near a point exactly on it, and the kernel
@@ -21,6 +22,7 @@
 
 import type { Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchArcCurve, SketchLineCurve, SketchPlane } from "./document.ts";
+import { centreClick, centreHover, centrePreview, type CentreArcTool } from "./centre-arc.ts";
 import { drawArc, drawCircle, drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
 
 export { pointAt };
@@ -61,22 +63,29 @@ export interface TangentTool {
   from: string | null;
 }
 
-export type SketchTool = LineTool | RectangleTool | CircleTool | ArcTool | TangentTool;
+export type { CentreArcTool };
+export type SketchTool = LineTool | RectangleTool | CircleTool | ArcTool | TangentTool | CentreArcTool;
 export type ToolKind = SketchTool["kind"];
 
-/** The tools the sketch panel offers, in its order, with their keys (the letters people already know for them). */
-export const SKETCH_TOOLS: readonly { kind: ToolKind; label: string; key: string }[] = [
+/**
+ * The tools the sketch panel offers, in its order, with their keys (the
+ * letters people already know for them; the centre arc has none) and, for
+ * the three arcs, the group the Create menu lists them under.
+ */
+export const SKETCH_TOOLS: readonly { kind: ToolKind; label: string; key?: string; group?: "Arc" }[] = [
   { kind: "line", label: "Line", key: "L" },
   { kind: "rectangle", label: "Rectangle", key: "R" },
   { kind: "circle", label: "Circle", key: "C" },
-  { kind: "arc", label: "Arc", key: "A" },
-  { kind: "tangent", label: "Tangent arc", key: "T" },
+  { kind: "arc", label: "3-point arc", key: "A", group: "Arc" },
+  { kind: "centre", label: "Centre arc", group: "Arc" },
+  { kind: "tangent", label: "Tangent arc", key: "T", group: "Arc" },
 ];
 
 /** A tool of this kind on a sketch, nothing clicked yet. */
 export function startTool(kind: ToolKind, sketch: string): SketchTool {
   if (kind === "line" || kind === "tangent") return { kind, sketch, from: null };
   if (kind === "arc") return { kind, sketch, start: null, end: null };
+  if (kind === "centre") return { kind, sketch, centre: null, start: null, swept: 0 };
   return kind === "rectangle" ? { kind, sketch, corner: null } : { kind, sketch, centre: null };
 }
 
@@ -87,6 +96,7 @@ export const toolBusy = (tool: SketchTool): boolean => (tool.kind === "line" || 
 function pendingClicks(tool: SketchTool): SketchXY[] {
   if (tool.kind === "line") return tool.from !== null && typeof tool.from !== "string" ? [tool.from] : [];
   if (tool.kind === "arc") return [tool.start, tool.end].filter((p) => p !== null);
+  if (tool.kind === "centre") return [tool.centre, tool.start].filter((p) => p !== null);
   if (tool.kind === "tangent") return [];
   const at = tool.kind === "rectangle" ? tool.corner : tool.centre;
   return at ? [at] : [];
@@ -139,6 +149,7 @@ export function clickAt<T extends SketchTool>(doc: DesignDocument, tool: T, at: 
   if (tool.kind === "circle") return circleClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "arc") return arcClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "tangent") return tangentClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
+  if (tool.kind === "centre") return centreClick(doc, sketchOf(doc, tool.sketch), tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   return lineClick(doc, tool as LineTool, at) as { doc: DesignDocument; tool: T; drew: boolean };
 }
 
@@ -393,6 +404,11 @@ export function switchTool(doc: DesignDocument, tool: SketchTool, kind: ToolKind
   return fresh;
 }
 
+/** The tool after the pointer hovers at `at` (snapped): only the centre arc changes, following the way the pointer goes round (`centreHover`). */
+export function hoverTool<T extends SketchTool>(tool: T, at: SketchXY | null): T {
+  return tool.kind === "centre" && at ? (centreHover(tool, at) as T) : tool;
+}
+
 /** The undo step a tool's drawing click is recorded as. */
 export const drawStep = (tool: SketchTool): string => SKETCH_STEPS[tool.kind === "line" ? "draw" : tool.kind];
 
@@ -473,6 +489,7 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
     const arc = arcThrough(tool.start, tool.end, pointer);
     return arc ? arcSegments(arc) : [[tool.start, tool.end]];
   }
+  if (tool.kind === "centre") return centrePreview(tool, pointer, arcSegments);
   if (tool.kind === "tangent") {
     const start = tangentStart(sketchOf(doc, tool.sketch), tool);
     if (!start || (start.s[0] === pointer[0] && start.s[1] === pointer[1])) return [];

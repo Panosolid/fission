@@ -29,6 +29,7 @@ export const TOOL_HELP: Record<ToolKind, string> = {
   rectangle: "Click one corner, then the opposite corner: four lines. Escape drops the first corner.",
   circle: "Click the centre, then a point on the circle. Escape drops the centre.",
   arc: "Click the start, then the end, then a point the arc passes through. Escape drops the ends.",
+  centre: "Click the centre, then the start, then where the arc ends: it goes round the way you move the pointer, past half a turn if you go that far. Escape drops the centre and start.",
   tangent: "Click the end of a line or arc, then where the arc ends: it leaves the line smoothly, and the next click carries on from its end. Escape ends it.",
 };
 
