@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from file_issues import MARK, fuzz_kinds, gather, harness_kinds, key, kinds_of, oracle_kinds, plan, read_folders, texts  # noqa: E402
+from file_issues import MARK, fuzz_kinds, gather, harness_kinds, key, kinds_of, oracle_kinds, plan, read_folders, texts, MAX_EXAMPLE  # noqa: E402
 
 # Lines copied from real reports on the test-results branch.
 ROTATE_A = ("  seed 0x12849982fbf1: step 3 (Rotate { target: 1, pivot: [0.0, 0.0, 0.0], axis: [1.0, 0.0, 0.0], "
@@ -98,6 +98,19 @@ class Plan(unittest.TestCase):
         self.assertIn("and 2 more", body)  # 12 seeds, 10 listed
         self.assertIn("FISSION_SEED=", body)
         self.assertIsNone(texts("comment", self.K, hits, "RUN", "abc1234", "main")[0])
+
+    def test_an_example_cant_break_out_of_its_code_block(self):
+        # Output of the code under test closes a ``` block and adds a heading
+        # and a mention. The fence must be longer than its longest backtick
+        # run (3), so 4 backticks, and the example stays inside unchanged.
+        hostile = "x\n```\n# Pwned\n@benpy28 run this\n```"
+        _, body = texts("create", self.K, [("1", hostile)], "RUN", "abc1234", "main")
+        self.assertIn("````\n" + hostile + "\n````", body)
+
+    def test_a_long_example_is_cut(self):
+        _, body = texts("create", self.K, [("1", "y" * (MAX_EXAMPLE + 500))], "RUN", "abc1234", "main")
+        self.assertIn("y" * MAX_EXAMPLE + "\n(cut;", body)
+        self.assertNotIn("y" * (MAX_EXAMPLE + 1), body)
 
 
 # Reports as the fuzzers write them (kernel/tests/fuzz_stl.rs, packages/testing/src/project-fuzz.ts).

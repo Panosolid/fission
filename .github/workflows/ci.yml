@@ -7,15 +7,25 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Started by auto-merge.yml after it brings a branch up to date.
+  # By hand only: main's ruleset doesn't count a dispatched run's checks
+  # for merging, so auto-merge.yml never starts one.
   workflow_dispatch:
 
 # A newer commit on the same branch cancels the run still testing an older
 # one: auto-merge only looks at the head's checks, so the old run's answer
 # can't matter, and its runners go to the new run. main's runs always finish.
+# The group names the repository the branch lives in, so a fork's pull
+# request from a branch called main or claude/x can't cancel our runs, and
+# the event, so a run started by hand can't cancel a pull request's own run
+# (the only one main's ruleset counts). Tested in
+# .github/scripts/test_ci_concurrency.py.
 concurrency:
-  group: ci-${{ github.head_ref || github.ref_name }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+# Read-only token by default; a job that writes says so itself.
+permissions:
+  contents: read
 
 jobs:
   kernel:
@@ -56,7 +66,7 @@ jobs:
   # cargo mutants makes in the changed lines must be caught by a lib test
   # (kernel/CLAUDE.md, Mutation testing). Equivalent mutants, which no test
   # can catch, are excluded in kernel/.cargo/mutants.toml with the reason.
-  # auto-merge's workflow_dispatch runs it on the commit it makes.
+  # A run started by hand (workflow_dispatch) runs it too.
   #
   # Three jobs: mutants-plan lists the mutants (no build) and picks how many
   # shards to split them across (one per 30 mutants, at most 8, none when no

@@ -94,9 +94,12 @@ export function parseCommand(raw: unknown, specs: readonly CommandSpec[]): Parse
   const obj = raw as Record<string, unknown>;
   const spec = specs.find((s) => s.op === obj.op);
   if (!spec) return { ok: false, error: `unknown command ${show(obj.op)}; known: ${specs.map((s) => s.op).join(", ")}` };
-  for (const key of Object.keys(obj)) if (key !== "op" && !(key in spec.params)) return { ok: false, error: `${spec.op} has no parameter ${show(key)}` };
+  // Own keys only: `in` would also accept inherited names such as
+  // __proto__ or toString, and an answer's "__proto__" would then set the
+  // prototype of whatever object the command is later assigned onto.
+  for (const key of Object.keys(obj)) if (key !== "op" && !Object.hasOwn(spec.params, key)) return { ok: false, error: `${spec.op} has no parameter ${show(key)}` };
   for (const [name, p] of Object.entries(spec.params)) {
-    if (!(name in obj) || obj[name] === undefined) {
+    if (!Object.hasOwn(obj, name) || obj[name] === undefined) {
       if (p.optional) continue;
       return { ok: false, error: `${spec.op} needs ${name}` };
     }

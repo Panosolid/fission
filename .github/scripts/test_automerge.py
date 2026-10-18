@@ -1,7 +1,9 @@
 """Tests for automerge.py: python3 -m unittest discover -s .github/scripts"""
 
+import io
 import os
 import random
+import urllib.error
 import sys
 import unittest
 
@@ -13,7 +15,7 @@ from automerge import ci_state, decide  # noqa: E402
 def pr(number, **kw):
     p = dict(number=number, head_ref=f"claude/t{number}", base_ref="main", same_repo=True,
              draft=False, labels=[], mergeable=True, up_to_date=True, ci="success",
-             base_in_main=False)
+             base_in_main=False, asked=False)
     p.update(kw)
     return p
 
@@ -92,14 +94,18 @@ class HandWorked(unittest.TestCase):
         for bad in (dict(draft=True), dict(labels=["hold"]), dict(base_ref="claude/x"),
                     dict(head_ref="feature/x"), dict(same_repo=False), dict(mergeable=False),
                     dict(mergeable=None), dict(ci="failure"), dict(ci="pending"),
-                    dict(ci="none")):
+                    dict(ci="none"), dict(up_to_date=False)):
             with self.subTest(bad=bad):
                 self.assertNotEqual(decide([pr(5, **bad)]), ("merge", 5))
 
-    def test_behind_main_is_updated_not_merged(self):
+    def test_behind_main_asks_its_thread_once(self):
         # Green on its own, but main moved since: its test says nothing about
-        # main plus it, so bring main in and test again.
-        self.assertEqual(decide([pr(5, up_to_date=False)]), ("update", 5))
+        # main plus it, so its thread is asked to bring main in (a push the
+        # ruleset counts); once asked for this head and main, it waits.
+        self.assertEqual(decide([pr(5, up_to_date=False)]), ("ask", 5))
+        self.assertIsNone(decide([pr(5, up_to_date=False, asked=True)]))
+        # A conflicted or not-yet-known merge isn't asked: the conflict reminder covers it.
+        self.assertIsNone(decide([pr(5, up_to_date=False, mergeable=None)]))
 
     def test_behind_and_red_is_left_to_its_thread(self):
         self.assertIsNone(decide([pr(5, up_to_date=False, ci="failure")]))
@@ -109,14 +115,22 @@ class HandWorked(unittest.TestCase):
         # #4 is being tested after an update; #5 is behind and green: it waits,
         # or both would be tested against a main that one of them changes.
         self.assertIsNone(decide([pr(4, ci="pending"), pr(5, up_to_date=False)]))
-        # Oldest first.
-        self.assertEqual(decide([pr(6, up_to_date=False), pr(5, up_to_date=False)]), ("update", 5))
+        # Oldest first; an asked one doesn't hold up the next.
+        self.assertEqual(decide([pr(6, up_to_date=False), pr(5, up_to_date=False)]), ("ask", 5))
+        self.assertEqual(decide([pr(6, up_to_date=False), pr(5, up_to_date=False, asked=True)]), ("ask", 6))
         self.assertEqual(decide([pr(6), pr(5)]), ("merge", 5))
         # A ready merge is never held up by the queue.
         self.assertEqual(decide([pr(4, ci="pending"), pr(5)]), ("merge", 5))
 
-    def test_untested_head_gets_tested(self):
-        self.assertEqual(decide([pr(5, ci="none")]), ("test", 5))
+    def test_untested_head_waits_for_its_own_run(self):
+        # Auto-merge never starts CI itself (a run it starts doesn't count for
+        # main's ruleset): a head with no checks yet waits for its push's run.
+        self.assertIsNone(decide([pr(5, ci="none")]))
+
+    def test_skipped_ones_are_left_alone(self):
+        # #5's merge was refused earlier in this run: #6 merges, #5 is not tried again.
+        self.assertEqual(decide([pr(5), pr(6)], skip={5}), ("merge", 6))
+        self.assertIsNone(decide([pr(5)], skip={5}))
 
     def test_stack(self):
         # #6 is stacked on #5's branch: it waits until #5's branch is in main,
@@ -138,8 +152,6 @@ class Fake:
     def call(self, method, path, body=None):
         if method != "GET":
             self.writes.append((method, path, body))
-            if path.endswith("/update-branch"):
-                self.table["/pulls/1"]["head"]["sha"] = "new"
             return None
         return self.table[path]
 
@@ -155,6 +167,8 @@ def fake_repo(behind=False, ci="success"):
         "/pulls/1": dict(raw, mergeable=True, head=dict(raw["head"])),
         "/compare/main...h1": dict(status="diverged" if behind else "ahead"),
         "/commits/h1/check-runs?filter=latest&per_page=100": dict(check_runs=runs),
+        "/commits/main": dict(sha="m1"),
+        "/issues/1/comments?per_page=100": [],
     })
 
 
@@ -176,13 +190,60 @@ class Calls(unittest.TestCase):
             ("POST", "/actions/workflows/pages.yml/dispatches", {"ref": "main"}),
         ])
 
-    def test_update_then_ci_started_no_deploy(self):
+    def test_behind_asks_once_pushes_nothing_starts_nothing(self):
         gh = fake_repo(behind=True)
+        orig = gh.call
+
+        def call(method, path, body=None):
+            r = orig(method, path, body)
+            if method == "POST" and path == "/issues/1/comments":
+                gh.table["/issues/1/comments?per_page=100"] = [body]
+            return r
+        gh.call = call
         self.assertEqual(automerge.run(gh, log=lambda s: None), 0)
+        self.assertEqual(len(gh.writes), 1)
+        method, path, body = gh.writes[0]
+        self.assertEqual((method, path), ("POST", "/issues/1/comments"))
+        self.assertIn("<!-- automerge-behind:h1:m1 -->", body["body"])
+        self.assertIn("merge `main` into it", body["body"])
+        # The next run finds the comment for this head and main: nothing more.
+        automerge.run(gh, log=lambda s: None)
+        self.assertEqual(len(gh.writes), 1)
+        # main moves on (m2): asked again, once.
+        gh.table["/commits/main"] = dict(sha="m2")
+        automerge.run(gh, log=lambda s: None)
+        self.assertEqual(len(gh.writes), 2)
+        self.assertIn("<!-- automerge-behind:h1:m2 -->", gh.writes[1][2]["body"])
+
+    def test_a_refused_merge_is_skipped_and_the_next_one_merges(self):
+        # The 2026-10-18 jam: #1's merge refused (405, a rule), and the run
+        # stopped there, so #2, green and up to date, never merged.
+        gh = fake_repo()
+        raw2 = dict(gh.table["/pulls?state=open&per_page=100"][0], number=2,
+                    head=dict(ref="claude/b", sha="h2", repo=dict(full_name="o/r")))
+        gh.table["/pulls?state=open&per_page=100"].append(raw2)
+        gh.table["/pulls/2"] = dict(raw2, mergeable=True)
+        gh.table["/compare/main...h2"] = dict(status="ahead")
+        gh.table["/commits/h2/check-runs?filter=latest&per_page=100"] = gh.table["/commits/h1/check-runs?filter=latest&per_page=100"]
+        orig = gh.call
+
+        def call(method, path, body=None):
+            if (method, path) == ("PUT", "/pulls/1/merge"):
+                gh.writes.append((method, path, body))
+                raise urllib.error.HTTPError(path, 405, "Method Not Allowed", {}, io.BytesIO(b'{"message":"5 of 5 required status checks are expected."}'))
+            r = orig(method, path, body)
+            if (method, path) == ("PUT", "/pulls/2/merge"):
+                gh.table["/pulls?state=open&per_page=100"] = [p for p in gh.table["/pulls?state=open&per_page=100"] if p["number"] != 2]
+            return r
+        gh.call = call
+        logs = []
+        self.assertEqual(automerge.run(gh, log=logs.append), 1)
         self.assertEqual(gh.writes, [
-            ("PUT", "/pulls/1/update-branch", {"expected_head_sha": "h1"}),
-            ("POST", "/actions/workflows/ci.yml/dispatches", {"ref": "claude/a"}),
+            ("PUT", "/pulls/1/merge", {"merge_method": "merge", "sha": "h1"}),
+            ("PUT", "/pulls/2/merge", {"merge_method": "merge", "sha": "h2"}),
+            ("POST", "/actions/workflows/pages.yml/dispatches", {"ref": "main"}),
         ])
+        self.assertTrue(any("405" in line and "required status checks" in line for line in logs))
 
     def test_dry_run_writes_nothing(self):
         gh = fake_repo()
@@ -217,6 +278,7 @@ class Session:
         self.main, self.next_change = frozenset(), 0
         self.branches, self.prs, self.ci = {}, {}, {}
         self.bad, self.clashes, self.next_pr = set(), [], 1
+        self.asked = set()  # (pr, head, main) its thread was asked to merge main into
         self.green_mains = {frozenset()}
         self.merges = 0
 
@@ -241,11 +303,11 @@ class Session:
             out.append(dict(number=n, head_ref=p["head_ref"], base_ref=p["base_ref"], same_repo=True,
                             draft=p["draft"], labels=p["labels"], mergeable=p["mergeable"],
                             up_to_date=self.main <= head, ci=self.ci.get(head, "none"),
-                            base_in_main=base_in_main))
+                            base_in_main=base_in_main, asked=(n, head, self.main) in self.asked))
         return out
 
     def automate(self):
-        for _ in range(50):
+        for _ in range(500):
             action = decide(self.view())
             if action is None:
                 return
@@ -264,12 +326,15 @@ class Session:
                 t.assertIn(self.main, self.green_mains, "main holds a set CI never passed")
                 del self.prs[n]
                 self.merges += 1
-            elif kind in ("update", "test"):
-                if kind == "update":
-                    self.branches[p["head_ref"]] = head | self.main
-                self.ci.setdefault(self.branches[p["head_ref"]], "pending")
-                return  # waits for CI, as the workflow does
+            elif kind == "ask":
+                self.t.assertFalse((n, head, self.main) in self.asked, "asked twice for the same head and main")
+                self.asked.add((n, head, self.main))
         self.t.fail("automation did not settle")
+
+    def answer(self, n):
+        """Its thread answers an ask: merges main in and pushes (a push the ruleset counts)."""
+        p = self.prs[n]
+        self.push(p["head_ref"], self.branches[p["head_ref"]] | self.main)
 
     def push(self, ref, content):
         self.branches[ref] = content
@@ -298,6 +363,10 @@ class Session:
             p = rng.choice(open_prs)
             p["labels"] = []
             p["mergeable"] = True
+        elif roll < 0.6:
+            waiting = sorted({n for n, _, _ in self.asked if n in self.prs})
+            if waiting:
+                self.answer(rng.choice(waiting))
         else:
             pending = [c for c, s in self.ci.items() if s == "pending"]
             if pending:
@@ -310,11 +379,16 @@ class Session:
         for _ in range(steps):
             self.event()
             self.automate()
-        # The threads go quiet: CI finishes, automation runs to the end.
+        # The threads stop starting work: CI finishes, each ask is answered,
+        # automation runs to the end.
         for _ in range(10 * steps):
             pending = [c for c, s in self.ci.items() if s == "pending"]
-            if not pending:
+            waiting = [n for n, p in self.prs.items() if (n, self.branches[p["head_ref"]], self.main) in self.asked]
+            if not pending and not waiting:
                 break
+            for n in waiting:
+                self.answer(n)
+            pending = [c for c, s in self.ci.items() if s == "pending"]
             for c in pending:
                 self.ci[c] = "success" if self.green(c) else "failure"
                 if self.ci[c] == "success":
@@ -389,7 +463,7 @@ def conflict_repo(comments=()):
         "/compare/main...c7": dict(status="diverged"),
         "/commits/c7/check-runs?filter=latest&per_page=100": dict(check_runs=[check("kernel"), check("app")]),
         "/commits/c7": stamp("1970-01-01T00:10:00Z"),     # 600 s
-        "/commits/main": stamp("1970-01-01T00:20:00Z"),   # 1200 s
+        "/commits/main": dict(stamp("1970-01-01T00:20:00Z"), sha="m1"),   # 1200 s
         "/issues/7/comments?per_page=100": [dict(body=b) for b in comments],
     })
 

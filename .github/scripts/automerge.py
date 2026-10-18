@@ -7,12 +7,17 @@ of such a branch has the same files as the branch head, so main ends up with
 exactly the files CI just tested; nothing untested reaches main.
 
 A pull request qualifies when it is open, not a draft, comes from a `claude/`
-branch of this repository, targets main, and has no `hold` label. A branch
-that is behind main is brought up to date (main merged in) and tested again,
-one pull request at a time, oldest first, so two green pull requests can't
-each pass alone and break main together. A stacked pull request (one whose
-base is another `claude/` branch) waits until its base is in main, then is
-retargeted to main and goes through the same rule, so stacks merge in order.
+branch of this repository, targets main, and has no `hold` label. A green
+branch that is behind main gets one comment per head and main asking its
+thread to merge main in and push (`ask`), so two green pull requests can't
+each pass alone and break main together. Auto-merge never pushes to a branch
+itself: main's ruleset only counts CI runs started by a pull request's own
+push, and a push with this workflow's token starts a run that waits for the
+owner's approval instead (found 2026-10-18, PR #176). A stacked pull request
+(one whose base is another `claude/` branch) waits until its base is in main,
+then is retargeted to main and goes through the same rule, so stacks merge in
+order. A pull request whose merge GitHub refuses is skipped for the rest of
+the run, so one stuck pull request never holds up the others.
 
 A pull request that has conflicted with main for 15 minutes gets one comment
 per head commit naming the conflicted files, in case its thread missed
@@ -77,18 +82,21 @@ def is_claude_pr(pr):
     return pr["head_ref"].startswith(PREFIX) and pr["same_repo"]
 
 
-def decide(prs):
+def decide(prs, skip=()):
     """The single next action, or None when there is nothing to do now.
 
     Each pr is a dict: number, head_ref, base_ref, same_repo, draft, labels,
     mergeable (True, False or None while GitHub works it out), up_to_date
     (head contains main), ci ('success', 'failure', 'pending' or 'none', for
-    the head commit), base_in_main (the base branch's head is in main).
+    the head commit), base_in_main (the base branch's head is in main),
+    asked (its thread was already asked to merge this main into this head).
+    Pull requests numbered in `skip` (refused earlier in this run) are left
+    alone.
 
-    Actions: ("retarget", n), ("merge", n), ("test", n) (run CI on the head),
-    ("update", n) (merge main into the branch, then test).
+    Actions: ("retarget", n), ("merge", n), ("ask", n) (ask its thread to
+    merge main in and push, which tests it again).
     """
-    mine = sorted((p for p in prs if is_claude_pr(p)), key=lambda p: p["number"])
+    mine = sorted((p for p in prs if is_claude_pr(p) and p["number"] not in skip), key=lambda p: p["number"])
     for p in mine:
         if p["base_ref"] != MAIN and p["base_ref"].startswith(PREFIX) and p["base_in_main"]:
             return ("retarget", p["number"])
@@ -100,16 +108,13 @@ def decide(prs):
     for p in ready:
         if p["up_to_date"] and p["ci"] == "success" and p["mergeable"] is True:
             return ("merge", p["number"])
-    # One branch in the queue at a time: wait while an up-to-date branch is
-    # being tested.
+    # Wait while an up-to-date branch is being tested: if it merges, main
+    # moves again and a branch brought up to date now would be behind again.
     if any(p["up_to_date"] and p["ci"] == "pending" for p in ready):
         return None
     for p in ready:
-        if p["up_to_date"] and p["ci"] == "none":
-            return ("test", p["number"])
-    for p in ready:
-        if not p["up_to_date"] and p["ci"] == "success" and p["mergeable"] is True:
-            return ("update", p["number"])
+        if not p["up_to_date"] and p["ci"] == "success" and p["mergeable"] is True and not p["asked"]:
+            return ("ask", p["number"])
     return None
 
 
@@ -130,6 +135,19 @@ def needs_reminder(pr, main_time, now):
     if pr["draft"] or pr["mergeable"] is not False or pr["reminded"]:
         return False
     return now - max(main_time, pr["head_time"]) >= CONFLICT_GRACE_S
+
+
+BEHIND = "<!-- automerge-behind:{}:{} -->"
+
+
+def behind_text(pr, main_sha):
+    return (
+        "This pull request passed CI, but `main` has moved on since, so auto-merge can't merge it "
+        "until it is tested with the new `main`.\n\n"
+        "To the thread that owns this branch: merge `main` into it (a merge commit, not a rebase), "
+        "rerun the affected tests and push. Auto-merge merges it once CI passes on the new head.\n\n"
+        + BEHIND.format(pr["head_sha"], main_sha) + FOOTER
+    )
 
 
 def reminder_text(pr, files):
@@ -192,6 +210,7 @@ def contains(gh, head_sha, ref):
 
 def gather(gh):
     prs = []
+    main_sha = None
     for raw in gh.call("GET", "/pulls?state=open&per_page=100"):
         head = raw["head"]
         pr = {
@@ -218,13 +237,18 @@ def gather(gh):
             except urllib.error.HTTPError as e:
                 if e.code != 404:
                     raise
-        pr["head_time"], pr["reminded"] = 0, False
-        if pr["mergeable"] is False and not pr["draft"]:
+        pr["head_time"], pr["reminded"], pr["asked"], pr["main_sha"] = 0, False, False, None
+        conflicted = pr["mergeable"] is False and not pr["draft"]
+        if conflicted:
             commit = gh.call("GET", f"/commits/{pr['head_sha']}")
             pr["head_time"] = iso_seconds(commit["commit"]["committer"]["date"])
-            marker = MARKER.format(pr["head_sha"])
-            comments = gh.call("GET", f"/issues/{pr['number']}/comments?per_page=100")
-            pr["reminded"] = any(marker in (c["body"] or "") for c in comments)
+        if conflicted or not pr["up_to_date"]:
+            comments = [c["body"] or "" for c in gh.call("GET", f"/issues/{pr['number']}/comments?per_page=100")]
+            pr["reminded"] = any(MARKER.format(pr["head_sha"]) in c for c in comments)
+            if not pr["up_to_date"]:
+                main_sha = main_sha or gh.call("GET", f"/commits/{MAIN}")["sha"]
+                pr["main_sha"] = main_sha
+                pr["asked"] = any(BEHIND.format(pr["head_sha"], main_sha) in c for c in comments)
         prs.append(pr)
     return prs
 
@@ -244,15 +268,6 @@ def remind_conflicts(gh, prs, now, files_for, dry_run, log):
     return sent
 
 
-def wait_for_new_head(gh, number, old_sha):
-    for _ in range(30):
-        sha = gh.call("GET", f"/pulls/{number}")["head"]["sha"]
-        if sha != old_sha:
-            return sha
-        time.sleep(2)
-    raise RuntimeError(f"#{number}: branch update did not land")
-
-
 def act(gh, action, prs):
     kind, number = action
     pr = next(p for p in prs if p["number"] == number)
@@ -260,17 +275,13 @@ def act(gh, action, prs):
         gh.call("PATCH", f"/pulls/{number}", {"base": MAIN})
     elif kind == "merge":
         gh.call("PUT", f"/pulls/{number}/merge", {"merge_method": "merge", "sha": pr["head_sha"]})
-    elif kind == "update":
-        gh.call("PUT", f"/pulls/{number}/update-branch", {"expected_head_sha": pr["head_sha"]})
-        wait_for_new_head(gh, number, pr["head_sha"])
-    if kind in ("update", "test"):
-        # A push made with the workflow's token starts no workflows, so CI is
-        # started by hand; its finish wakes auto-merge again.
-        gh.call("POST", "/actions/workflows/ci.yml/dispatches", {"ref": pr["head_ref"]})
+    elif kind == "ask":
+        gh.call("POST", f"/issues/{number}/comments", {"body": behind_text(pr, pr["main_sha"])})
 
 
 def run(gh, dry_run=False, log=print, now=None, files_for=conflicted_files):
     merged = 0
+    skip = set()
     for step in range(MAX_ACTIONS):
         prs = gather(gh)
         if step == 0:
@@ -278,21 +289,21 @@ def run(gh, dry_run=False, log=print, now=None, files_for=conflicted_files):
         for p in prs:
             log(f"#{p['number']} {p['head_ref']} -> {p['base_ref']}: draft={p['draft']} "
                 f"mergeable={p['mergeable']} up_to_date={p['up_to_date']} ci={p['ci']}")
-        action = decide(prs)
+        action = decide(prs, skip)
         log(f"next: {action}")
         if action is None or dry_run:
             break
         try:
             act(gh, action, prs)
         except urllib.error.HTTPError as e:
-            # Someone pushed or a conflict appeared meanwhile; the next run
-            # (CI finishing, or the half-hourly one) looks again.
+            # Someone pushed, a conflict appeared, or a rule refused it: the
+            # others go on, and the next run (CI finishing, or the
+            # half-hourly one) looks at this one again.
             log(f"{action} refused: {e.code} {e.read().decode(errors='replace')[:300]}")
-            break
+            skip.add(action[1])
+            continue
         if action[0] == "merge":
             merged += 1
-        if action[0] in ("update", "test"):
-            break
     if merged:
         # Same reason: the merge push starts no workflows, so deploy by hand.
         gh.call("POST", "/actions/workflows/pages.yml/dispatches", {"ref": MAIN})

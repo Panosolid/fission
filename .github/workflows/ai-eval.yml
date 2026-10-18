@@ -19,6 +19,10 @@ on:
       - "packages/ai/src/ollama.ts"
       - "packages/ai/src/commands.ts"
 
+# Read-only token by default; a job that writes says so itself.
+permissions:
+  contents: read
+
 jobs:
   ollama:
     runs-on: ubuntu-latest

@@ -67,7 +67,21 @@ class Watcher(unittest.TestCase):
             stopped, _, _ = self.watch(f'echo "$@" >{args}; echo MERGED\n')
             self.assertTrue(stopped)
             with open(args) as f:
-                self.assertIn("--repo o/r --head claude/x --state all", f.read())
+                asked = f.read()
+            self.assertIn("--repo o/r --head claude/x --state all", asked)
+            self.assertIn('select(.headRepositoryOwner.login == "o")', asked)
+
+    def test_a_forks_pull_request_with_the_same_branch_name_is_ignored(self):
+        # The fake gh runs the script's real --jq filter over what GitHub
+        # would answer: a fork's merged pull request from claude/x and none
+        # of ours, so testing goes on; with ours merged too, it stops.
+        jq = 'while [ "$1" != --jq ]; do shift; done; jq -r "$2" <<<\'%s\'\n'
+        fork = '{"state":"MERGED","headRepositoryOwner":{"login":"someone"}}'
+        ours = '{"state":"MERGED","headRepositoryOwner":{"login":"o"}}'
+        stopped, made, _ = self.watch(jq % f"[{fork}]", seconds=0.5)
+        self.assertFalse(stopped or made)
+        stopped, made, _ = self.watch(jq % f"[{fork},{ours}]")
+        self.assertTrue(stopped and made)
 
 
 class EndlessStopFile(unittest.TestCase):
