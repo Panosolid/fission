@@ -43,8 +43,7 @@ export interface MenuHost {
  */
 export async function chooseEntry(host: MenuHost, id: string, action: MenuEntry["action"], editing: string | null = null): Promise<void> {
   const before = host.current();
-  const entry = menuEntries(before, id, editing).find((e) => e.action === action);
-  if (entry?.off) return host.refuse(entry.off);
+  // An entry that is off is refused by barEdit itself, with the same words (it reads itemMenu).
   const r = barEdit(before, { kind: "menu", id, action }, editing);
   if (r.kind === "none") return;
   if (r.kind === "refused") return host.refuse(r.message);

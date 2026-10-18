@@ -175,7 +175,7 @@ async function everyEntry(m: Menu): Promise<string | null> {
   return null;
 }
 
-test("every entry of every item on six designs: refused with its words, or exactly one undo step; a delete asks exactly when something is built from the item", async () => {
+test("every entry of every item on nine designs: refused with its words, or exactly one undo step; a delete asks exactly when something is built from the item", async () => {
   assert.equal(await everyEntry(menu), null);
 });
 
@@ -276,7 +276,9 @@ const MENU_PLANTS: { name: string; edits: [string, string][]; caught: string }[]
     caught: "one Undo did not give back the document before (2 records)",
   },
   { name: "delete-never-asks", edits: [["  if (plan.ask) host.ask(plan.ask, go);", "  if (plan.ask && false) host.ask(plan.ask, go);"]], caught: "a used item deleted without asking" },
-  // "off-entry-run" (the off check dropped) went with 24f4: every entry still off is one barEdit itself refuses with the same words, or one that changes nothing, so dropping the check changes nothing a user can see.
+  // "off-entry-run" (chooseEntry's own off check dropped) went with 24f4, and so did the check: every entry still
+  // off is one barEdit itself refuses with the same words, so no test could tell it was gone. everyEntry still
+  // proves an off entry records nothing and is refused with its words.
   // 24f4's two: the no-body refusals coming back, on a delete and on the menu's entries.
   {
     name: "no-body-delete-refused",
