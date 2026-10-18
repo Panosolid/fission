@@ -26,11 +26,13 @@
 .guide .guide-status[data-status="planned"] { background: rgba(253, 230, 138, 0.25); color: #fff7d6; }
 /* A card's word list is on its back: both faces share one grid cell, so the card is the size of the larger and turning it over never moves anything. */
 .guide .guide-faces { display: grid; }
-.guide .guide-face { grid-area: 1 / 1; transition: opacity 0.25s ease, visibility 0.25s; }
+.guide .guide-face { grid-area: 1 / 1; display: flex; flex-direction: column; transition: opacity 0.25s ease, visibility 0.25s; }
+.guide .guide-face > .guide-flip { margin-top: auto; } /* the shorter side keeps its button at the bottom of the card */
 .guide .guide-face[data-face="words"], .guide .guide-card[data-face="words"] .guide-face[data-face="text"] { opacity: 0; visibility: hidden; }
 .guide .guide-card[data-face="words"] .guide-face[data-face="words"] { opacity: 1; visibility: visible; }
 .guide .guide-face > :last-child { margin-bottom: 0; }
-.guide .guide-flip { display: block; width: 100%; margin: 14px 0 0; padding: 9px 0 0; text-align: left; font: inherit; font-size: 13.5px; line-height: 1.4; color: inherit; background: none; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.18); border-radius: 0; cursor: pointer; opacity: 0.9; }
+.guide .guide-face > :nth-last-child(2) { margin-bottom: 14px; }
+.guide .guide-flip { display: block; width: 100%; margin: 0; flex-shrink: 0; padding: 9px 0 0; text-align: left; font: inherit; font-size: 13.5px; line-height: 1.4; color: inherit; background: none; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.18); border-radius: 0; cursor: pointer; opacity: 0.9; }
 .guide .guide-flip:hover { opacity: 1; text-decoration: underline; text-underline-offset: 3px; }
 .guide .guide-flip span { font: 600 11px/1 ui-monospace, Menlo, monospace; letter-spacing: 0.12em; text-transform: uppercase; margin-right: 6px; padding: 3px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.18); text-decoration: none; display: inline-block; }
 .guide .guide-face[data-face="words"] .guide-terms { margin: 0; padding: 0; border: 0; }
@@ -74,7 +76,8 @@
   .guide .guide-card p { margin-bottom: 8px; }
   .guide .guide-part { margin: 0 0 4px; font-size: 11px; }
   .guide .guide-status { margin-bottom: 8px; }
-  .guide .guide-flip { margin-top: 10px; padding-top: 8px; font-size: 13px; }
+  .guide .guide-flip { padding-top: 8px; font-size: 13px; }
+  .guide .guide-face > :nth-last-child(2) { margin-bottom: 10px; }
   .guide .guide-terms { font-size: 13px; }
   .guide .guide-chapter[data-words] .guide-card { position: static; width: auto; }
   .guide .guide-rail { display: none; }

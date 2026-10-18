@@ -46,6 +46,23 @@ async function fresh({ width = 1280, height = 800, touch = false, reducedMotion 
           run.forEach((f) => f(held));
         },
         presented: () => new Promise((r) => realFrame(() => realFrame(r))),
+        /** Lets time run again; frames that were waiting run on the browser's next real one. */
+        release: () => {
+          held = null;
+          const run = waiting;
+          waiting = [];
+          run.forEach((f) => realFrame(f));
+        },
+        /** Steps `n` frames of `ms` and returns the scroll after each (fast: no waiting for the screen). */
+        run: (n, ms = 16) => {
+          const sc = document.querySelector(".guide-scroll");
+          const ys = [];
+          for (let k = 0; k < n; k++) {
+            window.stepper.step(ms);
+            ys.push(sc.scrollTop);
+          }
+          return ys;
+        },
       };
     });
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
@@ -281,55 +298,41 @@ try {
 
   for (const [width, height] of [[1280, 800], [375, 667]]) {
     await check(`${width}×${height}: Next glides (no jump) and stops exactly where the next chapter's words come to rest`, async () => {
-      const page = await fresh({ width, height, query: "?guide" });
+      // Stepped on the hand-turned clock, 16 ms a frame, so the check is the same on a fast machine and a slow one.
+      const page = await fresh({ width, height, query: "?guide", clock: true });
       await page.waitForSelector("dialog.guide[data-frames]");
       const ids = await chapters(page);
       const from = ids.indexOf("sketch");
-      // Start with the sketch chapter's words at rest, then press Next and record every frame until it all stops.
       await page.evaluate((y) => (document.querySelector(".guide-scroll").scrollTop = y), await restOf(page, from));
       await waitChapter(page, "sketch");
       await settled(page);
-      const trace = await page.evaluate(
-        () =>
-          new Promise((done) => {
-            const sc = document.querySelector(".guide-scroll");
-            const out = [];
-            const t0 = performance.now();
-            // Each frame's own time stamp (the one the guide moves by), not the moment this runs after the drawing.
-            const tick = (ts) => {
-              const card = document.querySelector(".guide-chapter[data-active] .guide-card");
-              out.push({ t: ts - t0, y: sc.scrollTop, id: card?.parentElement.dataset.id, top: card?.getBoundingClientRect().top });
-              if (ts - t0 < 2200) requestAnimationFrame(tick);
-              else done(out);
-            };
-            document.querySelector(".guide-next").click();
-            out.push({ t: 0, y: sc.scrollTop });
-            requestAnimationFrame(tick);
-          }),
-      );
-      const start = trace[0].y;
       const goal = await restOf(page, from + 1);
-      const end = trace.at(-1).y;
-      // Lands exactly at rest (to the pixel), on the next chapter.
-      assert.ok(Math.abs(end - goal) <= 1, `stopped at ${end}, but the words rest at ${goal}`);
-      assert.equal(trace.at(-1).id, ids[from + 1]);
-      // Glides, at whatever frame rate the machine manages: several frames part of the way there, spread over a good part of a
-      // second, and never anywhere near a jump's speed. A jump covers the whole distance in one frame (60 distances a second at
-      // 60 frames a second); an eased glide of 600 ms or more averages under 2 a second and peaks at a few, so 10 is the line.
+      await page.evaluate(() => window.stepper.hold());
+      const start = await page.evaluate(() => {
+        document.querySelector(".guide-next").click();
+        return document.querySelector(".guide-scroll").scrollTop;
+      });
+      const ys = await page.evaluate(() => window.stepper.run(90)); // 1.44 s, past the longest glide (1 s)
       const distance = goal - start;
-      const between = trace.filter((f) => Math.abs(f.y - start) > distance * 0.05 && Math.abs(goal - f.y) > distance * 0.05);
-      assert.ok(between.length >= 2, `only ${between.length} frames were part of the way there: a jump, not a glide`);
-      const moving = trace.filter((f, k) => k > 0 && f.y !== trace[k - 1].y);
-      assert.ok(moving.at(-1).t - trace[0].t >= 400, `the glide took only ${Math.round(moving.at(-1).t - trace[0].t)} ms`);
-      const frames = trace.slice(1); // the frames' own time stamps (the first sample is the moment of the click)
-      const fastest = Math.max(...frames.slice(1).map((f, k) => Math.abs(f.y - frames[k].y) / Math.max(1, f.t - frames[k].t)));
-      if (process.env.GUIDE_DEBUG) console.log(frames.map((f) => `${Math.round(f.t)}:${Math.round(f.y)}`).join(" "));
-      assert.ok(fastest * 1000 <= 10 * Math.abs(distance), `moved ${Math.round(fastest * 1000)} px a second, over 10 × the ${distance} px distance`);
-      // And it stays stopped: once landed the scroll never moves again.
-      const landed = trace.findIndex((f) => Math.abs(f.y - goal) <= 1);
-      assert.ok(trace.slice(landed).every((f) => Math.abs(f.y - goal) <= 1), "it moved again after landing");
-      // At rest the card's top is at its sticky place (its words have just stopped moving), the whole card is on screen, and the scene starts from its beginning.
-      await page.waitForTimeout(600); // the words' fade-in
+      // Lands exactly at rest (to the pixel) and stays there.
+      const landed = ys.findIndex((y) => Math.abs(y - goal) <= 1);
+      assert.ok(landed >= 0, `never reached ${goal}: ended at ${ys.at(-1)}`);
+      assert.ok(ys.slice(landed).every((y) => Math.abs(y - goal) <= 1), "it moved again after landing");
+      // A glide, not a jump: forwards only, at least 600 ms of frames (37 at 16 ms) on the way, none moving more than a
+      // tenth of the distance (an eased glide of 600 ms or more moves at most 1.5 × distance × 16/600 = 4% a frame).
+      const steps = ys.map((y, k) => y - (k ? ys[k - 1] : start));
+      assert.ok(steps.every((d) => d >= 0), "it went backwards");
+      assert.ok(landed >= 36, `it got there in ${landed + 1} frames (${(landed + 1) * 16} ms): a jump, not a glide`);
+      assert.ok(Math.max(...steps) <= distance / 10, `one frame moved ${Math.max(...steps)} of ${distance} px`);
+      // Eased: slow at both ends, fastest in the middle.
+      const third = Math.floor(landed / 3);
+      const mid = Math.max(...steps.slice(third, 2 * third));
+      assert.ok(steps[0] < mid / 4 && steps[landed] < mid / 2, `not eased: first ${steps[0]}, middle ${mid}, last ${steps[landed]} px a frame`);
+      // At rest the card's top is at its sticky place (its words have just stopped moving), the whole card is on screen,
+      // fully shown, and the scene starts from its beginning.
+      await page.evaluate(() => window.stepper.release());
+      await waitChapter(page, ids[from + 1]);
+      await page.waitForTimeout(700); // the words' fade-in
       const card = await page.$eval(".guide-chapter[data-active] .guide-card", (c) => ({ box: c.getBoundingClientRect().toJSON(), place: parseFloat(getComputedStyle(c).top), opacity: Number(getComputedStyle(c).opacity) }));
       assert.ok(Math.abs(card.box.top - card.place) <= 1, `the card's top is at ${card.box.top}, its resting place is ${card.place}`);
       assert.ok(card.box.bottom <= height && card.box.top >= 0, `the card runs off the screen: ${card.box.top}–${card.box.bottom}`);
@@ -338,29 +341,34 @@ try {
     });
   }
 
-  await check("the reader's own scrolling takes over from a glide; Next pressed twice quickly goes two chapters", async () => {
+  await check("Next pressed twice quickly goes two chapters, and lands at the second's resting place", async () => {
+    const page = await fresh({ query: "?guide", clock: true });
+    await page.waitForSelector("dialog.guide[data-frames]");
+    await settled(page);
+    await page.evaluate(() => window.stepper.hold());
+    await page.evaluate(() => {
+      document.querySelector(".guide-next").click();
+      window.stepper.run(5);
+      document.querySelector(".guide-next").click();
+    });
+    const ys = await page.evaluate(() => window.stepper.run(90));
+    assert.ok(Math.abs(ys.at(-1) - (await restOf(page, 2))) <= 1, `ended at ${ys.at(-1)}, not at chapter 3's words (${await restOf(page, 2)})`);
+    await page.evaluate(() => window.stepper.release());
+    await waitChapter(page, (await chapters(page))[2]);
+  });
+
+  await check("the reader's own scrolling takes over from a glide", async () => {
     const page = await fresh({ query: "?guide" });
     await page.waitForSelector("dialog.guide[data-frames]");
-    const ids = await chapters(page);
     await page.click(".guide-next");
     await page.waitForFunction(() => document.querySelector(".guide-scroll").scrollTop > 40);
     await page.mouse.move(900, 400);
     await page.mouse.wheel(0, 30);
     await page.waitForFunction(() => document.querySelector("dialog.guide").dataset.gliding === undefined, null, { timeout: 2000 });
+    await page.waitForTimeout(300); // the wheel's own short scroll
     const y = await page.$eval(".guide-scroll", (s) => s.scrollTop);
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(500);
     assert.ok(Math.abs((await page.$eval(".guide-scroll", (s) => s.scrollTop)) - y) <= 1, "the glide kept pulling after the wheel");
-    // Two quick presses: the second carries on from where the first was going.
-    await page.evaluate(() => (document.querySelector(".guide-scroll").scrollTop = 0));
-    await waitChapter(page, ids[0]);
-    await settled(page);
-    await page.evaluate(() => {
-      document.querySelector(".guide-next").click();
-      document.querySelector(".guide-next").click();
-    });
-    await page.waitForFunction(() => document.querySelector("dialog.guide").dataset.gliding === undefined, null, { timeout: 4000 });
-    assert.equal(await chapter(page), ids[2]);
-    assert.ok(Math.abs((await page.$eval(".guide-scroll", (s) => s.scrollTop)) - (await restOf(page, 2))) <= 1);
   });
 
   for (const [width, height] of [[1280, 800], [1280, 720], [375, 667], [375, 740]]) {
@@ -467,56 +475,39 @@ try {
   });
 
   await check("Space plays the guide at a steady pace and again pauses, even with a button focused; the hint shows at the start and goes once played", async () => {
-    const page = await fresh({ query: "?guide" });
+    const page = await fresh({ query: "?guide", clock: true });
     await page.waitForSelector("dialog.guide[data-frames]");
     await page.waitForTimeout(500); // the hint's fade-in
     const hint = () => page.$eval(".guide-hint", (h) => ({ opacity: Number(getComputedStyle(h).opacity), text: h.innerText }));
     const before = await hint();
     assert.equal(before.opacity, 1, "the hint is not showing at the start");
     assert.match(before.text, /Space.*steady pace/);
-    // Next has focus (as after clicking it), yet Space plays instead of pressing Next.
+    // Next has focus (as after clicking it), yet Space plays instead of pressing Next. Time is stepped 16 ms a frame.
     await page.focus(".guide-next");
+    await page.evaluate(() => window.stepper.hold());
     const h = await page.$eval(".guide-scroll", (s) => s.clientHeight);
-    // Nothing moves before Space.
-    const still = await page.$eval(".guide-scroll", (s) => s.scrollTop);
-    await page.waitForTimeout(400);
-    assert.equal(await page.$eval(".guide-scroll", (s) => s.scrollTop), still, "the page moved before Space");
+    const still = await page.evaluate(() => window.stepper.run(20));
+    assert.ok(still.every((y) => y === still[0]), "the page moved before Space");
     await page.keyboard.press(" ");
     assert.equal(await page.$eval("dialog.guide", (d) => d.dataset.playing !== undefined), true, "Space did not start playing");
-    const played = await page.evaluate(
-      () =>
-        new Promise((done) => {
-          const sc = document.querySelector(".guide-scroll");
-          const out = [];
-          const t0 = performance.now();
-          const tick = () => {
-            out.push({ t: performance.now() - t0, y: sc.scrollTop });
-            if (performance.now() - t0 < 2500) requestAnimationFrame(tick);
-            else done(out);
-          };
-          requestAnimationFrame(tick);
-        }),
-    );
-    // Steady: 0.15 screens a second (worked out: 0.15 × the view's height px each second), give or take a third for the browser's
-    // frame timing; never backwards; no frame faster than twice that pace (no jumps to the next chapter).
-    const pace = 0.15 * h;
-    const seconds = (played.at(-1).t - played[0].t) / 1000;
-    const speed = (played.at(-1).y - played[0].y) / seconds;
-    assert.ok(speed > pace * 0.67 && speed < pace * 1.33, `played at ${Math.round(speed)} px a second, not about ${pace}`);
-    const steps = played.slice(1).map((f, k) => ({ dy: f.y - played[k].y, dt: f.t - played[k].t }));
-    assert.ok(steps.every((s) => s.dy >= 0), "it went backwards");
-    // A single frame may round to the next whole pixel, hence the 2 px allowance.
-    assert.ok(steps.every((s) => s.dy <= (2 * pace * s.dt) / 1000 + 2), `a frame jumped: ${JSON.stringify(steps.filter((s) => s.dy > (2 * pace * s.dt) / 1000 + 2))}`);
+    const ys = await page.evaluate(() => window.stepper.run(125)); // 2 s
+    // By hand: 0.15 screens a second on an 800 px view is 120 px a second, so 2 s is 240 px (to a pixel for rounding),
+    // 1.92 px a frame: never backwards, never more than 3 px in a frame (no jump to the next chapter), and steady
+    // (each half second the same 60 px).
+    assert.equal(h, 800);
+    assert.ok(Math.abs(ys.at(-1) - still[0] - 240) <= 1, `played ${ys.at(-1) - still[0]} px in 2 s, not 240`);
+    const steps = ys.map((y, k) => y - (k ? ys[k - 1] : still[0]));
+    assert.ok(steps.every((d) => d >= 0 && d <= 3), `uneven steps: ${steps.join(",")}`);
+    for (let k = 31; k < 125; k += 31) assert.ok(Math.abs(ys[k] - ys[k - 31] - 59.52) <= 1, `half a second moved ${ys[k] - ys[k - 31]} px, not 59.5`);
     assert.equal(await page.$eval(".guide-play", (b) => b.getAttribute("aria-pressed")), "true");
-    await page.waitForTimeout(500);
-    assert.equal((await hint()).opacity, 0, "the hint should go once the guide is playing");
     // Space again pauses, and it stays put.
     await page.keyboard.press(" ");
-    await page.waitForTimeout(100);
-    const y = await page.$eval(".guide-scroll", (s) => s.scrollTop);
-    await page.waitForTimeout(600);
-    assert.equal(await page.$eval(".guide-scroll", (s) => s.scrollTop), y, "still moving after Space paused it");
+    const after = await page.evaluate(() => window.stepper.run(40));
+    assert.ok(after.every((y) => y === after[0]), "still moving after Space paused it");
     assert.equal(await page.$eval(".guide-play", (b) => b.getAttribute("aria-pressed")), "false");
+    await page.evaluate(() => window.stepper.release());
+    await page.waitForTimeout(600);
+    assert.equal((await hint()).opacity, 0, "the hint should go once the guide has played");
     // The reader's own wheel stops a play too.
     await page.keyboard.press(" ");
     await page.waitForFunction(() => document.querySelector("dialog.guide").dataset.playing !== undefined);
