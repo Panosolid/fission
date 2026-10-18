@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CHAPTERS, cameraDistance, chapterAt, chapterForKey, glossary, stageLayout, termPattern, type Chapter } from "../src/guide/chapters.ts";
+import { CHAPTERS, PLAY_SPEED, blendAt, cameraDistance, chapterAt, chapterForKey, glideAt, glideDuration, glossary, playStep, restingScroll, stageLayout, termPattern, type Chapter } from "../src/guide/chapters.ts";
 import { SCENE_IDS } from "../src/guide/scenes.ts";
 
 const words = (c: Chapter) => [c.title, ...c.text].join(" ");
@@ -79,23 +79,103 @@ test("the glossary holds every term once, A to Z, and the last chapter shows it"
   assert.equal(CHAPTERS.at(-1)!.id, "words");
 });
 
-test("chapterAt: the chapter under the middle of the screen, and how far through it", () => {
-  // Three chapters 1000 px tall at 0, 1000, 2000; an 800 px screen, so the middle is scrollTop + 400.
-  const tops = [0, 1000, 2000];
-  const heights = [1000, 1000, 1000];
-  assert.deepEqual(chapterAt(0, 800, tops, heights), { index: 0, progress: 0.4 });
-  // scrollTop 600: middle at 1000, exactly the top of chapter 2, so it has just begun.
-  assert.deepEqual(chapterAt(600, 800, tops, heights), { index: 1, progress: 0 });
-  // scrollTop 1850: middle at 2250, a quarter into chapter 3.
-  assert.deepEqual(chapterAt(1850, 800, tops, heights), { index: 2, progress: 0.25 });
-  // Past the end: clamped to 1.
-  assert.deepEqual(chapterAt(5000, 800, tops, heights), { index: 2, progress: 1 });
-  assert.deepEqual(chapterAt(0, 800, [], []), { index: 0, progress: 0 });
+test("restingScroll: by hand, where a card's top reaches its sticky place", () => {
+  // A chapter starting 2000 px down with no padding, its card sticking 104 px below the top of the view:
+  // the card's top is 2000 − scroll px down the screen, which is 104 when scroll = 1896.
+  assert.equal(restingScroll(2000, 0, 104), 1896);
+  // The first chapter at 0 with 104 px of padding above its card rests at scroll 0 (it starts in place).
+  assert.equal(restingScroll(0, 104, 104), 0);
+  // Never negative: a card already lower than its place at scroll 0 is at rest from the start.
+  assert.equal(restingScroll(0, 50, 400), 0);
+  // Rounded to a whole pixel, as the browser scrolls.
+  assert.equal(restingScroll(1000.4, 0, 0), 1000);
+  assert.equal(restingScroll(1000.6, 0, 0), 1001);
 });
 
-test("chapterForKey: arrows, pages, Space, Home and End move; other keys don't; the ends hold", () => {
+test("chapterAt: a chapter takes over `lead` before its words rest, and runs 0 at rest to 1 where the next takes over", () => {
+  // Three chapters resting at 0, 1000 and 2000, each taking over 300 px early; the scroll ends at 2600.
+  const rests = [0, 1000, 2000];
+  const leads = [300, 300, 300];
+  assert.deepEqual(chapterAt(0, rests, leads, 2600), { index: 0, progress: 0 });
+  // Chapter 1 runs from rest 0 until chapter 2 takes over at 1000 − 300 = 700, so scroll 350 is halfway.
+  assert.deepEqual(chapterAt(350, rests, leads, 2600), { index: 0, progress: 0.5 });
+  // Just before the takeover the first chapter is all but done; at 700 the second has taken over, its words still sliding (progress held at 0).
+  assert.deepEqual(chapterAt(699, rests, leads, 2600), { index: 0, progress: 699 / 700 });
+  assert.deepEqual(chapterAt(700, rests, leads, 2600), { index: 1, progress: 0 });
+  assert.deepEqual(chapterAt(999, rests, leads, 2600), { index: 1, progress: 0 });
+  // At rest, exactly 0; a quarter of the way from 1000 to 1700 is 1175.
+  assert.deepEqual(chapterAt(1000, rests, leads, 2600), { index: 1, progress: 0 });
+  assert.deepEqual(chapterAt(1175, rests, leads, 2600), { index: 1, progress: 0.25 });
+  // The last chapter runs to the end of the scroll: 2300 is halfway from 2000 to 2600; past the end, clamped.
+  assert.deepEqual(chapterAt(2300, rests, leads, 2600), { index: 2, progress: 0.5 });
+  assert.deepEqual(chapterAt(5000, rests, leads, 2600), { index: 2, progress: 1 });
+  // A chapter with no room (the next takes over before it rests) stays at 0 rather than dividing by zero or going negative.
+  // Here chapter 3 takes over at 1200 − 300 = 900, before chapter 2 would rest at 1000; between 700 and 900 chapter 2 shows at 0.
+  assert.deepEqual(chapterAt(800, [0, 1000, 1200], leads, 2600), { index: 1, progress: 0 });
+  assert.deepEqual(chapterAt(0, [], [], 0), { index: 0, progress: 0 });
+});
+
+test("glideAt: eases from start to target, halfway at half time, and ends exactly on the target", () => {
+  // Cubic ease in-out: 4x³ for the first half, so at a quarter of the time 4 · (1/4)³ = 1/16 of the way: 0 → 1600 is at 100.
+  assert.equal(glideAt(0, 1600, 250, 1000), 100);
+  // Halfway in time is halfway in distance (4 · (1/2)³ = 1/2), and the end mirrors the start: at 3/4, 1 − 1/16 = 15/16.
+  assert.equal(glideAt(0, 1600, 500, 1000), 800);
+  assert.equal(glideAt(0, 1600, 750, 1000), 1500);
+  // Exactly on the target at the end and after it (never overshooting), and at the start before it; backwards works the same.
+  assert.equal(glideAt(300, 1977, 1000, 1000), 1977);
+  assert.equal(glideAt(300, 1977, 5000, 1000), 1977);
+  assert.equal(glideAt(300, 1977, -10, 1000), 300);
+  assert.equal(glideAt(1600, 0, 250, 1000), 1500);
+  // It never goes backwards on the way.
+  let last = -1;
+  for (let t = 0; t <= 1000; t += 10) {
+    const y = glideAt(0, 1000, t, 1000);
+    assert.ok(y >= last, `went back at ${t} ms`);
+    last = y;
+  }
+});
+
+test("glideDuration: 450 ms plus 160 ms a screen, between 600 and 1000 ms", () => {
+  // Two and a half screens (the gap between chapters): 450 + 160 · 2.5 = 850 ms.
+  assert.equal(glideDuration(2000, 800), 850);
+  assert.equal(glideDuration(-2000, 800), 850);
+  // A tiny step still takes 600 ms; a long jump is capped at 1000 ms.
+  assert.equal(glideDuration(10, 800), 600);
+  assert.equal(glideDuration(20000, 800), 1000);
+});
+
+test("playStep: by hand, a steady 0.15 screens a second, held to the end of the page", () => {
+  assert.equal(PLAY_SPEED, 0.15);
+  // An 800 px screen: 0.15 × 800 = 120 px a second, so one 16 ms frame moves 120 × 0.016 = 1.92 px.
+  assert.ok(Math.abs(playStep(1000, 16, 800, 9000) - 1001.92) < 1e-9);
+  // 50 ms: 6 px. Steady: ten 10 ms steps land where one 100 ms step does (12 px).
+  assert.ok(Math.abs(playStep(0, 50, 800, 9000) - 6) < 1e-9);
+  let y = 0;
+  for (let k = 0; k < 10; k++) y = playStep(y, 10, 800, 9000);
+  assert.ok(Math.abs(y - playStep(0, 100, 800, 9000)) < 1e-9 && Math.abs(y - 12) < 1e-9);
+  // A frame held up for 2 s moves no more than a quarter of a second's worth (30 px): no lurch.
+  assert.ok(Math.abs(playStep(0, 2000, 800, 9000) - 30) < 1e-9);
+  // Never past the end, never backwards.
+  assert.equal(playStep(8995, 100, 800, 9000), 9000);
+  assert.equal(playStep(500, -40, 800, 9000), 500);
+});
+
+test("blendAt: smoothstep from the old scene to the new one", () => {
+  // 3x² − 2x³: at a quarter, 3/16 − 2/64 = 10/64 = 0.15625; halfway 1/2; at three quarters 54/64 = 0.84375.
+  assert.equal(blendAt(0, 700), 0);
+  assert.equal(blendAt(175, 700), 0.15625);
+  assert.equal(blendAt(350, 700), 0.5);
+  assert.equal(blendAt(525, 700), 0.84375);
+  assert.equal(blendAt(700, 700), 1);
+  assert.equal(blendAt(9999, 700), 1);
+  assert.equal(blendAt(-5, 700), 0);
+  // No blend at all (reduced motion asks for none): straight to the new scene.
+  assert.equal(blendAt(0, 0), 1);
+});
+
+test("chapterForKey: arrows, pages, Home and End move; other keys don't; the ends hold", () => {
   assert.equal(chapterForKey("ArrowDown", 3, 10), 4);
-  assert.equal(chapterForKey(" ", 3, 10), 4);
+  assert.equal(chapterForKey(" ", 3, 10), null); // Space plays the guide (playStep) instead of jumping
   assert.equal(chapterForKey("PageUp", 3, 10), 2);
   assert.equal(chapterForKey("ArrowLeft", 0, 10), 0);
   assert.equal(chapterForKey("ArrowRight", 9, 10), 9);
@@ -116,9 +196,16 @@ test("cameraDistance: by hand, a unit ball in a 60° view", () => {
 
 test("stageLayout: the scene beside the words when wide, above them when narrow or upright", () => {
   assert.equal(stageLayout(1280, 800).centreX, 0.62);
-  assert.equal(stageLayout(375, 800).centreY, 0.3);
-  assert.equal(stageLayout(800, 1100).centreY, 0.3);
+  // By default the words start 54% down: centre (6 + 54) / 2 = 30%.
+  assert.ok(Math.abs(stageLayout(375, 800).centreY - 0.3) < 1e-12);
+  assert.ok(Math.abs(stageLayout(800, 1100).centreY - 0.3) < 1e-12);
   // 760 px is wide enough; 759 is not (the CSS breaks at the same width).
   assert.equal(stageLayout(760, 600).centreX, 0.62);
   assert.equal(stageLayout(759, 600).centreX, 0.5);
+  // Narrow: the scene fills the band from the top bar (6%) to where the words start, centred in it.
+  // Words from 40% down: centre (6 + 40) / 2 = 23%, height 40 − 6 = 34%.
+  const band = stageLayout(375, 667, 0.4);
+  assert.ok(Math.abs(band.centreY - 0.23) < 1e-12 && Math.abs(band.areaH - 0.34) < 1e-12);
+  // Wide screens ignore it: the words are beside the scene, not under it.
+  assert.deepEqual(stageLayout(1280, 800, 0.4), stageLayout(1280, 800));
 });

@@ -93,16 +93,16 @@ export const CHAPTERS: Chapter[] = [
     title: "Sketches: drawing on a flat sheet",
     status: "built",
     text: [
-      "Most parts start as a sketch: a flat drawing on a plane, like drawing on a sheet of paper laid on a table or stuck to a wall.",
-      "You draw lines, rectangles, circles and arcs. Clicks can snap to the grid, to the middle of a line or to the end of another, so points that should meet really do meet.",
-      "When the lines join into a loop with no gaps and no crossings, the loop is a profile. Before anything is built, the kernel checks the loop: closed, not crossing itself, and every piece at least a micrometre long.",
+      "Most parts start as a sketch: a flat drawing on a plane, like paper laid on a table or stuck to a wall.",
+      "You draw lines, rectangles, circles and arcs. Clicks snap to the grid, the middle of a line or the end of another, so points that should meet really do.",
+      "When the lines join into a loop with no gaps or crossings, it is a profile. Before anything is built, the kernel checks it: closed, not crossing itself, every piece at least a micrometre long.",
     ],
     terms: [
       { term: "sketch", meaning: "A flat drawing of lines, arcs and circles on a plane; the start of most parts." },
       { term: "plane", meaning: "A perfectly flat surface that goes on forever; a sketch is drawn on one." },
-      { term: "snapping", meaning: "Pulling a click onto a nearby exact spot (a grid point, a midpoint, an end) so it lands precisely.", match: /\bsnap(s|ping)?\b/i },
-      { term: "profile", meaning: "A closed loop of sketch lines with no gaps or crossings; the shape a solid is made from." },
-      { term: "loop", meaning: "A closed ring with no gaps: a profile in a sketch, or the ring of edges round a face (one more for each hole in it)." },
+      { term: "snapping", meaning: "Pulling a click onto a nearby exact spot: a grid point, a midpoint or an end.", match: /\bsnap(s|ping)?\b/i },
+      { term: "profile", meaning: "A closed loop of sketch lines with no gaps or crossings; a solid is made from it." },
+      { term: "loop", meaning: "A closed ring: a profile in a sketch, or the edges round a face (one more per hole)." },
       { term: "kernel", meaning: "The maths engine inside Fission that builds, checks and measures every shape." },
     ],
     scene: "sketch",
@@ -127,9 +127,9 @@ export const CHAPTERS: Chapter[] = [
     title: "The timeline: the recipe, in order",
     status: "partly",
     text: [
-      "Every step you take is a feature, kept in order on the timeline: Sketch 1, Extrude 1, Sketch 2 and so on. Fission already lists your sketches and extrudes there and saves them with the project.",
-      "The goal is that you can go back, change an early feature, and everything after it replays. That replaying, and the rules for what happens when a later step loses what it was built on, are being built now.",
-      "Replaying is harder than it sounds. A later step might say put a hole on the top side. After an edit, which side is the top one? Giving every side a name that survives a rebuild is called topological naming, and Fission is building it in.",
+      "Every step you take is a feature, kept in order on the timeline: Sketch 1, Extrude 1 and so on. Fission already lists and saves them.",
+      "The goal: change an early feature and everything after it replays. That is being built now.",
+      "The hard part: a later step might put a hole on the top side, but after an edit, which side is the top? Side names that survive a rebuild are topological naming.",
     ],
     terms: [
       { term: "feature", meaning: "One step in the timeline: a sketch, an extrude, later a fillet or a hole." },
@@ -158,9 +158,9 @@ export const CHAPTERS: Chapter[] = [
     title: "Constraints and dimensions",
     status: "planned",
     text: [
-      "Today a sketch stays exactly where you clicked. Real parts need rules too: this line stays level, these two are the same length, this gap is 20 mm.",
-      "Those rules are constraints, and a dimension is a constraint with a number. A solver moves the points until every rule holds at once, like the wobbly outline settling into a true rectangle here.",
-      "This is not built yet. Its answers will be checked against SolveSpace, another free CAD program, as a second opinion.",
+      "Today a sketch stays where you clicked. Real parts need rules: this line stays level, these two are equal, this gap is 20 mm.",
+      "Those rules are constraints, and a dimension is a constraint with a number. A solver moves the points until every rule holds, like the wobbly outline here settling into a true rectangle.",
+      "This is not built yet. Its answers will be checked against SolveSpace, another free CAD program.",
     ],
     terms: [
       { term: "constraint", meaning: "A rule a sketch must keep, like level, the same length or touching." },
@@ -176,9 +176,9 @@ export const CHAPTERS: Chapter[] = [
     title: "From your click to a shape",
     status: "built",
     text: [
-      "Under the buttons, Fission has two halves. The app draws the screen and keeps your project. The kernel does the geometry: it builds shapes, checks them and measures them.",
-      "When you press OK on an extrude, the app sends the profile and the distance to the kernel, which runs in the background of your browser tab so the screen never freezes. The kernel sends back the solid, its exact volume, and triangles to draw.",
-      "Keeping the halves apart means the maths can be tested on its own, on thousands of random shapes every night, without a browser.",
+      "Fission has two halves. The app draws the screen and keeps your project. The kernel does the geometry: it builds shapes, checks them and measures them.",
+      "When you press OK on an extrude, the app sends the profile and distance to the kernel, which runs in the background so the screen never freezes. Back come the solid, its exact volume and triangles to draw.",
+      "Keeping them apart means the maths is tested on its own, on thousands of random shapes every night.",
     ],
     terms: [{ term: "geometry", meaning: "The exact shape of each piece: this side is flat, that edge is a perfect circle of radius 5 mm." }],
     scene: "stack-journey",
@@ -206,9 +206,9 @@ export const CHAPTERS: Chapter[] = [
     title: "WebAssembly: the kernel in your browser",
     status: "built",
     text: [
-      "Browsers normally run JavaScript. WebAssembly (WASM) is a second, compact language that browsers run almost as fast as an installed program.",
-      "The Rust kernel is compiled into WebAssembly, so the whole kernel runs inside your browser tab on your own computer: nothing to install, and no shape is sent to a server.",
-      "The same Rust also builds as a normal program for testing. Fission makes sure both give bit-for-bit the same answers, even for sine and cosine, by doing that maths in its own code instead of trusting each computer's.",
+      "Browsers normally run JavaScript. WebAssembly (WASM) is a second, compact language they run almost as fast as an installed program.",
+      "The Rust kernel is compiled into WebAssembly, so it runs inside your browser tab: nothing to install, and no shape is sent to a server.",
+      "The same Rust builds as a normal program for testing, and both give bit-for-bit the same answers, even for sine and cosine, because Fission does that maths in its own code.",
     ],
     terms: [
       { term: "WebAssembly", meaning: "A compact program format browsers run at near-installed speed; the kernel is compiled into it.", match: /\b(WebAssembly|WASM)\b/i },
@@ -242,9 +242,9 @@ export const CHAPTERS: Chapter[] = [
     title: "Topology: what touches what",
     status: "built",
     text: [
-      "A B-rep has two halves. Geometry is the exact shapes. Topology is the connections: which edges go round which face, which faces share an edge.",
-      "Each face is bounded by loops: an outer loop, plus one more for each hole. A loop is made of coedges, each one a use of an edge in a direction. Every edge is used exactly twice, once by each of its two faces and in opposite directions, like the two halves of a zip.",
-      "The counts must also add up. Vertices − edges + faces − holes in faces = 2 − 2 × (holes through the part). The bracket: 16 − 24 + 10 − 2 = 0, so it has exactly one hole through it. A count that comes out wrong means a broken solid.",
+      "Geometry is a B-rep's exact shapes; topology is the connections: which edges go round which face, which faces share an edge.",
+      "Each face is bounded by loops, one outside plus one per hole. A loop is a chain of coedges, each a use of an edge in a direction. Every edge is used exactly twice, in opposite directions, like the two halves of a zip.",
+      "The counts must add up too: vertices − edges + faces − holes in faces = 2 − 2 × holes through the part. The bracket: 16 − 24 + 10 − 2 = 0, so one hole through it. Any other count means a broken solid.",
     ],
     terms: [
       { term: "topology", meaning: "Which pieces of a B-rep connect to which, ignoring their exact shapes." },
@@ -317,9 +317,9 @@ export const CHAPTERS: Chapter[] = [
     title: "Meshes: the triangles on screen",
     status: "built",
     text: [
-      "Screens and 3D printers do not understand exact curves. They want flat triangles, so the kernel cuts each face into a mesh just for drawing and exporting. Scroll and the cylinder drops from smooth to a few flat sides.",
-      "Each edge is cut once and both its faces share those same points, so the mesh has no cracks. Inside each face, the triangles are chosen to be as even as possible.",
-      "STL, the file most 3D printers read, is just this list of triangles. Measurements never come from the triangles; they come from the exact B-rep.",
+      "Screens and 3D printers want flat triangles, not exact curves, so the kernel cuts each face into a mesh just for drawing and exporting. Scroll and the cylinder drops to a few flat sides.",
+      "Each edge is cut once and both its faces share those points, so the mesh has no cracks.",
+      "STL, the file most 3D printers read, is just this list of triangles. Measurements never come from the triangles, only from the exact B-rep.",
     ],
     terms: [
       { term: "mesh", meaning: "A surface made of flat triangles; what the screen draws and what STL files hold." },
@@ -374,9 +374,9 @@ export const CHAPTERS: Chapter[] = [
     title: "How Fission is tested",
     status: "built",
     text: [
-      "Geometry bugs are quiet: a face a ten-thousandth of a millimetre off looks fine until something fails three steps later. So nothing counts as done until a test checks it automatically.",
-      "Some tests have answers worked out by hand. Random tests throw thousands of shapes at the kernel, each from a seed so a failure replays exactly. Fuzzing feeds it deliberately broken input. OpenCascade, a separate free kernel, acts as an oracle for volumes.",
-      "Mutation testing breaks the kernel's code on purpose, one small change at a time, to prove the tests notice. And browser tests click through the real app, this guide included.",
+      "Geometry bugs are quiet: a face a ten-thousandth of a millimetre off looks fine until something fails later, so nothing is done until a test checks it.",
+      "Some answers are worked out by hand. Random tests throw thousands of shapes at the kernel, each from a seed so a failure replays. Fuzzing feeds it broken input; OpenCascade, another free kernel, is an oracle for volumes.",
+      "Mutation testing breaks the code on purpose to prove the tests notice.",
     ],
     terms: [
       { term: "seed", meaning: "The starting number of a random test; the same seed always makes the same test, so failures replay." },
@@ -437,25 +437,81 @@ export function termPattern(t: Term): RegExp {
   return new RegExp(`(?<![\\w-])${escaped}(s|es)?(?![\\w-])`, "i");
 }
 
-/** Where the scroll is: the chapter whose box holds the middle of the screen, and how far through it (0 to 1). */
-export function chapterAt(scrollTop: number, viewHeight: number, tops: number[], heights: number[]): { index: number; progress: number } {
-  if (tops.length === 0) return { index: 0, progress: 0 };
-  const middle = scrollTop + viewHeight / 2;
+/**
+ * The scroll at which a chapter's words come to rest: its card scrolls up
+ * from below until its top reaches its sticky place `cardTop` px down the
+ * screen, which happens when the chapter's top (plus the padding above the
+ * card) is `cardTop` below the top of the view. Rounded to a whole pixel,
+ * never below 0.
+ */
+export function restingScroll(sectionTop: number, paddingTop: number, cardTop: number): number {
+  return Math.max(0, Math.round(sectionTop + paddingTop - cardTop));
+}
+
+/**
+ * Where the scroll is. Chapter i takes over `leads[i]` px before its words
+ * come to rest at `rests[i]` (so they fade in while they slide up), and its
+ * progress runs from 0 at rest to 1 where the next chapter takes over (the
+ * last chapter's at `end`, the bottom of the scroll), clamped to 0..1.
+ */
+export function chapterAt(scrollTop: number, rests: number[], leads: number[], end: number): { index: number; progress: number } {
+  if (rests.length === 0) return { index: 0, progress: 0 };
   let index = 0;
-  for (let i = 0; i < tops.length; i++) if (middle >= tops[i]) index = i;
-  const h = heights[index];
-  const progress = h > 0 ? Math.min(1, Math.max(0, (middle - tops[index]) / h)) : 0;
+  for (let i = 1; i < rests.length; i++) if (scrollTop >= rests[i] - leads[i]) index = i;
+  const stop = index + 1 < rests.length ? rests[index + 1] - leads[index + 1] : end;
+  const span = stop - rests[index];
+  const progress = span > 0 ? Math.min(1, Math.max(0, (scrollTop - rests[index]) / span)) : 0;
   return { index, progress };
 }
 
-/** The chapter a key moves to from `index`, or null for a key that isn't for moving. */
+/**
+ * The scroll during a glide from `from` to `to` lasting `duration` ms, `t`
+ * ms in: ease in and out (cubic), so it starts and stops gently and ends
+ * exactly on `to`.
+ */
+export function glideAt(from: number, to: number, t: number, duration: number): number {
+  const x = duration > 0 ? Math.min(1, Math.max(0, t / duration)) : 1;
+  const e = x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2;
+  return x === 1 ? to : from + (to - from) * e;
+}
+
+/** How long a glide over `distance` px takes on a screen `viewHeight` tall: longer for further, 600 to 1000 ms. */
+export function glideDuration(distance: number, viewHeight: number): number {
+  const screens = viewHeight > 0 ? Math.abs(distance) / viewHeight : 0;
+  return Math.min(1000, Math.max(600, 450 + 160 * screens));
+}
+
+/**
+ * How far one scene has faded into the next, `t` ms into a blend lasting
+ * `duration` ms: 0 (all the old scene) to 1 (all the new one), smoothstep
+ * shaped so it neither starts nor stops with a jolt.
+ */
+export function blendAt(t: number, duration: number): number {
+  const x = duration > 0 ? Math.min(1, Math.max(0, t / duration)) : 1;
+  return x * x * (3 - 2 * x);
+}
+
+/** How fast Space plays the guide: screens a second (a chapter is about 2.4 screens, so about 16 s each). */
+export const PLAY_SPEED = 0.15;
+
+/**
+ * Where a steady play (Space) has got to `dt` ms after `y`, on a screen
+ * `viewHeight` tall: PLAY_SPEED screens a second, never past `end`. A long
+ * gap (a frame held up, a hidden tab) counts as at most a quarter of a
+ * second, so the page never lurches.
+ */
+export function playStep(y: number, dt: number, viewHeight: number, end: number): number {
+  const ms = Math.min(250, Math.max(0, dt));
+  return Math.min(end, y + (PLAY_SPEED * viewHeight * ms) / 1000);
+}
+
+/** The chapter a key moves to from `index`, or null for a key that isn't for moving (Space plays the guide instead: playStep). */
 export function chapterForKey(key: string, index: number, count: number): number | null {
   const clamp = (i: number) => Math.min(count - 1, Math.max(0, i));
   switch (key) {
     case "ArrowDown":
     case "ArrowRight":
     case "PageDown":
-    case " ":
       return clamp(index + 1);
     case "ArrowUp":
     case "ArrowLeft":
@@ -485,12 +541,14 @@ export function cameraDistance(radius: number, verticalFovDeg: number, aspect: n
 /**
  * Where the scene sits on screen beside the words: on a wide screen the
  * words are on the left, so the scene's centre moves to 62% across; on a
- * tall or narrow one (under 760 px, or no wider than it is tall: the CSS's portrait) the words
- * are at the bottom, so it moves up to 30% down.
+ * tall or narrow one (under 760 px, or no wider than it is tall: the CSS's
+ * portrait) the words are at the bottom, starting `textTop` of the way
+ * down, so the scene fills the band between the top bar (6% down) and the
+ * words, centred in it.
  * `area` is the part of the screen (width and height, as fractions) the
  * scene may fill.
  */
-export function stageLayout(width: number, height: number): { centreX: number; centreY: number; areaW: number; areaH: number } {
+export function stageLayout(width: number, height: number, textTop = 0.54): { centreX: number; centreY: number; areaW: number; areaH: number } {
   if (width >= 760 && width > height) return { centreX: 0.62, centreY: 0.5, areaW: 0.7, areaH: 0.9 };
-  return { centreX: 0.5, centreY: 0.3, areaW: 0.95, areaH: 0.5 };
+  return { centreX: 0.5, centreY: (0.06 + textTop) / 2, areaW: 0.95, areaH: textTop - 0.06 };
 }
