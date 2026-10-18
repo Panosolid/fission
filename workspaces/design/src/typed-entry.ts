@@ -50,12 +50,16 @@ export function readLength(text: string): Reading {
 /**
  * An angle typed in a box, in degrees counter-clockwise from the sketch's
  * x axis ("30", "-45", "30°", "30 deg"), turned into [0, 360). Any finite
- * decimal is an angle; only its remainder matters.
+ * decimal is an angle; only its remainder matters. One too big to be a
+ * number is refused.
  */
 export function readAngle(text: string): Reading {
   const t = text.trim().replace(/\s*(°|deg)$/i, "");
   if (!DECIMAL.test(t)) return { error: `"${text.trim()}" isn't an angle: type degrees from the x axis, like 30 or -45.` };
-  return { value: turnDegrees(Number(t)) };
+  const deg = Number(t);
+  // 309 digits or more read as Infinity, whose remainder is NaN (security re-check N2).
+  if (!Number.isFinite(deg)) return { error: "That number is too big for an angle: type degrees from the x axis, like 30 or -45." };
+  return { value: turnDegrees(deg) };
 }
 
 /** Degrees into [0, 360): −90 is 270, 360 is 0, 405 is 45. */
