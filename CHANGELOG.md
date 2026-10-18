@@ -4,11 +4,11 @@ Every change that reached `main`, newest first, in plain words. The version in `
 
 How the numbers work, big.step.bugfix:
 - big: 0 until the CAD is good enough for real parts; 1.0.0 is that release.
-- step: the CAD roadmap step being built (`docs/progress/cad.md`), so 0.24 is step 24, the timeline. A step's number goes up when its first piece merges, and the bug-fix number starts again at 0.
+- step: the CAD roadmap step being built (`docs/progress/cad.md`), so 0.24 is step 24, the timeline. A step's number goes up when its first piece merges, and the bug-fix number starts again at 0. (In the first chat each step was finished in one go, so its number went up when it was done; step 15's start sits under 0.14.1.)
 - bugfix: goes up by one for each merged pull request whose main job is fixing something broken (a bug, a crash, a failing or flaky check).
 - Everything else (integration, AI, guide, testing and CI work) doesn't change the number; it is listed under the version `main` had when it merged.
 
-Steps 1 to 14 came in three early pull requests, so they share one entry. Numbers like #154 are the pull requests.
+Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
 ## 0.24.10 (2026-10-18)
 
@@ -175,18 +175,128 @@ Steps 1 to 14 came in three early pull requests, so they share one entry. Number
 - Step 15: a self-intersection check in validation, mutation-tested. #11
 - Integration foundations (I8 to I21) and the AI architecture (A1 to A9). #9, #10
 
+## 0.14.2 (2026-10-16)
+
+- Fix: the random tester wrongly judged slots and lenses near the 100 km edge to be out of range; the kernel was right to accept them, and the case is kept as a permanent test.
+- Circuit, Vector and Image placeholder workspaces, making nine in all.
+- Every item of the integration and AI specs written into the roadmap (I7 to I21, E1 to E3, V1 to V3, G1 and G2, A1 to A9).
+
+## 0.14.1 (2026-10-16)
+
+- Fix: CI failed because the kernel's browser build called code that only exists outside the browser, and because of a lint new in Rust 1.99.
+- Ben's decision: the largest part went from 10 km to 1 km and the tolerance from 1 nm to 10 nm; a test fails if either limit moves past what the arithmetic supports.
+- A program that measures how much precision intersections lose.
+- The README.
+- Community open questions on hosting costs and abuse.
+- Step 15 started: the self-intersection check in validation, with follow-up tests from mutation testing (finished in 0.15.0).
+
 ## 0.14.0 (2026-10-16)
 
-Steps 1 to 14, and the groundwork around them. #1, #2, #7, #8
-- Step 1: the testing rules, and the tolerance module with exact tests.
-- Step 2: curves and surfaces (line, circle, plane, cylinder, sphere).
-- Steps 3 and 4: the B-rep data structure and validation (watertight, orientation, Euler–Poincaré, points on edges and faces, no zero-length edges or zero-area faces).
-- Steps 5 and 6: meshing flat, cylindrical and spherical faces, with a watertight check.
-- Step 7: the box primitive, shown in the viewer with its edges.
-- Step 8: the kernel runs in a Web Worker; every call from the app is an async message.
-- Step 9: extrude outlines with holes, volume checked as area × distance.
-- Steps 10 and 11: arcs and circles in outlines, cylinder and sphere primitives, accurate volume and area.
-- Step 12: move and rotate bodies without losing accuracy far from the origin.
-- Step 13: STL export, a download button and a round-trip test.
-- Step 14: failure dumps (an STL and a viewer page with problem edges highlighted).
-- The modelling range set to 1 km with 10 nm tolerance, and placeholders for the Circuit, Vector and Image workspaces. #8
+- Step 14: failure dumps. A broken body is saved as STL files plus an offline viewer page with the problems marked in red, with follow-up tests from mutation testing.
+
+## 0.13.0 (2026-10-16)
+
+- Step 13: STL export, a Download STL button, and tests that export and read back.
+
+## 0.12.0 (2026-10-16)
+
+- Step 12: move and rotate change only a body's placement, not its geometry, so moving far away and back loses nothing. The 37.8 km acceptance case passes.
+
+## 0.11.3 (2026-10-15)
+
+- Fix: the mesh volume of huge thin bodies was wrong after rotation (found by nightly testing).
+- The app restructured into npm workspaces (core, viewport, ui, design), with draft model interfaces, a workspace switcher, five placeholder workspaces and a Community page.
+
+## 0.11.2 (2026-10-15)
+
+- Fix: the float comparison helpers counted infinite values as equal, and the relative comparison had lost a floor that made it too loose.
+
+## 0.11.1 (2026-10-15)
+
+- Fix: the inside/outside test went wrong on an arc's chord, and huge thin tubes got the wrong exact volume.
+
+## 0.11.0 (2026-10-15)
+
+- Step 11: the sphere primitive, and exact volume and area, with mutation-testing gaps closed.
+
+## 0.10.1 (2026-10-15)
+
+- Fix: crossing tests that rounding could fool, and touching shapes.
+
+## 0.10.0 (2026-10-15)
+
+- Step 10: arcs and circles in profiles, curved side faces, and the cylinder primitive in the app.
+
+## 0.9.3 (2026-10-15)
+
+- Fix: valid thin walls between curves broke the mesh.
+
+## 0.9.2 (2026-10-15)
+
+- Fix: a sphere's mesh changed when the sphere moved far away.
+- An endless random-testing script, and round-the-clock testing on GitHub.
+- The app shows tiny and huge quantities properly.
+
+## 0.9.1 (2026-10-15)
+
+- Fix: wrong bounding boxes for barely tilted circles (found by the OpenCascade comparison).
+- The tester's rounding allowance changed.
+
+## 0.9.0 (2026-10-15)
+
+- Step 9: extruding outlines with holes, in the kernel, the random tester, the OpenCascade comparison and the app.
+
+## 0.8.3 (2026-10-15)
+
+- Fix: volume is measured from each shell's centre, for precision.
+- The modelling range (then 1 um to 10 km, within 100 km).
+- The random-testing input mix (95% in range, 5% extreme).
+- The nightly workflow.
+
+## 0.8.2 (2026-10-15)
+
+- Five crash fixes, plus the stateful random tester and the OpenCascade comparison.
+
+## 0.8.1 (2026-10-15)
+
+- Two crash fixes, plus kernel preparation for random testing (cylinder, sphere, move, rotate).
+
+## 0.8.0 (2026-10-15)
+
+- Step 8: the kernel runs in a Web Worker.
+
+## 0.7.1 (2026-10-15)
+
+- Fix: wrong segment counts for curved edges (found by mutation testing).
+
+## 0.7.0 (2026-10-15)
+
+- Step 7: the box primitive, built by the kernel and shown in the viewer.
+
+## 0.6.0 (2026-10-15)
+
+- Step 6: cylinder and sphere faces turned into triangles.
+
+## 0.5.0 (2026-10-15)
+
+- Step 5: flat faces turned into triangles, and watertight mesh checks.
+
+## 0.4.0 (2026-10-15)
+
+- Step 4: geometry checks in validation. The roadmap reordered: testing before booleans, the worker early.
+
+## 0.3.0 (2026-10-15)
+
+- Step 3: topology checks in validation (watertight, orientation, Euler–Poincaré).
+
+## 0.2.0 (2026-10-15)
+
+- Step 2: curves and surfaces.
+
+## 0.1.0 (2026-10-15)
+
+- Step 1: the testing rules, and the tolerance module.
+
+## 0.0.0 (2026-10-15)
+
+- The first pipeline (Rust kernel to WebAssembly to the 3D viewer), deployed to GitHub Pages.

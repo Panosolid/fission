@@ -47,7 +47,7 @@ class Follows(unittest.TestCase):
         # A new step starts at .0, from whatever bug fix the last one reached.
         self.assertTrue(follows((0, 24, 0), (0, 23, 0)))
         self.assertTrue(follows((0, 19, 0), (0, 18, 1)))
-        # Steps 1 to 14 share one entry, so a jump of steps is allowed: 0.14.0 -> 0.15.0 and 0.14 -> 0.16.
+        # A jump of steps is allowed (a step with no entry of its own): 0.14.0 -> 0.16.0.
         self.assertTrue(follows((0, 16, 0), (0, 14, 0)))
         self.assertTrue(follows((1, 0, 0), (0, 40, 3)))
 
