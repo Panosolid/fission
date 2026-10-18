@@ -1,0 +1,29 @@
+
+running 1 test
+test stateful_random_chains has been running for over 60 seconds
+Stateful kernel test: 2014 cases over 1 seed(s) ["0x3d308b14c23b"] in 234.2s
+Failures: 0
+Per operation (ok / clean error → success rate, total time, slowest):
+  add box               1162 / 94      →  92.5%   400.6ms  slowest 931.2µs
+  add cylinder          1146 / 91      →  92.6%      8.3s  slowest 13.2ms
+  add extrude            483 / 492     →  49.5%      3.4s  slowest 57.5ms
+  add sketch arc extrude      71 / 37      →  65.7%   531.4ms  slowest 16.4ms
+  add sketch circle extrude      94 / 31      →  75.2%   706.9ms  slowest 13.2ms
+  add sketch extrude      48 / 25      →  65.8%    29.3ms  slowest 1.0ms
+  add sphere            1139 / 111     →  91.1%     75.5s  slowest 150.6ms
+  move                  2338 / 186     →  92.6%     25.1s  slowest 78.8ms
+  rotate                2391 / 126     →  95.0%     25.2s  slowest 80.1ms
+  ~extreme input          69 / 324     →  17.6%     0.0ns  slowest 0.0ns
+  slowest add box: Add { shape: Box { w: 5.0, d: 81.500011, h: 48.0 }, axis: [0.0, 3.0, 4.0], angle: -1.5707963267948966, at: [217245.99265709377, 50000000.0, -12.5] }
+  slowest add cylinder: Add { shape: Cylinder { r: 384413.7303872245, h: 4.707590010333936 }, axis: [0.8309431087497439, -0.4837793719574366, 0.16925916581251785], angle: -4.594464807634382, at: [-13139345.512459014, 384428.00391020585, 13139471.514470015] }
+  slowest add extrude: Add { shape: Extrude { outer: Path { pts: [[0.5, 439.04819265695755], [1320.6423779708725, 439.04819265695755], [1320.6423779708725, -1.0], [0.5, -1.0]], bulges: [] }, holes: [Circle { c: [220.52409632847878, 219.02409632847878], r: 220.02299632847877 }, Circle { c: [660.5711889854363, 219.02409632847878], r: 220.02299632847877 }, Circle { c: [1100.6182816423939, 219.02409632847878], r: 220.02299632847877 }], dist: 89.5, expect: Some(true), sketch: None }, axis: [1.0, 0.0, 0.0], angle: 0.7853981633974483, at: [15.5, -767.1070347128731, 4.0] }
+  slowest add sketch arc extrude: Add { shape: Extrude { outer: Path { pts: [[-12.0, 11.5], [-11.9989, 11.5]], bulges: [-410538212.20408463, 0.0] }, holes: [], dist: 46.0, expect: Some(true), sketch: Some(8909773774782974765) }, axis: [0.0, 0.0, 1.0], angle: -1.5707963267948966, at: [-595.3360309806069, 48.5, 651.9463149400046] }
+  slowest add sketch circle extrude: Add { shape: Extrude { outer: Circle { c: [-35.480564247384535, 19.0], r: 377.5903774252983 }, holes: [], dist: 178107.826659629, expect: Some(true), sketch: Some(6498019095753656893) }, axis: [-0.2940273463300475, 0.7559408707867391, 0.3799011005838402], angle: -3.141592653589793, at: [-19.499989, 740.2033808102949, 17.5] }
+  slowest add sketch extrude: Add { shape: Extrude { outer: Path { pts: [[50.698121019765075, 13.499999999999881], [44.61111445058193, -19.524909181289757], [7.410963599242335, -18.891033802217777], [-9.864024660664736, -28.704507814098122], [-32.02238610823481, -26.576424294751924], [-59.37134645751189, -0.19547737682276178], [-69.59780417040189, 17.487918967487605], [-37.4248503790477, 38.72339423184056], [-31.76149757911859, 58.548956285708364], [2.131386489494435, 58.83022304692837], [12.259043681412376, 42.739020832492486], [31.746342097889283, 45.71468977957515]], bulges: [] }, holes: [], dist: 1318.4722322301507, expect: None, sketch: Some(5454403907462739544) }, axis: [-0.3731482028889265, -0.858805409302388, -0.05021511646881956], angle: 0.0036367050360707536, at: [5.0, 7.5, -867.5203141144697] }
+  slowest add sphere: Add { shape: Sphere { r: 3827.720216743348 }, axis: [0.9275059305172371, -0.6789084784296492, -0.368997908239253], angle: 4.71238898038469, at: [-1.5, 209.0960964142125, 5e-324] }
+  slowest move: Move { target: 0, by: [-18.904316368548926, 758.154198020787, -554.4036310116362] }
+  slowest rotate: Rotate { target: 1, pivot: [7864.536529900908, 17.5, -18.999991], axis: [-0.9835704871458335, -0.44240793755816954, -0.6630141907803285], angle: 4.71238898038469 }
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 234.18s
+

@@ -1,12 +1,12 @@
-Fission random testing, all runs so far (updated 2026-10-18 03:07 UTC)
+Fission random testing, all runs so far (updated 2026-10-18 22:38 UTC)
 
-hours of testing:                 375.5
-rounds:                           6122
-random operation chains:          12244000
-rounds where the harness failed:  572
-bodies compared with OpenCascade: 23923541
-OpenCascade disagreements:        345
-last problem found:               2026-10-18 02:04:36 (seed 87838161456656, commit 3640135 on claude/project-thread-ug714p)
+hours of testing:                 412.7
+rounds:                           6782
+random operation chains:          13564000
+rounds where the harness failed:  574
+bodies compared with OpenCascade: 26652736
+OpenCascade disagreements:        346
+last problem found:               2026-10-18 20:01:16 (seed 67278701118011, commit 5af6f71 on main)
 
 Every round is a line in log.csv. Each round that found a problem has a
 folder in failures/ named after its seed: report.txt says what went wrong,
@@ -15,15 +15,15 @@ failure-dumps/*/index.html is a 3D view with the problem in red.
 The commit and branch columns of log.csv (and commit.txt in each
 failures folder) say which code a round tested.
 
-Latest mutation run (whole kernel, lib tests), 2026-10-17 22:37 UTC, commit 0428731 on main:
-  shards finished: 3 of 4 (incomplete: survivors list not replaced)
-  caught 2494, missed 17, timed out 197, unviable 99
+Latest mutation run (whole kernel, lib tests), 2026-10-18 22:38 UTC, commit 5af6f71 on main:
+  shards finished: 1 of 4 (incomplete: survivors list not replaced)
+  caught 2405, missed 15, timed out 175, unviable 105
   survivors not in the previous complete run: 0
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 5aaf448 on claude/project-thread-ug714p, 2026-10-18 03:07 UTC (https://github.com/benpy28/fission/actions/runs/39090240775)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.56 s (baseline 1.23 s)
+  tested commit 5af6f71 on main, 2026-10-18 22:38 UTC (https://github.com/Panosolid/fission/actions/runs/39139888245)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.91 s (baseline 1.23 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
