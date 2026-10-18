@@ -31,7 +31,12 @@ const until = (page, fn, arg, what) => page.waitForFunction(fn, arg, { timeout: 
 async function fresh(width, touch) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
-  await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
+  // A fresh store once per tab: a reload (step 8 below) keeps what the app saved.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("store-cleared")) return;
+    indexedDB.deleteDatabase("fission");
+    sessionStorage.setItem("store-cleared", "1");
+  });
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
@@ -111,15 +116,38 @@ const bar = (page) =>
 /** The browser's Timeline rows marked red as failed. */
 const redRows = (page) => page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-failed', (rows) => rows.map((r) => r.dataset.node));
 
-/** Sketches the layout's 10 × 10 square by the rectangle tool and extrudes it: Sketch 1 (sketch-2) and Extrude 1 (feature-11). */
-async function addSquare(page, tap, layout) {
+/**
+ * Clicks (or taps) model point (x, y, 0) where the app's own camera puts it,
+ * after checking nothing but the canvas is there. For a view clickPlane's
+ * fixed one can't know: Look at on an empty design centres on the origin.
+ */
+async function clickModel(page, [x, y], tap) {
+  const cam = await page.evaluate(() => window.fissionTest.camera());
+  const box = await page.locator("#viewport canvas").boundingBox();
+  const [fx, fy] = onCanvas(cam, box, [x, y, 0]);
+  const p = { x: box.x + fx * box.width, y: box.y + fy * box.height };
+  const on = await page.evaluate(([px, py]) => {
+    const e = document.elementFromPoint(px, py);
+    return e?.tagName === "CANVAS" && e.closest("#viewport") ? "canvas" : e ? e.id || e.className || e.tagName : "nothing";
+  }, [p.x, p.y]);
+  assert.equal(on, "canvas", `(${x}, ${y}) is under ${on} on screen, not the canvas`);
+  if (tap) await page.touchscreen.tap(p.x, p.y);
+  else await page.mouse.click(p.x, p.y);
+}
+
+/**
+ * Sketches the layout's 10 × 10 square by the rectangle tool and extrudes it: Sketch 1 (sketch-2) and Extrude 1
+ * (feature-11) on the starting box's design. `live`: click through the app's camera (clickModel), not clickPlane's.
+ */
+async function addSquare(page, tap, layout, live = false) {
   await press(page, "#create-sketch", tap);
   await press(page, "#sketch-plane-XY", tap);
   await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
   await page.check("#sketch-grid-snap");
   await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0));
   await press(page, "#sketch-tool-rectangle", tap);
-  for (const p of layout.corners) await clickPlane(page, p, TOP, tap);
+  for (const p of layout.corners) await (live ? clickModel(page, p, tap) : clickPlane(page, p, TOP, tap));
+  await until(page, (w) => document.querySelector("#viewport").dataset.sketchPoints?.startsWith(w), layout.corners[0].join(","), "the square's first corner where it was clicked");
   await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "the square closed");
   await press(page, "#sketch-extrude", tap);
   await page.fill("#extrude-distance", String(layout.distance));
@@ -354,6 +382,38 @@ try {
       for (let k = 0; k < 3; k++) await undo();
       await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "all back");
       assert.deepEqual(await state(), all);
+
+      // 8. Emptied again (three Redos), the page reloaded: the empty design comes back from the browser's store as it
+      // was, not refused (until 24f4 a design with no body could not be opened). Then a sketch drawn on it and
+      // extruded is the one body, framed; one Undo empties it again.
+      for (let k = 0; k < 3; k++) await redo();
+      await undoIs(page, "Delete Feature 1 (box)");
+      await until(page, () => document.querySelector("#save-status")?.dataset.state === "saved", null, "the empty design saved");
+      await page.reload();
+      await until(page, () => document.querySelector("#viewport")?.dataset.shape === "none", null, "the empty design reopened");
+      assert.deepEqual(await bar(page), ["|"]);
+      // Opened, not replaced by a new project with a message (the app's way with a stored project it can't read).
+      assert.equal(await page.textContent("#file-status"), "");
+      assert.equal(await page.textContent("#intent"), "No body: nothing in the timeline builds");
+      assert.equal(await page.textContent("#volume"), "—");
+      assert.equal(await page.textContent("#error"), "");
+      assert.equal(await undoTitle(page), "Nothing to undo", "a reload starts a fresh history");
+      const fits = Number(await page.evaluate(() => document.querySelector("#viewport").dataset.fits ?? 0));
+      // Ids go on from the saved counter (12): Sketch 1 is sketch-12, its four corners and four lines 13 to 20, Extrude 1 feature-21.
+      await addSquare(page, tap, layout, true);
+      await undoIs(page, "Extrude Sketch 1");
+      assert.deepEqual(await bar(page), ["sketch-12", "feature-21", "|"]);
+      assert.equal(await page.textContent("#volume"), V);
+      assert.deepEqual(await redRows(page), []);
+      // Framed alone, so the box's old spot may be off the canvas: only the square's top is probed.
+      const [empty, squareTop] = await colours(page, [layout.top]);
+      assert.ok(differs(squareTop, empty), `the square's top ${squareTop} shows the background ${empty}`);
+      assert.equal(await page.textContent("#intent"), `Extrude Sketch 1 by ${layout.distance} mm`);
+      assert.ok(Number(await page.evaluate(() => document.querySelector("#viewport").dataset.fits)) > fits, "the new body is framed");
+      await undo();
+      await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "the extrude undone");
+      assert.deepEqual(await bar(page), ["sketch-12", "|"]);
+      assert.equal(await page.textContent("#volume"), "—");
 
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();
