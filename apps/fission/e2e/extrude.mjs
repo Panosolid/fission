@@ -7,7 +7,9 @@
 // and no sketch at all keep OK off and say why; Escape cancels. The same at
 // 375 px wide with taps. A lost sketch's extrude keeps its last shape with
 // a warning (24d2), opened from a file until sketches can be edited after
-// an extrude. Screenshots go to E2E_SHOTS when set. Run with
+// an extrude; deleting the sketch from the browser (24e4) asks first, then
+// shows the same kept shape and warning, at 1280 px and at 375 px with taps.
+// Screenshots go to E2E_SHOTS when set. Run with
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
@@ -288,6 +290,115 @@ try {
     assert.deepEqual(await red(), []);
     await page.context().close();
   });
+
+  for (const { width, tap } of [{ width: 1280, tap: false }, { width: 375, tap: true }]) {
+    await check(`deleting a sketch from the browser: an unused one goes at once; a used one asks first, Cancel and Escape change nothing, then its extrude keeps its last shape with the warning, one undo step (24e4, ${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      const press = (sel) => (tap ? page.tap(sel) : page.click(sel));
+      const top = () => page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
+      /** The browser drawer open at phone width (its toggle), every group unfolded. */
+      const browserOpen = async () => {
+        if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press("#browser-toggle");
+        await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => (d.open = true)));
+      };
+      const sketchRows = () => page.$$eval('#browser [data-node^="sketches/"].tree-row', (rows) => rows.map((r) => `${r.dataset.node} ${r.textContent.trim()}`));
+      const warning = () => page.evaluate(() => { const w = document.querySelector("#kept-warning"); return w.hidden ? null : w.textContent; });
+      const red = () => page.$$eval(".tree-row.kept", (rows) => rows.map((r) => r.dataset.node));
+      const open = () => page.evaluate(() => ({ menu: document.getElementById("row-menu").open, ask: document.getElementById("delete-ask").open }));
+      /** The row menu for a sketch row: a right-click on the row with a mouse, its ⋯ button with taps. */
+      const menu = async (node) => {
+        await browserOpen();
+        const row = page.locator(`#browser .tree-row[data-node="${node}"]`);
+        await row.scrollIntoViewIfNeeded();
+        if (tap) await page.tap(`#browser [data-more="${node}"]`);
+        else await row.click({ button: "right" });
+        await until(page, () => document.getElementById("row-menu").open, null, "the row menu");
+      };
+      const state = async () => ({ volume: await page.textContent("#volume"), sketches: await sketchRows(), warning: await warning(), red: await red(), undo: await undoTitle(page), open: await open() });
+
+      // Sketch 1 (sketch-2): a 40 × 30 rectangle, extruded by the default 10: 40 · 30 · 10 = 12,000 mm³ (Extrude 1, feature-11).
+      await drawn(page, [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]], tap);
+      await status(page, "4 lines, a closed outline.");
+      await press("#sketch-extrude");
+      await page.press("#extrude-distance", "Enter");
+      await volume(page, "12,000 mm³");
+      // Sketch 2 (sketch-12), left empty: nothing is built from it.
+      await top();
+      await press("#create-sketch");
+      await press("#sketch-plane-XY");
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+      await top();
+      await press("#finish-sketch");
+      await until(page, () => document.querySelector("#viewport").dataset.sketching !== "true", null, "finished");
+      await browserOpen();
+      assert.deepEqual(await sketchRows(), ["sketches/sketch-2 Sketch 1", "sketches/sketch-12 Sketch 2"]);
+
+      // The unused sketch: Delete in its menu takes it at once, no box, one undo step.
+      await menu("sketches/sketch-12");
+      assert.equal(await page.getAttribute("#row-menu-delete", "aria-label"), "Delete Sketch 2");
+      await press("#row-menu-delete");
+      await until(page, () => !document.querySelector('#browser [data-node="sketches/sketch-12"]'), null, "Sketch 2 gone");
+      assert.deepEqual(await open(), { menu: false, ask: false }, "nothing asked");
+      assert.equal(await undoTitle(page), "Undo Delete Sketch 2 (Ctrl+Z)");
+      const before = await state();
+      assert.deepEqual(before, { volume: "12,000 mm³", sketches: ["sketches/sketch-2 Sketch 1"], warning: null, red: [], undo: "Undo Delete Sketch 2 (Ctrl+Z)", open: { menu: false, ask: false } });
+
+      // The used sketch asks first, with what happens to Extrude 1.
+      const ask = async () => {
+        await menu("sketches/sketch-2");
+        await press("#row-menu-delete");
+        await until(page, () => document.getElementById("delete-ask").open, null, "the box");
+      };
+      await ask();
+      assert.equal(await page.textContent("#delete-ask-heading"), "Delete Sketch 1?");
+      assert.equal(await page.textContent("#delete-ask-words"), "Extrude 1 is built from Sketch 1. If you delete it, Extrude 1 keeps its last shape and shows a warning. Undo brings Sketch 1 back.");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "delete-ask-cancel", "Cancel has the focus");
+      const box = await page.locator("#delete-ask").boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= width, `the box fits the screen: ${box.x} to ${box.x + box.width} of ${width}`);
+      if (shots) await page.screenshot({ path: `${shots}/delete-ask-${width}.png` });
+      // Cancel: nothing changes.
+      await press("#delete-ask-cancel");
+      assert.deepEqual(await state(), before);
+      // Escape, with the rectangle tool's key pressed in the box first: nothing changes, no tool chosen behind it.
+      await ask();
+      await page.keyboard.press("r");
+      await page.keyboard.press("Escape");
+      await until(page, () => !document.getElementById("delete-ask").open, null, "closed by Escape");
+      assert.deepEqual(await state(), before);
+      assert.equal(await data(page, "sketching"), "false");
+      // Escape in the menu closes only the menu.
+      await menu("sketches/sketch-2");
+      await page.keyboard.press("Escape");
+      await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed by Escape");
+      assert.deepEqual(await state(), before);
+
+      // Confirmed: Sketch 1 gone, Extrude 1 keeps the rectangle (still 12,000 mm³) with the warning, its timeline row red.
+      await ask();
+      await press("#delete-ask-confirm");
+      await until(page, (w) => document.querySelector("#kept-warning").textContent === w && !document.querySelector("#kept-warning").hidden, "Extrude 1 keeps its last shape. Sketch 1 was deleted.", "the deleted warning");
+      await volume(page, "12,000 mm³");
+      await browserOpen();
+      const after = await state();
+      assert.deepEqual(after, { volume: "12,000 mm³", sketches: [], warning: "Extrude 1 keeps its last shape. Sketch 1 was deleted.", red: ["feature-11"], undo: "Undo Delete Sketch 1 (Ctrl+Z)", open: { menu: false, ask: false } });
+      assert.equal(await page.textContent("#error"), "");
+      await top();
+      await page.locator("#kept-warning").scrollIntoViewIfNeeded();
+      if (shots) await page.screenshot({ path: `${shots}/delete-kept-${width}.png`, fullPage: tap });
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+
+      // One undo step: Undo brings Sketch 1 back and the warning goes; Redo deletes it again, warned.
+      await top();
+      await press("#undo");
+      await until(page, () => !!document.querySelector('#browser [data-node="sketches/sketch-2"]') && document.querySelector("#kept-warning").hidden, null, "undone");
+      await volume(page, "12,000 mm³");
+      assert.deepEqual(await state(), before);
+      await press("#redo");
+      await until(page, () => !document.querySelector("#kept-warning").hidden, null, "redone");
+      await browserOpen();
+      assert.deepEqual(await state(), after);
+      await page.context().close();
+    });
+  }
 
   await check("no errors in the console", async () => assert.deepEqual(errors, []));
 } finally {
