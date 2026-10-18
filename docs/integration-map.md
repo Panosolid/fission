@@ -46,14 +46,14 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 
 ## Video (planned)
 
-Video is a planned workspace (roadmap F1–F5), late in the order. These rows are its links, so they are designed before it is built.
+Video is a planned workspace (roadmap F0–F14; substeps in `docs/progress/video.md`). Its basics may start early, but these links come late (step F13). These rows are its links, so they are designed before it is built.
 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
-| 35 | Render → Video | an animation or turntable as a clip | Image frames (marked out of date when the scene changes) | none | expensive | R3 + F5 |
-| 36 | Design → Video | a camera fly-through, or the timeline played back feature by feature | Image frames, rendered from the live design | none | expensive | F5 |
-| 37 | Image → Video | stills on a track | Image | none | cheap | G1 + F1 |
-| 38 | Layout → Video | a page as a title card | Image (rasterised at the video's size) | none | cheap | Y1 + F3 |
+| 35 | Render → Video | an animation or turntable as a clip | Image frames (marked out of date when the scene changes) | none | expensive | R3 + F13d |
+| 36 | Design → Video | a camera fly-through, or the timeline played back feature by feature | Image frames, rendered from the live design | none | expensive | 25 + F13b–F13c |
+| 37 | Image → Video | stills on a track | Image | none | cheap | G1 + F13a |
+| 38 | Layout → Video | a page as a title card | Image (rasterised at the video's size) | none | cheap | Y1 + F13a |
 
 ## Office workspaces (planned)
 
