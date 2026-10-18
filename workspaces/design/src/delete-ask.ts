@@ -63,9 +63,17 @@ export async function planDelete(kernel: KernelCalls, doc: DesignDocument, id: s
   return { next, ask: deleteWords(doc, next, id) };
 }
 
+/** An entry of the row menu (24f3: the timeline's item menu): its button is `row-menu-<action>`; an off one is shown greyed with why. */
+export interface RowMenuEntry {
+  action: string;
+  label: string;
+  off: string | null;
+  run: () => void;
+}
+
 export interface DeleteAsk {
-  /** Opens the row menu for item `id` ("Sketch 1") at a point on the screen; `onDelete` runs on its Delete. */
-  menu(name: string, at: { x: number; y: number }, onDelete: () => void): void;
+  /** Opens the row menu for item `name` ("Sketch 1") at a point on the screen with these entries; an entry's `run` runs on its button. */
+  menu(name: string, at: { x: number; y: number }, entries: readonly RowMenuEntry[]): void;
   /** Opens the box asking `q`; `onConfirm` runs only on its Delete button. */
   ask(q: DeleteQuestion, onConfirm: () => void): void;
   /** Closes the menu and the box (a sketch started, Undo). */
@@ -99,9 +107,7 @@ export function deleteAsk(slot: HTMLElement): DeleteAsk {
 
   const menu = make("dialog", "row-menu");
   menu.className = "delete-ask-menu";
-  menu.setAttribute("aria-label", "Sketch");
-  const del = button("row-menu-delete", "Delete");
-  menu.append(del);
+  menu.setAttribute("role", "menu");
 
   const box = make("dialog", "delete-ask");
   box.className = "delete-ask-box";
@@ -118,7 +124,6 @@ export function deleteAsk(slot: HTMLElement): DeleteAsk {
   holder.append(menu, box);
   slot.append(holder);
 
-  let onDelete = () => {};
   let onConfirm = () => {};
   const shut = (d: HTMLDialogElement) => {
     if (d.open) d.close();
@@ -146,10 +151,6 @@ export function deleteAsk(slot: HTMLElement): DeleteAsk {
     // A right-click inside is not the page's own menu.
     d.addEventListener("contextmenu", (e) => e.preventDefault());
   }
-  del.addEventListener("click", () => {
-    shut(menu);
-    onDelete();
-  });
   cancel.addEventListener("click", () => shut(box));
   go.addEventListener("click", () => {
     shut(box);
@@ -157,11 +158,30 @@ export function deleteAsk(slot: HTMLElement): DeleteAsk {
   });
 
   return {
-    menu(name, at, run) {
+    menu(name, at, entries) {
       shut(box);
-      onDelete = run;
       menu.setAttribute("aria-label", name);
-      del.setAttribute("aria-label", `Delete ${name}`);
+      menu.replaceChildren(
+        ...entries.map((e) => {
+          const b = button(`row-menu-${e.action}`, e.label);
+          b.setAttribute("role", "menuitem");
+          b.setAttribute("aria-label", `${e.label.replace(" here", "")}${e.action === "marker" ? " to just after" : ""} ${name}`);
+          if (e.off !== null) {
+            // Greyed, with why under its words (a phone shows no tooltip).
+            b.disabled = true;
+            b.title = e.off;
+            const why = document.createElement("span");
+            why.className = "delete-ask-off";
+            why.textContent = e.off;
+            b.append(why);
+          }
+          b.addEventListener("click", () => {
+            shut(menu);
+            e.run();
+          });
+          return b;
+        }),
+      );
       show(menu);
       // At the pointer, kept on the screen.
       const view = document.defaultView;
@@ -170,7 +190,7 @@ export function deleteAsk(slot: HTMLElement): DeleteAsk {
       const r = menu.getBoundingClientRect();
       menu.style.left = `${Math.max(0, Math.min(at.x, w - r.width))}px`;
       menu.style.top = `${Math.max(0, Math.min(at.y, h - r.height))}px`;
-      del.focus();
+      menu.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
     },
     ask(q, run) {
       shut(menu);

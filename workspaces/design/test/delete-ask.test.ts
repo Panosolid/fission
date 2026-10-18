@@ -106,15 +106,29 @@ function setup() {
   return { doc, ask, $, key, shortcutKeys, runs, window };
 }
 
-test("the menu: Delete named for the row, at the pointer, runs the delete once and closes", () => {
+/** The timeline's item menu (24f3): Delete runs `onDelete`; the other entries do nothing. */
+const entries = (onDelete: () => void, off: Partial<Record<string, string>> = {}) =>
+  [
+    { action: "marker", label: "Move the marker here" },
+    { action: "suppress", label: "Suppress" },
+    { action: "delete", label: "Delete" },
+  ].map((e) => ({ ...e, off: off[e.action] ?? null, run: e.action === "delete" ? onDelete : () => {} }));
+
+test("the menu: each entry named for the row, at the pointer; Delete runs the delete once and closes", () => {
   const { ask, $, runs, doc } = setup();
   assert.equal(ask.open, null);
-  ask.menu("Sketch 1", { x: 120, y: 200 }, () => runs.deleted++);
+  ask.menu("Sketch 1", { x: 120, y: 200 }, entries(() => runs.deleted++));
   assert.equal(ask.open, "menu");
   assert.equal($("row-menu").getAttribute("aria-label"), "Sketch 1");
-  assert.equal($("row-menu-delete").getAttribute("aria-label"), "Delete Sketch 1");
-  assert.equal($("row-menu-delete").textContent, "Delete");
-  assert.equal(doc.activeElement?.id, "row-menu-delete", "the keyboard lands on Delete");
+  assert.deepEqual(
+    [...$("row-menu").querySelectorAll("button")].map((b) => [b.id, b.textContent, b.getAttribute("aria-label")]),
+    [
+      ["row-menu-marker", "Move the marker here", "Move the marker to just after Sketch 1"],
+      ["row-menu-suppress", "Suppress", "Suppress Sketch 1"],
+      ["row-menu-delete", "Delete", "Delete Sketch 1"],
+    ],
+  );
+  assert.equal(doc.activeElement?.id, "row-menu-marker", "the keyboard lands on the first entry");
   assert.equal($("row-menu").style.left, "120px");
   assert.equal($("row-menu").style.top, "200px");
   $("row-menu-delete").click();
@@ -124,18 +138,33 @@ test("the menu: Delete named for the row, at the pointer, runs the delete once a
 
 test("the menu stays on the screen near the right and bottom edges, and never goes past the left or top", () => {
   const { ask, $ } = setup();
-  ask.menu("Sketch 1", { x: 5000, y: 5000 }, () => {});
+  ask.menu("Sketch 1", { x: 5000, y: 5000 }, entries(() => {}));
   // happy-dom lays nothing out (the menu is 0 × 0), so it is pulled back to exactly the window's edge, 1280 × 800.
   assert.equal($("row-menu").style.left, "1280px");
   assert.equal($("row-menu").style.top, "800px");
-  ask.menu("Sketch 1", { x: -40, y: -3 }, () => {});
+  ask.menu("Sketch 1", { x: -40, y: -3 }, entries(() => {}));
   assert.equal($("row-menu").style.left, "0px");
   assert.equal($("row-menu").style.top, "0px");
 });
 
+test("an off entry is greyed with why under its words and as its title, never runs, and the keyboard skips it", () => {
+  const { ask, $, runs, doc } = setup();
+  const why = "Sketch 1 is being edited: finish the sketch first";
+  ask.menu("Sketch 1", { x: 0, y: 0 }, entries(() => runs.deleted++, { marker: "The marker is already here", delete: why }));
+  const del = $("row-menu-delete") as HTMLButtonElement;
+  assert.equal(del.disabled, true);
+  assert.equal(del.title, why);
+  assert.equal(del.querySelector(".delete-ask-off")?.textContent, why);
+  assert.equal(($("row-menu-suppress") as HTMLButtonElement).disabled, false);
+  assert.equal(doc.activeElement?.id, "row-menu-suppress", "the first entry that is on");
+  del.click();
+  assert.equal(runs.deleted, 0);
+  assert.equal(ask.open, "menu");
+});
+
 test("Escape closes the menu without deleting, and no key pressed in it reaches the app's shortcuts", () => {
   const { ask, $, key, shortcutKeys, runs } = setup();
-  ask.menu("Sketch 1", { x: 10, y: 10 }, () => runs.deleted++);
+  ask.menu("Sketch 1", { x: 10, y: 10 }, entries(() => runs.deleted++));
   key($("row-menu-delete"), "r"); // the rectangle tool's key
   key($("row-menu-delete"), "Escape"); // would clear the selection behind it
   assert.deepEqual(shortcutKeys, []);
@@ -189,10 +218,10 @@ test("a click on the backdrop, outside the box, cancels; a click inside it does 
 
 test("opening one closes the other, and close() shuts both", () => {
   const { ask } = setup();
-  ask.menu("Sketch 1", { x: 0, y: 0 }, () => {});
+  ask.menu("Sketch 1", { x: 0, y: 0 }, entries(() => {}));
   ask.ask({ heading: "h", words: "w" }, () => {});
   assert.equal(ask.open, "ask");
-  ask.menu("Sketch 1", { x: 0, y: 0 }, () => {});
+  ask.menu("Sketch 1", { x: 0, y: 0 }, entries(() => {}));
   assert.equal(ask.open, "menu");
   ask.close();
   assert.equal(ask.open, null);
