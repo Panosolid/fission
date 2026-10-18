@@ -183,7 +183,9 @@ await check("at 375 px with taps: the Arc menu on screen with 44 px rows, and a 
     await page.tap("#sketch-menu-centre");
     assert.equal(await page.getAttribute("#sketch-tool-centre", "aria-pressed"), "true");
     // (20, 0) is a quarter clockwise from (30, 10) round (20, 10): the arc is kept counter-clockwise from (20, 0) to (30, 10).
-    for (const p of [[20, 10], [30, 10], [20, 0]]) await clickPlane(page, p, TOP, true);
+    // At phone width the Arc angle box sits under the start, over (20, 0), so the end is tapped further out on
+    // the same ray, (20, −5), which lands on the circle at (20, 0) exactly: (20, 10) + (0, −15)·10/15.
+    for (const p of [[20, 10], [30, 10], [20, -5]]) await clickPlane(page, p, TOP, true);
     await points(page, "20,0 30,10 20,10");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways page scroll");
     if (shots) await page.screenshot({ path: `${shots}/centre-arc-375.png` });

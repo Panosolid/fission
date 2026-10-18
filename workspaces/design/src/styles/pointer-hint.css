@@ -1,0 +1,9 @@
+/* The hint by the pointer while sketching (pointer-hint.ts): a small
+   light label up and to the right of the pointer, clear of the typed
+   boxes below it, never taking a click. */
+.pointer-hint { position: absolute; z-index: 19; pointer-events: none; transform: translate(18px, -30px); padding: 2px 6px; font-size: 12px; line-height: 16px; white-space: nowrap; color: #1d2228; background: rgba(240, 242, 245, 0.95); border: 1px solid #9aa3ad; border-radius: 3px; }
+.pointer-hint[hidden] { display: none; }
+/* Phone width: above the finger, centred on it. */
+@media (max-width: 640px) {
+  .pointer-hint { transform: translate(-50%, -48px); }
+}
