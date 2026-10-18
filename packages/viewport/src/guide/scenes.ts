@@ -1200,8 +1200,8 @@ export const GUIDE_TILT = 0.5;
  * the camera's own up is set here because the app makes z-up the default
  * for every new object (the guide once drew everything upside down).
  */
-export function aimCamera(camera: THREE.PerspectiveCamera, radius: number, w: number, h: number): void {
-  const layout = stageLayout(w, h);
+export function aimCamera(camera: THREE.PerspectiveCamera, radius: number, w: number, h: number, textTop?: number): void {
+  const layout = stageLayout(w, h, textTop);
   const halfTan = Math.tan((camera.fov * Math.PI) / 360);
   const vfov = (360 / Math.PI) * Math.atan(layout.areaH * halfTan);
   const d = cameraDistance(radius, vfov, (layout.areaW * w) / (layout.areaH * h));
