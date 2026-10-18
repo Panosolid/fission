@@ -57,6 +57,22 @@ test("each kind of malformed command gets its own clear error", () => {
   }
 });
 
+test("inherited names are not parameters: a model can't smuggle in __proto__", () => {
+  // JSON.parse makes "__proto__" an ordinary own key, so the answer below
+  // reaches parseCommand intact. `"__proto__" in hole.params` is true (every
+  // object inherits it), so a check with `in` let it through, and
+  // Object.assign(part, command) then gave the part a prototype with depth 30.
+  for (const key of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+    const answer = `{"commands":[{"op":"hole","face":"f","diameter":5,"depth":"through","${key}":{"depth":30}}]}`;
+    const r = parseCommandList(answer, [hole]);
+    assert.equal(r.ok, false, key);
+    assert.match((r as { error: string }).error, new RegExp(`hole has no parameter "${key}"`));
+  }
+  // A required parameter can't be satisfied by an inherited one either.
+  const spec: CommandSpec = { op: "name", summary: "Name it", params: { toString: { type: "text", maxLength: 9, description: "x" } } };
+  assert.match((parseCommand({ op: "name" }, [spec]) as { error: string }).error, /name needs toString/);
+});
+
 test("a whole answer: JSON with a commands list, each checked", () => {
   const ok = JSON.stringify({ commands: [{ op: "hole", face: "f", diameter: 3, depth: "blind" }] });
   assert.equal(parseCommandList(ok, [hole]).ok, true);

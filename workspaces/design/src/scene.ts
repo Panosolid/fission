@@ -38,7 +38,18 @@ export interface Scene {
  */
 export async function shownBodies(doc: DesignDocument, build: TimelineBuild, cache: BodyCache): Promise<ShownBody[]> {
   const shown: ShownBody[] = [];
-  for (const [i, f] of bodyFeatures(doc).entries()) {
+  const features = bodyFeatures(doc);
+  // Every view asked at once, before the loop waits on one (security audit S2: one round trip each took minutes on a big file).
+  for (const f of features) {
+    const r = build.results[f.id];
+    if (r?.status !== "built" || r.body === undefined || r.spec === undefined) continue;
+    try {
+      cache.view(r.body).catch(() => {}); // a refusal is read in the loop below
+    } catch {
+      // not in the cache: the loop below says so
+    }
+  }
+  for (const [i, f] of features.entries()) {
     const r = build.results[f.id];
     if (r?.status !== "built" || r.body === undefined || r.spec === undefined) continue;
     const spec = r.spec;

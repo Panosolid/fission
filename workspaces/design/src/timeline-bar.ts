@@ -9,7 +9,7 @@
 // 24e edit with its undo step's name, or refused with the message shown
 // (`barEdit`). Behaviour copied from the reference app's timeline.
 
-import { builds, type DesignDocument } from "./document.ts";
+import { buildingItems, type DesignDocument } from "./document.ts";
 import { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS } from "./timeline-edits.ts";
 import { dragItem } from "./timeline-reorder.ts";
 
@@ -46,13 +46,14 @@ export function timelineBarItems(document: DesignDocument, failed: ReadonlySet<s
     if (i < 0) throw new Error(`the timeline marker "${marker}" names no item in the timeline`);
     at = i + 1;
   }
+  const building = buildingItems(document);
   const items = features.map((f, i) => ({
     id: f.id,
     label: `${i + 1}. ${f.intent.summary}`,
     icon: Object.hasOwn(ICON_OF, f.intent.type) ? ICON_OF[f.intent.type] : "feature",
     suppressed: f.suppressed,
     rolledBack: i >= at,
-    failed: i < at && !f.suppressed && (!builds(document, f) || failed.has(f.id)),
+    failed: i < at && !f.suppressed && (!building.has(f) || failed.has(f.id)),
   }));
   return { items, marker: at };
 }

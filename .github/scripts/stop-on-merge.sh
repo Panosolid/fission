@@ -13,7 +13,10 @@
 set -u
 branch=$1 stop_file=$2
 while sleep "${STOP_POLL_SECONDS:-300}"; do
-  states=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state all --json state --jq '.[].state') || continue
+  # Only pull requests from this repository: a fork's pull request from a
+  # branch with the same name must not stop our run.
+  states=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state all --json state,headRepositoryOwner \
+    --jq ".[] | select(.headRepositoryOwner.login == \"${GITHUB_REPOSITORY%%/*}\") | .state") || continue
   if [ -n "$states" ] && ! grep -qx OPEN <<<"$states"; then
     echo "The pull request for $branch has merged or closed: random testing stops after the round in progress."
     touch "$stop_file"

@@ -56,6 +56,18 @@ test("angles read by hand: degrees from the x axis, turned into [0, 360)", () =>
   for (const bad of ["", "north", "1e2", "30 rad", "Infinity"]) assert.ok(refused(readAngle(bad)), `"${bad}" is not an angle`);
 });
 
+test("an angle too big to be a number is refused, not turned into NaN (security re-check N2)", () => {
+  // The largest double is about 1.798e308: 308 nines (just under 1e308) is a
+  // number, 309 nines (just under 1e309) reads as Infinity, and Infinity % 360 is NaN.
+  const nines = (k: number) => "9".repeat(k);
+  assert.ok(Number.isFinite(Number(nines(308))) && !Number.isFinite(Number(nines(309))), "where the doubles end");
+  const near = value(readAngle(nines(308)));
+  assert.ok(near >= 0 && near < 360, `308 nines turn into [0, 360): ${near}`);
+  for (const k of [309, 400]) assert.match((readAngle(nines(k)) as { error: string }).error, /too big for an angle/, `${k} nines`);
+  // A length that big was already refused by MAX_TYPED (Infinity > 1e6).
+  assert.match((readLength(nines(400)) as { error: string }).error, /at most 1000000 mm/);
+});
+
 test("directions: the four quarter turns are exact, 30° is (√3/2, 1/2)", () => {
   assert.deepEqual(direction(0), [1, 0]);
   assert.deepEqual(direction(90), [0, 1]);

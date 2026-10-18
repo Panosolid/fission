@@ -4,7 +4,7 @@
 // longer timeline only adds rows here.
 
 import type { Feature, GeometryReference } from "@fission/core";
-import { builds, isSketchItem, profileLabel, type DesignDocument } from "./document.ts";
+import { buildingItems, isSketchItem, profileLabel, type DesignDocument } from "./document.ts";
 import { bodyReference, profileReference } from "./references.ts";
 import { sketchItem } from "./sketch.ts";
 
@@ -32,7 +32,8 @@ const ORIGIN: BrowserNode[] = [
  * (24d1), "Body 1", "Body 2"…, all drawn (24d3b).
  */
 export function bodyFeatures(document: DesignDocument): Feature[] {
-  return document.timeline.features.filter((f) => !isSketchItem(f) && builds(document, f));
+  const building = buildingItems(document);
+  return document.timeline.features.filter((f) => !isSketchItem(f) && building.has(f));
 }
 
 /**
@@ -45,13 +46,17 @@ export function bodyFeatures(document: DesignDocument): Feature[] {
  */
 export function browserTree(document: DesignDocument): BrowserNode[] {
   const features = document.timeline.features;
+  // Each sketch's item by its id, looked up once (S2: a search per sketch took the timeline's length squared).
+  const items = new Map<string, Feature>();
+  for (const f of features) if (isSketchItem(f) && !items.has(f.id)) items.set(f.id, f);
+  const sketchItemOf = (id: string) => items.get(id) ?? sketchItem(document, id);
   return [
     {
       id: "timeline",
       label: "Timeline",
       children: features.map((f, i) => ({ id: f.id, label: `${i + 1}. ${f.intent.summary}${f.suppressed ? " (suppressed)" : ""}` })),
     },
-    { id: "sketches", label: "Sketches", children: document.sketches.map((s) => ({ id: `sketches/${s.id}`, label: sketchItem(document, s.id).provenance.self.label })) },
+    { id: "sketches", label: "Sketches", children: document.sketches.map((s) => ({ id: `sketches/${s.id}`, label: sketchItemOf(s.id).provenance.self.label })) },
     { id: "profiles", label: "Profiles", children: document.profiles.map((p) => ({ id: p.id, label: profileLabel(p) })) },
     { id: "bodies", label: "Bodies", children: bodyFeatures(document).map((_, i) => ({ id: `body-${i + 1}`, label: `Body ${i + 1}` })) },
     { id: "origin", label: "Origin", children: ORIGIN },
@@ -66,8 +71,22 @@ export function browserTree(document: DesignDocument): BrowserNode[] {
  * are not selectable geometry), nor does an item that builds no body.
  */
 export function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  const body = /^body-(\d+)$/.exec(node);
-  if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodyFeatures(doc)[Number(body[1]) - 1]);
-  if (bodyFeatures(doc).some((f) => f.id === node)) return bodyReference(node);
-  return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
+  return rowReferences(doc)(node);
+}
+
+/**
+ * `rowReference` for every row of one document: the bodies and profiles
+ * are listed once, so the browser's rows take time in proportion to their
+ * number (security audit S2: listing them per row took its square).
+ */
+export function rowReferences(doc: DesignDocument): (node: string) => GeometryReference | null {
+  const bodies = bodyFeatures(doc);
+  const solids = new Set(bodies.map((f) => f.id));
+  const profiles = new Set(doc.profiles.map((p) => p.id));
+  return (node) => {
+    const body = /^body-(\d+)$/.exec(node);
+    if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodies[Number(body[1]) - 1]);
+    if (solids.has(node)) return bodyReference(node);
+    return profiles.has(node) ? profileReference(node) : null;
+  };
 }

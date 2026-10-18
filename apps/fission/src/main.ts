@@ -14,11 +14,11 @@ import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
 import.meta.glob(["../../../packages/ui/src/styles/*.css", "../../../workspaces/*/src/styles/*.css"], { eager: true });
-import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS, ShortcutTable, type Chord, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, createHistory, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS, ShortcutTable, type Chord, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, HEAD_BYTES, projectFromJson, routeFiles, projectToJson, RepresentationRegistry, createHistory, KernelClient, createSelection, type ChangeNote, type MountedWorkspace, type Project, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { changeNote, shortcutList, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
-import { localStore, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
+import { localStore, reopenGuard, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
 import { createAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
@@ -89,7 +89,14 @@ const ctx: WorkspaceContext = {
 ctx.history = createHistory({ capture: () => projectToJson(ctx.project), restore: restoreSnapshot });
 /** Mounts in progress: a change a workspace makes while being mounted is a default filled in, not an undo step. */
 let mounting = 0;
+/**
+ * The id of a new project started in place of the last one (skipped, or
+ * Start fresh instead): kept from its first change on, not from the
+ * defaults its workspaces fill in, so until then a reload opens the last one.
+ */
+let keepOnChange: string | null = null;
 function projectChanged(label = "Edit", mergeKey?: string) {
+  if (keepOnChange !== null && mounting === 0) keep(keepOnChange);
   autosave?.changed();
   if (mounting === 0) ctx.history.record(label, mergeKey);
 }
@@ -473,6 +480,18 @@ function closeSplit() {
 // Each project has its own stored id: an opened file becomes a new stored
 // project rather than overwriting the one that was open.
 const store = localStore(workspaces);
+// Marks the project being opened, so one that froze or crashed the tab isn't
+// reopened on the next visit (audit S2, reopen.ts in @fission/storage).
+const guard = reopenGuard(
+  (() => {
+    try {
+      return window.localStorage;
+    } catch {
+      return null; // storage turned off: projects reopen as before
+    }
+  })(),
+);
+window.addEventListener("pagehide", () => guard.finished());
 let autosave: Autosave | null = null;
 const saveStatus = (s: AutosaveStatus) => {
   const el = $("save-status");
@@ -484,10 +503,17 @@ const newId = () => globalThis.crypto?.randomUUID?.() ?? `p-${Date.now().toStrin
 /** False once the browser has shown it can't keep projects: then nothing autosaves, and Save/Open use files. */
 let canKeep = true;
 function keep(id: string) {
+  keepOnChange = null;
   autosave?.stop();
   if (!canKeep) return;
   autosave = startAutosave(store, id, () => ctx.project, saveStatus);
   document.body.dataset.projectId = id; // read by the e2e test
+}
+/** A new project in place of the last one, kept once it is changed (`keepOnChange`). */
+function keepOnFirstChange() {
+  autosave?.stop();
+  autosave = null;
+  keepOnChange = newId();
 }
 
 // Save and Open: the whole project, every workspace's data, as one
@@ -515,20 +541,84 @@ $<HTMLInputElement>("open-file").accept = FILE_FORMATS.filter((f) => representat
   .join(",");
 $("open").title = `Open ${FILE_FORMATS.filter((f) => representations.importerFor(f.format)).map((f) => f.many).join(", ")}`;
 $("open").addEventListener("click", () => $("open-file").click());
-/** Replaces the open project with the one in `text`; throws, leaving the open project as it was, when it doesn't read cleanly. */
-function openProject(text: string) {
-  const project = projectFromJson(text, workspaces);
+/** Puts `project` in place of the open one: every workspace mounted afresh on it, nothing to undo. */
+function replaceProject(project: Project) {
   ctx.selection.clear(); // it named the old part's faces
   ctx.project = project;
   useGraph(new DependencyGraph(), new ChangeNotes()); // the old notes were about the old project
-  keep(newId());
-  autosave?.changed(); // store the opened file as it is
   pool.forgetAll(); // every warm workspace showed the old project
-  show(current); // mounts the workspace on the opened project
+  show(current); // mounts the workspace on the new project
   if (split) mountSplit(split.id); // and the second one
   ctx.history.reset(); // a new start: nothing from the old project to undo
-  fileStatus("");
 }
+/**
+ * Replaces the open project with the one in `text`; throws, leaving the
+ * open project as it was, when it doesn't read cleanly. The opened file is
+ * kept in this browser only once it has shown (security audit S2): one that
+ * freezes the tab while it builds is never stored, so never reopened.
+ */
+function openProject(text: string) {
+  const project = projectFromJson(text, workspaces);
+  const id = newId();
+  autosave?.stop(); // the old project is kept as it was; nothing of the new one is stored yet
+  autosave = null;
+  guard.finished(); // the last project, if it was still opening, didn't freeze the tab
+  fileStatus("");
+  replaceProject(project);
+  whileOpening(OPENING_FILE, () => {
+    keep(id);
+    autosave?.changed(); // store the opened file, with anything changed while it opened
+  });
+}
+
+// While a project opens (the last one reopened, or a file), the top bar
+// offers to start a new one instead once it has taken OFFER_MS, so a big
+// project that takes long to build is never a wait with no way out
+// (security audit S2). The project being opened is then never kept (a
+// file) or counted as reopened (the last one, still kept as it was).
+const OFFER_MS = 1500;
+const OPENING_LAST = "Opening the last project…";
+const OPENING_FILE = "Opening the project…";
+/** Counts openings: Start fresh, or another opening, ends the wait for the one before. */
+let openings = 0;
+/** What is being opened while the offer stands. */
+let openingNow: string | null = null;
+/** Settles once every workspace on screen has shown the project (each one's `ready`). */
+const shownOnScreen = () => Promise.all((["main", "split"] as const).map((p) => pool.awake(p)?.view.ready)).then(() => {});
+function whileOpening(words: string, opened: () => void) {
+  const ticket = ++openings;
+  const offer = setTimeout(() => {
+    if (ticket !== openings) return;
+    openingNow = words;
+    fileStatus(words);
+    $("opening-fresh").hidden = false;
+  }, OFFER_MS);
+  void shownOnScreen().then(() => {
+    clearTimeout(offer);
+    if (ticket !== openings) return;
+    endOffer();
+    opened();
+  });
+}
+/** Takes the offer away, and its words if nothing has replaced them. */
+function endOffer() {
+  $("opening-fresh").hidden = true;
+  if (openingNow !== null && $("file-status").textContent === openingNow) fileStatus("");
+  openingNow = null;
+}
+$("opening-fresh").addEventListener("click", () => {
+  const was = openingNow;
+  openings++; // the project being opened is never kept or counted as reopened
+  endOffer();
+  guard.finished(); // the last project didn't freeze the tab: the next visit opens it as before
+  keepOnFirstChange(); // first: the last project's autosave must not store the new one over it
+  replaceProject(emptyProject());
+  fileStatus(
+    was === OPENING_LAST
+      ? "Started a new project instead. The last one is still kept in this browser: reload the page, before changing anything, to try it again."
+      : "Started a new project instead. The file was not opened: open it again to try again.",
+  );
+});
 $("open-file").addEventListener("change", async () => {
   const input = $<HTMLInputElement>("open-file");
   const file = input.files?.[0];
@@ -711,8 +801,10 @@ const fromHash = (): Page => {
 window.addEventListener("hashchange", () => show(fromHash()));
 // Start on the project saved most recently in this browser, or a new one.
 // One that can't be read is left stored as it is, and a new project starts
-// with a message saying so; a browser that can't keep projects at all still
-// gets a working app (Save and Open use files). Never a blank app.
+// with a message saying so; so does one the last visit started opening and
+// never finished (it froze or crashed the tab), once: the visit after tries
+// it again. A browser that can't keep projects at all still gets a working
+// app (Save and Open use files). Never a blank app.
 async function start() {
   const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
   let newest: string | undefined;
@@ -724,17 +816,26 @@ async function start() {
     show(fromHash());
     return ctx.history.reset();
   }
+  let opened: string | undefined;
   try {
-    if (newest) {
+    if (newest && guard.stuck(newest)) {
+      keepOnFirstChange();
+      fileStatus("The last project didn't finish opening on your last visit, so a new one was started. The old one is still kept in this browser: reload the page now, before changing anything, to try it again.");
+    } else if (newest) {
+      guard.opening(newest);
       ctx.project = await store.open(newest);
       keep(newest);
       saveStatus({ state: "saved" });
+      opened = newest;
     } else keep(newId());
   } catch (e) {
+    guard.finished(); // refused with a message, which is not a freeze
     keep(newId());
     fileStatus(`Couldn't open the last project (${why(e)}), so a new one was started. The old one is still kept in this browser.`);
   }
   show(fromHash());
+  // Counted as reopened once it has shown: a tab that freezes building it leaves the mark.
+  if (opened) whileOpening(OPENING_LAST, () => guard.shown(opened));
   ctx.history.reset(); // the project as it opened is the start
 }
 // Save, Open, a drop and a paste wait for this: until the last project is

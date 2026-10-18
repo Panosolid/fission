@@ -18,7 +18,7 @@
 // 3. A name that claims a format its contents don't match is refused as
 //    damaged or renamed; anything else is unknown.
 
-import type { WorkspaceId } from "./project.ts";
+import { tooBig, type WorkspaceId } from "./project.ts";
 import { workspaceName } from "./feature.ts";
 import type { RepresentationKind, RepresentationRegistry } from "./representation.ts";
 
@@ -175,6 +175,9 @@ export function routeFiles(registry: RepresentationRegistry, files: readonly Fil
     return { kind: "refused", message: `Couldn't open ${name}: Panoshape doesn't know this type of file. ${opens.length ? `It opens ${andList(opens)}.` : "It can't open any files yet."}` };
   }
   const importer = registry.importerFor(found.format);
+  // Refused by its size alone, before the shell reads the whole file.
+  const big = found.format === "project" ? tooBig(file.size) : null;
+  if (importer && big) return { kind: "refused", message: `Couldn't open ${name}: ${big}.` };
   if (importer) return { kind: "open", format: found.format, importer };
   const info = formatInfo(found.format);
   if (info.planned.workspaces.length === 0) return { kind: "refused", message: `Couldn't open ${name}: nothing here opens ${info.many}.` };

@@ -183,6 +183,21 @@ def seed_list(seeds, where="failures"):
     return "\n".join(shown)
 
 
+MAX_EXAMPLE = 4000  # characters of the example shown in an issue
+
+
+def fenced(text):
+    """text as a Markdown code block it can't break out of: the fence is
+    longer than any run of backticks inside (the text comes from the code
+    under test, so it could otherwise close the block and add Markdown or
+    @mentions to the issue). Long text is cut to MAX_EXAMPLE characters."""
+    if len(text) > MAX_EXAMPLE:
+        text = text[:MAX_EXAMPLE] + "\n(cut; the whole report is on the test-results branch)"
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{text}\n{fence}"
+
+
 def texts(action, kind, hits, run_url, commit, branch):
     """(title, body) for a create; body for a comment or reopen."""
     seeds = [s for s, _ in hits]
@@ -193,7 +208,7 @@ def texts(action, kind, hits, run_url, commit, branch):
             f"{MARK.format(key(kind))}\n"
             f"Fuzzing found a new kind of problem ({where}).\n\n"
             f"**Kind:** {kind}\n\n"
-            f"Example (seed `{seed}`):\n```\n{example}\n```\n\n"
+            f"Example (seed `{seed}`):\n{fenced(example)}\n\n"
             f"Seen in {len(seeds)} round(s):\n{seed_list(seeds, 'fuzz/failures')}\n\n"
             "Each folder is on the test-results branch: fuzz-report.txt lists every kind the round found, "
             "and input-<case> is the failing input, shrunk. Make the input a regression test first "
@@ -214,7 +229,7 @@ def texts(action, kind, hits, run_url, commit, branch):
             f"{MARK.format(key(kind))}\n"
             f"Random testing found a new kind of problem ({where}).\n\n"
             f"**Kind:** {kind}\n\n"
-            f"Example (seed `{seed}`):\n```\n{example}\n```\n\n"
+            f"Example (seed `{seed}`):\n{fenced(example)}\n\n"
             f"Seen in {len(seeds)} round(s):\n{seed_list(seeds)}\n\n"
             "Each folder is on the test-results branch: report.txt says what went wrong, "
             "the .json file is the shortest failing chain, failure-dumps/*/index.html shows it in 3D, "
