@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–33) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type BodyView, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import type { ShapeKind } from "./profiles.ts";
 import { isSketchItem, lastFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
@@ -13,15 +13,15 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { browserTree, type BrowserNode } from "./browser.ts";
+import { bodyFeatures, browserTree, type BrowserNode } from "./browser.ts";
 import { showTimelineBar } from "./timeline-bar.ts";
 import { propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
-import { nameBody, outlineCurves, type BodyNames } from "./naming.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
 import { bodyReference, profileReference } from "./references.ts";
 import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
+import { joinBodies, shownBodies, type Scene } from "./scene.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, type Locks } from "./typed-entry.ts";
@@ -112,7 +112,8 @@ const folded = new Set<string>();
 
 /** The browser rows that stand for selectable geometry, and the reference each selects. */
 function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  if (node === "body-1") return bodyReference(lastFeature(doc).id);
+  const body = /^body-(\d+)$/.exec(node);
+  if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodyFeatures(doc)[Number(body[1]) - 1]);
   return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
 }
 
@@ -210,10 +211,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let shown = true;
   /** A build finished while asleep and was not drawn: wake builds again. */
   let missed = false;
-  /** The last body that built, for the selection's surface and curve types. */
-  let lastView: BodyView | null = null;
-  /** Its faces' and edges' names (step 24c), which the selection holds. */
-  let lastNames: BodyNames | null = null;
+  /** Every body drawn, with its faces' and edges' names (steps 24c, 24d3b), which the selection holds. */
+  let lastScene: Scene | null = null;
   /** The note about items the last rebuild dropped, and whether that drop is being applied now. */
   let note = "";
   let settling = false;
@@ -228,11 +227,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   function showSelection() {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
-    const featureId = lastFeature(doc).id;
     const items = ctx.selection.items;
-    viewport.showSelection(highlightOf(items, featureId, lastNames));
+    viewport.showSelection(highlightOf(items, lastScene));
     lightRows(ctx.browser, doc, items);
-    panel.showSelection(selectionRows(items, featureId, lastView, lastNames, doc.profiles));
+    panel.showSelection(selectionRows(items, lastScene, doc.profiles));
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -259,16 +257,25 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     rebuilds = next.catch(() => {});
     return next;
   });
-  /** The part's body, its names and, when it is built from a kept shape, the warning; or throws why it has none. */
+  /**
+   * Every body the timeline built, joined for drawing (scene.ts, 24d3b),
+   * the part's (the last solid feature's) view for the panel and, when a
+   * body is built from a kept shape, the warning (the last such); or
+   * throws why the part has no body.
+   */
   async function buildPart(doc: DesignDocument) {
     const feature = lastFeature(doc);
-    const result = (await rebuildTimeline(doc, bodies, kernel)).results[feature.id];
+    const build = await rebuildTimeline(doc, bodies, kernel);
+    const result = build.results[feature.id];
     if (result.status === "failed") throw new Error(result.message);
     if (result.status !== "built" || result.body === undefined || result.spec === undefined) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
-    const spec = result.spec;
-    const view = await bodies.view(result.body);
-    const names = nameBody(feature.id, view, "extrude" in spec ? outlineCurves(spec.extrude.profile, result.curves) : () => null);
-    return { view, names, kept: result.warning && { feature: feature.id, label: feature.provenance.self.label, warning: result.warning } };
+    const drawn = await shownBodies(doc, build, bodies);
+    let kept: { feature: string; label: string; warning: KeptWarning } | undefined;
+    for (const f of bodyFeatures(doc)) {
+      const r = build.results[f.id];
+      if (r.status === "built" && r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
+    }
+    return { view: drawn[drawn.length - 1].view, scene: joinBodies(drawn), kept };
   }
   /** The part built from a kept shape (the owner's rule): shown on its timeline row and, once the sketch is finished, in the panel. */
   let keptNow: { feature: string; label: string; warning: KeptWarning } | undefined;
@@ -367,14 +374,14 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!current) return;
       if (!shown) return void (missed = true);
       missed = false;
-      const { view, names } = value;
+      const { view, scene } = value;
       keptNow = value.kept;
       showKept();
       // Built from the current inputs: the feature and the numbers are fresh.
       for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
       ctx.graph.markFresh(PART_VIEW);
       markStale();
-      viewport.showBody(view.mesh);
+      viewport.showBody(scene.mesh);
       // A different shape is a new part: frame it (not when Undo or Redo put
       // it back: the camera stays unless the body no longer fits).
       const newPart = kind !== framedKind && !keepCamera;
@@ -388,9 +395,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       panel.showBody(view);
       // Faces and edges the edit took off the body leave the selection, with a
       // note (17e); the rest follow their names, however the kernel numbers them now.
-      const { kept, dropped } = survivors(ctx.selection.items, names, doc.profiles.map((p) => p.id));
-      lastView = view;
-      lastNames = names;
+      const { kept, dropped } = survivors(ctx.selection.items, scene, doc.profiles.map((p) => p.id));
+      lastScene = scene;
       note = droppedNote(dropped);
       if (dropped.length > 0) {
         settling = true;
@@ -786,7 +792,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!doc) return;
     // Choosing a plane for Create sketch: only an offered plane counts.
     if (mode.kind === "pick") return void (pick.plane && pickPlane(pick.plane as SketchPlane));
-    const c = pickChange(pick, lastNames);
+    const c = pickChange(pick, lastScene);
     if (c.change === "set") ctx.selection.set([c.item]);
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
     else if (c.change === "clear") ctx.selection.clear();

@@ -1,6 +1,8 @@
 // Body views as the kernel gives them, written out by hand for Design's
 // unit tests (the journeys check the same numbers on the real kernel).
 import type { BodyView } from "@fission/core";
+import type { BodyNames } from "../src/naming.ts";
+import type { Scene } from "../src/scene.ts";
 
 /**
  * A box (make_box, primitives.rs). Corner k is at (k & 1, k & 2, k & 4)
@@ -53,3 +55,8 @@ export const CYLINDER_VIEW = {
     [1, 2],
   ],
 } as BodyView;
+
+/** A scene of one body, as `joinBodies` gives it, without its mesh (these views have none): numbering as the kernel's. */
+export function onlyBody(view: BodyView, names: BodyNames): Scene {
+  return { bodies: [{ feature: names.feature, view, names }], mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [], edge_line_edges: [] }, faceStart: [0], edgeStart: [0] };
+}

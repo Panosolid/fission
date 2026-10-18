@@ -23,6 +23,7 @@ import {
   featureNames,
   featureSpec,
   highlightOf,
+  joinBodies,
   lastFeature,
   movePoint,
   nameBody,
@@ -349,6 +350,9 @@ test("Design names edges by the two faces they join, the uprights in order round
 });
 
 /** Builds the part of a Design document on the real kernel and names it, as Design's workspace does. */
+/** One built body as the app shows it: joined alone (24d3b), so its numbering is the kernel's. */
+const sceneOf = (b: { view: BodyView; names: ReturnType<typeof nameBody> }) => joinBodies([{ feature: decodeURIComponent(b.names.feature), view: b.view, names: b.names }]);
+
 async function builtNames(kernel: KernelCalls, doc: DesignDocument) {
   const feature = lastFeature(doc);
   const spec = await featureSpec(kernel, doc, feature);
@@ -393,11 +397,11 @@ test("a selected face keeps its name through an edit that renumbers the kernel's
   const f = index(rightFace, after.names)!;
   assert.ok(close(after.view.face_areas[f], 300) && after.view.face_centroids[f].every((x, k) => close(x, [40, 15, 5][k])));
   // The bottom is a new line: the upright named after the old one is gone; the right's rim and the top stay.
-  const kept = survivors(items, after.names);
+  const kept = survivors(items, sceneOf(after));
   assert.deepEqual(kept, { kept: [rightFace, topFace, rim], dropped: [corner] });
   assert.equal(droppedNote(kept.dropped), `Taken out of the selection: Edge of Side of ${bottom} and Side of ${right}. The edit took them off the body, so they could not be followed.`);
   // The highlight finds each kept item where the kernel put it now.
-  const lit = highlightOf(kept.kept, feature, after.names);
+  const lit = highlightOf(kept.kept, sceneOf(after));
   assert.deepEqual(lit.faces, [index(rightFace, after.names), index(topFace, after.names)]);
   assert.deepEqual(lit.edges, [index(rim, after.names)]);
   // The new upright is named after the new line.
@@ -407,13 +411,13 @@ test("a selected face keeps its name through an edit that renumbers the kernel's
   // √(10² + 30²) = √1000 long, so √1000 × 10 mm², centred half way up its middle (45, 15, 5).
   const moved = movePoint(doc, sketch.id, pointAt(doc.sketches[0], [40, 30])!, 50, 30);
   const third = await builtNames(kernel, moved);
-  assert.deepEqual(survivors(kept.kept, third.names), { kept: kept.kept, dropped: [] });
+  assert.deepEqual(survivors(kept.kept, sceneOf(third)), { kept: kept.kept, dropped: [] });
   const g = index(rightFace, third.names)!;
   assert.ok(close(third.view.face_areas[g], Math.sqrt(1000) * 10) && third.view.face_centroids[g].every((x, k) => close(x, [45, 15, 5][k])));
 
   // The right side deleted: its face and its edges leave the selection, the top's stays.
   const gone = await builtNames(kernel, drawLine(deleteCurve(doc, sketch.id, right), sketch.id, pointAt(s, [40, 0])!, pointAt(s, [40, 30])!).doc);
-  assert.deepEqual(survivors(kept.kept, gone.names), { kept: [topFace], dropped: [rightFace, rim] });
+  assert.deepEqual(survivors(kept.kept, sceneOf(gone)), { kept: [topFace], dropped: [rightFace, rim] });
   // Nothing on the new body is ever named like the deleted side's face.
   assert.ok(!gone.names.faces.includes(`side:${right}`));
 });
@@ -575,6 +579,7 @@ const DESIGN_CAUGHT_BY: Record<Exclude<DesignFault, "leak-bodies">, string> = {
   "no-settle": "the rebuild differs from the model",
   "save-drops-kept": "save and open changed the rebuild",
   "cache-by-feature": "the rebuild differs from a rebuild from scratch",
+  "scene-drops-body": "the rebuild differs from the model",
 };
 
 for (const fault of DESIGN_FAULTS.filter((f): f is Exclude<DesignFault, "leak-bodies"> => f !== "leak-bodies"))
