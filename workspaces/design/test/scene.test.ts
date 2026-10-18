@@ -24,13 +24,13 @@ function meshFor(faces: number, edges: number): DisplayMesh {
   return mesh;
 }
 
-const shown = (feature: string, view: BodyView): ShownBody => {
+const shown = (feature: string, view: BodyView, place = 1): ShownBody => {
   const v = { ...view, mesh: meshFor(view.faces, view.edges) };
-  return { feature, view: v, names: nameBody(feature, v, () => null) };
+  return { feature, place, view: v, names: nameBody(feature, v, () => null) };
 };
 // A box (6 faces, 12 edges) built by feature-1, then a cylinder (3 faces, 2 edges) by feature-4.
 const box = shown("feature-1", BOX_VIEW);
-const cylinder = shown("feature-4", CYLINDER_VIEW);
+const cylinder = shown("feature-4", CYLINDER_VIEW, 2);
 const scene = joinBodies([box, cylinder]);
 
 test("two bodies joined: the second's points, faces and edges come after the first's", () => {

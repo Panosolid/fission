@@ -39,7 +39,7 @@ export function parameterRows(shape: PartKind): ParameterRow[] {
 export const DEFAULT_SIZES: Record<SizeKey, string> = { width: "40", depth: "30", height: "20" };
 const HTML = `
   <h2>Selection</h2>
-  <p id="selection-empty">Nothing selected: click a face or an edge, or Body 1 in the browser.</p>
+  <p id="selection-empty">Nothing selected: click a face or an edge, or a body in the browser.</p>
   <ul id="selection-list" class="selection-list"></ul>
   <p id="selection-note" class="bad" hidden></p>
   <div id="selection-actions" class="verbs" role="group" aria-label="Actions for the selection" hidden></div>
@@ -51,13 +51,14 @@ const HTML = `
     <dt>Feature</dt><dd id="intent">…</dd>
     <dt>Made from</dt><dd id="provenance">…</dd>
   </dl>
-  <h2>Body</h2>
+  <h2 id="body-heading">Body</h2>
   <dl id="stats">
     <dt>Volume</dt><dd id="volume">…</dd>
     <dt>Area</dt><dd id="area">…</dd>
     <dt>Topology</dt><dd id="topology">…</dd>
     <dt>Validation</dt><dd id="status">…</dd>
   </dl>
+  <p id="body-problems" class="bad" hidden></p>
   <p id="stale-note" hidden>Out of date: these numbers are for the last part that built.</p>
   <p id="error"></p>
   <p id="kept-warning" class="kept kept-warning" role="status" hidden></p>
@@ -83,8 +84,9 @@ export interface PropertiesPanel {
   showSelection(rows: readonly SelectionRow[]): void;
   /** Says what the last rebuild took out of the selection ("" hides the note). */
   showSelectionNote(text: string): void;
-  /** The built body's numbers and validation; clears the error line. */
-  showBody(view: BodyView): void;
+  /** A built body's name ("Body 3", the heading), numbers and validation, with its problems listed under them. */
+  showBody(view: BodyView, name: string): void;
+  /** Why the last rebuild failed, or "" once one builds. */
   showError(message: string): void;
   /** An extrude built from its kept shape (step 24d2): what happened and why, or "" for none. */
   showWarning(message: string): void;
@@ -134,14 +136,16 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
       note.textContent = text;
       note.hidden = text === "";
     },
-    showBody(view) {
+    showBody(view, name) {
+      $("body-heading").textContent = name;
       $("volume").textContent = `${fmt(view.volume)} mm³`;
       $("area").textContent = `${fmt(view.area)} mm²`;
       $("topology").textContent = `${view.vertices} V · ${view.edges} E · ${view.faces} F`;
       const status = $("status");
       status.textContent = view.errors.length === 0 ? "valid" : `${view.errors.length} problem(s)`;
       status.className = view.errors.length === 0 ? "ok" : "bad";
-      $("error").textContent = view.errors.join("\n");
+      $("body-problems").textContent = view.errors.join("\n");
+      $("body-problems").hidden = view.errors.length === 0;
     },
     showError(message) {
       $("error").textContent = message;
