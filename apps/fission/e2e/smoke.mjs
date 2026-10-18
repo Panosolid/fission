@@ -1448,7 +1448,11 @@ try {
       for (const [sel, b] of [["#viewport", mainBox], ["#split-viewport", splitBox]]) {
         const c = screenPoint(b, [20, 15, 10]);
         assert.ok(isBody(await pixelAt(sel, c.x, c.y)), `${sel} draws the body`);
-        assert.deepEqual(await pixelAt(sel, b.x + 3, b.y + b.height - 3), [0x14, 0x16, 0x1a], `${sel} corner is background`);
+        // A grid line can cross any one pixel (where depends on the view's size, which the timeline row changed in SF3d), so the
+        // corner is background when any of four pixels 3 to 9 px in is the exact background colour; the body would cover all four.
+        const corner = [];
+        for (const [dx, dy] of [[3, 3], [9, 3], [3, 9], [9, 9]]) corner.push(await pixelAt(sel, b.x + dx, b.y + b.height - dy));
+        assert.ok(corner.some((p) => p.join() === "20,22,26"), `${sel} corner is background: ${JSON.stringify(corner)}`);
       }
       assert.equal(await wide.evaluate(() => document.documentElement.scrollWidth), 1280, "no sideways scroll");
       await wide.screenshot({ path: "e2e/split-1280.png" });
