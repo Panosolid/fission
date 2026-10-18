@@ -48,7 +48,7 @@ export function deleteWords(before: DesignDocument, after: DesignDocument, id: s
   if (users.length === 0) return null;
   const keeps = users.filter((f) => isSketchExtrude(f) && after.kept !== undefined && Object.hasOwn(after.kept, f.id)).map(itemName);
   const fails = users.map(itemName).filter((n) => !keeps.includes(n));
-  const one = (n: string[]) => n.length === 1;
+  const one = (n: readonly unknown[]) => n.length === 1;
   const what = [
     ...(keeps.length > 0 ? [`${listWords(keeps)} ${one(keeps) ? "keeps its last shape and shows a warning" : "keep their last shapes and show a warning"}`] : []),
     ...(fails.length > 0 ? [`${listWords(fails)} ${one(fails) ? "has no shape to keep and fails" : "have no shapes to keep and fail"}`] : []),
