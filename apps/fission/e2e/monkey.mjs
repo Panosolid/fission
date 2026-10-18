@@ -57,11 +57,9 @@ const seedList = (text) => text.split(",").flatMap((part) => {
  * the run fails until the mark is removed (as sketch-tool.mjs's `known`).
  * MONKEY_KNOWN=0 turns every mark off, to see the bug fail.
  */
-const KNOWN_BUGS = process.env.MONKEY_KNOWN === "0" ? {} : {
-  "grid-after-undo": "a grid size typed in a sketch, then Undo before the kernel answers, throws \"Cannot set properties of null (setting 'grid')\"",
-};
+const KNOWN_BUGS = process.env.MONKEY_KNOWN === "0" ? {} : { /* none open */ };
 /** Known bugs that show as an uncaught error, by the error's words. */
-const KNOWN_ERRORS = { "grid-after-undo": /Cannot set properties of null \(setting 'grid'\)/ };
+const KNOWN_ERRORS = {};
 
 class Failure extends Error {
   constructor(check, message) {
