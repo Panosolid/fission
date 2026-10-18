@@ -46,10 +46,15 @@ body { display: flex; flex-direction: column; }
 #viewport { grid-column: 2; grid-row: 2; }
 /* The floating browser: in the viewport's own cell, over it (later in the
    stacking order), as tall as its rows up to the view's buttons; the notes
-   over the view move right of it (notes-strip.css). One workspace on a wide screen only: split
+   over the view move right of it (notes-strip.css). Design's browser (its
+   .browser-fold) has no backdrop and no clicks of its own: its rows are
+   blocks that take them (browser-fold.css), and the view shows and takes
+   clicks between them; other workspaces' browsers keep the solid panel.
+   One workspace on a wide screen only: split
    view keeps its browser columns and phones their Browser toggle. */
 @media (min-width: 641px) {
   #workspace:not([data-split="on"]) #browser { grid-column: 2; z-index: 2; align-self: start; justify-self: start; margin: 8px; width: 240px; max-height: calc(100% - 64px); padding: 6px 10px; gap: 6px; background: rgba(28, 31, 36, 0.92); border: 1px solid #353a43; border-radius: 6px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+  #workspace:not([data-split="on"]) #browser:has(> .browser-fold) { padding: 0; gap: 0; background: none; border: none; box-shadow: none; pointer-events: none; }
 }
 #timeline, #split-timeline { grid-column: 1 / -1; grid-row: 3; min-width: 0; }
 #properties { grid-column: 3; grid-row: 2; width: 300px; border-left: 1px solid #2a2e35; }
