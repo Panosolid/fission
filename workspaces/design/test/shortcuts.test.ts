@@ -15,6 +15,8 @@ test("Design's keys: Escape clears (also in a size field), Copy is Mod+C, L, R, 
     ["sketch-circle", "C", false],
     ["sketch-arc", "A", false],
     ["sketch-tangent", "T", false],
+    // SF4: the keys that start typing a size, never inside a text box (there they type).
+    ...[..."0123456789.-"].map((k) => [`type-size-${k}`, k, false]),
   ]);
 });
 
