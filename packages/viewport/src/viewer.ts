@@ -148,13 +148,29 @@ export class ViewportView {
     this.resizer = new ResizeObserver(() => this.resize());
     this.resizer.observe(container);
     this.resize();
-    this.renderer.setAnimationLoop(() => {
-      this.controls.update();
-      this.bar.canLookAt(!this.image && this.host.sketchPlane() !== null);
-      this.host.frame(this);
-      this.renderer.render(this.host.scene, this.camera);
-      if (!this.image) this.cube.render(this.renderer, this.camera);
-    });
+    this.renderer.setAnimationLoop(this.draw);
+  }
+
+  private draw = () => {
+    this.controls.update();
+    this.bar.canLookAt(!this.image && this.host.sketchPlane() !== null);
+    this.host.frame(this);
+    this.renderer.render(this.host.scene, this.camera);
+    if (!this.image) this.cube.render(this.renderer, this.camera);
+  };
+
+  /**
+   * Stops or restarts drawing this view: off, its canvas, view cube and
+   * navigation bar are hidden and no frame is drawn (a pane showing a
+   * workspace with no 3D view, such as a placeholder), its camera kept as
+   * it was for when it comes back. `data-drawing` is read by the e2e test.
+   */
+  setDrawing(on: boolean) {
+    if ((this.element.dataset.drawing !== "off") === on) return;
+    this.renderer.setAnimationLoop(on ? this.draw : null);
+    for (const el of [this.renderer.domElement, this.cube.element, this.bar.element, this.legend]) el.style.display = on ? "" : "none";
+    if (on) delete this.element.dataset.drawing;
+    else this.element.dataset.drawing = "off";
   }
 
   /** Writes what the viewer shows onto this view's element (read by the e2e test) and lists the overlays in its legend. */
