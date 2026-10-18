@@ -7,9 +7,9 @@ shared vertex count as intersecting, so it flags very sharp corners and
 nearly tangent pieces that never actually meet. This finds the points
 where two pieces of a loop really meet, from the doubles the kernel was
 given, independently of both kernels: the kernel promises none apart from
-the corners consecutive pieces share (kernel/src/ops/profile.rs, which
-also wants non-neighbours at least 1 um apart; that rule is not checked
-here).
+the corners consecutive pieces share, to within LINEAR of them
+(kernel/src/ops/profile.rs, which also wants non-neighbours at least
+1 um apart; that rule is not checked here).
 
 Pieces (pieces.py's ("line", a, b) and ("arc", a, centre, b, r, phi)) are
 rebuilt exactly: an arc of bulge t over chord a->b has its centre on the
@@ -26,6 +26,13 @@ counter-clockwise (t > 0) from a to b runs on its right.
 from mpmath import mp, mpf, sqrt
 
 mp.dps = 50
+
+# The kernel's linear tolerance (kernel/src/tolerance.rs LINEAR, 10 nm):
+# two neighbours meeting within it of the corner they share meet at that
+# corner as far as the kernel can tell, so it is not a crossing (the
+# owner's decision on issue #138, a meeting 0.44 nm from the corner).
+# Non-neighbours get no such allowance anywhere.
+LINEAR = mpf("1e-5")
 
 
 def _x(v):
@@ -129,8 +136,7 @@ def crossings(shape):
                 shared.append(a[2])
             if k == kk and i == 0 and j == n - 1:
                 shared.append(b[2])
-            size = max(abs(v) for v in a[1] + a[2] + b[1] + b[2]) or mpf(1)
             for x in meeting_points(a, b):
-                if all((x[0] - s[0]) ** 2 + (x[1] - s[1]) ** 2 > (mpf(10) ** -30 * size) ** 2 for s in shared):
+                if all((x[0] - s[0]) ** 2 + (x[1] - s[1]) ** 2 > LINEAR ** 2 for s in shared):
                     found.append((k, i, kk, j, (float(x[0]), float(x[1]))))
     return found
