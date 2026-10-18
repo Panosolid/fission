@@ -1,0 +1,24 @@
+/* Deleting a sketch from the browser (delete-ask.ts, step 24e4): the
+   sketch rows' "⋯" button, the small row menu at the pointer, and the box
+   that asks before a used sketch is deleted. Delete in the box is the
+   warning red of something that removes work; Cancel keeps the plain look
+   and has the focus. ":not(#none)" lifts a rule over the base layout's
+   "#workspace button" while every selector still starts with .delete-ask. */
+.delete-ask-row { display: flex; align-items: center; gap: 4px; }
+.delete-ask-row > .tree-row { flex: 1; min-width: 0; }
+.delete-ask-more:not(#none) { padding: 0 6px; min-width: 28px; background: none; border: 1px solid transparent; border-radius: 4px; color: #b5bbc4; cursor: pointer; line-height: 1.4; }
+.delete-ask-more:not(#none):hover, .delete-ask-more:not(#none):focus-visible { border-color: #353a43; color: #e6e9ee; }
+.delete-ask-menu { position: fixed; inset: auto; margin: 0; padding: 4px; min-width: 140px; background: #1c1f24; color: #e6e9ee; border: 1px solid #353a43; border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.delete-ask-menu::backdrop { background: transparent; }
+.delete-ask-menu button:not(#none) { display: block; width: 100%; text-align: left; padding: 6px 10px; background: none; border: none; border-radius: 4px; color: #ff8a8a; font: inherit; cursor: pointer; }
+.delete-ask-menu button:not(#none):hover, .delete-ask-menu button:not(#none):focus-visible { background: #2a2e35; }
+.delete-ask-box { max-width: min(420px, calc(100vw - 32px)); padding: 16px 18px; background: #1c1f24; color: #e6e9ee; border: 1px solid #353a43; border-radius: 8px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
+.delete-ask-box::backdrop { background: rgba(0, 0, 0, 0.5); }
+.delete-ask-box h2 { margin: 0 0 8px; font-size: 1.1em; }
+.delete-ask-box p { margin: 0 0 14px; line-height: 1.45; color: #c4cbd5; }
+.delete-ask-box .delete-ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.delete-ask-box #delete-ask-confirm:not(#none) { background: #6b2328; border-color: #e0656d; font-weight: 600; }
+.delete-ask-box #delete-ask-confirm:not(#none):hover { background: #82292f; }
+@media (max-width: 640px) {
+  .delete-ask-more:not(#none), .delete-ask-menu button:not(#none), .delete-ask-box button:not(#none) { min-height: 44px; min-width: 44px; }
+}
