@@ -3,7 +3,9 @@
 // view runs the full width left of the properties, the timeline is a thin
 // row along the very bottom under the view's own buttons (each item in build
 // order, the rollback marker between two, rolled-back items greyed, a
-// suppressed one crossed out), the browser folds away, and the view bar's
+// suppressed one crossed out), the browser's rows float as compact blocks
+// with the view showing between them and their words readable over a white
+// or black view, the browser folds away, and the view bar's
 // Full screen button goes in and out of full screen. Each layout check is
 // also run on the page with the old layout forced back by a style, and must
 // fail there. Split view keeps its browser columns; a workspace with no
@@ -69,6 +71,64 @@ function checkFloating(m) {
   assert.ok(m.browser.right <= m.viewport.right && m.browser.bottom <= m.bar.y, "the browser stays over the view and clear of its buttons");
   assert.equal(m.atBrowser, "browser", "the browser is on top of the view");
   assert.equal(m.besideBrowser, "canvas", "the part shows right beside it");
+}
+
+/** WCAG's relative luminance of an sRGB colour [r, g, b], channels 0 to 255. */
+function luminance(rgb) {
+  const [r, g, b] = rgb.map((c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+/** WCAG's contrast ratio of two opaque colours, 1 to 21. */
+function contrast(a, b) {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+/** A colour with alpha [r, g, b, a] laid over an opaque one, channel by channel, as the page composites it. */
+const over = ([r, g, b, a], [R, G, B]) => [r * a + R * (1 - a), g * a + G * (1 - a), b * a + B * (1 - a)];
+/** "rgb(1, 2, 3)" or "rgba(1, 2, 3, 0.5)" as [r, g, b, a]. */
+const rgba = (css) => {
+  const [r, g, b, a = 1] = css.match(/[\d.]+/g).map(Number);
+  return [r, g, b, a];
+};
+/** WCAG AA for normal text: the least contrast a row's words may have over the view behind them. */
+const READABLE = 4.5;
+const WHITE = [255, 255, 255];
+const BLACK = [0, 0, 0];
+
+/** The floating browser's title, group and row blocks: their words, colours and boxes, and the panel's own backdrop. */
+const browserBlocks = (page) =>
+  page.evaluate(() => {
+    const panel = document.querySelector("#browser");
+    const blocks = [...panel.querySelectorAll(".browser-fold > summary, .tree summary, .tree-row, .delete-ask-more")].map((el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return { text: el.textContent, leaf: el.classList.contains("tree-row"), color: s.color, background: s.backgroundColor, events: s.pointerEvents, x: r.x, y: r.y, w: r.width, h: r.height, right: r.right };
+    });
+    const p = panel.getBoundingClientRect();
+    return { panel: { background: getComputedStyle(panel).backgroundColor, x: p.x, y: p.y, w: p.width, right: p.right }, blocks };
+  });
+
+/** Every block's words readable over a white and over a black view (the part and the background can be either, in time). */
+function checkReadable({ blocks }) {
+  for (const b of blocks)
+    for (const [name, view] of [["white", WHITE], ["black", BLACK]]) {
+      const c = contrast(rgba(b.color).slice(0, 3), over(rgba(b.background), view));
+      assert.ok(c >= READABLE, `"${b.text}" over a ${name} view: contrast ${c.toFixed(2)} is under ${READABLE}`);
+    }
+}
+
+/** Floating rows: no panel backdrop, each block its own backdrop and clickable, rows sized to their words, the view clickable between them. */
+async function checkFloatingRows(page, { panel, blocks }) {
+  assert.equal(rgba(panel.background)[3], 0, `the panel has no backdrop of its own (${panel.background})`);
+  for (const b of blocks) {
+    assert.ok(rgba(b.background)[3] > 0, `"${b.text}" has a backdrop of its own`);
+    assert.equal(b.events, "auto", `"${b.text}" takes clicks`);
+  }
+  const body = blocks.find((b) => b.text === "Body 1");
+  assert.ok(body.w < panel.w / 2, `the Body 1 row is sized to its words (${body.w} of ${panel.w} px)`);
+  const gap = { x: body.right + 20, y: body.y + body.h / 2 };
+  assert.ok(gap.x < panel.right, "that spot is inside the panel's box");
+  assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName, gap), "CANVAS", "beside a short row, the view takes the click");
 }
 
 /** The timeline row: the very bottom of the window, full width, thin, under the view and its buttons. */
@@ -200,6 +260,56 @@ try {
     assert.equal(await page.$eval("#browser .browser-fold", (d) => d.open), true);
   });
 
+  await check("the contrast sum is right, worked by hand", async () => {
+    // #7e7e7e on white: 126/255 = 0.4941, linear ((0.4941 + 0.055) / 1.055)^2.4 = 0.2086;
+    // (1 + 0.05) / (0.2086 + 0.05) = 4.06, about 0.9 × 4.5, so it must fail the bar.
+    assert.ok(Math.abs(contrast([126, 126, 126], WHITE) - 4.06) < 0.01);
+    assert.ok(contrast([126, 126, 126], WHITE) < READABLE);
+    // #707070: 112/255 = 0.4392, linear 0.1620; 1.05 / 0.2120 = 4.95, about 1.1 × 4.5, so it passes.
+    assert.ok(Math.abs(contrast([112, 112, 112], WHITE) - 4.95) < 0.01);
+    assert.ok(contrast([112, 112, 112], WHITE) >= READABLE);
+    // Laying over: half-opaque black over white is mid grey 127.5 in every channel.
+    assert.deepEqual(over([0, 0, 0, 0.5], WHITE), [127.5, 127.5, 127.5]);
+  });
+
+  await check("the browser's rows float as blocks over the view, readable over white or black", async () => {
+    const found = await browserBlocks(page);
+    await checkFloatingRows(page, found);
+    checkReadable(found);
+    // Worked by hand for the Body 1 row (words #e6e9ee on rgba(28, 31, 36, 0.84)) over a white view:
+    // the backdrop is 0.84 × (28, 31, 36) + 0.16 × 255 = (64.32, 66.84, 71.04), luminance
+    // 0.2126 × 0.0518 + 0.7152 × 0.0559 + 0.0722 × 0.0631 = 0.0556; the words' luminance is
+    // 0.2126 × 0.7913 + 0.7152 × 0.8150 + 0.0722 × 0.8550 = 0.8129; (0.8129 + 0.05) / (0.0556 + 0.05) = 8.17.
+    const body = found.blocks.find((b) => b.text === "Body 1");
+    const c = contrast(rgba(body.color).slice(0, 3), over(rgba(body.background), WHITE));
+    assert.ok(Math.abs(c - 8.17) < 0.02, `Body 1 over white: ${c.toFixed(3)}`);
+    if (shots) await page.screenshot({ path: `${shots}/browser-rows-1280.png` });
+  });
+
+  await check("the row checks fail on a see-through backdrop and on the old solid panel", async () => {
+    // Backdrops at 0.3: over white the words wash out.
+    const faint = await page.addStyleTag({ content: "#workspace #browser .browser-fold:not(#none) { --browser-block: rgba(28, 31, 36, 0.3); }" });
+    const washed = await browserBlocks(page);
+    assert.throws(() => checkReadable(washed), /over a white view/);
+    await faint.evaluate((el) => el.remove());
+    // The panel's old solid backdrop, taking every click over its box.
+    const solid = await page.addStyleTag({ content: "#workspace #browser:not(#none) { background: rgba(28, 31, 36, 0.92); pointer-events: auto; }" });
+    await assert.rejects(async () => checkFloatingRows(page, await browserBlocks(page)), /the panel has no backdrop of its own/);
+    await solid.evaluate((el) => el.remove());
+    await checkFloatingRows(page, await browserBlocks(page));
+  });
+
+  await check("a long browser still scrolls with the wheel over its rows", async () => {
+    await page.setViewportSize({ width: 1280, height: 400 });
+    assert.equal(await page.$eval("#browser", (el) => el.scrollHeight > el.clientHeight), true, "at 400 px tall the rows overflow the panel");
+    await page.$eval("#browser", (el) => (el.scrollTop = 0));
+    const first = await page.$eval("#browser [data-node=timeline] summary", (el) => el.getBoundingClientRect());
+    await page.mouse.move(first.x + 10, first.y + first.height / 2);
+    await page.mouse.wheel(0, 120);
+    await page.waitForFunction(() => document.querySelector("#browser").scrollTop > 0);
+    await page.setViewportSize({ width: 1280, height: 800 });
+  });
+
   await check("Full screen goes in and out of full screen", async () => {
     const full = "#view-controls [data-view=full-screen]";
     assert.equal(await page.getAttribute(full, "aria-pressed"), "false");
@@ -220,6 +330,7 @@ try {
     const m = await measure(page);
     assert.equal(m.browser.x, 0, "the browser is back in its column");
     assert.ok(m.viewport.x >= m.browser.right - 1, "the view starts after it");
+    assert.equal(rgba(await page.$eval("#browser", (el) => getComputedStyle(el).backgroundColor))[3], 1, "in its column the browser keeps its solid backdrop");
     assert.ok(m.timeline.x === 0 && Math.abs(m.timeline.right - m.viewport.right) <= 1, "the timeline spans Design's own pane");
     assert.ok(Math.abs(m.timeline.bottom - m.window.h) <= 1, "still the bottom row");
     assert.equal(await page.$eval("#viewport > .notes-strip", (el) => getComputedStyle(el).left), "8px", "with no browser over it, the notes keep the corner");
@@ -254,6 +365,7 @@ try {
     await phone.tap("#browser-toggle");
     const open = await measure(phone);
     assert.ok(open.browser.bottom <= open.viewport.y + 1, "opened, the browser sits above the view in the column, not over it");
+    assert.equal(rgba(await phone.$eval("#browser", (el) => getComputedStyle(el).backgroundColor))[3], 1, "in the column the browser keeps its solid backdrop");
     await phone.tap("[data-view=full-screen]");
     await phone.waitForFunction(() => document.fullscreenElement === document.documentElement);
     await phone.evaluate(() => document.exitFullscreen());
