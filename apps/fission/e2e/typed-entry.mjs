@@ -159,7 +159,7 @@ await check("1280 px: a 10 mm square typed side by side closes on its first corn
   await page.close();
 });
 
-await check("1280 px: a click with the length locked, a bad size, Escape twice, letters in a box", async () => {
+await check("1280 px: a click with the length locked, a bad size, an angle too big, Escape twice, letters in a box", async () => {
   const page = await fresh();
   await sketch(page);
   await clickPlane(page, [0, 0]);
@@ -190,6 +190,15 @@ await check("1280 px: a click with the length locked, a bad size, Escape twice, 
   assert.equal(await boxesShown(page), true, "the line is still going");
   await hover(page, [20, 20]);
   await previewIs(page, "9,12 20,20");
+  // An angle too big to be a number (400 nines read as Infinity): refused with the reason, no padlock, no NaN preview (re-check N2).
+  await page.focus("#typed-angle");
+  await page.keyboard.insertText("9".repeat(400));
+  assert.equal(await page.getAttribute("#typed-angle", "aria-invalid"), "true");
+  assert.equal(await locked(page, "angle"), false);
+  assert.match(await page.textContent("label[data-field=angle] .typed-entry-error"), /too big for an angle/);
+  await previewIs(page, "9,12 20,20");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.inputValue("#typed-angle"), "");
   await page.keyboard.press("Escape");
   await previewIs(page, "");
   assert.equal(await boxesShown(page), false);

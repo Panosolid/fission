@@ -14,7 +14,7 @@
 // sketch_outline's `invalid`), never from its words.
 
 import { KernelError, type BodyHandle, type BodySpec, type BodyView, type Feature, type KernelCalls, type KernelInput, type Outline } from "@fission/core";
-import { isSketchExtrude, isSketchItem, keptOf, specOf, type DesignDocument, type KeptShape, type Sketch } from "./document.ts";
+import { buildingItems, isSketchExtrude, isSketchItem, keptOf, specOf, type DesignDocument, type KeptShape, type Sketch } from "./document.ts";
 import { sketchCurves } from "./sketch.ts";
 
 /** Why an extrude's sketch gives it no outline (the model's causes). */
@@ -58,8 +58,16 @@ export interface TimelineBuild {
  * without building again, and `keepOnly` frees every other one. One cache
  * per document view; `clear` frees all of it.
  */
+const CLOSED = "Design was closed, so nothing more is built";
+
 export class BodyCache {
   private bodies = new Map<string, { handle: BodyHandle; view?: Promise<BodyView> }>();
+  /** Each kept body's key by its handle, so `view` finds it in one step (security audit S2). */
+  private keys = new Map<BodyHandle, string>();
+  /** Bodies asked of the kernel and not answered yet: the same spec asked again waits for the same answer, so asking ahead never builds twice. */
+  private building = new Map<string, Promise<BodyHandle>>();
+  /** Set by `close`: nothing more is built, and a body answered after it is freed at once, not kept. */
+  private closed = false;
   private kernel: KernelCalls;
   constructor(kernel: KernelCalls) {
     this.kernel = kernel;
@@ -67,17 +75,34 @@ export class BodyCache {
 
   /** The body for `spec`, built once. */
   async body(spec: BodySpec): Promise<BodyHandle> {
+    if (this.closed) throw new Error(CLOSED);
     const key = JSON.stringify(spec);
     const hit = this.bodies.get(key);
     if (hit) return hit.handle;
-    const handle = await this.kernel.call("body_build", spec);
-    this.bodies.set(key, { handle });
-    return handle;
+    const asked = this.building.get(key);
+    if (asked) return asked;
+    const build = this.kernel.call("body_build", spec).then((handle) => {
+      if (this.closed) {
+        // Asked before Design closed (a rebuild asks for every body at once): the kernel would keep it forever.
+        void this.kernel.call("body_free", handle).catch(() => {});
+        throw new Error(CLOSED);
+      }
+      this.bodies.set(key, { handle });
+      this.keys.set(handle, key);
+      return handle;
+    });
+    this.building.set(key, build);
+    try {
+      return await build;
+    } finally {
+      this.building.delete(key);
+    }
   }
 
   /** A kept body's view, asked of the kernel once. */
   view(handle: BodyHandle): Promise<BodyView> {
-    const entry = [...this.bodies.values()].find((b) => b.handle === handle);
+    const key = this.keys.get(handle);
+    const entry = key === undefined ? undefined : this.bodies.get(key);
     if (!entry) throw new Error(`body ${handle} is not in this cache`);
     entry.view ??= this.kernel.call("body_view", handle);
     return entry.view;
@@ -89,12 +114,19 @@ export class BodyCache {
     for (const [key, b] of this.bodies)
       if (!keep.has(b.handle)) {
         this.bodies.delete(key);
+        this.keys.delete(b.handle);
         await this.kernel.call("body_free", b.handle);
       }
   }
 
   clear(): Promise<void> {
     return this.keepOnly([]);
+  }
+
+  /** Design is gone for good: frees every body, and every one still being built once it is answered. */
+  close(): Promise<void> {
+    this.closed = true;
+    return this.clear();
   }
 
   get size(): number {
@@ -131,6 +163,57 @@ async function outlineOf(kernel: KernelCalls, content: KeptShape): Promise<{ out
 /** A sketch's content as it is now, or undefined when it is gone. */
 const contentOf = (doc: DesignDocument, id: string): Sketch | undefined => doc.sketches.find((s) => s.id === id);
 
+/** A document's timeline items and sketches by id (each id's first), so a rebuild looks each up in one step (security audit S2). */
+export interface DocIndex {
+  items: Map<string, Feature>;
+  sketches: Map<string, Sketch>;
+}
+
+export function indexOf(doc: DesignDocument): DocIndex {
+  const items = new Map<string, Feature>();
+  for (const f of doc.timeline.features) if (!items.has(f.id)) items.set(f.id, f);
+  const sketches = new Map<string, Sketch>();
+  for (const s of doc.sketches) if (!sketches.has(s.id)) sketches.set(s.id, s);
+  return { items, sketches };
+}
+
+/**
+ * `kernel` with the outline of every sketch an extrude in `docs` uses (and
+ * every kept shape) asked at once, before anything waits on one: asked one
+ * after another, each waited a round trip to the kernel's worker, which a
+ * busy page stretches to a frame, so a big file took minutes (security
+ * audit S2). The same curves asked again get the same answer; the kernel's
+ * work is the same, only the waiting goes.
+ */
+function outlinesAtOnce(kernel: KernelCalls, docs: DesignDocument[]): KernelCalls {
+  const asked = new Map<string, ReturnType<KernelCalls["call"]>>();
+  const ask = (args: unknown[]) => {
+    const key = JSON.stringify(args);
+    let answer = asked.get(key);
+    if (answer === undefined) {
+      answer = (kernel.call as (op: string, ...a: unknown[]) => ReturnType<KernelCalls["call"]>)("sketch_outline", ...args);
+      answer.catch(() => {}); // a refusal is read by whoever asks for it; one nobody asks for is not an error
+      asked.set(key, answer);
+    }
+    return answer;
+  };
+  const curvesOf = (content: KeptShape) => {
+    const c = sketchCurves({ id: "", points: content.points, curves: content.curves, constraints: [] });
+    return [c.lines, c.circles, c.arcs];
+  };
+  for (const doc of docs) {
+    const { sketches } = indexOf(doc);
+    for (const f of doc.timeline.features) {
+      if (!isSketchExtrude(f)) continue;
+      const content = sketches.get(f.intent.parameters.sketch as string);
+      if (content !== undefined) ask(curvesOf(content));
+      const kept = keptOf(doc, f);
+      if (kept !== undefined) ask(curvesOf(kept));
+    }
+  }
+  return { call: ((op: string, ...args: unknown[]) => (op === "sketch_outline" ? ask(args) : (kernel.call as (op: string, ...a: unknown[]) => unknown)(op, ...args))) as KernelCalls["call"] };
+}
+
 /** Whether a sketch makes an outline now (suppression and the marker don't count): the owner's "lost" is its opposite. */
 async function makesOutline(kernel: KernelCalls, doc: DesignDocument, sketchId: string): Promise<boolean> {
   const content = contentOf(doc, sketchId);
@@ -144,7 +227,9 @@ async function makesOutline(kernel: KernelCalls, doc: DesignDocument, sketchId: 
  * and the extrude has no kept shape yet); one whose sketch makes an
  * outline forgets its kept shape. The same rule as the model's `settle`.
  */
-export async function settleKept(kernel: KernelCalls, before: DesignDocument, after: DesignDocument): Promise<DesignDocument> {
+export async function settleKept(calls: KernelCalls, before: DesignDocument, after: DesignDocument): Promise<DesignDocument> {
+  // Every outline `after` needs asked at once; `before`'s, needed only for a sketch just lost, as they come.
+  const kernel = outlinesAtOnce(calls, [after]);
   const next: Record<string, KeptShape> = {};
   for (const f of after.timeline.features) {
     if (!isSketchExtrude(f)) continue;
@@ -165,14 +250,18 @@ export async function settleKept(kernel: KernelCalls, before: DesignDocument, af
  * every body no feature holds. Sketch items build no body; a solid
  * feature's result is its handle or why it has none.
  */
-export async function rebuildTimeline(doc: DesignDocument, cache: BodyCache, kernel: KernelCalls): Promise<TimelineBuild> {
-  const results: Record<string, FeatureResult> = {};
+export async function rebuildTimeline(doc: DesignDocument, cache: BodyCache, calls: KernelCalls): Promise<TimelineBuild> {
+  const kernel = outlinesAtOnce(calls, [doc]);
+  const index = indexOf(doc);
+  bodiesAtOnce(doc, cache, kernel, index);
+  // No prototype: every id is an entry, even one named like an object's own (results["__proto__"], re-check N1).
+  const results: Record<string, FeatureResult> = Object.create(null);
   const { features, marker } = doc.timeline;
   let rolled = marker === "start";
   for (const f of features) {
     if (rolled) results[f.id] = { status: "rolled-back" };
     else if (f.suppressed) results[f.id] = { status: "suppressed" };
-    else results[f.id] = await buildFeature(doc, f, results, cache, kernel);
+    else results[f.id] = await buildFeature(doc, f, results, cache, kernel, index);
     if (marker === f.id) rolled = true;
   }
   await cache.keepOnly(Object.values(results).flatMap((r) => (r.status === "built" && r.body !== undefined ? [r.body] : [])));
@@ -181,7 +270,27 @@ export async function rebuildTimeline(doc: DesignDocument, cache: BodyCache, ker
 
 const words = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string, FeatureResult>, cache: BodyCache, kernel: KernelCalls): Promise<FeatureResult> {
+/**
+ * Asks the kernel for every body the loop below will build, at once and
+ * in timeline order, without waiting: built one after another, each waited
+ * a round trip, so a big file took minutes (security audit S2). Only the
+ * items that build (`buildingItems`) with a spec that reads are asked, the
+ * very bodies `buildFeature` asks for, so nothing extra is built; the loop
+ * then finds each one asked or answered (`BodyCache.body`). A refusal is
+ * read there, with its words.
+ */
+function bodiesAtOnce(doc: DesignDocument, cache: BodyCache, kernel: KernelCalls, index: DocIndex): void {
+  const building = buildingItems(doc);
+  for (const f of doc.timeline.features) {
+    if (isSketchItem(f) || !building.has(f)) continue;
+    const ask = isSketchExtrude(f)
+      ? extrudeSpec(kernel, doc, f, index).then((made) => ("status" in made ? undefined : cache.body(made.spec)))
+      : Promise.resolve().then(() => cache.body(specOf(doc, f)));
+    ask.catch(() => {});
+  }
+}
+
+async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string, FeatureResult>, cache: BodyCache, kernel: KernelCalls, index: DocIndex): Promise<FeatureResult> {
   if (isSketchItem(f)) return { status: "built" };
   try {
     if (!isSketchExtrude(f)) {
@@ -189,11 +298,11 @@ async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string
       return { status: "built", body: await cache.body(spec), spec };
     }
     const sketchId = f.intent.parameters.sketch as string;
-    const item = doc.timeline.features.find((x) => x.id === sketchId);
+    const item = index.items.get(sketchId);
     const input = done[sketchId];
     if (item !== undefined && input?.status === "suppressed") return { status: "failed", cause: "suppressed-input", input: sketchId, message: `${item.provenance.self.label} is suppressed` };
     if (item !== undefined && input?.status !== "built") return { status: "failed", cause: "failed-input", input: sketchId, message: `${item.provenance.self.label} is not built` };
-    const made = await extrudeSpec(kernel, doc, f);
+    const made = await extrudeSpec(kernel, doc, f, index);
     if ("status" in made) return made;
     return { status: "built", body: await cache.body(made.spec), ...made };
   } catch (e) {
@@ -215,16 +324,16 @@ export interface ExtrudeSpec {
  * is the one place the rule is applied, so Design's view, the Extrude
  * panel and what other workspaces are handed (`featureSpec`) all agree.
  */
-export async function extrudeSpec(kernel: KernelCalls, doc: DesignDocument, f: Feature): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
+export async function extrudeSpec(kernel: KernelCalls, doc: DesignDocument, f: Feature, index: DocIndex = indexOf(doc)): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
   const sketchId = f.intent.parameters.sketch as string;
   const distance = f.intent.parameters.distance as number;
-  const item = doc.timeline.features.find((x) => x.id === sketchId);
+  const item = index.items.get(sketchId);
   const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, { cause, sketch: sketchId, message, curves }, kernel);
   // The extrude's provenance names the sketch it was made from, so a deleted one is still called by its label.
   if (item === undefined) return await lost("deleted-input", `${f.provenance.from.find((r) => r.id === sketchId)?.label ?? sketchId} was deleted`, []);
   // The kernel extrudes along +Z: a sketch on XZ or YZ needs placing, which comes with sketches on other planes (step 26).
   if (item.intent.parameters.plane !== "XY") return { status: "failed", cause: "error", message: `${item.provenance.self.label} is on the ${item.intent.parameters.plane} plane, and only sketches on the XY plane can be extruded so far` };
-  const content = contentOf(doc, sketchId)!;
+  const content = index.sketches.get(sketchId)!;
   const out = await outlineOf(kernel, content);
   // A curve the kernel refused is named in its own words ("line 1 must be …"), as before 24d2; an outline that doesn't close says whose.
   if (!("outline" in out)) return await lost(out.lost, out.refused ? out.message : `${item.provenance.self.label} has no closed outline: ${out.message}`, out.curves);

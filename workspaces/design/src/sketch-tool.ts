@@ -20,7 +20,7 @@
 // chain's first point closes it. Keeping points together after that comes
 // with the sketch constraints (29).
 
-import type { Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
+import type { Feature, Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchArcCurve, SketchLineCurve, SketchPlane } from "./document.ts";
 import { centreClick, centreHover, centrePreview, type CentreArcTool } from "./centre-arc.ts";
 import { drawArc, drawCircle, drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
@@ -514,8 +514,11 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
  * the preview.
  */
 export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null): SketchDrawing[] {
+  // Each sketch's plane from its item, found by id once (security audit S2: a search per sketch took the timeline's length squared).
+  const items = new Map<string, Feature>();
+  for (const f of doc.timeline.features) if (!items.has(f.id)) items.set(f.id, f);
   return doc.sketches.map((s) => {
-    const plane: Plane = planeOf(sketchPlaneOf(doc, s.id));
+    const plane: Plane = planeOf(planeOfItem(items.get(s.id)));
     const curves = sketchCurves(s);
     const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
     if (editing?.tool.sketch !== s.id) return { plane, lines };
@@ -528,9 +531,10 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
 
 /** The plane a sketch is on, from its timeline item. */
 export function sketchPlaneOf(doc: DesignDocument, id: string): SketchPlane {
-  const item = doc.timeline.features.find((f) => f.id === id);
-  return (item?.intent.parameters.plane as SketchPlane | undefined) ?? "XY";
+  return planeOfItem(doc.timeline.features.find((f) => f.id === id));
 }
+
+const planeOfItem = (item: Feature | undefined): SketchPlane => (item?.intent.parameters.plane as SketchPlane | undefined) ?? "XY";
 
 /** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", "2 lines, 1 arc and 1 circle", or "Nothing drawn yet" when empty. */
 export function curveCount(sketch: Sketch): string {

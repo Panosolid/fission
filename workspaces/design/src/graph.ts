@@ -22,9 +22,13 @@ export function changeWords(kind: string, removed = false): string {
 export function syncGraph(graph: DependencyGraph, doc: DesignDocument, before: DesignDocument | null, notes: ChangeNotes): void {
   const changed: { id: string; label: string; kind: string }[] = [];
   // A sketch's item and its content are one node: drawing a line changes the sketch.
-  const content = (d: DesignDocument, x: { id: string }) => (d.sketches.some((s) => s.id === x.id) ? [x, d.sketches.find((s) => s.id === x.id)] : x);
-  const old = new Map<string, unknown>(before ? [...before.profiles, ...before.timeline.features].map((x) => [x.id, content(before, x)]) : []);
-  const differs = (x: { id: string }) => JSON.stringify(old.get(x.id)) !== JSON.stringify(content(doc, x));
+  // Sketches are found by id through a Map, not a search per item (security audit S2).
+  const sketchesOf = (d: DesignDocument) => new Map(d.sketches.map((s) => [s.id, s] as const));
+  const content = (sketches: Map<string, unknown>, x: { id: string }) => (sketches.has(x.id) ? [x, sketches.get(x.id)] : x);
+  const beforeSketches = before ? sketchesOf(before) : new Map();
+  const nowSketches = sketchesOf(doc);
+  const old = new Map<string, unknown>(before ? [...before.profiles, ...before.timeline.features].map((x) => [x.id, content(beforeSketches, x)]) : []);
+  const differs = (x: { id: string }) => JSON.stringify(old.get(x.id)) !== JSON.stringify(content(nowSketches, x));
   for (const p of doc.profiles) {
     graph.set({ id: p.id, label: `Profile ${p.id}`, workspace: "design", cost: "cheap" });
     if (differs(p)) changed.push({ id: p.id, label: `Profile ${p.id}`, kind: "profile" });
@@ -45,10 +49,12 @@ export function syncGraph(graph: DependencyGraph, doc: DesignDocument, before: D
     notes.record({ node: PART_VIEW, label: "Volume, area and mesh", workspace: "design", change: changeWords("part", part === null) }, graph.changed(PART_VIEW), graph);
   // Profiles and features that are gone (their readers were re-pointed above).
   const now = new Set([...doc.profiles, ...doc.timeline.features].map((x) => x.id));
+  const kinds = new Map<string, string>();
+  for (const f of before?.timeline.features ?? []) if (!kinds.has(f.id)) kinds.set(f.id, f.intent.type);
   for (const id of old.keys()) {
     const node = graph.node(id);
     if (now.has(id) || !node) continue;
-    const kind = before?.timeline.features.find((f) => f.id === id)?.intent.type ?? "profile";
+    const kind = kinds.get(id) ?? "profile";
     notes.record({ node: id, label: node.label, workspace: "design", change: changeWords(kind, true) }, graph.remove(id), graph);
   }
 }
