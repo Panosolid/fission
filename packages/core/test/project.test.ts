@@ -13,8 +13,8 @@ test("a version 1 file (before live links) is upgraded, keeping everything else"
   assert.equal(FORMAT_VERSION, 2);
 });
 
-test("files from a newer Fission, and things that are not projects, are refused clearly", () => {
-  assert.throws(() => readProject({ ...emptyProject(), formatVersion: 3 }), /saved by a newer Fission \(format 3; this one reads up to 2\)/);
+test("files from a newer Panoshape, and things that are not projects, are refused clearly", () => {
+  assert.throws(() => readProject({ ...emptyProject(), formatVersion: 3 }), /saved by a newer Panoshape \(format 3; this one reads up to 2\)/);
   assert.throws(() => readProject([]), /expected an object/);
   assert.throws(() => readProject({ name: "x" }), /no format version/);
   assert.throws(() => readProject({ formatVersion: 1.5 }), /no format version/);
@@ -94,10 +94,10 @@ test("bad files are each refused with their own message, never half-read", () =>
   const good = projectToJson({ ...emptyProject(), workspaces: { design: { version: 1 } } });
   const open = (text: string) => projectFromJson(text, [reader("design")]);
   // Truncated: cut the file in half.
-  assert.throws(() => open(good.slice(0, good.length / 2)), /^Error: not a Fission project: the file is not valid JSON \(/);
+  assert.throws(() => open(good.slice(0, good.length / 2)), /^Error: not a Panoshape project: the file is not valid JSON \(/);
   assert.throws(() => open(""), /not valid JSON/);
-  assert.throws(() => open(good.replace('"formatVersion": 2', '"formatVersion": 3')), /saved by a newer Fission \(format 3; this one reads up to 2\)/);
-  assert.throws(() => open(good.replace('"workspaces"', '"workspacez"')), /not a Fission project: "workspaces" is missing/);
+  assert.throws(() => open(good.replace('"formatVersion": 2', '"formatVersion": 3')), /saved by a newer Panoshape \(format 3; this one reads up to 2\)/);
+  assert.throws(() => open(good.replace('"workspaces"', '"workspacez"')), /not a Panoshape project: "workspaces" is missing/);
   assert.throws(() => open(good.replace(/"workspaces": \{[^]*\}\n\}/, '"workspaces": []\n}')), /"workspaces" must be an object/);
   assert.throws(() => open(`"just a string"`), /expected an object/);
   // A workspace refusing its part refuses the whole file, saying which workspace.
@@ -118,7 +118,7 @@ test("save then open gives an equal project (self-consistency)", () => {
 
 test("an outer field of the wrong type is refused, not opened half-broken", () => {
   const p = emptyProject() as unknown as Record<string, unknown>;
-  assert.throws(() => readProject({ ...p, name: 5 }), /not a Fission project: "name" must be text/);
+  assert.throws(() => readProject({ ...p, name: 5 }), /not a Panoshape project: "name" must be text/);
   assert.throws(() => readProject({ ...p, units: {} }), /"units" must give a length unit/);
   assert.throws(() => readProject({ ...p, units: { length: "furlong" } }), /"units" must give a length unit/);
   assert.throws(() => readProject({ ...p, units: null }), /"units" must give a length unit/);
@@ -148,7 +148,7 @@ test("a file nested deeper than MAX_NESTING is refused when opened, since it cou
   const at = (brackets: number) => `{"formatVersion": 2, "links": [], "materials": [], "name": "P", "units": {"length": "mm"}, "workspaces": {"render": ${"[".repeat(brackets)}${"]".repeat(brackets)}}}`;
   assert.equal(MAX_NESTING, 256);
   assert.doesNotThrow(() => projectToJson(projectFromJson(at(MAX_NESTING - 2), [])));
-  assert.throws(() => projectFromJson(at(MAX_NESTING - 1), []), /not a Fission project: project\.workspaces\.render(\[0\]){254} is nested more than 256 deep/);
+  assert.throws(() => projectFromJson(at(MAX_NESTING - 1), []), /not a Panoshape project: project\.workspaces\.render(\[0\]){254} is nested more than 256 deep/);
   // 10,000 deep is past what saving (JSON.stringify) can reach.
   assert.throws(() => projectFromJson(at(10_000), []), /nested more than 256 deep/);
 });
@@ -157,7 +157,7 @@ test("a number too big for a double (read as Infinity) is refused with where it 
   // 1e400 > Number.MAX_VALUE ≈ 1.8e308, so JSON.parse gives Infinity, which
   // no file can hold: opening it would make a project that can't be saved.
   const text = (n: string) => `{"formatVersion": 2, "links": [], "materials": [], "name": "P", "units": {"length": "mm"}, "workspaces": {"render": {"w": ${n}}}}`;
-  assert.throws(() => projectFromJson(text("1e400"), []), /not a Fission project: project\.workspaces\.render\.w is too big a number/);
+  assert.throws(() => projectFromJson(text("1e400"), []), /not a Panoshape project: project\.workspaces\.render\.w is too big a number/);
   assert.throws(() => projectFromJson(text("-1e400"), []), /project\.workspaces\.render\.w is too big a number/);
   assert.equal((projectFromJson(text("1e308"), []).workspaces.render as { w: number }).w, 1e308);
 });

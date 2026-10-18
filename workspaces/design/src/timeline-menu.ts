@@ -15,7 +15,7 @@ import { planDelete, type DeleteQuestion } from "./delete-ask.ts";
 import { barEdit, itemMenu, type MenuEntry } from "./timeline-bar.ts";
 
 /** Why an edit that would leave nothing built is off. */
-export const NO_BODY = "This would leave no body, and Fission can't show a design with no body yet";
+export const NO_BODY = "This would leave no body, and Panoshape can't show a design with no body yet";
 
 /** Whether no solid feature of `doc` builds: the app has nothing to show (`lastFeature` refuses it). */
 export function leavesNoBody(doc: DesignDocument): boolean {

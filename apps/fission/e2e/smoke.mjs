@@ -1147,9 +1147,9 @@ try {
   await check("a file that is not a project is refused with its message, keeping the open part", async () => {
     await page.setInputFiles("#open-file", { name: "half.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 2, "name": "Cut') });
     await page.waitForFunction(() => document.querySelector("#file-status").textContent !== "");
-    assert.match(await text("file-status"), /^Couldn't open “half\.fission\.json”: not a Fission project: the file is not valid JSON/); // the same words as a drop (X6)
+    assert.match(await text("file-status"), /^Couldn't open “half\.fission\.json”: not a Panoshape project: the file is not valid JSON/); // the same words as a drop (X6)
     await page.setInputFiles("#open-file", { name: "new.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 99}') });
-    await page.waitForFunction(() => /newer Fission/.test(document.querySelector("#file-status").textContent));
+    await page.waitForFunction(() => /newer Panoshape/.test(document.querySelector("#file-status").textContent));
     assert.equal(await text("volume"), "37,500 mm³");
     assert.equal(await page.inputValue("#height"), "25");
   });
@@ -1308,7 +1308,7 @@ try {
       // Not a blank app: the default part, and the message in full.
       await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       const message = await phone.textContent("#file-status");
-      assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a Fission project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
+      assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a Panoshape project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
       const notice = await phone.$eval("#file-notice", (el) => ({ ...el.getBoundingClientRect().toJSON(), cut: el.scrollWidth > el.clientWidth }));
       assert.ok(notice.width > 0 && notice.left >= 0 && notice.right <= 375 && !notice.cut, JSON.stringify(notice));
       assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");

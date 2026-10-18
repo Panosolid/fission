@@ -1,4 +1,4 @@
-// Browser check of the guide (How Fission works): opened from the top bar's
+// Browser check of the guide (How Panoshape works): opened from the top bar's
 // Guide button (inside Menu at 375 px) and from a ?guide link; Next walks
 // through every chapter in order and each chapter's 3D scene really draws
 // (the stage with the canvas differs from the stage with it hidden); keys

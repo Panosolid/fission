@@ -15,7 +15,7 @@ test("the physical limits are the kernel's modelling range", () => {
 test("smallest pixel: 0.9× is refused, 1.1× is allowed", () => {
   checkMmPerPixel(MIN_MM_PER_PIXEL * 1.1, 1, 1);
   checkMmPerPixel(MIN_MM_PER_PIXEL, 1, 1);
-  assert.match(refusal(() => checkMmPerPixel(MIN_MM_PER_PIXEL * 0.9, 1, 1)).message, /smaller than the smallest size Fission models/);
+  assert.match(refusal(() => checkMmPerPixel(MIN_MM_PER_PIXEL * 0.9, 1, 1)).message, /smaller than the smallest size Panoshape models/);
 });
 
 test("largest image: 0.9× of 1 km is allowed, 1.1× is refused", () => {
