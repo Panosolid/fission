@@ -14,7 +14,7 @@ import { XY_PLANE } from "@fission/core";
 import { curvePoints, insertItem, isSketchItem, shown, type DesignDocument, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
 
 /** The undo step each sketch edit is recorded as. */
-export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", tangent: "Draw tangent arc", delete: "Delete line", move: "Move point" } as const;
+export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", centre: "Draw centre arc", tangent: "Draw tangent arc", delete: "Delete line", move: "Move point" } as const;
 
 /**
  * Each origin plane's frame: the sketch's x along `xAxis`, its y along
