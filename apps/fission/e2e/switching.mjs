@@ -123,7 +123,7 @@ try {
     const page = await fresh(1400);
     try {
       await page.click("#split-toggle");
-      await page.waitForFunction(() => document.body.dataset.split === "render");
+      await page.waitForFunction(() => document.body.dataset.split === "image");
       for (const id of ["image", "slice", "render"]) {
         await page.selectOption("#split-choice", id);
         await page.waitForFunction((id) => document.body.dataset.split === id, id);

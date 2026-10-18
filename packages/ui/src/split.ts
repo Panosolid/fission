@@ -3,6 +3,8 @@
 export interface SplitEntry {
   id: string;
   title: string;
+  /** A workspace not built yet: its pane says "Coming soon" and draws no 3D view. */
+  placeholder?: boolean;
 }
 
 /**
@@ -15,9 +17,10 @@ export function splitChoices<T extends SplitEntry>(entries: readonly T[], shown:
   return entries.filter((e) => e.id !== shown);
 }
 
-/** The second pane's workspace when Split is opened: the first one offered. */
+/** The second pane's workspace when Split is opened: the first working one offered, or the first one when only placeholders are left. */
 export function defaultSplit<T extends SplitEntry>(entries: readonly T[], shown: string | null): T | undefined {
-  return splitChoices(entries, shown)[0];
+  const choices = splitChoices(entries, shown);
+  return choices.find((e) => !e.placeholder) ?? choices[0];
 }
 
 /** The narrowest window that offers Split (theme.css hides it below this): two viewports beside two 240 px panel columns. */

@@ -41,11 +41,12 @@
       <aside id="properties" aria-label="Properties"></aside>
       <section id="split" aria-label="Second workspace" hidden>
         <div id="split-toolbar" role="toolbar" aria-label="Tools of the second workspace"></div>
+        <div id="split-bar">
+          <label><span class="split-bar-label">Beside it</span> <select id="split-choice" title="The workspace in the second pane"></select></label>
+          <button id="split-close" type="button" title="Back to one workspace">Close split</button>
+        </div>
         <div id="split-viewport">
-          <div id="split-bar">
-            <label>Beside it <select id="split-choice" title="The workspace in the second pane"></select></label>
-            <button id="split-close" type="button" title="Back to one workspace">Close split</button>
-          </div>
+          <div class="split-soon" role="status" hidden></div>
         </div>
         <aside id="split-browser" aria-label="Browser of the second workspace"></aside>
         <aside id="split-properties" aria-label="Properties of the second workspace"></aside>
