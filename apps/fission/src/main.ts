@@ -134,7 +134,6 @@ function notesStrip(host: HTMLElement): HTMLElement {
   return strip;
 }
 const notesStrips = { main: notesStrip($("viewport")), split: notesStrip($("split-viewport")) };
-notesStrips.split.classList.add("in-split"); // below the split bar
 const drawn = new WeakMap<HTMLElement, string>();
 /** Draws `notes` in `strip`, keeping open any "Why?" the user opened; nothing changes when nothing would. */
 function drawNotes(strip: HTMLElement, notes: ChangeNote[]) {
@@ -170,7 +169,9 @@ function useGraph(graph: DependencyGraph, notes: ChangeNotes) {
 useGraph(ctx.graph, ctx.changeNotes);
 // For the browser test only (?test-hooks): the graph and notes, so it can
 // stand in a result in another workspace before any workspace makes one;
-// the main view's camera, to check navigation (SF3a).
+// the main view's camera, to check navigation (SF3a); split view's second
+// view, to check its camera and to break its "no 3D view" on purpose; how
+// many bodies the kernel holds (the monkey tester's leak check).
 if (new URLSearchParams(location.search).has("test-hooks"))
   Object.assign(window, {
     fissionTest: {
@@ -181,6 +182,8 @@ if (new URLSearchParams(location.search).has("test-hooks"))
         return ctx.changeNotes;
       },
       camera: () => viewer.main.cameraPose(),
+      splitView: () => split?.view ?? null,
+      bodyCount: () => kernel.call("body_count"),
     },
   });
 
@@ -278,8 +281,8 @@ $("community").addEventListener("click", () => show("community"));
 // Close split, or a window too narrow for two, goes back to one. The
 // second workspace gets slots of its own and a pane over a second view;
 // the project, selection, history and registries are the first one's.
-let split: { id: WorkspaceId; view: ViewportView; viewport: SharedViewport } | null = null;
-const splitEntries = workspaces.map((w) => ({ id: w.id, title: w.title }));
+let split: { id: WorkspaceId; view: ViewportView; viewport: SharedViewport; settled: boolean; framed: boolean } | null = null;
+const splitEntries = workspaces.map((w) => ({ id: w.id, title: w.title, placeholder: w.status === "placeholder" }));
 const shownWorkspace = () => (current === "community" ? null : current);
 /** What a workspace in `pane` sees: its own slots and that pane's viewport; the project, selection, history and registries are the one set. */
 function paneCtx(pane: PaneId, slots: Slots): WorkspaceContext {
@@ -339,25 +342,58 @@ function mountSplitPane(id: WorkspaceId) {
   if (!split) {
     $("split").hidden = false;
     $("workspace").dataset.split = "on";
+    $("workspace").classList.add("split-view"); // styles/split-view.css
     const view = viewer.addView($("split-viewport"));
     const viewport = pane(view);
     // The new view framed the body at home before the grid had settled its
     // size; frame it again once it has (the view's own resize runs first,
-    // as its observer was registered first).
+    // as its observer was registered first), or, while the pane shows no 3D
+    // view (Image's 2D view, a placeholder), when a 3D workspace comes in.
     const settled = new ResizeObserver(([entry]) => {
       if (!entry || entry.contentRect.width === 0 || split?.view !== view) return;
       settled.disconnect();
-      view.fit();
+      split.settled = true;
+      frameSplit();
     });
     settled.observe($("split-viewport"));
-    split = { id, view, viewport };
+    split = { id, view, viewport, settled: false, framed: false };
   }
   split!.id = id;
   pool.show("split", id);
+  showSoon(workspace);
   document.body.dataset.split = id; // read by the e2e test
   $("split-toggle").setAttribute("aria-pressed", "true");
   fillSplitChoice();
   showNotes();
+}
+/**
+ * A workspace not built yet gets no 3D view in the second pane: the view
+ * stops drawing (its camera kept for the next workspace there) and the
+ * pane shows its name and "Coming soon" with what its page says it will
+ * do; a working workspace gets the view back.
+ */
+function showSoon(workspace: WorkspacePlugin) {
+  const soon = $("split-viewport").querySelector<HTMLElement>(".split-soon")!;
+  const placeholder = workspace.status === "placeholder";
+  split!.view.setDrawing(!placeholder);
+  $("workspace").dataset.splitPane = placeholder ? "placeholder" : "workspace";
+  soon.hidden = !placeholder;
+  if (!placeholder) {
+    frameSplit();
+    return soon.replaceChildren();
+  }
+  const page = $("split-properties").querySelector(".placeholder");
+  if (page) soon.replaceChildren(page.cloneNode(true));
+  else soon.innerHTML = `<div class="placeholder"><h2></h2><p class="coming-soon">Coming soon</p></div>`;
+  if (!page) soon.querySelector("h2")!.textContent = workspace.title;
+}
+/** Frames the second view at home once, the first time it shows in 3D at its settled size. */
+function frameSplit() {
+  if (!split || split.framed || !split.settled) return;
+  const { dataset } = split.view.element;
+  if (dataset.image !== undefined || dataset.drawing === "off") return;
+  split.view.fit();
+  split.framed = true;
 }
 function closeSplit() {
   if (!split) return;
@@ -367,6 +403,11 @@ function closeSplit() {
   split = null;
   $("split").hidden = true;
   $("workspace").dataset.split = "off";
+  $("workspace").classList.remove("split-view");
+  delete $("workspace").dataset.splitPane;
+  const soon = $("split-viewport").querySelector<HTMLElement>(".split-soon")!;
+  soon.hidden = true;
+  soon.replaceChildren();
   document.body.dataset.split = "";
   $("split-toggle").setAttribute("aria-pressed", "false");
   showNotes();
@@ -386,6 +427,18 @@ function closeSplit() {
     toggle.focus();
   });
   $("workspace").dataset.split = "off";
+  // A half-width toolbar scrolls sideways (styles/split-view.css): the
+  // mouse wheel scrolls it too, as a wheel has no sideways turn.
+  $("workspace").addEventListener(
+    "wheel",
+    (e) => {
+      const bar = (e.target as Element).closest<HTMLElement>(".split-view #toolbar, .split-view #split-toolbar");
+      if (!bar || e.deltaX !== 0 || e.deltaY === 0 || bar.scrollWidth <= bar.clientWidth) return;
+      bar.scrollLeft += e.deltaY;
+      e.preventDefault();
+    },
+    { passive: false },
+  );
   const wide = matchMedia(`(min-width: ${SPLIT_MIN_WIDTH_PX}px)`);
   wide.addEventListener("change", () => {
     if (!wide.matches) closeSplit();

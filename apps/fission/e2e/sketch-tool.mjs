@@ -264,6 +264,26 @@ try {
     await page.context().close();
   });
 
+  await check("a grid size the kernel judges after Undo closed the sketch is dropped with no error", async () => {
+    // Found by the monkey tester (seed 5, e2e/regressions/monkey-grid-after-undo.json): Undo while the
+    // kernel judged a typed grid size closed the sketch, then the answer threw "Cannot set properties of null (setting 'grid')".
+    const page = await fresh();
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+    await page.evaluate(() => ((window.kernelDelay = 400), (window.kernelHeld = 0)));
+    await page.fill("#sketch-grid", "0.5");
+    await page.press("#sketch-grid", "Enter");
+    await until(page, () => window.kernelHeld > 0, null, "the grid size sent to the kernel");
+    await page.click("#undo");
+    assert.equal(await data(page, "sketching"), "false", "Undo took the new sketch away");
+    const before = errors.length;
+    await page.waitForTimeout(800); // the held answer arrives (400 ms) with the sketch gone
+    assert.deepEqual(errors.slice(before), [], "no error when the late answer arrives");
+    assert.equal(await data(page, "sketching"), "false", "the late answer opened nothing");
+    await page.context().close();
+  });
+
   await check("at 375 px wide with taps: the prompt, the plane, a closed triangle, Undo, and nothing wider than the screen", async () => {
     const page = await fresh(375, true);
     await page.tap("#create-sketch");

@@ -13,7 +13,7 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { bodyFeatures, browserTree, type BrowserNode } from "./browser.ts";
+import { bodyFeatures, browserTree, rowReference, type BrowserNode } from "./browser.ts";
 import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
@@ -23,8 +23,7 @@ import { chooseEntry, menuEntries, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
-import { bodyReference, profileReference } from "./references.ts";
-import { droppedNote, highlightOf, selectionRows, survivors } from "./selection.ts";
+import { droppedNote, highlightOf, panelBody, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene } from "./scene.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
@@ -113,13 +112,6 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
 
 /** Browser groups the user folded, kept across rebuilds and workspace switches. */
 const folded = new Set<string>();
-
-/** The browser rows that stand for selectable geometry, and the reference each selects. */
-function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  const body = /^body-(\d+)$/.exec(node);
-  if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodyFeatures(doc)[Number(body[1]) - 1]);
-  return doc.profiles.some((p) => p.id === node) ? profileReference(node) : null;
-}
 
 /** Lights the browser rows whose geometry is selected (aria-current), and only those. */
 function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly GeometryReference[]) {
@@ -263,6 +255,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.showSelection(highlightOf(items, lastScene));
     lightRows(ctx.browser, doc, items);
     panel.showSelection(selectionRows(items, lastScene, doc.profiles));
+    // The Feature and Body sections describe the selected body (else the last one), with the browser's number for it.
+    const focus = panelBody(items, lastScene);
+    const feature = focus && doc.timeline.features.find((f) => f.id === focus.feature);
+    panel.showFeature(feature ?? lastFeature(doc));
+    if (focus && feature) panel.showBody(focus.view, `Body ${focus.place}`);
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -290,10 +287,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return next;
   });
   /**
-   * Every body the timeline built, joined for drawing (scene.ts, 24d3b),
-   * the part's (the last solid feature's) view for the panel and, when a
-   * body is built from a kept shape, the warning (the last such); or
-   * throws why the part has no body.
+   * Every body the timeline built, joined for drawing (scene.ts, 24d3b)
+   * and, when a body is built from a kept shape, the warning (the last
+   * such); or throws why the part (the last solid feature) has no body.
    */
   async function buildPart(doc: DesignDocument) {
     const feature = lastFeature(doc);
@@ -308,7 +304,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const r = build.results[f.id];
       if (r.status === "built" && r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
     }
-    return { view: drawn[drawn.length - 1].view, scene: joinBodies(drawn), kept };
+    return { scene: joinBodies(drawn), kept };
   }
   /** The part built from a kept shape (the owner's rule): shown on its timeline row and, once the sketch is finished, in the panel. */
   let keptNow: { feature: string; label: string; warning: KeptWarning } | undefined;
@@ -485,14 +481,12 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     drawSketches();
     showSelection();
     markStale();
-    const feature = lastFeature(doc);
-    panel.showFeature(feature);
     try {
       const { current, value } = await build(doc);
       if (!current) return;
       if (!shown) return void (missed = true);
       missed = false;
-      const { view, scene } = value;
+      const { scene } = value;
       keptNow = value.kept;
       showKept();
       showFailed(doc);
@@ -511,7 +505,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         viewport.element.dataset.fits = String(++fits);
       }
       framedKind = kind;
-      panel.showBody(view);
+      panel.showError("");
       // Faces and edges the edit took off the body leave the selection, with a
       // note (17e); the rest follow their names, however the kernel numbers them now.
       const { kept, dropped } = survivors(ctx.selection.items, scene, doc.profiles.map((p) => p.id));
@@ -685,6 +679,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** A grid size typed: the kernel judges it (snapping 0, 0 to it); a refused one keeps the grid and says why. */
   async function setGrid(typed: string) {
     if (mode.kind !== "edit" || !editingSketch) return;
+    const sketch = editingSketch;
     const grid = Number(typed);
     try {
       if (typed.trim() === "" || !Number.isFinite(grid)) throw new Error("Type the grid size in mm.");
@@ -692,10 +687,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     } catch (e) {
       return sketchBox.showError(e instanceof Error ? e.message : String(e));
     }
-    if (mode.kind !== "edit") return;
+    // The kernel answered after an Undo, Escape or Finish put this sketch away: the size is for a sketch no longer open.
+    if (mode.kind !== "edit" || editingSketch !== sketch) return;
     sketchBox.showError("");
-    mode.grid = editingSketch.grid = grid;
-    editingSketch.typed = typed;
+    mode.grid = sketch.grid = grid;
+    sketch.typed = typed;
     drawSketches();
   }
 

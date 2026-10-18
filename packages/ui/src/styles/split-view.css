@@ -1,0 +1,33 @@
+/* Split view (X3) while it is on (the shell puts .split-view on #workspace;
+   the grid itself is in theme.css). Each pane's toolbar is half the width,
+   so it keeps to one row and scrolls sideways inside itself, as at phone
+   width, rather than wrapping into rows that would leave a tall empty band
+   over the other pane (both toolbars share the top row). */
+.split-view #toolbar, .split-view #split-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; padding: 4px 8px; }
+.split-view .tool-group { flex-wrap: nowrap; flex-shrink: 0; }
+.split-view #toolbar button, .split-view #split-toolbar button { white-space: nowrap; padding: 5px 8px; }
+/* The second pane's choice and Close split end the toolbar row, over that
+   pane's 240 px panel column, instead of floating over its view; with no
+   toolbar in the pane they take the pane's whole row. "Beside it" is read
+   out, not shown: the choice shows the pane's name. Close split stands in
+   for the Split button, hidden meanwhile. ":not(#none)" lifts a rule over
+   theme.css's split view while every selector starts with .split-view. */
+.split-view #split-toolbar:not(#none):not(#none2) { grid-column: 3; }
+.split-view #split-bar:not(#none) { position: static; z-index: auto; grid-column: 4; grid-row: 1; justify-content: flex-end; max-width: 240px; box-sizing: border-box; padding: 4px 8px; background: #1c1f24; border-bottom: 1px solid #2a2e35; border-radius: 0; white-space: nowrap; }
+.split-view #split:has(#split-toolbar:empty) #split-bar:not(#none) { grid-column: 3 / 5; max-width: none; border-left: 2px solid #2a2e35; }
+.split-view #split-bar label { flex: 1; min-width: 0; }
+.split-view #split:has(#split-toolbar:empty) #split-bar label { flex: 0 1 auto; }
+.split-view #split-bar .split-bar-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.split-view #split-toggle:not(#none) { display: none; }
+/* Each view is narrower: its navigation bar wraps rather than spilling past the view's edges. */
+.split-view .view-controls { flex-wrap: wrap; justify-content: center; width: max-content; }
+.split-view .view-controls button.nav-button:not(#none) { min-width: 28px; padding: 0 4px; }
+
+/* A workspace not built yet in the second pane: no 3D view (the shell stops
+   drawing it), its name and "Coming soon" in the middle of the pane
+   instead, and its properties column, which would say the same, hidden. */
+.split-view .split-soon { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; overflow-y: auto; }
+.split-view .split-soon[hidden] { display: none; }
+.split-view .split-soon > * { max-width: 420px; width: 100%; }
+.split-view .split-soon h2 { font-size: 22px; }
+.split-view[data-split-pane="placeholder"] #split-properties { display: none; }
