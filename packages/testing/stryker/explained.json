@@ -103,5 +103,12 @@
     "original": "typeof end !== \"string\"",
     "replacement": "false",
     "why": "The points set holds only text ids, so has() is false for a line end that is not text and the same message follows."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "EqualityOperator",
+    "original": "there > i",
+    "replacement": "there >= i",
+    "why": "there === i means the extrude names its own id as its sketch; that item is the extrude itself, not a sketch, so the isSketchItem half refuses it with the same message."
   }
 ]

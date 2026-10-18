@@ -134,8 +134,6 @@ export const DESIGN_FAULTS: readonly DesignFault[] = [
 ];
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
-/** The messages a design with no body is refused with until 24d3 shows one. */
-const NOTHING_BUILT = /Design data (builds no body|has no part|has no timeline)/;
 
 /** The model's shape and curve ids of each sketch, by Design id: how model curve k and corner k are found in Design's sketch. */
 type Meta = Record<string, { shape: ModelShape; curves: (string | null)[] }>;
@@ -422,13 +420,8 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
       return save(rest);
     },
     open(text) {
-      let doc: DesignDocument;
-      try {
-        doc = projectFromJson(text, DESIGN).workspaces.design as DesignDocument;
-      } catch (e) {
-        if (NOTHING_BUILT.test(String(e))) return "nothing built";
-        throw e;
-      }
+      // A design with nothing built opens too (24f4).
+      const doc = projectFromJson(text, DESIGN).workspaces.design as DesignDocument;
       state = { doc, meta: state.meta };
       undo = [];
       redo = [];

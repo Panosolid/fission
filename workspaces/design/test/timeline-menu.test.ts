@@ -3,9 +3,11 @@
 // with and without a marker and a suppressed item, is refused with its
 // words or recorded as exactly one undo step (one Undo gives back the
 // document before it, byte for byte, one Redo the one after); a delete
-// asks first exactly when something is built from the item; an edit that
-// would leave no body is off. Bugs planted in the wiring (test plan point
-// 3, "suppress recorded as two undo steps" among them) are each caught.
+// asks first exactly when something is built from the item; what is
+// recorded is the edit's own document. From 24f4 an edit that leaves no
+// body is on like any other (the app shows a design with no body). Bugs
+// planted in the wiring (test plan point 3, "suppress recorded as two undo
+// steps" among them) are each caught.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -14,12 +16,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHistory, type KernelCalls } from "@fission/core";
-import { partDocument, type DesignDocument } from "../src/document.ts";
+import { partDocument, partFeature, type DesignDocument } from "../src/document.ts";
 import { addSketch, drawRectangle } from "../src/sketch.ts";
 import { extrudeSketch } from "../src/extrude.ts";
 import { deleteItem, moveMarker, suppressItem } from "../src/timeline-edits.ts";
 import * as menu from "../src/timeline-menu.ts";
-import type { DeleteQuestion } from "../src/delete-ask.ts";
+import { planDelete, type DeleteQuestion } from "../src/delete-ask.ts";
+import { barEdit, itemMenu } from "../src/timeline-bar.ts";
 
 /** The box (feature-1), Sketch 1 (sketch-2: a 40 × 30 rectangle, ids 3 to 10) and Extrude 1 of it (feature-11), as in delete-ask.test.ts. */
 function part(): DesignDocument {
@@ -82,40 +85,44 @@ test("hand-worked: the menu of each item of the box, Sketch 1 and Extrude 1, wit
   assert.equal(menu.menuEntries(d, "feature-11")[0].off, "The marker is already here");
 });
 
-test("hand-worked: with the box suppressed, an edit that leaves nothing built is off with the reason, the rest stay on", () => {
+test("hand-worked (24f4): with the box suppressed, the edits that leave no body are on, and each records one step whose design has no body", async () => {
   const d = suppressItem(part(), "feature-1", true);
-  // Extrude 1 is the only body. Suppressing it, suppressing Sketch 1 (it
-  // fails) or the marker after Sketch 1 (it is rolled back) leaves none.
-  const off = (id: string, action: string) => menu.menuEntries(d, id).find((e) => e.action === action)!.off;
-  assert.equal(off("feature-11", "suppress"), menu.NO_BODY);
-  assert.equal(off("sketch-2", "suppress"), menu.NO_BODY);
-  assert.equal(off("sketch-2", "marker"), menu.NO_BODY);
-  // The marker after the suppressed box: it builds nothing and Extrude 1 is rolled back.
-  assert.equal(off("feature-1", "marker"), menu.NO_BODY);
-  // Unsuppressing the box brings a second body: on.
+  // Extrude 1 is the only body. Suppressing it, suppressing Sketch 1 (its
+  // extrude then fails), the marker after Sketch 1 (Extrude 1 rolled back)
+  // or after the suppressed box (it builds nothing, Extrude 1 rolled back)
+  // each leaves none. Until 24f4 these four were off; now every one is on.
+  const leaving: [string, "suppress" | "marker", string][] = [
+    ["feature-11", "suppress", "Suppress Extrude 1"],
+    ["sketch-2", "suppress", "Suppress Sketch 1"],
+    ["sketch-2", "marker", "Move the rollback marker"],
+    ["feature-1", "marker", "Move the rollback marker"],
+  ];
+  for (const [id, action, step] of leaving) {
+    assert.equal(menu.menuEntries(d, id).find((e) => e.action === action)!.off, null, `${action} on ${id}`);
+    const t = host(menu, d);
+    await t.run(id, action);
+    assert.deepEqual(t.log.records, [step]);
+    assert.deepEqual(t.log.refused, []);
+    assert.equal(partFeature(t.doc()), null, `${step} leaves no body`);
+    // One Undo gives the body back.
+    t.history.undo();
+    assert.equal(partFeature(t.doc())?.id, "feature-11");
+  }
+  // Unsuppressing the box brings a second body: on, as always.
   assert.deepEqual(menu.menuEntries(d, "feature-1")[1], { action: "unsuppress", label: "Unsuppress", off: null });
-  // Delete is judged when chosen (below), never here.
-  assert.equal(off("feature-11", "delete"), null);
 });
 
-test("leavesNoBody: true only when no solid feature builds", () => {
-  const d = part();
-  assert.equal(menu.leavesNoBody(d), false);
-  assert.equal(menu.leavesNoBody(moveMarker(d, "start")), true);
-  assert.equal(menu.leavesNoBody(moveMarker(d, "feature-1")), false);
-  assert.equal(menu.leavesNoBody(suppressItem(suppressItem(d, "feature-1", true), "feature-11", true)), true);
-  // A suppressed sketch fails its extrude: with the box suppressed too, nothing builds.
-  assert.equal(menu.leavesNoBody(suppressItem(suppressItem(d, "feature-1", true), "sketch-2", true)), true);
-});
-
-/** The designs every entry is tried on: no marker, the marker after Sketch 1, the box suppressed, an unused Sketch 2 last, the marker at the start of a design with a box after it isn't possible (nothing built), so the marker on the box. */
+/** The designs every entry is tried on: no marker, the marker after Sketch 1 or the box or at the start (nothing built, 24f4), the box suppressed, Sketch 1 suppressed, both solids suppressed (nothing built), an unused Sketch 2 last, and only sketches left. */
 const DESIGNS: [string, () => DesignDocument][] = [
   ["no marker", part],
   ["marker after Sketch 1", () => moveMarker(part(), "sketch-2")],
   ["marker after the box", () => moveMarker(part(), "feature-1")],
+  ["marker at the start", () => moveMarker(part(), "start")],
   ["box suppressed", () => suppressItem(part(), "feature-1", true)],
   ["Sketch 1 suppressed", () => suppressItem(part(), "sketch-2", true)],
+  ["both solids suppressed", () => suppressItem(suppressItem(part(), "feature-1", true), "feature-11", true)],
   ["unused Sketch 2 last", withSketch2],
+  ["only sketches left", () => deleteItem(deleteItem(withSketch2(), "feature-11"), "feature-1")],
 ];
 const ACTIONS = ["marker", "suppress", "unsuppress", "delete"] as const;
 
@@ -129,7 +136,7 @@ async function everyEntry(m: Menu): Promise<string | null> {
           const t = host(m, make(), closed);
           const before = json(t.doc());
           const where = `${name}, outlines ${closed ? "closed" : "open"}, ${action} on ${id}`;
-          const entry = menu.menuEntries(t.doc(), id).find((e) => e.action === action);
+          const entry = m.menuEntries(t.doc(), id).find((e) => e.action === action);
           await t.run(id, action);
           t.log.confirm?.();
           const after = json(t.doc());
@@ -137,16 +144,26 @@ async function everyEntry(m: Menu): Promise<string | null> {
             if (t.log.records.length > 0) return `${where}: recorded an entry the menu doesn't offer`;
             continue;
           }
+          // An entry is off only for the bar's own reasons (24f2's itemMenu): never for leaving no body (24f4).
+          const own = itemMenu(make(), id, null).find((e) => e.action === action)?.off ?? null;
+          if (entry.off !== own) return `${where}: off with "${entry.off}", which the bar's menu doesn't say`;
           if (entry.off !== null) {
             if (t.log.records.length > 0 || after !== before) return `${where}: an off entry recorded ${t.log.records.join(", ")}`;
             if (t.log.refused[0] !== entry.off) return `${where}: refused with "${t.log.refused[0]}", not its words "${entry.off}"`;
             continue;
           }
+          // What the edit makes: barEdit's document, or for a delete planDelete's settled one (the same before as the menu used).
+          const r = barEdit(make(), { kind: "menu", id, action }, null);
+          const want = action === "delete" ? json((await planDelete(kernel(closed), make(), id)).next) : r.kind === "edit" ? json(r.doc) : before;
+          if (r.kind === "refused") {
+            if (t.log.records.length > 0 || t.log.refused[0] !== r.message) return `${where}: a refused edit went "${t.log.refused[0]}" with ${t.log.records.length} records`;
+            continue;
+          }
+          if (after !== want) return `${where}: did not record the edit's document (${t.log.records.length} records${t.log.refused.length ? `, refused "${t.log.refused[0]}"` : ""})`;
           if (after === before) {
             if (t.log.records.length > 0) return `${where}: recorded a step that changed nothing`;
             continue;
           }
-          if (menu.leavesNoBody(t.doc())) return `${where}: recorded a design with no body`;
           const used = make().timeline.features.some((f) => f.dependsOn.includes(id));
           if (action === "delete" && (t.log.asked.length > 0) !== used) return `${where}: ${used ? "a used item deleted without asking" : "asked for an unused item"}`;
           if (t.history.undo() === null || json(t.doc()) !== before) return `${where}: one Undo did not give back the document before (${t.log.records.length} records)`;
@@ -158,7 +175,7 @@ async function everyEntry(m: Menu): Promise<string | null> {
   return null;
 }
 
-test("every entry of every item on six designs: refused with its words, or exactly one undo step; a delete asks exactly when something is built from the item", async () => {
+test("every entry of every item on nine designs: refused with its words, or exactly one undo step; a delete asks exactly when something is built from the item", async () => {
   assert.equal(await everyEntry(menu), null);
 });
 
@@ -183,16 +200,39 @@ test("hand-worked: deleting Extrude 1, built from by nothing, goes at once as on
   assert.deepEqual(u.doc().timeline.features.map((f) => f.id), ["feature-1", "feature-11"]);
 });
 
-test("hand-worked: deleting Sketch 1 with the box suppressed and an outline that never closed would leave no body: refused, nothing asked", async () => {
+test("hand-worked (24f4): deleting Sketch 1 with the box suppressed and an outline that never closed leaves no body: asked, then one step", async () => {
+  // Extrude 1 is built from Sketch 1, so the box asks; the outline never
+  // closed, so there is no last shape to keep and Extrude 1 fails: no body.
+  // Until 24f4 this was refused without asking.
   const t = host(menu, suppressItem(part(), "feature-1", true), false);
   await t.run("sketch-2", "delete");
-  assert.deepEqual(t.log.refused, [menu.NO_BODY]);
-  assert.deepEqual(t.log.asked, []);
+  assert.deepEqual(t.log.refused, []);
+  assert.equal(t.log.asked.length, 1);
   assert.deepEqual(t.log.records, []);
-  // The same with the outline closed: Extrude 1 keeps its shape, a body, so it asks.
+  t.log.confirm!();
+  assert.deepEqual(t.log.records, ["Delete Sketch 1"]);
+  assert.deepEqual(t.doc().timeline.features.map((f) => f.id), ["feature-1", "feature-11"]);
+  assert.equal(partFeature(t.doc()), null);
+  // The same with the outline closed: Extrude 1 keeps its shape, a body.
   const u = host(menu, suppressItem(part(), "feature-1", true), true);
   await u.run("sketch-2", "delete");
-  assert.equal(u.log.asked.length, 1);
+  u.log.confirm!();
+  assert.equal(partFeature(u.doc())?.id, "feature-11");
+});
+
+test("hand-worked (24f4): every item deleted one by one, last first, leaves an empty timeline, each delete one step", async () => {
+  const t = host(menu, part());
+  // Extrude 1 (built from by nothing: at once), Sketch 1 (now built from by nothing), the box.
+  for (const id of ["feature-11", "sketch-2", "feature-1"]) await t.run(id, "delete");
+  assert.deepEqual(t.log.asked, []);
+  assert.deepEqual(t.log.records, ["Delete Extrude 1", "Delete Sketch 1", "Delete Feature 1 (box)"]);
+  assert.deepEqual(t.doc().timeline.features, []);
+  assert.deepEqual(t.doc().profiles, []);
+  assert.deepEqual(t.doc().sketches, []);
+  assert.equal(partFeature(t.doc()), null);
+  // Three Undos give back the design, byte for byte.
+  for (let i = 0; i < 3; i++) t.history.undo();
+  assert.equal(json(t.doc()), json(part()));
 });
 
 test("the design changing while the box asks: its Delete records nothing", async () => {
@@ -236,9 +276,20 @@ const MENU_PLANTS: { name: string; edits: [string, string][]; caught: string }[]
     caught: "one Undo did not give back the document before (2 records)",
   },
   { name: "delete-never-asks", edits: [["  if (plan.ask) host.ask(plan.ask, go);", "  if (plan.ask && false) host.ask(plan.ask, go);"]], caught: "a used item deleted without asking" },
-  { name: "no-body-delete", edits: [["  if (leavesNoBody(plan.next)) return host.refuse(NO_BODY);", ""]], caught: "recorded a design with no body" },
-  { name: "off-entry-run", edits: [["  if (entry?.off) return host.refuse(entry.off);", ""]], caught: "an off entry recorded" },
-  { name: "no-body-entries-on", edits: [["return r.kind === \"edit\" && leavesNoBody(r.doc) ? { ...e, off: NO_BODY } : e;", "return e;"]], caught: "an off entry recorded" },
+  // "off-entry-run" (chooseEntry's own off check dropped) went with 24f4, and so did the check: every entry still
+  // off is one barEdit itself refuses with the same words, so no test could tell it was gone. everyEntry still
+  // proves an off entry records nothing and is refused with its words.
+  // 24f4's two: the no-body refusals coming back, on a delete and on the menu's entries.
+  {
+    name: "no-body-delete-refused",
+    edits: [["  if (host.current() !== before) return;\n", '  if (host.current() !== before) return;\n  if (!plan.next.timeline.features.some((f) => f.intent.type !== "sketch" && !f.suppressed && plan.next.timeline.marker !== "start")) return host.refuse("no body");\n']],
+    caught: "did not record the edit's document",
+  },
+  {
+    name: "no-body-entries-off",
+    edits: [["  return itemMenu(doc, id, editing);", '  return itemMenu(doc, id, editing).map((e) => (e.off === null && e.action !== "delete" && ((r) => r.kind === "edit" && r.doc.timeline.marker === "start")(barEdit(doc, { kind: "menu", id, action: e.action }, editing)) ? { ...e, off: "no body" } : e));']],
+    caught: "which the bar's menu doesn't say",
+  },
 ];
 
 async function planted(edits: [string, string][], dir: string, name: string): Promise<Menu> {

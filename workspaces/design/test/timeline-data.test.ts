@@ -13,6 +13,7 @@ import {
   insertAt,
   insertPreset,
   lastFeature,
+  partFeature,
   migrateDesignV2,
   partDocument,
   partOf,
@@ -84,7 +85,8 @@ test("the fixture test fails for a migration broken on purpose, each way", () =>
   };
   const dropCounter = (data: unknown) => readDesignDocument({ ...migrateDesignV2(data as Record<string, unknown>), nextId: 17 });
   assert.match(fixtureProblem(plantMarker) ?? "", /a marker appeared/);
-  assert.match(fixtureProblem(suppressAll) ?? "", /refused: .*builds no body/);
+  // Opened since 24f4 (a design with no body), and caught by the suppressed check instead of refused.
+  assert.match(fixtureProblem(suppressAll) ?? "", /^something was suppressed$/);
   assert.match(fixtureProblem(dropCounter) ?? "", /refused: .*nextId 17 is not above arc-17/);
 });
 
@@ -206,11 +208,17 @@ test("the part is the last solid feature that builds: suppressed, rolled back, o
   assert.equal(builds(edit((x) => ({ suppressed: x.id === "sketch-2" })), made.timeline.features[2]), false);
   assert.equal(lastFeature(edit(() => ({}), "sketch-2")).id, "feature-1");
   assert.equal(lastFeature(edit(() => ({}), "feature-11")).id, "feature-11");
-  // Nothing builds: refused, with the reason.
-  const none = /^Error: Design data builds no body: every solid feature is suppressed or after the rollback marker, and this Panoshape can't show a design with no body yet$/;
-  assert.throws(() => lastFeature(edit(() => ({}), "start")), none);
-  assert.throws(() => lastFeature(edit((x) => ({ suppressed: x.id !== "sketch-2" }))), none);
-  assert.throws(() => readDesignDocument(structuredClone(edit(() => ({}), "start"))), none);
+  // Nothing builds (24f4): no part, and the file opens as it is; lastFeature, for callers that need a body, says why there is none.
+  const atStart = edit(() => ({}), "start");
+  const allOff = edit((x) => ({ suppressed: x.id !== "sketch-2" }));
+  assert.equal(partFeature(atStart), null);
+  assert.equal(partFeature(allOff), null);
+  assert.equal(partOf(atStart), null);
+  assert.deepEqual(readDesignDocument(structuredClone(atStart)), atStart);
+  assert.deepEqual(readDesignDocument(structuredClone(allOff)), allOff);
+  const none = /^Error: Design builds no body: every solid feature is suppressed, rolled back or deleted$/;
+  assert.throws(() => lastFeature(atStart), none);
+  assert.throws(() => lastFeature(allOff), none);
 });
 
 test("a version 3 file that breaks a timeline rule is refused when it is opened, each with its message", () => {
@@ -224,12 +232,13 @@ test("a version 3 file that breaks a timeline rule is refused when it is opened,
   assert.doesNotThrow(broken(() => {}));
   assert.doesNotThrow(broken((d) => (d.timeline.marker = "sketch-2")));
   assert.doesNotThrow(broken((d) => (d.timeline.marker = "feature-1")));
+  // Nothing built is a design like any other since 24f4.
+  assert.doesNotThrow(broken((d) => (d.timeline.marker = "start")));
   const cases: [(d: DesignDocument & { timeline: Record<string, unknown> }) => void, RegExp][] = [
     [(d) => (d.timeline.marker = "feature-99"), /^Error: Design timeline marker feature-99 is not "start" or the id of an item in the timeline$/],
     [(d) => (d.timeline.marker = 3), /^Error: Design timeline marker 3 is not "start" or the id of an item in the timeline$/],
     [(d) => (d.timeline.marker = null), /^Error: Design timeline marker null is not "start" or the id of an item in the timeline$/],
     [(d) => (d.timeline.marker = "line-4"), /marker line-4 is not "start" or the id of an item/],
-    [(d) => (d.timeline.marker = "start"), /builds no body/],
     [(d) => ((d.timeline.features as Feature[])[2].suppressed = "no" as unknown as boolean), /^Error: Design feature feature-11: suppressed must be true or false, not no$/],
   ];
   for (const [edit, message] of cases) assert.throws(broken(edit), message);

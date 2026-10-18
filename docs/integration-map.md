@@ -44,6 +44,29 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 | 21 | Layout → Laser | a page as an engraving or cut (signs, labels) | Outline and Image | none | cheap | Y4 + L1 |
 | 22 | Layout → Vector | a page's artwork back to editable paths | Outline | none | cheap | Y4 |
 
+## Video (planned)
+
+Video is a planned workspace (roadmap F0–F14; substeps in `docs/progress/video.md`). Its basics may start early, but these links come late (step F13). These rows are its links, so they are designed before it is built.
+
+| # | From → to | What flows | As | Back | Cost | Ready at |
+|---|---|---|---|---|---|---|
+| 35 | Render → Video | an animation or turntable as a clip | Image frames (marked out of date when the scene changes) | none | expensive | R3 + F13d |
+| 36 | Design → Video | a camera fly-through, or the timeline played back feature by feature | Image frames, rendered from the live design | none | expensive | 25 + F13b–F13c |
+| 37 | Image → Video | stills on a track | Image | none | cheap | G1 + F13a |
+| 38 | Layout → Video | a page as a title card | Image (rasterised at the video's size) | none | cheap | Y1 + F13a |
+
+## Office workspaces (planned)
+
+Document, Sheet and Slides are planned workspaces (roadmap W, T and U), late in the order.
+
+| # | From → to | What flows | As | Back | Cost | Ready at |
+|---|---|---|---|---|---|---|
+| 39 | Design → Document | design views, drawing views, parameters as text, one view per timeline step for build instructions | Image or Outline for views, Data for parameters | none | cheap | W2–W3 + 77 for drawings |
+| 40 | Design ↔ Sheet | parameters and measured values (volume, mass, size) into cells; a cell that owns a parameter drives the design | Data | edits to Design parameters are previewed commands | cheap | T2 + 34 |
+| 41 | Sheet → Document and Slides | tables and charts | Data (tables), Image (charts) | none | cheap | T3 + W2 / U2 |
+| 42 | Design → Slides | a live 3D part on a slide, and views | Solid (tessellated for the slide), Image for views | none | cheap | U2 |
+| 43 | Render → Document and Slides | rendered pictures | Image (marked out of date when the scene changes) | none | expensive | R2 + W2 / U2 |
+
 ## Between the making workspaces
 
 | # | From → to | What flows | As | Back | Cost | Ready at |

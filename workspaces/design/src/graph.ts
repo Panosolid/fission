@@ -1,7 +1,7 @@
 // Design's timeline in the project-wide dependency graph.
 
 import type { ChangeNotes, DependencyGraph } from "@fission/core";
-import { lastFeature, type DesignDocument } from "./document.ts";
+import { partFeature, type DesignDocument } from "./document.ts";
 
 /** Graph id of the part's mass properties and mesh: cheap, rebuilt at once after every change. */
 export const PART_VIEW = "design.part-view";
@@ -35,8 +35,14 @@ export function syncGraph(graph: DependencyGraph, doc: DesignDocument, before: D
     graph.set({ id: f.id, label: f.intent.summary, workspace: "design", cost: "cheap" }, f.dependsOn.filter((d) => present.has(d)));
     if (differs(f)) changed.push({ id: f.id, label: f.intent.summary, kind: f.intent.type });
   }
-  graph.set({ id: PART_VIEW, label: "Volume, area and mesh", workspace: "design", cost: "cheap" }, [lastFeature(doc).id]);
+  // A design with no body (24f4): the numbers read nothing.
+  const part = partFeature(doc);
+  graph.set({ id: PART_VIEW, label: "Volume, area and mesh", workspace: "design", cost: "cheap" }, part === null ? [] : [part.id]);
   for (const c of changed) notes.record({ node: c.id, label: c.label, workspace: "design", change: changeWords(c.kind) }, graph.changed(c.id), graph);
+  // The part itself is another feature now, or none (a marker move, a suppress, a delete; 24f4): what reads the part's view is out of date, even when the feature it read did not change.
+  const was = before && partFeature(before);
+  if (before && (was?.id ?? null) !== (part?.id ?? null))
+    notes.record({ node: PART_VIEW, label: "Volume, area and mesh", workspace: "design", change: changeWords("part", part === null) }, graph.changed(PART_VIEW), graph);
   // Profiles and features that are gone (their readers were re-pointed above).
   const now = new Set([...doc.profiles, ...doc.timeline.features].map((x) => x.id));
   for (const id of old.keys()) {
