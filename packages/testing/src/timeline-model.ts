@@ -27,12 +27,20 @@
 // - Circles and slots (two lines and two half circles) have whole-mm
 //   sizes of at least 1 mm, so they are always valid outlines.
 //
-// Behaviour the model fixes where Fusion's is not known yet (open
-// questions for the owner, docs/progress/cad.md; change the model and the
-// plan together):
-// - Deleting an item leaves the items that use it in place, failed with
-//   "deleted-input" naming it; nothing is deleted silently.
-// - An item whose input is suppressed fails with "suppressed-input".
+// The timeline's rules (decided by the owner, 2026-10-17, from trying the
+// reference app; docs/progress/cad.md; change the model and the plan
+// together):
+// - An extrude that loses its sketch (the sketch deleted, or its outline
+//   broken: a curve deleted, a corner moved so it crosses itself) keeps its
+//   last shape, built with a warning naming the sketch and why ("kept"
+//   below, step 24d2). Its last shape is the sketch as it was just before
+//   the edit that lost it, extruded by the extrude's distance now; the
+//   faces keep that sketch's curve names. Once the sketch makes an outline
+//   again the extrude builds from it and forgets the kept shape. With no
+//   kept shape (the sketch was already broken when the extrude was made, or
+//   when it was lost) it fails with the cause; nothing is deleted silently.
+// - An item whose input is suppressed fails with "suppressed-input", kept
+//   shape or not.
 // - New items go in just after the marker, and the marker moves onto them.
 // - Deleting the item the marker is on moves the marker to the item before
 //   it ("start" if there is none).
@@ -59,10 +67,17 @@ export type PresetKind = "box" | "cylinder" | "sphere";
 export type ModelItem =
   /** `curves[k]` is curve k's id, or null once it is deleted. */
   | { id: string; kind: "sketch"; shape: ModelShape; curves: (string | null)[]; suppressed: boolean }
-  | { id: string; kind: "extrude"; sketch: string; distance: number; suppressed: boolean }
+  /** `kept`: the sketch as it was before the edit that lost it, while it is lost (the owner's rule above). */
+  | { id: string; kind: "extrude"; sketch: string; distance: number; suppressed: boolean; kept?: Kept }
   | { id: string; kind: "box"; width: number; depth: number; height: number; suppressed: boolean }
   | { id: string; kind: "cylinder"; diameter: number; height: number; suppressed: boolean }
   | { id: string; kind: "sphere"; diameter: number; suppressed: boolean };
+
+/** An extrude's last shape: its sketch's shape and curve ids just before the sketch was lost. */
+export interface Kept {
+  shape: ModelShape;
+  curves: string[];
+}
 
 /** null: everything is built; "start": nothing is; an id: built up to and including that item. */
 export type Marker = string | null;
@@ -128,8 +143,17 @@ export interface ModelBody {
 
 export type FailCause = "deleted-input" | "suppressed-input" | "failed-input" | "open-outline" | "invalid-outline";
 
+/** Why an extrude is built from its kept shape: its sketch is gone, or makes no outline. */
+export type LostCause = "deleted-input" | "open-outline" | "invalid-outline";
+
+/** An extrude built from its kept shape, and why (the owner's rule: the warning names the sketch). */
+export interface KeptWarning {
+  cause: LostCause;
+  input: string;
+}
+
 export type ItemResult =
-  | { status: "built"; body?: ModelBody }
+  | { status: "built"; body?: ModelBody; warning?: KeptWarning }
   | { status: "suppressed" }
   | { status: "rolled-back" }
   | { status: "failed"; cause: FailCause; input?: string };
@@ -182,7 +206,11 @@ export type ModelFault =
   | "save-stamps"
   | "uprights-as-given"
   | "cap-edges-swapped"
-  | "end-edges-named-start";
+  | "end-edges-named-start"
+  | "lost-sketch-fails"
+  | "kept-not-forgotten"
+  | "save-drops-kept"
+  | "warning-dropped";
 
 export const MODEL_FAULTS: readonly ModelFault[] = [
   "reorder-past-dependency",
@@ -203,6 +231,10 @@ export const MODEL_FAULTS: readonly ModelFault[] = [
   "uprights-as-given",
   "cap-edges-swapped",
   "end-edges-named-start",
+  "lost-sketch-fails",
+  "kept-not-forgotten",
+  "save-drops-kept",
+  "warning-dropped",
 ];
 
 /** "item-3/side:curve-5": a face name as one string, for maps and messages. */
@@ -442,11 +474,21 @@ function presetBody(item: Extract<ModelItem, { kind: PresetKind }>, faults: Read
 
 type SketchItem = Extract<ModelItem, { kind: "sketch" }>;
 
-/** Why a sketch makes no outline to extrude, or null when it makes one. */
-export function outlineProblem(s: SketchItem): "open-outline" | "invalid-outline" | null {
+/**
+ * Why a sketch makes no outline to extrude, or null when it makes one. Its
+ * curves join where their ends meet, so a deleted curve, or two corners
+ * that aren't neighbours in one place (four ends meeting: a branch), leave
+ * no single loop: "open-outline". A loop that touches or crosses itself,
+ * doubles back or has a side of length 0 is "invalid-outline".
+ */
+export function outlineProblem(s: Pick<SketchItem, "shape" | "curves">): LostCause | null {
   if (s.curves.some((c) => c === null)) return "open-outline";
-  if (s.shape.kind === "polygon" && !polygonValid(s.shape.corners)) return "invalid-outline";
-  return null;
+  if (s.shape.kind !== "polygon") return null;
+  const cs = s.shape.corners;
+  const n = cs.length;
+  for (let i = 0; i < n; i++)
+    for (let j = i + 2; j < n; j++) if (!(i === 0 && j === n - 1) && cs[i][0] === cs[j][0] && cs[i][1] === cs[j][1]) return "open-outline";
+  return polygonValid(cs) ? null : "invalid-outline";
 }
 
 /**
@@ -471,7 +513,7 @@ function build(item: ModelItem, byId: Map<string, ModelItem>, done: Record<strin
   if (item.kind === "sketch") return { status: "built" };
   if (item.kind !== "extrude") return { status: "built", body: presetBody(item, faults) };
   const sketch = byId.get(item.sketch);
-  if (sketch === undefined) return { status: "failed", cause: "deleted-input", input: item.sketch };
+  if (sketch === undefined) return lost(item, "deleted-input", faults);
   const input = done[item.sketch];
   // Only reachable with "reorder-past-dependency" planted: the sketch comes later.
   if (input === undefined) return { status: "failed", cause: "failed-input", input: item.sketch };
@@ -479,8 +521,40 @@ function build(item: ModelItem, byId: Map<string, ModelItem>, done: Record<strin
   if (input.status !== "built") return { status: "failed", cause: "failed-input", input: item.sketch };
   if (sketch.kind !== "sketch") throw new Error(`${item.id} extrudes ${sketch.id}, which is not a sketch`);
   const problem = outlineProblem(sketch);
-  if (problem !== null) return { status: "failed", cause: problem, input: item.sketch };
+  if (problem !== null) return lost(item, problem, faults);
+  // Planted bug: the kept shape is used even once the sketch makes an outline again.
+  if (faults.has("kept-not-forgotten") && item.kept) return lost(item, "open-outline", faults);
   return { status: "built", body: extrudeBody(item.id, sketch.shape, sketch.curves as string[], item.distance, faults) };
+}
+
+/** An extrude whose sketch is lost: its kept shape with a warning, or failed with the cause when it has none. */
+function lost(item: Extract<ModelItem, { kind: "extrude" }>, cause: LostCause, faults: ReadonlySet<ModelFault>): ItemResult {
+  if (item.kept === undefined) return { status: "failed", cause, input: item.sketch };
+  const body = extrudeBody(item.id, item.kept.shape, item.kept.curves, item.distance, faults);
+  // Planted bug: the kept shape is built, but nothing says so.
+  return faults.has("warning-dropped") ? { status: "built", body } : { status: "built", body, warning: { cause, input: item.sketch } };
+}
+
+/**
+ * The owner's rule, after an edit from `before` to `doc`: an extrude whose
+ * sketch is lost now (gone, or no outline; suppression and the marker
+ * don't count) keeps the sketch as it was in `before`, if it made an
+ * outline there and the extrude has no kept shape yet; an extrude whose
+ * sketch makes an outline forgets its kept shape.
+ */
+function settle(before: ModelDoc, doc: ModelDoc, faults: ReadonlySet<ModelFault>): void {
+  const sketchIn = (d: ModelDoc, id: string) => d.items.find((i): i is SketchItem => i.id === id && i.kind === "sketch");
+  for (const item of doc.items) {
+    if (item.kind !== "extrude") continue;
+    const now = sketchIn(doc, item.sketch);
+    if (now !== undefined && outlineProblem(now) === null) {
+      if (!faults.has("kept-not-forgotten")) delete item.kept;
+      continue;
+    }
+    const was = sketchIn(before, item.sketch);
+    if (item.kept !== undefined || was === undefined || outlineProblem(was) !== null || faults.has("lost-sketch-fails")) continue;
+    item.kept = { shape: JSON.parse(JSON.stringify(was.shape)), curves: [...(was.curves as string[])] };
+  }
 }
 
 // ---------------------------------------------------------------- edits
@@ -551,6 +625,7 @@ export function applyOp(m: TimelineModel, op: ConcreteOp): Applied {
   const doc = clone(m.doc);
   const r = edit(doc, op, m.faults);
   if (r.kind === "refused") return r;
+  settle(m.doc, doc, m.faults);
   if (snapshot(doc) === before) return { kind: "unchanged" };
   m.undo.push(before);
   if (!m.faults.has("keep-redo")) m.redo = [];

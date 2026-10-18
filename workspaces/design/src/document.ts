@@ -75,6 +75,22 @@ export interface Sketch {
   constraints: never[];
 }
 
+/**
+ * An extrude's last shape (the owner's timeline rule, step 24d2): its
+ * sketch's points and curves as they were just before the edit that lost
+ * the sketch (deleted it, or left it with no outline). Saved in the
+ * document's `kept`, by the extrude's id, while the sketch is lost, so the extrude
+ * still builds, with a warning, after the file is opened again
+ * (`rebuild.ts`, `settleKept`). Its ids are the sketch's old ones.
+ */
+export interface KeptShape {
+  points: SketchPoint[];
+  curves: SketchCurve[];
+}
+
+/** An extrude's kept shape, or undefined while its sketch makes an outline. */
+export const keptOf = (doc: Pick<DesignDocument, "kept">, f: Feature): KeptShape | undefined => (doc.kept && Object.hasOwn(doc.kept, f.id) ? doc.kept[f.id] : undefined);
+
 /** The planes a sketch can be on (a stable face id joins these at step 24). */
 export const SKETCH_PLANES = ["XY", "XZ", "YZ"] as const;
 export type SketchPlane = (typeof SKETCH_PLANES)[number];
@@ -93,6 +109,8 @@ export interface DesignDocument {
   profiles: ReadyProfile[];
   sketches: Sketch[];
   timeline: { features: Feature[]; marker?: Marker };
+  /** Each extrude's kept shape while its sketch is lost (24d2), by the extrude's id; left out when there is none. */
+  kept?: Record<string, KeptShape>;
 }
 
 const profileNames: Record<ProfileKind, string> = {
@@ -336,6 +354,12 @@ function checkSketch(s: unknown, i: number): void {
   const at = `Design sketch ${s.id}`;
   if (!Array.isArray(s.points) || !Array.isArray(s.curves) || !Array.isArray(s.constraints)) throw new Error(`${at} needs points, curves and constraints lists`);
   if (s.constraints.length > 0) throw new Error(`${at} has constraints, which this Fission can't read yet`);
+  checkContent(s.points, s.curves, at);
+}
+
+/** A sketch's or kept shape's points and curves, checked as checkSketch says; `at` starts each message. */
+function checkContent(pointList: unknown[], curves: unknown[], at: string): void {
+  const s = { points: pointList, curves };
   const points = new Set<string>();
   for (const [j, p] of s.points.entries()) {
     if (!isRecord(p) || typeof p.id !== "string") throw new Error(`${at}: point ${j + 1} has no id`);
@@ -361,6 +385,16 @@ function checkSketch(s: unknown, i: number): void {
       if (typeof end !== "string" || !points.has(end)) throw new Error(`${at}: line ${c.id} ends at ${shown(end)}, which is not one of the sketch's points`);
     if (c.start === c.end) throw new Error(`${at}: line ${c.id} starts and ends at the same point`);
   }
+}
+
+/** An extrude's kept shape, checked: a sketch's points and curves (checkContent), each id once. */
+function checkKept(kept: unknown, feature: string): void {
+  const at = `Design feature ${feature}'s kept shape`;
+  if (!isRecord(kept) || !Array.isArray(kept.points) || !Array.isArray(kept.curves)) throw new Error(`${at} needs points and curves lists`);
+  checkContent(kept.points, kept.curves, at);
+  const ids = [...kept.points, ...kept.curves].map((x) => (x as { id: string }).id);
+  const twice = ids.find((id, k) => ids.indexOf(id) !== k);
+  if (twice !== undefined) throw new Error(`${at} uses the id ${shown(twice)} twice`);
 }
 
 /**
@@ -403,10 +437,20 @@ export function readDesignDocument(data: unknown): DesignDocument {
     if (!isSketchExtrude(f)) continue;
     const p = f.intent.parameters;
     if (Object.hasOwn(p, "profile")) throw new Error(`Design feature ${f.id} extrudes both a sketch and a profile`);
-    if (!d.timeline.features.slice(0, i).some((x) => x.id === p.sketch && isSketchItem(x)))
+    // Its sketch may be gone (deleted: the extrude keeps its last shape, or fails naming it), but never another item or a later one.
+    const there = d.timeline.features.findIndex((x) => x.id === p.sketch);
+    if (typeof p.sketch !== "string" || (there >= 0 && (there > i || !isSketchItem(d.timeline.features[there]))))
       throw new Error(`Design feature ${f.id} extrudes ${shown(p.sketch)}, which is not a sketch before it in the timeline`);
     if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(p.sketch as string)) throw new Error(`Design feature ${f.id} extrudes ${p.sketch} but does not depend on it`);
     if (!isFiniteNumber(p.distance)) throw new Error(`Design feature ${f.id}: distance ${shown(p.distance)} is not a number of mm`);
+  }
+  if (Object.hasOwn(d, "kept")) {
+    if (!isRecord(d.kept)) throw new Error("Design data's kept shapes are not an object of extrude ids");
+    for (const [id, kept] of Object.entries(d.kept)) {
+      const f = d.timeline.features.find((x) => x.id === id);
+      if (!f || !isSketchExtrude(f)) throw new Error(`Design data keeps a shape for ${shown(id)}, which is not an extrude of a sketch in the timeline`);
+      checkKept(kept, id);
+    }
   }
   // Ids are unique in the document (a sketch shares its id with its timeline item), and the counter is above all of them.
   const seen = new Set<string>();
@@ -415,6 +459,12 @@ export function readDesignDocument(data: unknown): DesignDocument {
     ...d.timeline.features.map((f) => f.id),
     ...d.sketches.flatMap((s) => [...s.points.map((p) => p.id), ...s.curves.map((c) => c.id)]),
   ];
+  // A kept shape holds a sketch's old ids (some may still be in the sketch): never repeated by a new id, so the counter is above them too.
+  const kept = Object.values(d.kept ?? {}).flatMap((k) => [...k.points.map((p) => p.id), ...k.curves.map((c) => c.id)]);
+  for (const id of kept) {
+    const n = idNumber(id);
+    if (n !== null && n >= d.nextId!) throw new Error(`Design data's nextId ${d.nextId} is not above ${id}, so a new id could repeat it`);
+  }
   for (const id of ids) {
     if (seen.has(id)) throw new Error(`Design id ${shown(id)} is used twice`);
     seen.add(id);
@@ -438,7 +488,9 @@ export function builds(document: DesignDocument, f: Feature): boolean {
   if (marker === "start" || (marker !== undefined && at > features.findIndex((x) => x.id === marker))) return false;
   if (!isSketchExtrude(f)) return true;
   const sketch = features.find((x) => x.id === f.intent.parameters.sketch && isSketchItem(x));
-  return sketch !== undefined && builds(document, sketch);
+  // A deleted sketch: the extrude builds from its kept shape, if it has one (24d2).
+  if (sketch === undefined) return keptOf(document, f) !== undefined;
+  return builds(document, sketch);
 }
 
 /**

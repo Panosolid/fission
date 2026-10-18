@@ -10,7 +10,7 @@
 // seeded sessions; Design's timeline plugs in as a TimelineSubject).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { BodyView, KernelCalls, SketchArc, SketchCircle, SketchLine } from "@fission/core";
+import { emptyProject, projectFromJson, projectToJson, type BodyView, type KernelCalls, type SketchArc, type SketchCircle, type SketchLine } from "@fission/core";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 import {
@@ -26,6 +26,12 @@ import {
   lastFeature,
   movePoint,
   nameBody,
+  BodyCache,
+  outlineCurves,
+  readDesignDocument,
+  rebuildTimeline,
+  setExtrudeDistance,
+  settleKept,
   partDocument,
   pointAt,
   resolveReference,
@@ -35,7 +41,11 @@ import {
   type DesignDocument,
 } from "@fission/design";
 import { applyOp, createModel, edgeKey, faceKey, rebuild, shoelace, type ModelBody, type ModelShape, type PresetKind } from "../src/timeline-model.ts";
-import { close, randomShape } from "../src/timeline-session.ts";
+import { close, randomSession, randomShape, runSession, failureOf, TimelineFailure, type SessionCounts } from "../src/timeline-session.ts";
+import { DESIGN_FAULTS, designSubject, EDGE_SLACK, edgeGeometry, edgeMatches as meshEdgeMatches, type DesignFault } from "../src/timeline-design.ts";
+
+/** Whether a mesh-measured edge (`size` its length) matches the model's within EDGE_SLACK. */
+const edgeMatches = (got: { size: number; centroid: number[] }, want: { length: number; centroid: readonly number[] }) => meshEdgeMatches({ length: got.size, centroid: got.centroid }, want);
 
 const pending = (name: string, substep: string) => test(name, { todo: `waits for ${substep}` });
 
@@ -116,19 +126,6 @@ interface Named {
  * points, one pair per segment): the sum of its segments, and the mean of
  * their midpoints weighted by length.
  */
-export function edgeGeometry(view: BodyView): { length: number; centroid: number[] }[] {
-  const out = Array.from({ length: view.edges }, () => ({ length: 0, sum: [0, 0, 0] }));
-  const at = view.mesh.edge_lines;
-  view.mesh.edge_line_edges.forEach((e, s) => {
-    const p = at.slice(6 * s, 6 * s + 3);
-    const q = at.slice(6 * s + 3, 6 * s + 6);
-    const len = Math.sqrt((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2 + (q[2] - p[2]) ** 2);
-    out[e].length += len;
-    for (let k = 0; k < 3; k++) out[e].sum[k] += (len * (p[k] + q[k])) / 2;
-  });
-  return out.map((o) => ({ length: o.length, centroid: o.sum.map((x) => x / o.length) }));
-}
-
 /** A view's faces and edges under Design's names: feature, role and, for an extrude's side, the curve its piece came from. */
 function named(feature: string, view: BodyView, curveOf?: (piece: number) => string): Named {
   for (const [f, role] of view.face_roles.entries()) {
@@ -169,24 +166,6 @@ async function kernelPreset(kernel: KernelCalls, feature: string, kind: PresetKi
   const view =
     kind === "box" ? await kernel.call("make_box", sizes[0], sizes[1], sizes[2]) : kind === "cylinder" ? await kernel.call("make_cylinder", sizes[0] / 2, sizes[1]) : await kernel.call("make_sphere", sizes[0] / 2);
   return named(feature, view);
-}
-
-/**
- * How far an edge measured on the display mesh may be from the model's:
- * its chords sag inside a curve by at most DISPLAY_CHORD (0.01 mm,
- * kernel/src/tolerance.rs; the cap of 256 chords a turn sags less below a
- * radius of 133 mm, more than any shape here), which moves the centroid by
- * at most that, plus the f32 rounding of each point (2⁻²⁴ of 100 mm, ~6e-6
- * mm). Each chord is shorter than its arc by (θ/3) × its sag, θ the chord's
- * turn, so over a whole circle (2π) the length falls short by at most
- * 2π/3 × 0.01 ≈ 0.021 mm.
- */
-export const EDGE_SLACK = { centroid: 0.0101, length: 0.022 };
-
-/** Whether a mesh-measured edge matches the model's within EDGE_SLACK. */
-export function edgeMatches(got: { size: number; centroid: number[] }, want: { length: number; centroid: readonly number[] }): boolean {
-  const off = Math.sqrt(got.centroid.reduce((s, x, k) => s + (x - want.centroid[k]) ** 2, 0));
-  return Math.abs(got.size - want.length) <= EDGE_SLACK.length && off <= EDGE_SLACK.centroid;
 }
 
 /** The same names, each face's area and centroid within MATCH_REL, each edge's length and centroid within EDGE_SLACK. */
@@ -439,9 +418,191 @@ test("a selected face keeps its name through an edit that renumbers the kernel's
   assert.ok(!gone.names.faces.includes(`side:${right}`));
 });
 
-pending("the model's hand-worked rebuilds give the same volumes, names, areas and centroids on the real kernel", "24d");
-pending("presets are ordinary features with counter ids; every solid feature is its own body; a version 2 file migrates to the timeline's version and opens byte-identical after one save", "24d");
-pending("seeded sessions: Design's timeline as a TimelineSubject passes runSession for 12 seeds × 150 steps, reaching every kind of outcome", "24d");
+// ---------------------------------------------------------------- 24d2
+
+/** A kernel that counts its body_build calls. */
+function counting(kernel: KernelCalls): KernelCalls & { builds: number } {
+  const k = {
+    builds: 0,
+    call: ((op: string, ...args: unknown[]) => {
+      if (op === "body_build") k.builds++;
+      return (kernel.call as (op: string, ...a: unknown[]) => Promise<unknown>)(op, ...args);
+    }) as KernelCalls["call"],
+  };
+  return k;
+}
+
+test("the real kernel names the lines a closed-up but invalid outline breaks on, over the wire (sketch_outline's invalid)", async () => {
+  const kernel = nodeKernel();
+  const ring = (cs: [number, number][]) => cs.map((a, i) => ({ a, b: cs[(i + 1) % cs.length] }));
+  // A bow tie (0,0) → (10,10) → (10,0) → (0,10): lines 0 and 2 are the diagonals crossing at (5, 5).
+  const bow = await kernel.call("sketch_outline", ring([[0, 0], [10, 10], [10, 0], [0, 10]]), [], []);
+  assert.ok("open" in bow && bow.invalid, JSON.stringify(bow));
+  assert.deepEqual([...bow.invalid].map((i) => JSON.stringify(i)).sort(), ['{"input":"line","index":0}', '{"input":"line","index":2}']);
+  // A loose end is open with no `invalid`; a closed square is closed.
+  const loose = await kernel.call("sketch_outline", ring([[0, 0], [10, 0], [10, 10]]).slice(0, 2), [], []);
+  assert.ok("open" in loose && !("invalid" in loose), JSON.stringify(loose));
+  assert.ok("closed" in (await kernel.call("sketch_outline", ring([[0, 0], [10, 0], [10, 10], [0, 10]]), [], [])));
+});
+
+test("the owner's rule on the real kernel, hand-worked: a lost sketch's extrude keeps the shape it had just before, by its distance now, until the sketch makes an outline again; bodies kept by handle and freed", async () => {
+  const kernel = counting(nodeKernel());
+  const start = await kernel.call("body_count");
+  const cache = new BodyCache(kernel);
+  // A 40 × 30 rectangle (lines bottom, right, top, left from (0, 0)), extruded by 10, beside the starting box.
+  const s = addSketch(partDocument("box", 40, 30, 20));
+  const rect = drawRectangle(s.doc, s.id, [0, 0], [40, 30]);
+  const [, right, , left] = rect.ids;
+  const made = extrudeSketch(rect.doc, s.id, 10);
+  const e = made.id;
+  let doc = made.doc;
+  const edit = async (next: DesignDocument) => (doc = await settleKept(kernel, doc, next));
+  const point = (x: number, y: number) => pointAt(doc.sketches.find((k) => k.id === s.id)!, [x, y])!;
+  const result = async () => (await rebuildTimeline(doc, cache, kernel)).results[e];
+  const body = async () => {
+    const r = await result();
+    assert.ok(r.status === "built" && r.body !== undefined, JSON.stringify(r));
+    const view = await cache.view(r.body);
+    const names = nameBody(e, view, outlineCurves((r.spec as { extrude: { profile: never } }).extrude.profile, r.curves));
+    return { r, view, face: (part: string) => names.faces.indexOf(part) };
+  };
+  const warned = (r: Awaited<ReturnType<typeof result>>) => (r.status === "built" && r.warning ? [r.warning.cause, r.warning.sketch] : null);
+  // Corner (40, 30) to (40, 15): a trapezium, parallel sides 30 (x = 0) and 15 (x = 40), 40 apart: (30 + 15)/2 · 40 = 900 mm², × 10 = 9000 mm³.
+  await edit(movePoint(doc, s.id, point(40, 30), 40, 15));
+  let b = await body();
+  assert.ok(close(b.view.volume, 9000) && warned(b.r) === null, `${b.view.volume}`);
+  // The same document again: the same handle, no new body built.
+  const before = kernel.builds;
+  assert.equal((await body()).r.status === "built" && (await result()).status === "built" && ((await result()) as { body: number }).body, (b.r as { body: number }).body);
+  assert.equal(kernel.builds, before, "an unchanged feature was built again");
+  // The right side deleted: the trapezium is kept (9000 mm³), warned as an open outline of the sketch; its right side is still
+  // named after the deleted line: 15 × 10 = 150 mm² at (40, 7.5, 5).
+  await edit(deleteCurve(doc, s.id, right));
+  b = await body();
+  assert.deepEqual(warned(b.r), ["open-outline", s.id]);
+  assert.ok(close(b.view.volume, 9000));
+  let f = b.face(`side:${right}`);
+  assert.ok(close(b.view.face_areas[f], 150) && b.view.face_centroids[f].every((x, k) => close(x, [40, 7.5, 5][k])));
+  assert.ok(doc.kept?.[e], "the kept shape is in the document");
+  // Distance 20 while lost: 900 × 20 = 18000 mm³; the side 15 × 20 = 300 mm² at half height 10.
+  await edit(setExtrudeDistance(doc, 20, e));
+  b = await body();
+  f = b.face(`side:${right}`);
+  assert.ok(close(b.view.volume, 18000) && close(b.view.face_areas[f], 300) && close(b.view.face_centroids[f][2], 10));
+  // An edit to the open sketch doesn't reach the kept shape: corner (0, 0) to (0, −10), still 18000.
+  await edit(movePoint(doc, s.id, point(0, 0), 0, -10));
+  assert.ok(close((await body()).view.volume, 18000));
+  // Suppressing the sketch fails the extrude, kept shape or not; unsuppressing brings the kept shape back.
+  const suppress = (on: boolean): DesignDocument => ({ ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((x) => (x.id === s.id ? { ...x, suppressed: on } : x)) } });
+  await edit(suppress(true));
+  assert.deepEqual(await result(), { status: "failed", cause: "suppressed-input", input: s.id, message: "Sketch 1 is suppressed" });
+  await edit(suppress(false));
+  assert.deepEqual(warned((await body()).r), ["open-outline", s.id]);
+  // The right side drawn again: built from the sketch, corners (0, −10), (40, 0), (40, 15), (0, 30): a trapezium with
+  // parallel sides 40 and 15, 40 apart, (40 + 15)/2 · 40 = 1100 mm² × 20 = 22000 mm³; the kept shape forgotten.
+  const again = drawLine(doc, s.id, point(40, 0), point(40, 15));
+  await edit(again.doc);
+  b = await body();
+  assert.ok(close(b.view.volume, 22000) && warned(b.r) === null && doc.kept === undefined, `${b.view.volume}`);
+  // Corner (40, 15) to (−10, 15): the new right side (40, 0) → (−10, 15) crosses the left side x = 0 at y = 12, so the outline
+  // is invalid; the kernel names those two lines (from `invalid`, never its words), and the 22000 mm³ shape is kept.
+  await edit(movePoint(doc, s.id, point(40, 15), -10, 15));
+  b = await body();
+  assert.ok(b.r.status === "built" && b.r.warning);
+  assert.equal(b.r.warning.cause, "invalid-outline");
+  assert.deepEqual([...b.r.warning.curves].sort(), [again.id, left].sort());
+  assert.ok(close(b.view.volume, 22000));
+  // The sketch deleted (written into the data until 24e's delete): the kept shape stays, now warned as deleted.
+  await edit({ ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.filter((x) => x.id !== s.id) }, sketches: [] });
+  b = await body();
+  assert.deepEqual(warned(b.r), ["deleted-input", s.id]);
+  assert.ok(close(b.view.volume, 22000));
+  // Saved and opened: still kept, the same shape.
+  const opened = projectFromJson(projectToJson({ ...emptyProject("Kept"), workspaces: { design: doc } }), [{ id: "design", readData: readDesignDocument }]).workspaces.design as DesignDocument;
+  const fresh = new BodyCache(kernel);
+  const reopened = (await rebuildTimeline(opened, fresh, kernel)).results[e];
+  assert.ok(reopened.status === "built" && reopened.body !== undefined && reopened.warning);
+  assert.ok(close((await fresh.view(reopened.body)).volume, 22000));
+  // Every body freed: the kernel keeps what it kept before.
+  await fresh.clear();
+  await cache.clear();
+  assert.equal(await kernel.call("body_count"), start);
+});
+
+/** Runs a seeded session on Design; on failure the message has the seed to replay. */
+async function designSession(seed: bigint, steps: number, faults: DesignFault[] = []): Promise<SessionCounts> {
+  const subject = designSubject(nodeKernel(), faults);
+  try {
+    return await runSession(subject, randomSession(seed, steps), meshEdgeMatches);
+  } finally {
+    await subject.dispose();
+  }
+}
+
+const SEEDS = process.env.FISSION_SEED ? [BigInt(process.env.FISSION_SEED)] : Array.from({ length: 12 }, (_, k) => BigInt(k + 1));
+const STEPS = Number(process.env.FISSION_TIMELINE_STEPS ?? 150);
+
+test("seeded sessions: Design's timeline on the real kernel passes runSession for 12 seeds × 150 steps against the model, reaching every outcome and warning, and frees every body", async () => {
+  const kernel = nodeKernel();
+  const start = await kernel.call("body_count");
+  const total: SessionCounts = {};
+  for (const seed of SEEDS) {
+    try {
+      for (const [k, v] of Object.entries(await designSession(seed, STEPS))) total[k] = (total[k] ?? 0) + v;
+    } catch (e) {
+      if (e instanceof TimelineFailure) assert.fail(`seed ${seed} (FISSION_SEED=${seed} to replay): ${e.message}`);
+      throw e;
+    }
+    assert.equal(await kernel.call("body_count"), start, `seed ${seed} left bodies in the kernel`);
+  }
+  if (process.env.FISSION_SEED) return;
+  const wanted = [
+    ...["add-sketch", "add-extrude", "add-preset", "set-size", "move-corner", "delete-curve", "redraw-curve", "delete-item", "reorder", "suppress", "marker", "undo", "redo", "save-open", "hold-ref"].map((o) => `op:${o}`),
+    ...["built", "suppressed", "rolled-back", "failed"].map((x) => `status:${x}`),
+    "cause:suppressed-input",
+    ...["deleted-input", "open-outline", "invalid-outline"].map((c) => `warning:${c}`),
+    "refused:before-dependency",
+    "refused:after-dependent",
+    "ref:kept",
+    "ref:missing",
+  ];
+  const missing = wanted.filter((k) => !total[k]);
+  assert.deepEqual(missing, [], `never reached: ${missing.join(", ")}`);
+});
+
+/** The check each bug planted in Design's side must be caught by. */
+const DESIGN_CAUGHT_BY: Record<Exclude<DesignFault, "leak-bodies">, string> = {
+  "no-settle": "the rebuild differs from the model",
+  "save-drops-kept": "save and open changed the rebuild",
+  "cache-by-feature": "the rebuild differs from a rebuild from scratch",
+};
+
+for (const fault of DESIGN_FAULTS.filter((f): f is Exclude<DesignFault, "leak-bodies"> => f !== "leak-bodies"))
+  test(`planted in Design: "${fault}" is caught: ${DESIGN_CAUGHT_BY[fault]}`, async () => {
+    let found: TimelineFailure | null = null;
+    for (const seed of SEEDS) {
+      const subject = designSubject(nodeKernel(), [fault]);
+      found = await failureOf(() => subject, randomSession(seed, STEPS), meshEdgeMatches);
+      await subject.dispose();
+      if (found) break;
+    }
+    assert.ok(found, `no session caught ${fault}`);
+    assert.equal(found.check, DESIGN_CAUGHT_BY[fault], found.message);
+  });
+
+test("planted in Design: bodies never freed (\"leak-bodies\") pass the session but are caught by body_count", async () => {
+  const kernel = nodeKernel();
+  const start = await kernel.call("body_count");
+  const subject = designSubject(kernel, ["leak-bodies"]);
+  await runSession(subject, randomSession(1n, 30), meshEdgeMatches);
+  await subject.dispose();
+  const left = (await kernel.call("body_count")) - start;
+  assert.ok(left > 0, "the leak was not seen");
+  // Leave the kernel as found for the tests after this one: free the leaked handles (numbers from 1, never reused).
+  for (let h = 1, freed = 0; freed < left && h < 1e6; h++) await kernel.call("body_free", h).then(() => freed++, () => undefined);
+  assert.equal(await kernel.call("body_count"), start);
+});
+
 pending("delete, reorder, suppress and the marker on the real document, each one undo step; refused reorders give their exact messages", "24e");
 pending("each planted bug of MODEL_FAULTS, planted by hand once in Design's code, is caught by its check (recorded in the substep's line)", "24e");
 pending("the timeline in the browser at 1280 and 375 px in Chromium, Firefox and WebKit: rows in build order, the marker dragged and tapped, suppress and delete from a row, failed items marked; pixel probes for each body drawn", "24f");

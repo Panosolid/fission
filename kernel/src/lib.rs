@@ -373,12 +373,38 @@ pub enum LoopOut {
     Circle { center: [f64; 2], radius: f64 },
 }
 
-/// What a sketch makes: `{ closed: profile }` or `{ open: "why, in words" }`.
-#[derive(Debug, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+/// What a sketch makes: `{ closed: profile }` or `{ open: "why, in words" }`;
+/// when its curves close up but break the profile rules, also `invalid`:
+/// the sketch's lines, arcs and circles the rules name (`{ input: "line",
+/// index }`…, possibly none), so the app can mark them without reading the
+/// words (`Open(why, None)` for every other reason).
+#[derive(Debug, PartialEq)]
 pub enum SketchOutlineOut {
     Closed(ProfileOut),
-    Open(String),
+    Open(String, Option<Vec<ops::Input>>),
+}
+
+impl Serialize for SketchOutlineOut {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        // A struct, not a map: serde-wasm-bindgen turns a map into a JavaScript Map, which has no `open` key.
+        use serde::ser::SerializeStruct;
+        match self {
+            SketchOutlineOut::Closed(p) => {
+                let mut out = s.serialize_struct("SketchOutlineOut", 1)?;
+                out.serialize_field("closed", p)?;
+                out.end()
+            }
+            SketchOutlineOut::Open(why, invalid) => {
+                // The field count is only a size hint to the serializer (JSON and the WebAssembly bridge ignore it): at most two.
+                let mut out = s.serialize_struct("SketchOutlineOut", 2)?;
+                out.serialize_field("open", why)?;
+                if let Some(curves) = invalid {
+                    out.serialize_field("invalid", curves)?;
+                }
+                out.end()
+            }
+        }
+    }
 }
 
 /// `sketch::sketch_outline` in the app's form; lines, circles or arcs
@@ -388,7 +414,22 @@ pub fn sketch_outline_of(lines: &[LineIn], circles: &[CircleIn], arcs: &[ArcIn])
     let circles: Vec<sketch::Circle> = circles.iter().map(|c| sketch::Circle { centre: c.centre.into(), radius: c.radius }).collect();
     let arcs: Vec<sketch::Arc> = arcs.iter().map(|a| sketch::Arc { start: a.start.into(), end: a.end.into(), centre: a.centre.into() }).collect();
     match sketch::sketch_outline(&lines, &circles, &arcs)? {
-        sketch::SketchOutline::Open(why) => Ok(SketchOutlineOut::Open(why.to_string())),
+        sketch::SketchOutline::Open(why) => {
+            let invalid = match &why {
+                sketch::Open::NotAProfile { curves, .. } => Some(
+                    curves
+                        .iter()
+                        .map(|c| match *c {
+                            sketch::SketchCurve::Line(index) => ops::Input::Line { index },
+                            sketch::SketchCurve::Arc(index) => ops::Input::Arc { index },
+                            sketch::SketchCurve::Circle(index) => ops::Input::Circle { index },
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            };
+            Ok(SketchOutlineOut::Open(why.to_string(), invalid))
+        }
         sketch::SketchOutline::Closed(profile, sources) => {
             let outer = match profile.outer {
                 ops::profile::Boundary::Path { corners, bulges } => LoopOut::Path { corners: corners.iter().flat_map(|p| [p.x, p.y]).collect(), bulges },
@@ -547,9 +588,9 @@ mod tests {
         // Open sketches say why in words; bad lines are errors.
         assert_eq!(
             sketch_outline_of(&lines[..2], &[], &[]).unwrap(),
-            SketchOutlineOut::Open("the end at (0, 0) is not joined to another line or arc".into())
+            SketchOutlineOut::Open("the end at (0, 0) is not joined to another line or arc".into(), None)
         );
-        assert_eq!(sketch_outline_of(&[], &[], &[]).unwrap(), SketchOutlineOut::Open("the sketch has no lines, arcs or circles yet".into()));
+        assert_eq!(sketch_outline_of(&[], &[], &[]).unwrap(), SketchOutlineOut::Open("the sketch has no lines, arcs or circles yet".into(), None));
         // The first line (index 0, "line 1" as a person counts) is named.
         let e = sketch_outline_of(&[line([0.0, 0.0], [0.0, 0.0])], &[], &[]).unwrap_err();
         assert_eq!(e.message, "line 1 must be between 0.001 and 1000000 mm long, got 0");
@@ -589,6 +630,37 @@ mod tests {
     }
 
     #[test]
+    fn an_outline_that_breaks_the_profile_rules_names_its_curves_in_the_apps_form() {
+        let line = |a: [f64; 2], b: [f64; 2]| LineIn { a, b };
+        // A bow tie drawn out of order, one line backwards: corners (0,0),
+        // (10,10), (10,0), (0,10). The diagonals (0,0)–(10,10) (given as
+        // line 2) and (10,0)–(0,10) (given as line 0, backwards) cross at
+        // (5,5), so those two lines are named, and the edges (lines 1 and 3)
+        // aren't.
+        let bow = [line([0.0, 10.0], [10.0, 0.0]), line([10.0, 10.0], [10.0, 0.0]), line([0.0, 0.0], [10.0, 10.0]), line([0.0, 10.0], [0.0, 0.0])];
+        let SketchOutlineOut::Open(why, Some(mut named)) = sketch_outline_of(&bow, &[], &[]).unwrap() else { panic!() };
+        assert!(why.starts_with("the curves close up but are not a valid outline: "), "{why}");
+        named.sort_by_key(|i| format!("{i:?}"));
+        assert_eq!(named, vec![ops::Input::Line { index: 0 }, ops::Input::Line { index: 2 }]);
+        // A cusp: (0,0) → (40,0) → (20,0) doubles back at (40,0), where line
+        // 0 meets line 1: both named.
+        let cusp = [line([0.0, 0.0], [40.0, 0.0]), line([40.0, 0.0], [20.0, 0.0]), line([20.0, 0.0], [0.0, 30.0]), line([0.0, 30.0], [0.0, 0.0])];
+        let SketchOutlineOut::Open(_, Some(mut named)) = sketch_outline_of(&cusp, &[], &[]).unwrap() else { panic!() };
+        named.sort_by_key(|i| format!("{i:?}"));
+        assert_eq!(named, vec![ops::Input::Line { index: 0 }, ops::Input::Line { index: 1 }]);
+        // The same half circle twice: arcs, by their own index.
+        let half = || ArcIn { start: [5.0, 0.0], end: [-5.0, 0.0], centre: [0.0, 0.0] };
+        let SketchOutlineOut::Open(_, Some(named)) = sketch_outline_of(&[], &[], &[half(), half()]).unwrap() else { panic!() };
+        assert!(!named.is_empty() && named.iter().all(|i| matches!(i, ops::Input::Arc { index: 0 | 1 })), "{named:?}");
+        // Over the wire: `invalid` beside `open`, and only for this reason.
+        let json = serde_json::to_value(sketch_outline_of(&cusp, &[], &[]).unwrap()).unwrap();
+        assert_eq!(json["invalid"], serde_json::json!([{ "input": "line", "index": 0 }, { "input": "line", "index": 1 }]));
+        assert!(json["open"].is_string());
+        let loose = serde_json::to_value(sketch_outline_of(&cusp[..2], &[], &[]).unwrap()).unwrap();
+        assert_eq!(loose.as_object().unwrap().keys().collect::<Vec<_>>(), vec!["open"]);
+    }
+
+    #[test]
     fn a_sketched_circle_in_the_apps_form_extrudes_to_pi_r_squared_h() {
         // One circle round (3, -4), radius 5: the outline is that circle in
         // make_extrude's form, the same numbers back.
@@ -608,7 +680,7 @@ mod tests {
         let two = [CircleIn { centre: [0.0, 0.0], radius: 1.0 }, CircleIn { centre: [9.0, 0.0], radius: 1.0 }];
         assert_eq!(
             sketch_outline_of(&[], &two, &[]).unwrap(),
-            SketchOutlineOut::Open("the sketch makes 2 separate loops; for now a sketch makes one outline".into())
+            SketchOutlineOut::Open("the sketch makes 2 separate loops; for now a sketch makes one outline".into(), None)
         );
         assert_eq!(
             sketch_outline_of(&[], &[CircleIn { centre: [0.0, 0.0], radius: 0.0 }], &[]).unwrap_err(),
