@@ -96,6 +96,22 @@ try {
     throw new Error(`${e.message}\n  the page shows ${JSON.stringify(shown)}\n  console errors: ${JSON.stringify(consoleErrors)}`);
   });
 
+  /**
+   * The browser floats over the view's top-left corner (SF3d), where this
+   * 1000 px window draws the left of the part, so the checks that click the
+   * part fold it first, as a person would; `clickRow` opens it for a row's
+   * click and folds it again.
+   */
+  const FOLD = "#browser .browser-fold";
+  const foldBrowser = async (open) => {
+    if ((await page.$eval(FOLD, (d) => d.open)) !== open) await page.click(`${FOLD} > summary`);
+  };
+  async function clickRow(node, shift = false) {
+    await foldBrowser(true);
+    await page.click(`#browser [data-node=${node}]`, { modifiers: shift ? ["Shift"] : [] });
+    await foldBrowser(false);
+  }
+
   await check("default 40×30×20 box shows hand-worked numbers", async () => {
     // V = 40·30·20 = 24000; A = 2(40·30 + 30·20 + 40·20) = 5200.
     assert.equal(await text("volume"), "24,000 mm³");
@@ -121,6 +137,7 @@ try {
     assert.notDeepEqual(centre, background, "centre of the view should show the body");
   });
 
+  await foldBrowser(false);
   await check("clicking faces and edges selects them: click, Shift-click, drag, empty space, Escape, hidden edges", async () => {
     const box = await page.locator("#viewport canvas").boundingBox();
     const screen = (p) => screenPoint(box, p);
@@ -140,7 +157,7 @@ try {
     await page.mouse.move(front.x + 30, front.y, { steps: 5 });
     await page.mouse.up();
     assert.equal(await selection(), "face:feature-1/top face:feature-1/front", "a drag does not pick");
-    await page.mouse.click(box.x + 0.02 * box.width, box.y + 0.02 * box.height);
+    await page.mouse.click(box.x + 0.02 * box.width, box.y + 0.98 * box.height); // bottom left: the browser floats over the top left (SF3d)
     assert.equal(await selection(), "", "a click on empty space clears");
     await page.mouse.click(top.x, top.y);
     await page.keyboard.press("Escape");
@@ -200,7 +217,7 @@ try {
     };
     // How green a pixel is: the selection colour is green, the body grey-blue.
     const green = ([r, g, b]) => g - (r + b) / 2;
-    const away = () => page.mouse.move(box.x + 2, box.y + 2); // empty space: nothing hovered
+    const away = () => page.mouse.move(box.x + 2, box.y + box.height - 2); // empty space, below the floating browser: nothing hovered
     const viewport = (key) => page.$eval("#viewport", (el, k) => el.dataset[k], key);
     const listed = () => page.$$eval("#selection-list li", (els) => els.map((e) => e.textContent));
     const lit = () => page.$$eval("#browser [aria-current=true]", (els) => els.map((e) => e.dataset.node));
@@ -238,7 +255,7 @@ try {
     assert.deepEqual(await colourAt(top), plainTop, "the face is no longer selected");
 
     // Body 1 in the browser selects the whole body: every face tinted, its row lit.
-    await page.click("#browser [data-node=body-1]");
+    await clickRow("body-1");
     assert.equal(await viewport("highlight"), "body faces  edges ");
     assert.ok(green(await colourAt(front)) > green(plainFront) + 40, "the body's front face is tinted too");
     assert.deepEqual(await lit(), ["body-1"]);
@@ -254,7 +271,7 @@ try {
     await away();
     assert.deepEqual(await colourAt(top), plainTop, "Escape takes the colour away");
     assert.equal(await page.isVisible("#selection-empty"), true);
-    await page.click("#browser [data-node=body-1]");
+    await clickRow("body-1");
     await page.screenshot({ path: "e2e/selection.png" });
     await page.keyboard.press("Escape");
   });
@@ -282,9 +299,7 @@ try {
     assert.equal(await selected(), "face:feature-1/top edge:feature-1/front+top", "a resize keeps face 1 and edge 4");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "faces 1 edges 4");
     assert.equal(await page.isVisible("#selection-note"), false);
-    await page.keyboard.down("Shift");
-    await page.click("#browser [data-node=body-1]");
-    await page.keyboard.up("Shift");
+    await clickRow("body-1", true);
     // A cylinder (the same feature, changed) has a top but no front: the
     // box's top stays selected, now the cylinder's top (kernel face 1 again),
     // the top front edge goes with a note; the body stays.
@@ -339,7 +354,7 @@ try {
       await page.keyboard.press("Escape");
     };
     // The group sits over the viewport, not in the workspace toolbar (the navigation bar, SF3a; e2e/navigation.mjs checks the rest).
-    assert.deepEqual(await page.$$eval("#viewport #view-controls button", (bs) => bs.map((b) => b.getAttribute("aria-label"))), ["Orbit", "Pan", "Zoom", "Fit", "Look at", "Home", "Top", "Front", "Right"]);
+    assert.deepEqual(await page.$$eval("#viewport #view-controls button", (bs) => bs.map((b) => b.getAttribute("aria-label"))), ["Orbit", "Pan", "Zoom", "Fit", "Look at", "Home", "Top", "Front", "Right", "Full screen"]);
     assert.equal(await page.$("#toolbar #view-controls"), null);
 
     // Top: the camera looks straight down at the centre (20, 15, 10), so
@@ -624,6 +639,7 @@ try {
   });
 
   await check("the browser lists the timeline, Body 1 and the origin; Body 1 selects the body", async () => {
+    await foldBrowser(true);
     // The L-bracket part from the check above: feature #1 with its intent.
     const rows = async (group) => page.$$eval(`#browser [data-node=${group}] .tree-row`, (els) => els.map((e) => e.textContent));
     assert.deepEqual(await rows("timeline"), ["1. Extrude: L-bracket profile 40 × 30 mm, by 20 mm"]);
