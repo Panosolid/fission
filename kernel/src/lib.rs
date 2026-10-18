@@ -395,7 +395,8 @@ impl Serialize for SketchOutlineOut {
                 out.end()
             }
             SketchOutlineOut::Open(why, invalid) => {
-                let mut out = s.serialize_struct("SketchOutlineOut", 1 + usize::from(invalid.is_some()))?;
+                // The field count is only a size hint to the serializer (JSON and the WebAssembly bridge ignore it): at most two.
+                let mut out = s.serialize_struct("SketchOutlineOut", 2)?;
                 out.serialize_field("open", why)?;
                 if let Some(curves) = invalid {
                     out.serialize_field("invalid", curves)?;
