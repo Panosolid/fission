@@ -521,7 +521,17 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   };
 
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
+  /** Rebuilds asked for and not answered yet: the viewport's `data-rebuilding` says whether any is, so a test reads the page only once it shows the last edit (the monkey). */
+  let rebuilding = 0;
   async function show(doc: DesignDocument, kind: PartKind) {
+    viewport.element.dataset.rebuilding = String(++rebuilding > 0);
+    try {
+      await showBuilt(doc, kind);
+    } finally {
+      viewport.element.dataset.rebuilding = String(--rebuilding > 0);
+    }
+  }
+  async function showBuilt(doc: DesignDocument, kind: PartKind) {
     drawBrowser(doc);
     fresh.showFor(doc);
     showFailed(doc);

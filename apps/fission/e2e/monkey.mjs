@@ -135,6 +135,8 @@ function shown() {
     bodies: document.querySelectorAll('#browser .tree-row[data-node^="body-"]').length,
     rows: [...document.querySelectorAll('#browser .tree-row[data-node^="body-"]')].map((r) => `${r.dataset.node} ${r.textContent}`),
     sketching: view?.dataset.sketching === "true",
+    // A rebuild still running: the bar's failed marks and the Bodies rows are not the last edit's yet.
+    rebuilding: view?.dataset.rebuilding === "true",
     data: { ...(view?.dataset ?? {}) },
     undo: document.getElementById("undo")?.title,
     redo: document.getElementById("redo")?.title,
@@ -144,13 +146,13 @@ function shown() {
   };
 }
 
-/** Waits until the page stops changing (two reads 150 ms apart agree), at most 6 s; a page still changing then is a failure. */
+/** Waits until the page stops changing (two reads 150 ms apart agree, no rebuild running), at most 6 s; a page still changing then is a failure. */
 async function settle(page) {
   let last = "";
   const until = Date.now() + 6000;
   while (Date.now() < until) {
     const now = JSON.stringify(await page.evaluate(shown));
-    if (now === last) return JSON.parse(now);
+    if (now === last && !JSON.parse(now).rebuilding) return JSON.parse(now);
     last = now;
     await page.waitForTimeout(150);
   }
