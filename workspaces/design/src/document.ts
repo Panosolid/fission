@@ -454,8 +454,11 @@ export function readDesignDocument(data: unknown): DesignDocument {
   if (!Array.isArray(d.profiles) || !Array.isArray(d.timeline?.features)) throw new Error("Design data has no timeline");
   if (!Array.isArray(d.sketches)) throw new Error("Design data has no sketches list");
   if (!Number.isSafeInteger(d.nextId) || d.nextId! < 1) throw new Error(`Design data's nextId ${shown(d.nextId)} is not a counting number`);
-  for (const [i, profile] of d.profiles.entries())
+  for (const [i, profile] of d.profiles.entries()) {
     if (typeof profile !== "object" || profile === null || Array.isArray(profile)) throw new Error(`Design profile ${i + 1} is not an object`);
+    // Before anything turns it into text (the id check's regular expression, the profile's own messages): issue #139.
+    if (typeof profile.id !== "string") throw new Error(`Design profile ${i + 1} has no id`);
+  }
   for (const [i, f] of d.timeline.features.entries()) {
     const intent = (f as Partial<Feature> | null)?.intent;
     if (typeof f?.id !== "string" || typeof intent?.type !== "string" || typeof intent.summary !== "string" || typeof intent.parameters !== "object" || intent.parameters === null)

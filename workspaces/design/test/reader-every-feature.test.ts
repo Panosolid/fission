@@ -2,7 +2,10 @@
 // last one (from 24d1 every solid feature is its own body), and a
 // profile's kind that isn't text is refused in words (issue #139: an array
 // there reached Object.hasOwn, which turned it into text and threw the
-// engine's "Cannot convert object to primitive value").
+// engine's "Cannot convert object to primitive value"). A profile's id that
+// isn't text is refused the same way (issue #139 again: an object whose
+// toString is not a function reached the id check's regular expression,
+// and the profile's own messages, which turn it into text).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { insertPreset, partDocument, readDesignDocument } from "../src/document.ts";
@@ -37,4 +40,17 @@ test("a profile whose kind is not text is refused in words, earlier or last", ()
     earlier.profiles[0].kind = kind;
     assert.throws(() => readDesignDocument(earlier), /profile profile-\d+ has an unknown kind/, `earlier: ${JSON.stringify(kind)}`);
   }
+});
+
+test("a profile whose id is not text is refused in words, before anything turns it into text", () => {
+  // The fuzzer's three shapes (an object whose toString is an object or
+  // true, an array holding one) and the plain ones: none is a string, so
+  // none can be one of Design's ids ("profile-1").
+  for (const id of [{ toString: { "": 1 } }, [{ toString: "" }], { toString: true }, 7, null, ["profile-1"]]) {
+    const doc = JSON.parse(JSON.stringify(partDocument("plate", 40, 30, 5)));
+    doc.profiles[0].id = id;
+    assert.throws(() => readDesignDocument(doc), /^Error: Design profile 1 has no id$/, JSON.stringify(id));
+  }
+  // The same file with its id as text still opens: the check refuses only the id.
+  assert.doesNotThrow(() => readDesignDocument(JSON.parse(JSON.stringify(partDocument("plate", 40, 30, 5)))));
 });
