@@ -1,0 +1,30 @@
+Sketch-extrude sessions, seed 3955982769946476140, 40 steps: 1 kind(s) of failure
+failure: refused: Sketch 2 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 4) and (0, 5) (loop, piece) are 0e0 mm apart; features must be at least 0.001 mm | seed 3955982769946476140, step 26 (extrude sketch-15 by 108.31254250995359): refused: Sketch 2 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 4) and (0, 5) (loop, piece) are 0e0 mm apart; features must be at least 0.001 mm | replay: FISSION_SEED=3955982769946476140 FISSION_SESSIONS=1 FISSION_SESSION_STEPS=40 npm run journeys
+steps:
+  0. draw 6 sides (0 arcs)
+  1. delete side 5 of sketch-2
+  2. draw 7 sides (5 arcs)
+  3. move nothing (no free corner)
+  4. move nothing (no free corner)
+  5. box 2.0770012300042 × 73.83285990647673 × 26.960973152706124
+  6. move nothing (no free corner)
+  7. delete side 5 of sketch-15
+  8. draw side 5 of sketch-2 again
+  9. move corner 2 of sketch-2 to -365.1040064001297,205.99947583011183
+  10. move nothing (no free corner)
+  11. move nothing (no free corner)
+  12. save and open again
+  13. move nothing (no free corner)
+  14. draw side 5 of sketch-15 again
+  15. draw 3 sides (0 arcs)
+  16. draw 5 sides (3 arcs)
+  17. draw 3 sides (0 arcs)
+  18. move corner 2 of sketch-59 to -26.311145838030196,104.42957503785705
+  19. move nothing (no free corner)
+  20. move nothing (no free corner)
+  21. move corner 1 of sketch-2 to -353.04789847879715,216.30617015583283
+  22. extrude sketch-59 by 166.83601385515112
+  23. extrude sketch-2 by 198.15331391446773
+  24. delete side 1 of sketch-38
+  25. extrude sketch-38 by 132.47
+  26. extrude sketch-15 by 108.31254250995359

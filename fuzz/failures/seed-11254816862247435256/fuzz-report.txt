@@ -1,0 +1,5 @@
+Sketch-extrude sessions, seed 11254816862247435256, 40 steps: 1 kind(s) of failure
+failure: refused: Sketch 1 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 0) and (0, 1) (loop, piece) are 7.055894981908582e-4 mm apart; features must be at least 0.001 mm | seed 11254816862247435256, step 1 (extrude sketch-2 by 6.6): refused: Sketch 1 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 0) and (0, 1) (loop, piece) are 7.055894981908582e-4 mm apart; features must be at least 0.001 mm | replay: FISSION_SEED=11254816862247435256 FISSION_SESSIONS=1 FISSION_SESSION_STEPS=40 npm run journeys
+steps:
+  0. draw 8 sides (3 arcs)
+  1. extrude sketch-2 by 6.6

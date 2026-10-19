@@ -1,0 +1,34 @@
+Sketch-extrude sessions, seed 683007817698689554, 40 steps: 1 kind(s) of failure
+failure: refused: Sketch 1 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 0) and (0, 3) (loop, piece) are 1.1264646517077724e-4 mm apart; features must be at least 0.001 mm | seed 683007817698689554, step 30 (draw side 2 of sketch-2 again): refused: Sketch 1 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 0) and (0, 3) (loop, piece) are 1.1264646517077724e-4 mm apart; features must be at least 0.001 mm | replay: FISSION_SEED=683007817698689554 FISSION_SESSIONS=1 FISSION_SESSION_STEPS=40 npm run journeys
+steps:
+  0. draw 4 sides (2 arcs)
+  1. save and open again
+  2. delete side 2 of sketch-2
+  3. draw 7 sides (0 arcs)
+  4. draw a circle round -147,-34 through -193,-11
+  5. save and open again
+  6. extrude sketch-2 by 95.8
+  7. draw 5 sides (2 arcs)
+  8. move nothing (no free corner)
+  9. draw 4 sides (2 arcs)
+  10. save and open again
+  11. save and open again
+  12. draw 7 sides (5 arcs)
+  13. delete side 2 of sketch-45
+  14. extrude sketch-2 by 90.5
+  15. move corner 3 of sketch-13 to -8.286747440363733,-71.79043611703538
+  16. type distance 27.6
+  17. delete side 0 of sketch-13
+  18. type distance 60.2
+  19. extrude sketch-45 by 100.94868946568702
+  20. move nothing (no free corner)
+  21. type distance 35.97519417637544
+  22. extrude sketch-28 by 153.44633246430976
+  23. save and open again
+  24. draw a circle round -132.5,-210 through -97.5,-205
+  25. draw side 2 of sketch-45 again
+  26. delete side 4 of sketch-56
+  27. move nothing (no free corner)
+  28. extrude sketch-2 by 126.4
+  29. draw a rectangle 197.5,-22.5 to 230,-5
+  30. draw side 2 of sketch-2 again

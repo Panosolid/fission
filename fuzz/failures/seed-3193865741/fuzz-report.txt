@@ -1,0 +1,2 @@
+Kernel sketch fuzzing, seed 3193865741, 60727 inputs: 1 failure(s)
+failure: kernel produced an invalid body: face 0 could not be tessellated: more than 4000000 mesh points needed | input input-1-crash-b956a6bb2706070c20c52186f7b1f03e7591ba4a (47 bytes)

@@ -1,0 +1,38 @@
+Sketch-extrude sessions, seed 7783563890718321776, 40 steps: 1 kind(s) of failure
+failure: refused: Sketch 7 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 4) and (0, 5) (loop, piece) are 8.019609069752488e-4 mm apart; features must be at least 0.001 mm | seed 7783563890718321776, step 34 (extrude sketch-46 by 8.45): refused: Sketch 7 has no closed outline: the curves close up but are not a valid outline: profile pieces (0, 4) and (0, 5) (loop, piece) are 8.019609069752488e-4 mm apart; features must be at least 0.001 mm | replay: FISSION_SEED=7783563890718321776 FISSION_SESSIONS=1 FISSION_SESSION_STEPS=40 npm run journeys
+steps:
+  0. draw a rectangle -245,-277 to -276.5,-290
+  1. move corner 0 of sketch-2 to -247.95123086384504,-273.64758988193165
+  2. delete side 1 of sketch-2
+  3. extrude sketch-2 by 57.72
+  4. draw a circle round 312,-52 through 267,-90
+  5. extrude sketch-2 by 37.08
+  6. save and open again
+  7. draw 6 sides (0 arcs)
+  8. extrude sketch-16 by 46.3
+  9. draw a circle round -346.5544028333833,155.09788598900894 through -322.1278112371713,165.49365185914112
+  10. extrude sketch-2 by 21.3
+  11. save and open again
+  12. extrude sketch-12 by 150.78326580287614
+  13. draw 3 sides (0 arcs)
+  14. save and open again
+  15. save and open again
+  16. move corner 4 of sketch-16 to 90.71150480621755,395.2199326642526
+  17. draw a circle round -244.5,38 through -300,26.5
+  18. extrude sketch-30 by 178.7146963628617
+  19. draw 6 sides (2 arcs)
+  20. move nothing (no free corner)
+  21. draw 8 sides (3 arcs)
+  22. move nothing (no free corner)
+  23. draw a circle round 6,107.5 through 1.5,107.5
+  24. move nothing (no free corner)
+  25. draw side 1 of sketch-2 again
+  26. extrude sketch-42 by 155.2946235751818
+  27. draw 7 sides (3 arcs)
+  28. draw 6 sides (2 arcs)
+  29. save and open again
+  30. save and open again
+  31. extrude sketch-12 by 65.2
+  32. draw 5 sides (0 arcs)
+  33. extrude sketch-2 by 155.1
+  34. extrude sketch-46 by 8.45

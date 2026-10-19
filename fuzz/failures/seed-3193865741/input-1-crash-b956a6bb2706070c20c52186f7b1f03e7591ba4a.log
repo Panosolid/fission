@@ -1,0 +1,60 @@
+#28505	REDUCE cov: 3983 ft: 14373 corp: 934/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 27/267 MS: 3 ShuffleBytes-ShuffleBytes-EraseBytes-
+#29234	NEW    cov: 3983 ft: 14376 corp: 935/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 105/267 MS: 4 InsertByte-ChangeBit-CMP-ChangeBinInt- DE: "\001\000\000\000\000\000\000\000"-
+#29242	NEW    cov: 3983 ft: 14377 corp: 936/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 13/267 MS: 3 ChangeASCIIInt-InsertByte-ChangeByte-
+#29393	NEW    cov: 3983 ft: 14386 corp: 937/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 17/267 MS: 1 ChangeBinInt-
+#29445	REDUCE cov: 3983 ft: 14386 corp: 937/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 50/267 MS: 2 ChangeBinInt-EraseBytes-
+#29497	NEW    cov: 3983 ft: 14387 corp: 938/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 13/267 MS: 2 ChangeBinInt-PersAutoDict- DE: "\002\252\252\252\252\252\252\252"-
+#29884	NEW    cov: 3983 ft: 14392 corp: 939/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 31/267 MS: 2 ChangeBit-CopyPart-
+#30122	REDUCE cov: 3983 ft: 14392 corp: 939/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 39/267 MS: 3 EraseBytes-CMP-CopyPart- DE: "\376\377\377\365"-
+#30223	REDUCE cov: 3987 ft: 14400 corp: 940/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 181/267 MS: 1 ChangeByte-
+#30685	NEW    cov: 3987 ft: 14404 corp: 941/34Kb lim: 284 exec/s: 24 rss: 35Mb L: 137/267 MS: 2 InsertRepeatedBytes-ChangeBit-
+#31513	REDUCE cov: 3987 ft: 14404 corp: 941/34Kb lim: 292 exec/s: 24 rss: 35Mb L: 24/267 MS: 3 PersAutoDict-ChangeByte-EraseBytes- DE: "\354\255\326\277"-
+#31910	REDUCE cov: 3987 ft: 14406 corp: 942/35Kb lim: 292 exec/s: 24 rss: 35Mb L: 29/267 MS: 2 ChangeASCIIInt-PersAutoDict- DE: "\001\020\000\000"-
+#32022	NEW    cov: 3987 ft: 14407 corp: 943/35Kb lim: 292 exec/s: 24 rss: 35Mb L: 82/267 MS: 2 ShuffleBytes-InsertByte-
+#32058	REDUCE cov: 3987 ft: 14407 corp: 943/35Kb lim: 292 exec/s: 24 rss: 35Mb L: 9/267 MS: 1 EraseBytes-
+#32184	NEW    cov: 3987 ft: 14408 corp: 944/35Kb lim: 292 exec/s: 24 rss: 35Mb L: 97/267 MS: 1 ChangeBit-
+#32241	REDUCE cov: 3987 ft: 14408 corp: 944/35Kb lim: 292 exec/s: 24 rss: 35Mb L: 122/267 MS: 2 InsertByte-EraseBytes-
+#32246	NEW    cov: 3987 ft: 14410 corp: 945/35Kb lim: 292 exec/s: 24 rss: 35Mb L: 72/267 MS: 5 PersAutoDict-CopyPart-EraseBytes-ChangeBit-CMP- DE: "\002\252\252\252\252\252\252\252"-"\001\000\000\000"-
+#32368	REDUCE cov: 3987 ft: 14410 corp: 945/35Kb lim: 292 exec/s: 24 rss: 35Mb L: 60/267 MS: 2 ChangeBit-EraseBytes-
+
+thread '<unnamed>' (4308) panicked at /home/runner/work/fission/fission/kernel/src/validate.rs:200:17:
+kernel produced an invalid body:
+  face 0 could not be tessellated: more than 4000000 mesh points needed
+failure dump: /home/runner/work/fission/fission/kernel/target/failure-dumps/invalid-body-c7e066d504d10cf7
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+==4308== ERROR: libFuzzer: deadly signal
+NOTE: libFuzzer has rudimentary signal handlers.
+      Combine libFuzzer with AddressSanitizer or similar for better crash reports.
+SUMMARY: libFuzzer: deadly signal
+MS: 1 InsertByte-; base unit: 6d14499223681f04c09a20af1b48d0826115c04b
+0x2e,0x0,0x0,0x1,0x4,0x55,0x55,0x55,0x55,0x55,0x41,0x55,0x5a,0xa2,0x55,0x7,0x5a,0x58,0x5a,0x5a,0x5a,0xa2,0xa2,0xa2,0xff,0xe5,0xa2,0xa2,0xa2,0xa2,0x82,0xa2,0xa2,0xa2,0xa2,0x1,0x0,0x7a,0xa2,0xa2,0xa2,0xa2,0x82,0xa2,0xa2,0xa2,0xa2,0xa2,0xa2,0x0,0xa2,0xa2,0xa2,0xa2,0xf2,0xac,
+.\000\000\001\004UUUUUAUZ\242U\007ZXZZZ\242\242\242\377\345\242\242\242\242\202\242\242\242\242\001\000z\242\242\242\242\202\242\242\242\242\242\242\000\242\242\242\242\362\254
+artifact_prefix='/home/runner/work/fission/fission/kernel/fuzz/artifacts/sketch/'; Test unit written to /home/runner/work/fission/fission/kernel/fuzz/artifacts/sketch/crash-b956a6bb2706070c20c52186f7b1f03e7591ba4a
+Base64: LgAAAQRVVVVVVUFVWqJVB1pYWlpaoqKi/+WioqKigqKioqIBAHqioqKigqKioqKiogCioqKi8qw=
+stat::number_of_executed_units: 32674
+stat::average_exec_per_sec:     23
+stat::new_units_added:          189
+stat::slowest_unit_time_sec:    0
+stat::peak_rss_mb:              386
+
+────────────────────────────────────────────────────────────────────────────────
+
+Failing input:
+
+	fuzz/artifacts/sketch/crash-b956a6bb2706070c20c52186f7b1f03e7591ba4a
+
+Output of `std::fmt::Debug`:
+
+	[46, 0, 0, 1, 4, 85, 85, 85, 85, 85, 65, 85, 90, 162, 85, 7, 90, 88, 90, 90, 90, 162, 162, 162, 255, 229, 162, 162, 162, 162, 130, 162, 162, 162, 162, 1, 0, 122, 162, 162, 162, 162, 130, 162, 162, 162, 162, 162, 162, 0, 162, 162, 162, 162, 242, 172]
+
+Reproduce with:
+
+	cargo fuzz run -a --sanitizer=none sketch fuzz/artifacts/sketch/crash-b956a6bb2706070c20c52186f7b1f03e7591ba4a
+
+Minimize test case with:
+
+	cargo fuzz tmin -a --sanitizer=none sketch fuzz/artifacts/sketch/crash-b956a6bb2706070c20c52186f7b1f03e7591ba4a
+
+────────────────────────────────────────────────────────────────────────────────
+
+Error: Fuzz target exited with exit status: 77
