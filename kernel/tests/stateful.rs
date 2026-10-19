@@ -2347,6 +2347,26 @@ fn write_dump(name: &str, f: &Failure, ops: &[Op]) -> Option<PathBuf> {
     debug_dump::dump(&dir, name, &bodies, &note).ok()
 }
 
+/// The shape the kernel was given, for OpenCascade and the exact referee:
+/// a drawn sketch's closed outline (`Drawn::outline`) in place of the
+/// harness's own corners and bulges. They differ where the drawing rounds:
+/// an arc is drawn round its centre, a double, and 100 km out a double
+/// resolves only 1.5e-8 mm, so the outline's bulge is the one that centre
+/// gives, not the harness's (issues #183, #184: a 0.096 mm arc's bulge
+/// 349.26670850809774 drawn as 349.26668292259035, 1.5e-7 of the volume,
+/// which the kernel had to 1e-16 of the outline's). Any other shape is
+/// itself.
+fn oracle_shape(shape: &Shape) -> Shape {
+    let (Shape::Extrude { dist, expect, sketch, .. }, Some(drawn)) = (shape, sketched(shape)) else { return shape.clone() };
+    let Ok(sketch::SketchOutline::Closed(profile, _)) = drawn.outline() else { return shape.clone() };
+    let num = |p: DVec2| [Num(p.x), Num(p.y)];
+    let outer = match profile.outer {
+        Boundary::Path { corners, bulges } => Ring::Path { pts: corners.into_iter().map(num).collect(), bulges: bulges.into_iter().map(Num).collect() },
+        Boundary::Circle { center, radius } => Ring::Circle { c: num(center), r: Num(radius) },
+    };
+    Shape::Extrude { outer, holes: vec![], dist: *dist, expect: *expect, sketch: *sketch }
+}
+
 fn oracle_lines(slots: &[Slot]) -> String {
     let mut out = String::new();
     for s in slots {
@@ -2372,9 +2392,10 @@ fn oracle_lines(slots: &[Slot]) -> String {
         ];
         // Rounding allowance for the placed coordinates, as in check_rigid.
         let delta = tolerance::rounding_slack(reach(&m)) * s.steps.max(1) as f64;
-        let (curve_volume_slack, curve_area_slack) = curve_slacks(&s.shape);
+        let shape = oracle_shape(&s.shape);
+        let (curve_volume_slack, curve_area_slack) = curve_slacks(&shape);
         let line = serde_json::json!({
-            "shape": s.shape, "matrix": matrix, "faces": b.body.faces.len(),
+            "shape": shape, "matrix": matrix, "faces": b.body.faces.len(),
             "volume": m.volume, "area": m.area, "exact_volume": m.exact.volume, "exact_area": m.exact.area, "lo": m.lo.to_array(), "hi": m.hi.to_array(), "max_deviation": dev,
             "volume_slack": m.area * delta, "area_slack": m.perimeters * delta,
             "curve_volume_slack": curve_volume_slack, "curve_area_slack": curve_area_slack,
@@ -3037,4 +3058,53 @@ fn walls_of_almost_a_full_turn_are_decided_by_their_witness() {
     }
     let err = edge_pairs_off(&flipped, &fission_kernel::edge_faces(&flipped), &centroids).unwrap_err();
     assert!(err.contains(&format!("edge {upright}:")) && err.contains("lies on its right"), "{err}");
+}
+
+#[test]
+fn the_oracle_is_given_the_outline_a_sketch_drew_by_hand() {
+    // Issues #183, #184 (seed 67278701118011): a 1.1 µm chord 100 km out,
+    // (−22.501324259437055, −99999999) to (−22.500224259437054, −99999999),
+    // closed by an arc of bulge 349.26670850809774: chord c = 0.0011000000000010,
+    // radius c(1 + β²)/(4β) = 0.0960491322037, sagitta βc/2 = 0.192096689680.
+    // Drawn as a sketch arc round its centre, at y = −99999999 + s − r =
+    // −99999998.903952442524 (40 digits), which the nearest double puts
+    // 7.04e-9 lower. Moving the centre down by δ shortens both r and the
+    // centre's height over the chord by δ, so the sagitta the outline works
+    // out, (centre − m)·n + r, by 2δ: the bulge by 2δ/s = 7.33e-8 of itself,
+    // to 349.26668292259035, and the area (~πr²) by 2δ/r = 1.47e-7. The
+    // kernel's volume is the outline's to rounding; OpenCascade and the
+    // exact referee were given the harness's bulge instead.
+    let shape = Shape::Extrude {
+        outer: Ring::curved(vec![DVec2::new(-22.501324259437055, -99999999.0), DVec2::new(-22.500224259437054, -99999999.0)], vec![-349.26670850809774, 0.0]),
+        holes: vec![],
+        dist: Num(61.5),
+        expect: Some(true),
+        sketch: Some(11386601276301485740),
+    };
+    let built = oracle_shape(&shape);
+    let Shape::Extrude { outer: Ring::Path { pts, bulges }, holes, dist, .. } = &built else { panic!("{built:?}") };
+    assert!(holes.is_empty() && dist.0 == 61.5);
+    assert_eq!(bulges.iter().map(|b| b.0).collect::<Vec<_>>(), [0.0, 349.26668292259035]);
+    assert_eq!(pts.iter().map(p2).collect::<Vec<_>>(), [DVec2::new(-22.501324259437055, -99999999.0), DVec2::new(-22.500224259437054, -99999999.0)]);
+    let Ok(sketch::SketchOutline::Closed(profile, _)) = sketched(&shape).unwrap().outline() else { panic!() };
+    let volume = fission_kernel::mass::mass_properties(&extrude::extrude(&profile, 61.5).unwrap()).volume;
+    let cap = |s: &Shape| face_model(s).unwrap().iter().find(|m| m.0 == FaceRole::Start).unwrap().1 * 61.5;
+    assert!((volume - cap(&built)).abs() <= 1e-12 * volume, "{volume} vs the outline's {}", cap(&built));
+    let off = (volume - cap(&shape)).abs() / volume;
+    assert!((1.4e-7..1.5e-7).contains(&off), "the harness's own bulge is {off:e} off");
+    // The oracle's line for that part carries the outline.
+    let body = extrude::extrude(&profile, 61.5).unwrap();
+    let mut slot = placed_slot(&body, Placed::new(body.clone()), glam::DAffine3::IDENTITY, 1);
+    slot.shape = shape.clone();
+    let line: serde_json::Value = serde_json::from_str(oracle_lines(&[slot]).trim()).unwrap();
+    assert_eq!(line["shape"]["Extrude"]["outer"]["Path"]["bulges"], serde_json::json!(["0.0", "349.26668292259035"]), "{line}");
+    // A shape not drawn as a sketch, or one whose drawing doesn't close, is
+    // given as it is.
+    let mut plain = shape.clone();
+    if let Shape::Extrude { sketch, .. } = &mut plain {
+        *sketch = None;
+    }
+    assert_eq!(oracle_shape(&plain), plain);
+    let boxed = Shape::Box { w: Num(1.0), d: Num(2.0), h: Num(3.0) };
+    assert_eq!(oracle_shape(&boxed), boxed);
 }
