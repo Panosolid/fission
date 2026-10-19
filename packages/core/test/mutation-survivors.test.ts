@@ -139,14 +139,14 @@ test('a new project with no name given is called "Untitled"', () => {
 test("null, version 0 and negative versions are refused with their own messages", () => {
   // Catches `data === null` and `v < 1` dropped: null would fail reading a
   // property of null, version 0 would look for a migration from 0.
-  assert.throws(() => readProject(null), /^Error: not a Panoshape project: expected an object$/);
-  for (const v of [0, -1]) assert.throws(() => readProject({ ...emptyProject(), formatVersion: v }), /^Error: not a Panoshape project: no format version$/);
+  assert.throws(() => readProject(null), /^Error: not a Panosolid project: expected an object$/);
+  for (const v of [0, -1]) assert.throws(() => readProject({ ...emptyProject(), formatVersion: v }), /^Error: not a Panosolid project: no format version$/);
 });
 
 test("a bad unit's message lists every unit, comma separated", () => {
   assert.throws(
     () => readProject({ ...emptyProject(), units: { length: "furlong" } }),
-    (e: Error) => e.message === 'not a Panoshape project: "units" must give a length unit (mm, cm, m, in)',
+    (e: Error) => e.message === 'not a Panosolid project: "units" must give a length unit (mm, cm, m, in)',
   );
 });
 

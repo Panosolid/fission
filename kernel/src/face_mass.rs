@@ -13,16 +13,24 @@
 //!   ∬ (x − c) dA = s r V. Check: a hemisphere has V = πr² along its axis
 //!   and A = 2πr², so its centroid is r/2 from the centre (Archimedes).
 //! - Cylinder (axis point o, unit axis a, radius r): x − o = r m + h a, h
-//!   the height along the axis. The first part gives s r V (V has no part
-//!   along the axis; the rounding that gives it one is dropped, as in
-//!   `mass.rs`). For the second, in coordinates (θ, h) round and along the
+//!   the height along the axis. In coordinates (θ, h) round and along the
 //!   axis dA = r dθ dh, and θ̂ × â = m, so the face's loops (counter-
 //!   clockwise seen from n) run positively in (θ, h) when s = +1. Green's
 //!   theorem with P = −h²/2 gives ∬ h dθ dh = −½ ∮ h² dθ, so
-//!   ∬ h dA = −(s r/2) ∮ h² dθ, where only circles round the axis count (a
-//!   line along the axis has dθ = 0; until step 46 no other curve lies on a
-//!   cylinder). Heights are measured from p's, h_p, adding h_p A back, so
-//!   a face far up its axis keeps its digits.
+//!   ∬ h dA = −(s r/2) ∮ h² dθ; with P = −h m(θ) it gives
+//!   ∬ m dθ dh = −∮ h m dθ, so ∬ r m dA = −s r² ∮ h m dθ. Only circles
+//!   round the axis count (a line along the axis has dθ = 0; until step 46
+//!   no other curve lies on a cylinder), and along one ∫ m dθ is
+//!   2 sin(Δθ/2) times m at the middle angle. Check: a half cylinder
+//!   wall (θ from 0 to π, h from 0 to H, s = +1) has loop pieces at h = 0
+//!   (θ rising, nothing) and h = H (θ falling), so ∮ h m dθ = H · 2 m(π/2)
+//!   · (−1) and ∬ r m dA = 2 r² H m(π/2) over A = π r H: 2r/π from the axis.
+//!   Heights are measured from p's, h_p, adding h_p A back, so a face far
+//!   up its axis keeps its digits. Neither part reads the face's corners,
+//!   only its circles: V from the corners would set the wall's direction
+//!   by its chords, and on a narrow wall of a wide cylinder far out a
+//!   corner's rounding over the wall's width tips the radius r arm
+//!   (`a_narrow_wall_of_a_wide_cylinder_far_out_by_hand`).
 //! - Plane: in-plane coordinates (u, v) from p along e1 and e2 = n × e1
 //!   run positively the way the loops do. Green's theorem gives
 //!   ∬ u dA = ∮ (u²/2) dv and ∬ v dA = −∮ (v²/2) du; along a straight piece
@@ -51,10 +59,6 @@
 //! Mutation testing (`cargo mutants`) leaves these survivors, equivalent:
 //! - `> → >=` in an arc's `left`: an arc on a plane is square to it, so
 //!   `axis.dot(n)` is ±1, never 0, and an edge never has `tb == ta`.
-//! - `- → +` in a cylinder's `across`: a cylinder face's vector area is
-//!   radial (its normal never has an axial part), so the axial part
-//!   removed there is only rounding; it is kept so that rounding can't
-//!   leak into the centroid's height.
 //!
 //! Each factor that is ±1 (`sign`, `left`, `axis.dot(k)`) comes first in
 //! its product, so `* → /` there changes the answer (±1 / x, not x / ±1)
@@ -86,28 +90,36 @@ pub fn face_mass(body: &Body, face: &Face) -> FaceMass {
     let corner = |v: usize| body.vertices[v].point;
     let p = coedges().next().map_or(DVec3::ZERO, |c| corner(body.coedge_start(c)));
     let area = face_terms(body, face, p).1;
-    let vector_area: DVec3 = coedges()
-        .map(|c| {
-            let (curve, ta, tb) = travel(body, c);
-            half_moment(curve, ta, tb, corner(body.coedge_start(c)), corner(body.coedge_end(c)), p)
-        })
-        .sum();
     let centroid = match face.surface {
-        Surface::Sphere { center, radius, .. } => center + vector_area * (sign * radius / area),
+        Surface::Sphere { center, radius, .. } => {
+            let vector_area: DVec3 = coedges()
+                .map(|c| {
+                    let (curve, ta, tb) = travel(body, c);
+                    half_moment(curve, ta, tb, corner(body.coedge_start(c)), corner(body.coedge_end(c)), p)
+                })
+                .sum();
+            center + vector_area * (sign * radius / area)
+        }
         Surface::Cylinder { origin, axis, radius, .. } => {
-            let across = vector_area - axis * axis.dot(vector_area);
             let hp = axis.dot(p - origin);
-            // ∮ (h − h_p)² dθ, θ measured about +axis.
+            // ∮ (h − h_p)² dθ and ∮ (h − h_p) m dθ, θ measured about +axis.
             let mut swept = 0.0;
+            let mut round = DVec3::ZERO;
             for c in coedges() {
                 let (curve, ta, tb) = travel(body, c);
-                if let Curve::Circle { center, axis: k, .. } = *curve {
+                if let Curve::Circle { center, axis: k, x_dir, .. } = *curve {
                     let h = axis.dot(center - origin) - hp;
-                    swept += axis.dot(k) * (tb - ta) * h * h;
+                    let turn = axis.dot(k);
+                    swept += turn * (tb - ta) * h * h;
+                    // ∫ m dt from ta to tb, m = cos t x_dir + sin t (k × x_dir),
+                    // is 2 sin(Δ/2) m(mid): no difference of near-equal sines.
+                    let (s, c) = fmath::sin_cos(0.5 * (ta + tb));
+                    let m = x_dir * c + k.cross(x_dir) * s;
+                    round += m * (turn * 2.0 * fmath::sin(0.5 * (tb - ta)) * h);
                 }
             }
             let height = hp - sign * radius * swept / area * 0.5;
-            origin + across * (sign * radius / area) + axis * height
+            origin + round * (-sign * radius * radius / area) + axis * height
         }
         Surface::Plane { normal, .. } => {
             let n = sign * normal;
@@ -456,6 +468,41 @@ mod tests {
             let want = tf.point(m.centroid);
             assert!(n.centroid.distance(want) < 1e-6, "{:?}: {} vs {want}", f.role, n.centroid);
         }
+    }
+
+    #[test]
+    fn a_narrow_wall_of_a_wide_cylinder_far_out_by_hand() {
+        // Regression (#204, seed6eb3ca5f418b, random testing): an arc of
+        // bulge 1e-5 over the chord P0 → P1 below, extruded 0.5, turned
+        // −90° about x and moved 1e8 − 1 up z. The turn takes (x, y, h) to
+        // (x, h, −y), so the wall's centroid is near (Mx, 0.25, 1e8 − 1 − My)
+        // with M = (P0 + P1)/2 the chord's midpoint. Near, by hand: the
+        // chord is c = |P1 − P0| ≈ 0.0079 mm, the arc's sagitta is
+        // bulge · c/2 ≈ 4e-8 mm, and an arc's centroid lies 2/3 of its
+        // sagitta off the chord (R sin(φ/2)/(φ/2) − R cos(φ/2) ≈ R φ²/12,
+        // the sagitta being R φ²/8), so within 3e-8 of M; 1e8 out each
+        // coordinate is held to ~1.5e-8. The radius is
+        // c (1 + bulge²)/(4 bulge) ≈ 197 mm, and measuring the wall's
+        // direction from its corners, each rounded by ~7e-9 over its 8 µm
+        // width, tipped that 197 mm arm by ~1e-6 rad: 1.05e-4 mm off.
+        let p0 = DVec2::new(0.00209065048129847, 0.004401014196766702);
+        let p1 = DVec2::new(-0.005666475370731479, 0.002905723170709483);
+        let corners = [
+            (p0.x, p0.y),
+            (p1.x, p1.y),
+            (-0.0031164824140770798, -0.0023863614497971627),
+            (0.0016842440948024464, -0.0035454908595923366),
+            (0.003925198543555436, -9.613963664766035e-19),
+        ];
+        let b = extrude(&Profile { outer: path(&corners, &[1e-5, 0.0, 0.0, 0.0, 0.0]), holes: vec![] }, 0.5).unwrap();
+        let tf = Transform::rotation(DVec3::X, -0.5 * PI).then(Transform::translation(DVec3::new(0.0, 0.0, 99999999.0)));
+        let m = 0.5 * (p0 + p1);
+        let want = DVec3::new(m.x, 0.25, 99999999.0 - m.y);
+        let got = face_with(&b.transformed(&tf), side(0, 0)).centroid;
+        assert!(got.distance(want) < 1e-7, "{got} vs {want} ({:e} off)", got.distance(want));
+        // Unmoved, the same wall is within 3e-8 of (Mx, My, 0.25).
+        let near = face_with(&b, side(0, 0)).centroid;
+        assert!(near.distance(DVec3::new(m.x, m.y, 0.25)) < 3e-8, "{near}");
     }
 
     #[test]

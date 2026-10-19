@@ -1,4 +1,4 @@
-//! Fission geometry kernel.
+//! Panosolid geometry kernel.
 //!
 //! Pure Rust lives in the modules; the `#[wasm_bindgen]` functions below are the
 //! thin layer the browser app calls. Vectors cross the boundary as flat

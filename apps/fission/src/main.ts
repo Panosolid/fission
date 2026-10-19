@@ -537,7 +537,7 @@ function keepOnFirstChange() {
 }
 
 // Save and Open: the whole project, every workspace's data, as one
-// .fission.json file (docs/project-format.md). Opening replaces the project
+// .panosolid.json file (docs/project-format.md). Opening replaces the project
 // only once all of it has read cleanly; a refused file leaves the open
 // project as it was and says why.
 const fileStatus = (message: string) => ($("file-status").textContent = message);
@@ -546,7 +546,7 @@ $("save").addEventListener("click", async () => {
   try {
     await started; // the project shown, not the empty one the app starts with
     const url = URL.createObjectURL(new Blob([projectToJson(ctx.project)], { type: "application/json" }));
-    const a = Object.assign(document.createElement("a"), { href: url, download: `${ctx.project.name.replace(/[\\/:*?"<>|]/g, "-") || "Untitled"}.fission.json` });
+    const a = Object.assign(document.createElement("a"), { href: url, download: `${ctx.project.name.replace(/[\\/:*?"<>|]/g, "-") || "Untitled"}.panosolid.json` });
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
     fileStatus("");
@@ -866,5 +866,5 @@ async function start() {
 const started = start();
 ctx.kernel.call("kernel_version").then((v) => {
   $("version").textContent = `kernel v${v}`;
-  $("version").parentElement!.title = `Panoshape, kernel v${v}`; // where the version shows when the bar has no room for it
+  $("version").parentElement!.title = `Panosolid, kernel v${v}`; // where the version shows when the bar has no room for it
 });

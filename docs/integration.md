@@ -1,6 +1,6 @@
-# How Panoshape's workspaces work together
+# How Panosolid's workspaces work together
 
-Panoshape is ten workspaces sharing one project: Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image and Layout. The goal is that anything made in one workspace can go straight into any other, stays linked to its source, and never loses information, without anyone exporting a file. This page is for contributors. It explains the model and where each piece lives. The code in `packages/core/src/model/` is the reference. Which links exist between which workspaces, and when each can be built, is in [integration-map.md](integration-map.md).
+Panosolid is ten workspaces sharing one project: Design, Render, Simulate, Manufacture, Laser, Slice, Circuit, Vector, Image and Layout. The goal is that anything made in one workspace can go straight into any other, stays linked to its source, and never loses information, without anyone exporting a file. This page is for contributors. It explains the model and where each piece lives. The code in `packages/core/src/model/` is the reference. Which links exist between which workspaces, and when each can be built, is in [integration-map.md](integration-map.md).
 
 ## The rules
 
@@ -17,7 +17,7 @@ Panoshape is ten workspaces sharing one project: Design, Render, Simulate, Manuf
 
 ## Why this matters
 
-Integration is Panoshape's flagship and its main way to compete with established tools, even where its CAD is less capable. Moving a design (your own or a shared one) between workspaces should feel as if everything was always one tool. CAD reliability still comes first: integration never hides a broken boolean, and integration work never slows the kernel roadmap. Only what can be built for real is built; the rest is written here as rules and in `docs/roadmap.md` as planned steps ("Integration experience").
+Integration is Panosolid's flagship and its main way to compete with established tools, even where its CAD is less capable. Moving a design (your own or a shared one) between workspaces should feel as if everything was always one tool. CAD reliability still comes first: integration never hides a broken boolean, and integration work never slows the kernel roadmap. Only what can be built for real is built; the rest is written here as rules and in `docs/roadmap.md` as planned steps ("Integration experience").
 
 ## Representations (`representation.ts`)
 
@@ -39,7 +39,7 @@ Design produces Solid and Mesh for its features, and Outline for its profiles. T
 
 ## Files from outside (`files.ts`)
 
-A file dropped anywhere on the app, or pasted outside a text field, goes through the same registry. `identifyFile` says what it is: contents with a strong signature (PNG, JPEG, PDF, STEP, a Panoshape project, SVG) decide alone; STL and DXF, whose signatures are weak, count only with their extension; a name that claims a format its contents don't match is refused as damaged or renamed. Each workspace that opens a format registers an importer for it (`registerImporter`, one per format; the shell registers projects). A format nothing opens yet is refused with a message naming the workspace that will take it (STL: Design, as mesh bodies; SVG: Vector and Laser; DXF: Laser; STEP: Design; PDF: Layout), so the message changes by itself when that workspace registers its importer. One file at a time.
+A file dropped anywhere on the app, or pasted outside a text field, goes through the same registry. `identifyFile` says what it is: contents with a strong signature (PNG, JPEG, PDF, STEP, a Panosolid project, SVG) decide alone; STL and DXF, whose signatures are weak, count only with their extension; a name that claims a format its contents don't match is refused as damaged or renamed. Each workspace that opens a format registers an importer for it (`registerImporter`, one per format; the shell registers projects). A format nothing opens yet is refused with a message naming the workspace that will take it (STL: Design, as mesh bodies; SVG: Vector and Laser; DXF: Laser; STEP: Design; PDF: Layout), so the message changes by itself when that workspace registers its importer. One file at a time.
 
 ## Live links (`links.ts`)
 
@@ -124,7 +124,7 @@ These describe what the user feels. Each one turns into a rule for code below an
 5. **Motion that explains.** A short animation (about half a second, skippable, off when the system asks for reduced motion) when an object moves between representations: a box unfolds into laser panels, a part drops onto the print bed, a logo wraps onto a surface. One shared transition helper in the UI kit, added with the first real cross-workspace move.
 6. **Conversions, not just moves.** Linked transformations between kinds of making, each staying live: a solid box becomes finger-jointed laser panels (sheet thickness a parameter), a solid becomes a sheet-metal part, a logo becomes a stamp, cookie cutter or keychain, a photo becomes a lithophane and then a print. Each is a feature with intent, so it rebuilds when its source changes.
 7. **Shared designs are complete recipes.** A shared design carries the whole recipe: the design, print settings, laser jobs, render scenes and instructions. "Make it for my machine" adapts a recipe to the user's own printers, lasers, materials and units. Remixes stay linked to the original like a git branch: when the author updates it, the remixer sees "Update available from the author" and can bring it in with their own changes kept on top. The format for this is planned in [project-format.md](project-format.md).
-8. **The outside world flows in and out.** Dropping or pasting a supported file anywhere (SVG, PNG or JPEG, STEP, STL, DXF, PDF) routes it through the representation registry to the right representation. Pasting an image straight onto a face offers to engrave it. Copying from Panoshape gives other apps something useful: SVG for outlines, PNG for renders and images.
+8. **The outside world flows in and out.** Dropping or pasting a supported file anywhere (SVG, PNG or JPEG, STEP, STL, DXF, PDF) routes it through the representation registry to the right representation. Pasting an image straight onto a face offers to engrave it. Copying from Panosolid gives other apps something useful: SVG for outlines, PNG for renders and images.
 9. **Always explain changes.** When something updates because of something else, a short dismissible note names the cause ("Print plate updated: you changed wall thickness in Design"), with one click to the full provenance chain. Nothing updates silently in a way the user would find surprising.
 10. **Fast and the same everywhere.** Switching workspaces takes under 100 ms, because workspaces stay warm in the background. Shortcuts, gizmos, selection behaviour, units and undo are the same in every workspace. A browser test measures switching time and fails above 100 ms.
 

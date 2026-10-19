@@ -36,7 +36,7 @@ export function indexedDbKeyValue(name = "fission", factory: IDBFactory | undefi
         db = undefined; // let the next call try again
         reject(failure(r.error, "open the project database"));
       };
-      r.onblocked = () => reject(new Error("browser storage is busy: close other Panoshape tabs and try again"));
+      r.onblocked = () => reject(new Error("browser storage is busy: close other Panosolid tabs and try again"));
     }));
   /** Runs one request in its own transaction; a write resolves only once it is committed. */
   const run = async <T>(mode: IDBTransactionMode, doing: string, make: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
