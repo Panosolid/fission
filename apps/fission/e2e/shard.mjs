@@ -36,6 +36,7 @@ export const SECONDS = {
   "typed-entry.mjs": 37,
   "journeys.mjs": 9,
   "framing.mjs": 14,
+  "leave-save.mjs": 23,
 };
 export const UNKNOWN = 30;
 
