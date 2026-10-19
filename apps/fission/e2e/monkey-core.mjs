@@ -72,6 +72,8 @@ export function nextAction(random, page) {
     key: 12,
     menu: page.rows.length ? 5 : 0,
     row: page.rows.length ? 6 : 0,
+    // 25a3: a double-click on a bar item or a browser row opens it (Edit Sketch, Edit feature).
+    double: page.rows.length ? 4 : 0,
     resize: 3,
     open: page.haveSave ? 6 : 0,
     reload: 1,
@@ -116,6 +118,11 @@ export function nextAction(random, page) {
       // A left click on a browser row; a body's row selects that body, so those are picked most.
       const bodies = page.rows.filter((r) => r.body);
       return { do: "click", sel: (bodies.length && random() < 0.7 ? pick(random, bodies) : pick(random, page.rows)).sel };
+    }
+    case "double": {
+      // Mostly a sketch's: Edit Sketch, with drawing and Finish Sketch after it.
+      const sketches = page.rows.filter((r) => r.sketch);
+      return { do: "double", sel: (sketches.length && random() < 0.7 ? pick(random, sketches) : pick(random, page.rows)).sel };
     }
     case "resize":
       return { do: "resize", size: pick(random, SIZES) };

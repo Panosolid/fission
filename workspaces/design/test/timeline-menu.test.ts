@@ -49,7 +49,7 @@ type Menu = typeof menu;
 function host(m: Menu, start: DesignDocument, closed = true) {
   let doc = start;
   const history = createHistory({ capture: () => JSON.stringify(doc), restore: (s) => (doc = JSON.parse(s)) });
-  const log = { records: [] as string[], refused: [] as string[], asked: [] as DeleteQuestion[], opened: [] as string[], confirm: null as null | (() => void) };
+  const log = { records: [] as string[], refused: [] as string[], asked: [] as DeleteQuestion[], opened: [] as string[], sketches: [] as string[], confirm: null as null | (() => void) };
   const h = {
     kernel: kernel(closed),
     current: () => doc,
@@ -64,6 +64,7 @@ function host(m: Menu, start: DesignDocument, closed = true) {
     },
     refuse: (message: string) => void log.refused.push(message),
     edit: (id: string) => void log.opened.push(id),
+    editSketch: (id: string) => void log.sketches.push(id),
   };
   return { h, log, history, doc: () => doc, set: (d: DesignDocument) => (doc = d), run: (id: string, action: Parameters<Menu["chooseEntry"]>[2], editing: string | null = null) => m.chooseEntry(h, id, action, editing) };
 }
@@ -83,8 +84,8 @@ test("hand-worked: the menu of each item of the box, Sketch 1 and Extrude 1, wit
   ]);
   // Sketch 1 suppressed: Extrude 1 fails (its sketch is suppressed), the box still builds.
   assert.equal(menu.menuEntries(d, "sketch-2")[1].off, null);
-  // A sketch has no Edit feature (its sketch is reopened with Edit Sketch, 25a3).
-  assert.deepEqual(menu.menuEntries(d, "sketch-2").map((e) => e.action), ["marker", "suppress", "delete"]);
+  // A sketch has Edit Sketch in Edit feature's place (25a3), on: it is built and not open.
+  assert.deepEqual(menu.menuEntries(d, "sketch-2").map((e) => [e.action, e.off]), [["edit-sketch", null], ["marker", null], ["suppress", null], ["delete", null]]);
   // Extrude 1: the marker is already just after it.
   assert.equal(menu.menuEntries(d, "feature-11")[1].off, "The marker is already here");
 });
@@ -128,7 +129,7 @@ const DESIGNS: [string, () => DesignDocument][] = [
   ["unused Sketch 2 last", withSketch2],
   ["only sketches left", () => deleteItem(deleteItem(withSketch2(), "feature-11"), "feature-1")],
 ];
-const ACTIONS = ["edit", "marker", "suppress", "unsuppress", "delete"] as const;
+const ACTIONS = ["edit", "edit-sketch", "marker", "suppress", "unsuppress", "delete"] as const;
 
 /** Runs every entry of every item of every design through `m`, confirming every ask; the first broken rule, or null. */
 async function everyEntry(m: Menu): Promise<string | null> {
@@ -145,7 +146,14 @@ async function everyEntry(m: Menu): Promise<string | null> {
           t.log.confirm?.();
           const after = json(t.doc());
           if (!entry) {
-            if (t.log.records.length > 0 || t.log.opened.length > 0) return `${where}: did an entry the menu doesn't offer`;
+            if (t.log.records.length > 0 || t.log.opened.length > 0 || t.log.sketches.length > 0) return `${where}: did an entry the menu doesn't offer`;
+            continue;
+          }
+          // Edit Sketch (25a3) only opens the sketch: nothing recorded, the document as it was; off, refused with its words.
+          if (action === "edit-sketch") {
+            const opened = entry.off === null ? id : "";
+            if (t.log.sketches.join() !== opened || t.log.records.length > 0 || t.log.opened.length > 0 || after !== before) return `${where}: Edit Sketch opened ${t.log.sketches.join() || "nothing"} and recorded ${t.log.records.length}`;
+            if (entry.off !== null && t.log.refused[0] !== entry.off) return `${where}: Edit Sketch refused with "${t.log.refused[0]}", not its words "${entry.off}"`;
             continue;
           }
           // Edit feature (25a2) only opens the item's sizes: nothing recorded, nothing refused, the document as it was.
@@ -285,6 +293,9 @@ const MENU_PLANTS: { name: string; edits: [string, string][]; caught: string }[]
     caught: "one Undo did not give back the document before (2 records)",
   },
   { name: "delete-never-asks", edits: [["  if (plan.ask) host.ask(plan.ask, go);", "  if (plan.ask && false) host.ask(plan.ask, go);"]], caught: "a used item deleted without asking" },
+  // 25a3: Edit Sketch opening the Edit feature panel instead, and opening a sketch whose entry is off.
+  { name: "edit-sketch-opens-feature", edits: [["  if (r.kind === \"sketch\") return host.editSketch(r.id);", "  if (r.kind === \"sketch\") return host.edit(r.id);"]], caught: "Edit Sketch opened nothing" },
+  { name: "edit-sketch-off-opens", edits: [["  if (r.kind === \"refused\") return host.refuse(r.message);", "  if (r.kind === \"refused\" && action === \"edit-sketch\" && itemMenu(before, id, editing).some((e) => e.action === action)) return host.editSketch(id);\n  if (r.kind === \"refused\") return host.refuse(r.message);"]], caught: "Edit Sketch opened sketch-2" },
   // "off-entry-run" (chooseEntry's own off check dropped) went with 24f4, and so did the check: every entry still
   // off is one barEdit itself refuses with the same words, so no test could tell it was gone. everyEntry still
   // proves an off entry records nothing and is refused with its words.
@@ -367,6 +378,50 @@ test("the bar: a right-click on an item opens its menu at the pointer; a click p
   const e = new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 });
   item("feature-1").dispatchEvent(e as unknown as Event);
   assert.equal(e.defaultPrevented, true);
+});
+
+test("the bar (25a3): two clicks on one item within DOUBLE_CLICK_MS open it and pick nothing more; slower, or on two items, they are two picks", () => {
+  const calls: string[] = [];
+  const wiring = { onPick: (id: string) => calls.push(`pick ${id}`), onOpen: (id: string) => calls.push(`open ${id}`) };
+  const { slot, window } = barIn(part(), wiring);
+  // Each click as the app has it: the bar drawn again after a pick, so the second click lands on a new element.
+  const click = (id: string, at: number) => {
+    const e = new window.MouseEvent("click", { bubbles: true, cancelable: true });
+    Object.defineProperty(e, "timeStamp", { value: at });
+    slot.querySelector(`[data-item="${id}"]`)!.dispatchEvent(e as unknown as Event);
+    showTimelineBar(slot, part(), wiring);
+  };
+  // 450 ms apart (0.9 × 500): a double-click on Sketch 1.
+  click("sketch-2", 1000);
+  click("sketch-2", 1450);
+  assert.deepEqual(calls, ["pick sketch-2", "open sketch-2"]);
+  // A third click straight after starts again: a pick, not a second open.
+  click("sketch-2", 1500);
+  assert.deepEqual(calls.slice(2), ["pick sketch-2"]);
+  // 550 ms apart (1.1 × 500): two picks.
+  calls.length = 0;
+  click("feature-11", 5000);
+  click("feature-11", 5550);
+  assert.deepEqual(calls, ["pick feature-11", "pick feature-11"]);
+  // Close together on two items: two picks.
+  calls.length = 0;
+  click("feature-1", 9000);
+  click("feature-11", 9100);
+  assert.deepEqual(calls, ["pick feature-1", "pick feature-11"]);
+  // With no onOpen wired, a double-click is two picks, as before 25a3.
+  const { slot: plain, window: w2 } = barIn(part(), { onPick: (id: string) => calls.push(`plain ${id}`) });
+  calls.length = 0;
+  for (const at of [100, 200]) {
+    const e = new w2.MouseEvent("click", { bubbles: true });
+    Object.defineProperty(e, "timeStamp", { value: at });
+    plain.querySelector('[data-item="sketch-2"]')!.dispatchEvent(e as unknown as Event);
+  }
+  assert.deepEqual(calls, ["plain sketch-2", "plain sketch-2"]);
+});
+
+test("openAction (25a3): a double-click runs Edit Sketch on a sketch and Edit feature on a solid", () => {
+  assert.deepEqual(["feature-1", "sketch-2", "feature-11"].map((id) => menu.openAction(part(), id)), ["edit", "edit-sketch", "edit"]);
+  assert.throws(() => menu.openAction(part(), "feature-9"), /there is no item feature-9 in the timeline/);
 });
 
 test("the bar: an item the rebuild failed, and one built from a suppressed sketch, are marked failed and say so", () => {

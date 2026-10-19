@@ -52,6 +52,8 @@ export const MONKEY_PLANTS = {
   "no-finish-on-phone": {
     what: "at phone width the sketch has no Finish Sketch on screen",
     expect: "never stuck",
+    // Missed in seeds 1-6 on main and with 25a3's double-clicks; with them the first seed to catch it at 120 steps is 29 (1-40 hunted 2026-10-19).
+    seeds: 40,
     edits: [{ file: SKETCHBAR, find: ".sketchbar.sketchbar-finish:not(#none) { margin-left: auto; }", replace: ".sketchbar.sketchbar-finish:not(#none) { margin-left: auto; }\n@media (max-width: 640px) { #finish-sketch, .sketch .sketch-finish, #sketch-cancel { display: none !important; } }" }],
   },
   "body-row-off-by-one": {

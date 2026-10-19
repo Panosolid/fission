@@ -120,12 +120,28 @@ const bar = (page) =>
 const redRows = (page) => page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-failed', (rows) => rows.map((r) => r.dataset.node));
 
 /**
+ * The app's camera once it has stopped moving (Look at and Home ease into
+ * place): two reads 100 ms apart within a nanometre, as navigation.mjs
+ * waits for its damping.
+ */
+async function stillCamera(page) {
+  let last = null;
+  for (let i = 0; i < 200; i++) {
+    const now = await page.evaluate(() => window.fissionTest.camera());
+    if (last && [...now.position, ...now.target].every((v, k) => Math.abs(v - [...last.position, ...last.target][k]) < 1e-6)) return now;
+    last = now;
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`the camera never settled: ${JSON.stringify(last)}`);
+}
+
+/**
  * Clicks (or taps) model point (x, y, 0) where the app's own camera puts it,
  * after checking nothing but the canvas is there. For a view clickPlane's
  * fixed one can't know: Look at on an empty design centres on the origin.
  */
 async function clickModel(page, [x, y], tap) {
-  const cam = await page.evaluate(() => window.fissionTest.camera());
+  const cam = await stillCamera(page);
   const box = await page.locator("#viewport canvas").boundingBox();
   const [fx, fy] = onCanvas(cam, box, [x, y, 0]);
   const p = { x: box.x + fx * box.width, y: box.y + fy * box.height };
@@ -997,7 +1013,7 @@ try {
       await press(page, "#feature-edit-ok", tap);
       await panelClosed();
       assert.equal(await undoTitle(page), "Undo Edit Extrude 1 (Ctrl+Z)");
-      // A sketch's menu has no Edit feature (Edit Sketch is 25a3).
+      // A sketch's menu has no Edit feature: it has Edit Sketch instead (25a3, checked below).
       await barMenu("sketch-2");
       assert.equal(await page.$("#row-menu-edit"), null);
       await page.keyboard.press("Escape");
@@ -1012,6 +1028,182 @@ try {
       await panelClosed();
       assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "|"]);
 
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+  }
+
+  // 25a3: Edit Sketch, a finished sketch opened again from the bar and the browser; Finish Sketch rebuilds what is built from it.
+  for (const { width, tap } of [{ width: 1280, tap: false }, { width: 375, tap: true }]) {
+    await check(`Edit Sketch (25a3): Sketch 1 opened by a double-${tap ? "tap" : "click"} on the bar and from the browser's Sketches row; a stray line breaks it with no question and no warning while open; after Finish Sketch Extrude 1 keeps its shape with the warning and red rows; one undo step; pixels probed (${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      const layout = LAYOUTS[width];
+      await addSquare(page, tap, layout);
+      const browserOpen = async () => {
+        if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press(page, "#browser-toggle", tap);
+        await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => (d.open = true)));
+      };
+      const browserClosed = async () => {
+        if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) === "true") await press(page, "#browser-toggle", tap);
+      };
+      const sketching = () => page.evaluate(() => document.querySelector("#viewport").dataset.sketching === "true");
+      const warning = () => page.evaluate(() => { const w = document.querySelector("#kept-warning"); return w.hidden ? null : w.textContent; });
+      const red = () => page.$$eval(".tree-row.kept", (rows) => rows.map((r) => r.dataset.node).sort());
+      const status = (w) => page.waitForFunction((t) => document.querySelector("#sketch-status")?.textContent?.startsWith(t), w, { timeout: 5000 }).catch(async () => assert.fail(`the sketch status "${w}": timed out at "${await page.textContent("#sketch-status")}"`));
+      const finished = () => until(page, () => document.querySelector("#viewport").dataset.sketching !== "true", null, "the sketch finished");
+      const top = () => page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
+      const lastStep = await undoTitle(page);
+      assert.equal(lastStep, "Undo Extrude Sketch 1 (Ctrl+Z)");
+      assert.equal(await warning(), null);
+
+      // 1. A double-click (or double-tap) on Sketch 1's bar item opens it: its sketch bar, its four lines, nothing recorded.
+      const item = page.locator('#timeline [data-item="sketch-2"]');
+      await item.scrollIntoViewIfNeeded();
+      if (tap) {
+        // Two taps straight after each other at the item's middle (the bar redraws between them, as the first picks it).
+        const b = await item.boundingBox();
+        await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+        await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+      } else await item.dblclick();
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "Sketch 1 open");
+      await status("4 lines, a closed outline.");
+      assert.equal(await undoTitle(page), lastStep, "opening records nothing");
+      assert.equal(await page.isVisible("#finish-sketch"), true);
+
+      // 2. A line apart from the square (5 mm beyond its far side, upward from 2 mm above its bottom to 2 mm below its top; upward, so the
+      // typed-length boxes that float under the pointer after the first click are not on the second): a loose end. No question, no
+      // warning while open, the body as it was.
+      const [[, y0], [x1, y1]] = layout.corners;
+      // addSquare drew on the grid; this line goes where it is tapped (Snap to grid off, as a new page has it).
+      await page.uncheck("#sketch-grid-snap");
+      await top();
+      await clickModel(page, [x1 + 5, y0 + 2], tap);
+      await clickModel(page, [x1 + 5, y1 - 2], tap);
+      // Escape only once the line is drawn: one pressed while the kernel still places the click drops it (snap.mjs).
+      await undoIs(page, "Draw line");
+      await page.keyboard.press("Escape");
+      await status("5 lines, not closed");
+      assert.equal(await page.evaluate(() => !!document.querySelector("dialog[open]")), false, "nothing asks");
+      assert.equal(await warning(), null, "no warning while Sketch 1 is open");
+      assert.equal(await page.textContent("#volume"), layout.volume);
+
+      // 3. Finish Sketch: Extrude 1 keeps the square (the same volume) with the warning, and its rows are red; both bodies drawn.
+      await top();
+      await press(page, "#finish-sketch", tap);
+      await finished();
+      await until(page, () => !document.querySelector("#kept-warning").hidden, null, "the warning after Finish Sketch");
+      assert.match(await warning(), /^Extrude 1 keeps its last shape\. Sketch 1 has no closed outline: .*not joined/);
+      assert.equal(await page.textContent("#volume"), layout.volume);
+      await browserOpen();
+      assert.deepEqual(await red(), ["feature-11", "sketch-2"]);
+      await browserClosed();
+      assert.deepEqual(await drawn(page, layout), { box: true, square: true });
+      await page.locator("#kept-warning").scrollIntoViewIfNeeded();
+      if (shots) await page.screenshot({ path: `${shots}/edit-sketch-kept-${width}.png` });
+      await top();
+      assert.equal(await undoTitle(page), "Undo Draw line (Ctrl+Z)", "Finish Sketch records nothing");
+
+      // 4. One Undo takes the line back (the warning goes); one Redo brings it back, warned.
+      await press(page, "#undo", tap);
+      await until(page, (w) => document.getElementById("undo").title === w && document.querySelector("#kept-warning").hidden, lastStep, "undone, no warning");
+      await press(page, "#redo", tap);
+      await until(page, () => !document.querySelector("#kept-warning").hidden, null, "redone, warned");
+
+      // 5. From the browser's Sketches row: its menu leads with Edit Sketch, read "Edit Sketch 1"; it opens, and the warning hides while it is open.
+      await browserOpen();
+      const row = page.locator('#browser .tree-row[data-node="sketches/sketch-2"]');
+      await row.scrollIntoViewIfNeeded();
+      if (tap) await page.tap('#browser [data-more="sketches/sketch-2"]');
+      else await row.click({ button: "right" });
+      await until(page, () => document.getElementById("row-menu").open, null, "the row menu");
+      assert.deepEqual(await page.$eval("#row-menu button", (b) => [b.id, b.disabled, b.getAttribute("aria-label"), b.textContent]), ["row-menu-edit-sketch", false, "Edit Sketch 1", "Edit Sketch"]);
+      await press(page, "#row-menu-edit-sketch", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "Sketch 1 open again");
+      await browserClosed();
+      assert.equal(await warning(), null, "no warning while Sketch 1 is open");
+      if (shots) await page.screenshot({ path: `${shots}/edit-sketch-open-${width}.png` });
+      // Its menu now has Edit Sketch off, saying why.
+      const barItem = page.locator('#timeline [data-item="sketch-2"]');
+      await barItem.scrollIntoViewIfNeeded();
+      if (tap) {
+        if (!(await page.isVisible('#timeline [data-more="sketch-2"]'))) await barItem.tap();
+        await page.tap('#timeline [data-more="sketch-2"]');
+      } else await barItem.click({ button: "right" });
+      await until(page, () => document.getElementById("row-menu").open, null, "the bar's menu");
+      assert.deepEqual(await page.$eval("#row-menu-edit-sketch", (b) => [b.disabled, b.querySelector(".delete-ask-off")?.textContent]), [true, "Sketch 1 is open: you are editing it"]);
+      await page.keyboard.press("Escape");
+      await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed");
+      assert.equal(await sketching(), true, "Escape in the menu leaves the sketch open");
+      // Finish with nothing drawn: the warning is back, nothing recorded.
+      await top();
+      await press(page, "#finish-sketch", tap);
+      await finished();
+      await until(page, () => !document.querySelector("#kept-warning").hidden, null, "the warning back");
+      assert.equal(await undoTitle(page), "Undo Draw line (Ctrl+Z)");
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+
+    await check(`Edit Sketch (25a3): a ⊐ whose extrude keeps the square, opened and closed on its open side, is rebuilt on Finish Sketch to twice the square, not before; Undo and Redo; pixels probed (${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      const layout = LAYOUTS[width];
+      await addSquare(page, tap, layout);
+      const [[x0, y0], [x1, y1]] = layout.corners;
+      // Saved, then opened as a file whose Sketch 1 lost its left side and had its right side moved out by the square's width:
+      // a ⊐ 20 wide, open on the left, with Extrude 1 keeping the 10 × 10 square it was built from.
+      const [download] = await Promise.all([page.waitForEvent("download"), page.evaluate(() => document.getElementById("save").click())]);
+      const saved = JSON.parse(await download.path().then((p) => import("node:fs").then((fs) => fs.readFileSync(p, "utf8"))));
+      const design = saved.workspaces.design;
+      const sketch = design.sketches.find((k) => k.id === "sketch-2");
+      const extrude = design.timeline.features.find((f) => f.intent.parameters?.sketch === "sketch-2");
+      design.kept = { [extrude.id]: { points: structuredClone(sketch.points), curves: structuredClone(sketch.curves) } };
+      const at = new Map(sketch.points.map((p) => [p.id, p]));
+      const left = sketch.curves.find((c) => at.get(c.start).x === x0 && at.get(c.end).x === x0);
+      sketch.curves = sketch.curves.filter((c) => c !== left);
+      for (const p of sketch.points) if (p.x === x1) p.x = x1 + (x1 - x0);
+      await page.setInputFiles("#open-file", { name: "open-u.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(saved)) });
+      await until(page, () => !document.querySelector("#kept-warning").hidden, null, "the kept square, warned");
+      assert.equal(await page.textContent("#volume"), layout.volume);
+      // The middle of the top face of the half added beyond the square, and of the square: only the square is drawn yet.
+      const added = [x1 + (x1 - x0) / 2, (y0 + y1) / 2, layout.distance];
+      const probe = async () => {
+        const [empty, square, more] = await colours(page, [layout.top, added]);
+        return { square: differs(square, empty), added: differs(more, empty) };
+      };
+      if (width === 1280) assert.deepEqual(await probe(), { square: true, added: false });
+
+      // Edit Sketch from the bar's menu; the left side drawn up from the ⊐'s bottom-left end to its top-left end closes it (4 lines, 20 × 10).
+      const item = page.locator('#timeline [data-item="sketch-2"]');
+      await item.scrollIntoViewIfNeeded();
+      if (tap) {
+        if (!(await page.isVisible('#timeline [data-more="sketch-2"]'))) await item.tap();
+        await page.tap('#timeline [data-more="sketch-2"]');
+      } else await item.click({ button: "right" });
+      await until(page, () => document.getElementById("row-menu").open, null, "the menu");
+      await press(page, "#row-menu-edit-sketch", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "Sketch 1 open");
+      await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
+      await clickModel(page, [x0, y0], tap);
+      await clickModel(page, [x0, y1], tap);
+      await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "closed");
+      await undoIs(page, "Draw line");
+      // Not rebuilt while open: the panel still has the square's volume.
+      assert.equal(await page.textContent("#volume"), layout.volume);
+
+      // Finish Sketch: 20 · 10 · d, twice the square, no warning; the added half drawn.
+      const twice = width === 1280 ? "2,000 mm³" : "6,000 mm³";
+      await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
+      await press(page, "#finish-sketch", tap);
+      await until(page, (v) => document.querySelector("#volume")?.textContent === v, twice, "Extrude 1 rebuilt to twice the square");
+      await until(page, () => document.querySelector("#kept-warning").hidden, null, "no warning");
+      if (width === 1280) assert.deepEqual(await probe(), { square: true, added: true });
+      if (shots) await page.screenshot({ path: `${shots}/edit-sketch-rebuilt-${width}.png` });
+      // One Undo: the ⊐ and the kept square again, warned; one Redo: twice the square.
+      await press(page, "#undo", tap);
+      await until(page, (v) => document.querySelector("#volume")?.textContent === v && !document.querySelector("#kept-warning").hidden, layout.volume, "undone");
+      if (width === 1280) assert.deepEqual(await probe(), { square: true, added: false });
+      await press(page, "#redo", tap);
+      await until(page, (v) => document.querySelector("#volume")?.textContent === v && document.querySelector("#kept-warning").hidden, twice, "redone");
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();
     });

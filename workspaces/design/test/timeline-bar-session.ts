@@ -69,7 +69,7 @@ interface Model {
   /** "start" (nothing built), an item's id (built up to and including it), or null (everything built). */
   marker: string | null;
 }
-type Outcome = { kind: "none" } | { kind: "edit"; step: string } | { kind: "delete"; step: string; ask: boolean } | { kind: "open"; id: string } | { kind: "refused"; message: string };
+type Outcome = { kind: "none" } | { kind: "edit"; step: string } | { kind: "delete"; step: string; ask: boolean } | { kind: "open"; id: string } | { kind: "sketch"; id: string } | { kind: "refused"; message: string };
 
 const place = (m: Model) => (m.marker === "start" ? 0 : m.marker === null ? m.items.length : m.items.findIndex((i) => i.id === m.marker) + 1);
 const markerFor = (items: MItem[], p: number): string | null => (p === 0 ? "start" : p === items.length ? null : items[p - 1].id);
@@ -95,6 +95,14 @@ function modelMenu(m: Model, k: number, action: string, editing: string | null):
   const item = m.items[k];
   // Edit feature (25a2) opens the item's sizes, on any solid item, sketch being edited or not; nothing changes yet.
   if (action === "edit") return [m, item.kind === "sketch" ? { kind: "refused", message: `${item.name} has no edit in its menu` } : { kind: "open", id: item.id }];
+  // Edit Sketch (25a3) opens a sketch again, unless it is the one open, suppressed, or after the marker (it would be rolled back while edited).
+  if (action === "edit-sketch") {
+    if (item.kind !== "sketch") return [m, { kind: "refused", message: `${item.name} has no edit-sketch in its menu` }];
+    if (editing === item.id) return [m, { kind: "refused", message: `${item.name} is open: you are editing it` }];
+    if (item.suppressed) return [m, { kind: "refused", message: `${item.name} is suppressed: unsuppress it first` }];
+    if (k >= place(m)) return [m, { kind: "refused", message: `${item.name} is after the marker: move the marker past it first` }];
+    return [m, { kind: "sketch", id: item.id }];
+  }
   if (action === "marker") {
     if (place(m) === k + 1) return [m, { kind: "refused", message: "The marker is already here" }];
     return moveTo(m, k + 1, editing);
@@ -249,7 +257,7 @@ export function runBarSession(bar: Bar, steps: readonly Step[]): Failure | null 
           const entry = entries[Math.floor(b * entries.length)];
           expected = modelMenu(model, k, entry.action === "unsuppress" ? "suppress" : entry.action, editing);
           const words = model.items[k].suppressed ? "Unsuppress" : "Suppress";
-          const edit = model.items[k].kind === "sketch" ? "" : "Edit feature|";
+          const edit = model.items[k].kind === "sketch" ? "Edit Sketch|" : "Edit feature|";
           if (entries.map((e) => e.label).join("|") !== `${edit}Move the marker here|${words}|Delete`) return fail(`${model.items[k].id}'s menu offers ${entries.map((e) => e.label).join(", ")}`);
           got = bar.barEdit(doc, { kind: "menu", id: model.items[k].id, action: entry.action }, editing);
         } else if (op === "button") {
@@ -292,6 +300,8 @@ export function runBarSession(bar: Bar, steps: readonly Step[]): Failure | null 
             ? { kind: "delete", step: got.step, ask: got.ask }
             : got.kind === "open"
               ? { kind: "open", id: got.id }
+              : got.kind === "sketch"
+                ? { kind: "sketch", id: got.id }
               : got.kind === "refused"
                 ? { kind: "refused", message: got.message }
                 : { kind: "none" };
@@ -300,6 +310,8 @@ export function runBarSession(bar: Bar, steps: readonly Step[]): Failure | null 
         if (got.doc === doc) return fail(`an edit recorded ("${got.step}") that changes nothing`);
         record(got.doc, next);
       }
+      // Edit Sketch opened it: it is the sketch being edited from here on, as in the app.
+      if (got.kind === "sketch") editing = got.id;
     }
     // Undo can take the sketch being edited away, or behind the marker: the app then leaves the sketch.
     if (editing !== null) {
