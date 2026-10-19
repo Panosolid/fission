@@ -312,6 +312,16 @@ fn crossing(s: &Seg, t: &Seg, shared: &[DVec2]) -> bool {
 /// points they share: 0 if they cross. Every local minimum of the distance
 /// from one to the other is at one of the critical points, so a "neck"
 /// (pieces coming back close after meeting at a corner) is caught too.
+///
+/// A point inside one piece whose nearest point on the other is a shared
+/// corner P is passed over: it is no local minimum, since along a line or
+/// arc that starts at P the distance to P has none inside it (a chord
+/// 2r·sin(θ/2) grows to θ = π and then shrinks to the far end), and it is
+/// joined to P through its own piece, so its closeness is no thin wall.
+/// Where a piece comes back round towards P, its far end is nearer P still
+/// and decides. Without this a line and an arc meeting almost straight on,
+/// the arc bending back across the line's way, were refused as about
+/// r·(turn) apart (random sketch sessions hit 0.0002 to 0.0009 mm).
 pub fn clearance(s: &Seg, t: &Seg, shared: &[DVec2]) -> f64 {
     if crossing(s, t, shared) {
         return 0.0;
@@ -319,9 +329,11 @@ pub fn clearance(s: &Seg, t: &Seg, shared: &[DVec2]) -> f64 {
     let near_shared = |x: DVec2| shared.iter().any(|&p| x.distance(p) <= LINEAR);
     let mut best = f64::INFINITY;
     for (u, v) in [(s, t), (t, s)] {
+        let ends = u.ends();
         for x in u.critical_points(v) {
-            if !near_shared(x) {
-                best = best.min(v.distance(x));
+            let y = v.closest(x);
+            if !near_shared(x) && (ends.contains(&x) || !near_shared(y)) {
+                best = best.min(x.distance(y));
             }
         }
     }
@@ -828,6 +840,97 @@ mod tests {
         // is 3 from the first.
         let (l1, l2) = (Seg::Line { a: p(0.0, 0.0), b: p(4.0, 0.0) }, Seg::Line { a: p(4.0, 0.0), b: p(4.0, 3.0) });
         assert!(eq(clearance(&l1, &l2, &[p(4.0, 0.0)]), 3.0));
+    }
+
+    /// The line (0,0)→(10,0), then from its end P = (10,0) a clockwise arc
+    /// of radius 5 turning 1 rad, leaving P along the angle `kink` (a
+    /// corner of |kink| rad: above the line's way for kink > 0).
+    fn kinked(kink: f64) -> (Seg, Seg, DVec2) {
+        let (pp, r, sweep) = (p(10.0, 0.0), 5.0, -1.0);
+        // The chord runs along the leaving angle plus half the sweep, and
+        // is 2r·sin(|sweep|/2) long; the bulge is tan(sweep/4).
+        let q = pp + dir(kink + sweep / 2.0) * (2.0 * r * fmath::sin(0.5));
+        (Seg::Line { a: p(0.0, 0.0), b: pp }, Seg::from_bulge(pp, q, fmath::tan(sweep / 4.0)).unwrap(), q)
+    }
+
+    #[test]
+    fn a_line_and_an_arc_meeting_almost_straight_on_by_hand() {
+        // Kinked up by δ, the arc bends back (clockwise) and is parallel to
+        // the line after turning δ, at its circle's top, 2r·sin(δ/2) =
+        // 10·sin(δ/2) along the arc's own chord from P: 5e-4 for δ = 1e-4.
+        // That point is close to the line only through P, which joins it
+        // to the line along the arc, so it is no thin wall (kinked down by
+        // δ, the same shape mirrored in the line's way is accepted), and
+        // is not where the distance between the pieces is least (moving
+        // towards P along the arc brings it nearer still). The clearance
+        // is the arc's far end Q: beyond x = 10, nearest P, so 10·sin(0.5)
+        // away (the chord), less than the line's start (0,0), 10 from P.
+        for kink in [1e-4, -1e-4, 1e-2, -1e-2, 0.3] {
+            let (line, arc, q) = kinked(kink);
+            assert!(q.x > 10.0);
+            for (s, t) in [(&line, &arc), (&arc, &line)] {
+                let gap = clearance(s, t, &[p(10.0, 0.0)]);
+                assert!(rel_eq(gap, 10.0 * fmath::sin(0.5), 1e-12), "kink {kink}: {gap}");
+            }
+            // The loop closing back to (0,0) along a straight side.
+            let corners = [(0.0, 0.0), (10.0, 0.0), (q.x, q.y)];
+            ok(Profile { outer: path(&corners, &[0.0, fmath::tan(-0.25), 0.0]), holes: vec![] });
+        }
+        // Two arcs: the same kinked arc after a counter-clockwise one of
+        // radius 5 arriving at P along +X (centre (10, 5), from −90° − 0.5
+        // rad). Each one's point facing the other's centre lies near P on
+        // it, but nearest P on the other. The far ends are what's left,
+        // both well over 1 mm from the other piece.
+        let before = Seg::Arc { a: p(10.0, 5.0) + dir(-FRAC_PI_2 - 0.5) * 5.0, b: p(10.0, 0.0), center: p(10.0, 5.0), radius: 5.0, sweep: 0.5 };
+        for kink in [1e-4, -1e-4] {
+            let (_, arc, _) = kinked(kink);
+            for (s, t) in [(&before, &arc), (&arc, &before)] {
+                let gap = clearance(s, t, &[p(10.0, 0.0)]);
+                assert!(gap > 1.0, "kink {kink}: {gap}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_arc_coming_back_round_to_its_corner_is_still_a_neck_by_hand() {
+        // The line (−10,0)→P = (0,0), then the arc counter-clockwise round
+        // the unit circle about (1,0), from P (its angle π, leaving
+        // straight down) all the way round but ε, to Q = (1 − cos ε,
+        // sin ε): |Q − P| = 2·sin(ε/2), with Q beyond the line's end, so
+        // nearest P. Joined to P only the long way round, Q is a neck: g
+        // from the line for ε = 2·asin(g/2), even though the line's nearest
+        // point is the corner they share. As a loop (closed by the side
+        // Q→(−10,0), which passes P about g·(1 − g²) away) it is accepted
+        // at 1.1·MIN_FEATURE; at 0.9× the arc's own chord PQ is too short,
+        // a rule of its own that names piece 1.
+        for (k, refuse) in [(0.9, true), (1.1, false)] {
+            let g = k * MIN_FEATURE;
+            let eps = 2.0 * fmath::asin(g / 2.0);
+            let q = p(1.0 - fmath::cos(eps), fmath::sin(eps));
+            let arc = Seg::Arc { a: p(0.0, 0.0), b: q, center: p(1.0, 0.0), radius: 1.0, sweep: TAU - eps };
+            let line = Seg::Line { a: p(-10.0, 0.0), b: p(0.0, 0.0) };
+            assert!(rel_eq(clearance(&line, &arc, &[p(0.0, 0.0)]), g, 1e-9), "{k}×");
+            let neck = Profile { outer: path(&[(-10.0, 0.0), (0.0, 0.0), (q.x, q.y)], &[0.0, fmath::tan((TAU - eps) / 4.0), 0.0]), holes: vec![] };
+            if refuse {
+                assert_eq!(named(&neck).unwrap(), vec![Input::Piece { boundary: 0, piece: 1 }]);
+            } else {
+                ok(neck);
+            }
+        }
+    }
+
+    #[test]
+    fn a_point_nearest_the_shared_corner_is_judged_within_linear() {
+        // The kinked arc of the line test, with the shared corner given h
+        // past P along +X. Within LINEAR (0.9·LINEAR), P counts as that
+        // corner: the arc's top, nearest P, is passed over and the far end
+        // decides, 10·sin(0.5). Beyond it (1.1·LINEAR), P is a point of
+        // both pieces that isn't where they meet: 0 apart.
+        let (line, arc, _) = kinked(1e-4);
+        for (k, expect) in [(0.9, 10.0 * fmath::sin(0.5)), (1.1, 0.0)] {
+            let gap = clearance(&line, &arc, &[p(10.0 + k * LINEAR, 0.0)]);
+            assert!((gap - expect).abs() <= 1e-12 * expect.max(1.0), "{k}×: {gap}");
+        }
     }
 
     #[test]
