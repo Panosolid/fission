@@ -288,17 +288,24 @@ fn reaches_into(s: &Chord, t: &Chord) -> bool {
         return false;
     }
     // Both ends outside: t can still pass through, in and out across the
-    // arc. The part of t inside the disc solves power(a + λd) < 0, a
-    // quadratic |d|²λ² + 2λ·d·(t.a − c) + power(t.a); that part can't cross
-    // s without touching it, so its middle tells which side it is on.
+    // arc. The part of t inside the disc solves power(x) < 0 along it; that
+    // part can't cross s without touching it, so its middle tells which
+    // side it is on. About the foot f = t.a + λ₀d of the perpendicular from
+    // c, power(f + μd) = power(f) + |d|²μ², so the part is λ₀ ± √(−power(f)
+    // / |d|²). (Solved about t.a instead, as |d|²λ² + 2λ·d·(t.a − c) +
+    // power(t.a), the discriminant was a difference of two ~1e23 numbers
+    // for a 557 m chord ending on a 0.011 mm half circle, which moved the
+    // roots by ~1e-3 mm, flagged slivers t never enters and split their
+    // chords without end; issue #189.)
     let d = t.b - t.a;
-    let (qa, h) = (d.length_squared(), d.dot(t.a - c));
-    let disc = h * h - qa * power(t.a);
-    if disc <= 0.0 {
+    let qa = d.length_squared();
+    let l0 = (c - t.a).dot(d) / qa;
+    let foot = power(t.a + d * l0);
+    if foot >= 0.0 {
         return false;
     }
-    let root = disc.sqrt();
-    let (lo, hi) = (((-h - root) / qa).max(0.0), ((-h + root) / qa).min(1.0));
+    let half = (-foot / qa).sqrt();
+    let (lo, hi) = ((l0 - half).max(0.0), (l0 + half).min(1.0));
     lo < hi && tolerance::side(s.a, s.b, t.a + d * (0.5 * (lo + hi))) == arc
 }
 
@@ -1402,6 +1409,35 @@ mod tests {
         // ...but not when they leave it in opposite directions, or at an angle.
         assert_eq!(count(&[chord((0.0, 0.0), (-1.0, 0.0), [0, 2]), long()]), 0);
         assert_eq!(count(&[long(), chord((0.0, 0.0), (1.0, 1e-9), [0, 2])]), 0);
+    }
+
+    #[test]
+    fn a_long_chord_reaches_into_a_tiny_sliver_only_where_it_crosses_it_by_hand() {
+        // Issue #189. A circle of radius r = 0.01 round o = (5312.495, 5312.49)
+        // (the fuzzer's numbers), and its chord s from 80° to 100°: its
+        // sliver lies above the line y = o.y + r·cos 10° = o.y + 0.0098481
+        // and below the arc, which tops out at o.y + r. The sag is
+        // r(1 − cos 10°) = 1.519e-4. Chord t is level at height o.y + y0 and
+        // 1 km long, from 500 m left of o to 500 m right: it is in the
+        // sliver exactly when r cos 10° < y0 < r. Worked about t's end, the
+        // test's quadratic took the difference of two ~6e22 numbers.
+        let (o, r) = (DVec2::new(5312.495, 5312.49), 0.01);
+        let at = |deg: f64| {
+            let t = deg.to_radians();
+            o + DVec2::new(fmath::cos(t), fmath::sin(t)) * r
+        };
+        let s = Chord { a: at(80.0), b: at(100.0), ends: [BoundaryPoint::OnEdge(0, 1), BoundaryPoint::OnEdge(0, 2)], edge: 0, k: 1, center: Some(o) };
+        let sag = r * (1.0 - fmath::cos(10f64.to_radians()));
+        let level = |y0: f64| {
+            let y = o.y + y0;
+            Chord { a: DVec2::new(o.x - 5e5, y), b: DVec2::new(o.x + 5e5, y), ends: [BoundaryPoint::Vertex(7), BoundaryPoint::Vertex(8)], edge: 1, k: 0, center: None }
+        };
+        // Below the arc's top by 0.1 and 0.9 of the sag: in the sliver. Above
+        // it by 0.1 of the sag, or below the chord by 0.1 of it (1.1 of the
+        // sag below the top): outside it, the second inside the disc.
+        for (y0, inside) in [(r - 0.1 * sag, true), (r - 0.9 * sag, true), (r + 0.1 * sag, false), (r - 1.1 * sag, false)] {
+            assert_eq!(reaches_into(&s, &level(y0)), inside, "y0 = r {:+} sag", (y0 - r) / sag);
+        }
     }
 
     /// Flat plate on z = 0: the square [-2, 2] × [0, 4] with a round hole of
