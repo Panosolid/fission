@@ -7,8 +7,12 @@ name: Auto-merge
 # or add the `hold` label; to stop all of it, disable this workflow on the
 # Actions tab.
 #
-# It wakes when CI finishes, when a pull request is marked ready or loses its
-# `hold` label, every half hour as a safety net, and on "Run workflow".
+# It wakes when CI finishes, when a pull request opens, is marked ready or
+# drafted, gains or loses a label, leaves the merge queue or merges, every
+# half hour as a safety net, and on "Run workflow". Once main's ruleset
+# requires the merge queue it steers the queue instead of merging itself
+# (automerge.py), and a pull request the queue removes gets a comment naming
+# why.
 # A pull request in conflict with main for 15 minutes gets one comment per
 # head commit naming the conflicted files, for its thread to resolve; a green
 # one that is behind main gets one comment per head and main asking its
@@ -23,7 +27,7 @@ on:
   # Runs main's copy of this workflow and never checks out the pull
   # request's code, so it is safe with a write token.
   pull_request_target:
-    types: [ready_for_review, unlabeled]
+    types: [opened, reopened, ready_for_review, converted_to_draft, labeled, unlabeled, dequeued, closed]
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
@@ -40,15 +44,36 @@ permissions:
   actions: write
   checks: read
 
-# One at a time, so two runs never act on the same pull request at once.
-concurrency:
-  group: auto-merge
-  cancel-in-progress: false
-
 jobs:
+  # A pull request the merge queue just removed: its comment goes first and
+  # outside the one-at-a-time group below, where a newer waiting run would
+  # replace this one and the comment would be lost. The merge job then sees
+  # the comment and doesn't queue that head again.
+  dequeued:
+    if: github.event.action == 'dequeued'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+      - env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEQUEUED_PR: ${{ github.event.pull_request.number }}
+          DEQUEUED_HEAD: ${{ github.event.pull_request.head.sha }}
+          DEQUEUED_REASON: ${{ github.event.reason }}
+        run: python3 .github/scripts/automerge.py --dequeued
+
   merge:
+    needs: dequeued
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # One at a time, so two runs never act on the same pull request at once.
+    concurrency:
+      group: auto-merge
+      cancel-in-progress: false
     steps:
       # Every branch, so a conflicted pull request's reminder can name the
       # files git can't merge.
