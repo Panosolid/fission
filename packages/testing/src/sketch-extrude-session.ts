@@ -185,36 +185,41 @@ export function clearlySimple(shape: LoopShape): boolean {
   const size = Math.sqrt((Math.max(...xs) - Math.min(...xs)) ** 2 + (Math.max(...ys) - Math.min(...ys)) ** 2);
   const error = Math.max(...sides.map((s) => s.error));
   const margin = 1e-3 * size + 2 * error;
+  // Side i's direction where it starts or ends: its chord's, turned by half
+  // the arc's turn, towards its bulge at the start and away at the end (an
+  // arc bulging to the right curves left).
+  const way = (i: number, end: boolean) => {
+    const [a, b] = [c[i], c[(i + 1) % n]];
+    const chord = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    if (sagitta[i] === 0) return chord;
+    const half = (Math.sign(sagitta[i]) * arcOf(a, b, sagitta[i]).phi) / 2;
+    return end ? chord + half : chord - half;
+  };
   for (let i = 0; i < n; i++) {
-    // The turn at corner i + 1, from side i's way in to side i + 1's way out.
-    const inn = sides[i].pts;
-    const out = sides[(i + 1) % n].pts;
-    const t1 = Math.atan2(inn.at(-1)![1] - inn.at(-2)![1], inn.at(-1)![0] - inn.at(-2)![0]);
-    const t2 = Math.atan2(out[1][1] - out[0][1], out[1][0] - out[0][0]);
-    const turn = Math.abs(normalise(t2 - t1 + Math.PI) - Math.PI);
+    // The turn at corner i + 1, from side i's way in to side i + 1's way
+    // out: the arcs' true tangents, not their first and last pieces, which
+    // are off by half a piece's turn (up to 0.025 rad). Measured on the
+    // pieces, a line and an arc turning 4.2e-5 rad passed the near-straight
+    // guard; the arc came parallel to the line r·4.2e-5 = 7e-4 mm past their
+    // corner, and the kernel refused them as closer than 1 µm (issue #140).
+    const turn = Math.abs(normalise(way((i + 1) % n, false) - way(i, true) + Math.PI) - Math.PI);
     if (turn > Math.PI - 0.1 || turn < 0.02) return false;
   }
   for (let i = 0; i < n; i++)
     for (let j = i + 1; j < n; j++) {
-      let p = sides[i].pts;
-      let q = sides[j].pts;
-      // Next-door sides touch at their shared corner, so one piece there is
-      // left out: an arc's, never a straight side (one piece, the whole
-      // side; issue #140). Two straight sides can only meet away from their
-      // corner by doubling back, which the turn check refuses.
-      const straight = (pts: XY[]) => pts.length === 2;
-      if ((j === i + 1 || (i === 0 && j === n - 1)) && straight(p) && straight(q)) continue;
-      // Side i's end is side j's start.
-      if (j === i + 1) {
-        if (!straight(q)) q = q.slice(1);
-        else p = p.slice(0, -1);
-      }
-      // Side 0's start is side n − 1's end.
-      if (i === 0 && j === n - 1) {
-        if (!straight(p)) p = p.slice(1);
-        else q = q.slice(0, -1);
-      }
-      for (let u = 0; u + 1 < p.length; u++) for (let v = 0; v + 1 < q.length; v++) if (segmentDistance(p[u], p[u + 1], q[v], q[v + 1]) <= margin) return false;
+      const [p, q] = [sides[i].pts, sides[j].pts];
+      // Next-door sides touch at their shared corner, so the two pieces
+      // that meet there are not compared; every other pair is. Two pieces
+      // from one point meet nowhere else unless they double back, which
+      // the turn check refuses, and curves leaving a corner at least 0.1
+      // rad apart only meet again ~0.1 r out, far past the few-error
+      // reach of their pieces' sag. (Leaving out an arc's whole first piece
+      // instead, as before, hid two arcs crossing 1.5 mm from their 6°
+      // corner, inside the 2.5 mm piece; issue #140.)
+      const last = (pts: XY[]) => pts.length - 2;
+      const meet = (u: number, v: number) => (j === i + 1 && u === last(p) && v === 0) || (i === 0 && j === n - 1 && u === 0 && v === last(q));
+      for (let u = 0; u + 1 < p.length; u++)
+        for (let v = 0; v + 1 < q.length; v++) if (!meet(u, v) && segmentDistance(p[u], p[u + 1], q[v], q[v + 1]) <= margin) return false;
     }
   return true;
 }
