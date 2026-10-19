@@ -766,7 +766,7 @@ try {
       const p = (k) => [0, 1, 2].map((i) => bytes.readFloatLE(at + 12 * k + 4 * i));
       tris.push([p(0), p(1), p(2)]);
     }
-    return { name: dl.suggestedFilename(), size: bytes.length, header: bytes.subarray(0, 12).toString("latin1"), tris };
+    return { name: dl.suggestedFilename(), size: bytes.length, header: bytes.subarray(0, 14).toString("latin1"), tris };
   };
   /** Volume enclosed by triangles (divergence theorem: Σ a·(b×c)/6). */
   const stlVolume = (tris) =>
@@ -782,7 +782,7 @@ try {
     // 12 triangles: 84 + 12 × 50 = 684 bytes. Corners 0/40, 0/30, 0/20 are
     // exact in single precision, so the volume is exactly 40 × 30 × 20.
     assert.equal(f.name, "fission-box.stl");
-    assert.equal(f.header, "Fission STL:");
+    assert.equal(f.header, "Panosolid STL:");
     assert.equal(f.size, 684);
     assert.equal(f.tris.length, 12);
     assert.equal(stlVolume(f.tris), 24000);
@@ -1130,8 +1130,8 @@ try {
     // V = 50·30·20 = 30000.
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
-    assert.equal(download.suggestedFilename(), "Untitled.fission.json");
-    const saved = "e2e/saved.fission.json";
+    assert.equal(download.suggestedFilename(), "Untitled.panosolid.json");
+    const saved = "e2e/saved.panosolid.json";
     await download.saveAs(saved);
     const file = JSON.parse(readFileSync(saved, "utf8"));
     assert.equal(file.formatVersion, 2);
@@ -1157,9 +1157,9 @@ try {
   await check("a file that is not a project is refused with its message, keeping the open part", async () => {
     await page.setInputFiles("#open-file", { name: "half.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 2, "name": "Cut') });
     await page.waitForFunction(() => document.querySelector("#file-status").textContent !== "");
-    assert.match(await text("file-status"), /^Couldn't open “half\.fission\.json”: not a Panoshape project: the file is not valid JSON/); // the same words as a drop (X6)
+    assert.match(await text("file-status"), /^Couldn't open “half\.fission\.json”: not a Panosolid project: the file is not valid JSON/); // the same words as a drop (X6)
     await page.setInputFiles("#open-file", { name: "new.fission.json", mimeType: "application/json", buffer: Buffer.from('{"formatVersion": 99}') });
-    await page.waitForFunction(() => /newer Panoshape/.test(document.querySelector("#file-status").textContent));
+    await page.waitForFunction(() => /newer Panosolid/.test(document.querySelector("#file-status").textContent));
     assert.equal(await text("volume"), "37,500 mm³");
     assert.equal(await page.inputValue("#height"), "25");
   });
@@ -1187,7 +1187,7 @@ try {
       assert.equal(await kept.evaluate(() => document.body.dataset.projectId), id, "the same stored project");
       assert.equal(await kept.textContent("#save-status"), "Saved");
       // Opening a file makes a new stored project; the autosaved one is kept.
-      await kept.setInputFiles("#open-file", "e2e/saved.fission.json");
+      await kept.setInputFiles("#open-file", "e2e/saved.panosolid.json");
       await kept.waitForFunction((old) => document.body.dataset.projectId !== old, id);
       await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
       const stored = await kept.evaluate(async () => {
@@ -1237,7 +1237,7 @@ try {
       await kept.reload({ waitUntil: "domcontentloaded" });
       const download = kept.waitForEvent("download");
       await kept.click("#save");
-      const wide = JSON.parse(readFileSync("e2e/saved.fission.json", "utf8"));
+      const wide = JSON.parse(readFileSync("e2e/saved.panosolid.json", "utf8"));
       wide.workspaces.design.timeline.features[0].intent.parameters.width = 60;
       await kept.setInputFiles("#open-file", { name: "wide.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(wide)) });
       await holder.evaluate(() => (window.release = true));
@@ -1298,7 +1298,7 @@ try {
       assert.equal(await phone.evaluate(() => document.activeElement?.id), "save");
       // Choosing an item does it and closes the menu.
       const [download] = await Promise.all([phone.waitForEvent("download"), phone.keyboard.press("Enter")]);
-      assert.equal(download.suggestedFilename(), "Untitled.fission.json");
+      assert.equal(download.suggestedFilename(), "Untitled.panosolid.json");
       assert.equal(await phone.getAttribute("#menu-toggle", "aria-expanded"), "false");
       // A tap elsewhere closes it too.
       await phone.click("#menu-toggle");
@@ -1368,7 +1368,7 @@ try {
       // Not a blank app: the default part, and the message in full.
       await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       const message = await phone.textContent("#file-status");
-      assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a Panoshape project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
+      assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a Panosolid project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
       const notice = await phone.$eval("#file-notice", (el) => ({ ...el.getBoundingClientRect().toJSON(), cut: el.scrollWidth > el.clientWidth }));
       assert.ok(notice.width > 0 && notice.left >= 0 && notice.right <= 375 && !notice.cut, JSON.stringify(notice));
       assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 375, "no sideways scroll");
@@ -1438,7 +1438,7 @@ try {
       await bare.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
       assert.equal(await bare.textContent("#save-status"), "");
       const [download] = await Promise.all([bare.waitForEvent("download"), bare.click("#save")]);
-      assert.equal(download.suggestedFilename(), "Untitled.fission.json");
+      assert.equal(download.suggestedFilename(), "Untitled.panosolid.json");
     } finally {
       await bare.close();
     }

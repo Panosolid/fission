@@ -96,7 +96,7 @@ test("each way a JPEG header can be broken is refused with its own message", () 
   assert.match(refusal(() => readPhysicalSize(new Uint8Array([0xff, 0xd8, 0x12, 0x34]))).message, /expected a marker at byte 2/);
   assert.match(refusal(() => readPhysicalSize(new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0, 1, 0, 0]))).message, /impossible length 1/);
   assert.match(refusal(() => readPhysicalSize(jpeg(segment(0xc0, [8, 0, 4, 0]), sos()))).message, /frame header is 6 bytes long, too short/);
-  assert.deepEqual(refusal(() => readPhysicalSize(jpeg(sof(4, 0), sos()))), { code: "unsupported", message: "This JPEG gives its height after the image data (a DNL marker), which Panoshape can't read yet." });
+  assert.deepEqual(refusal(() => readPhysicalSize(jpeg(sof(4, 0), sos()))), { code: "unsupported", message: "This JPEG gives its height after the image data (a DNL marker), which Panosolid can't read yet." });
   assert.match(refusal(() => readPhysicalSize(jpeg(sof(0, 4), sos()))).message, /at least 1 × 1 pixels/);
   assert.equal(refusal(() => readPhysicalSize(jpeg(sof(65535, 1), sos()))).code, "too-large");
 });

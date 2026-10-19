@@ -10,8 +10,8 @@ clicks, apart from Design and the kernel).
 Each extrude is rebuilt in OpenCascade (compare.py's builder, the profile
 moved near the origin first) and given its 50-digit exact volume and area
 (exact.py). Three numbers are checked against the exact ones, each to
-REL (1e-9) relative: Fission's, the session model's, and OpenCascade's; and
-the face count against OpenCascade's. Fission or the model off is a
+REL (1e-9) relative: Panosolid's, the session model's, and OpenCascade's; and
+the face count against OpenCascade's. Panosolid or the model off is a
 disagreement (exit 1); OpenCascade alone off is its own rounding, counted
 but not a failure, as in compare.py.
 

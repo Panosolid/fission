@@ -79,11 +79,11 @@ test("bigDesign makes what it says: 2 pairs of 6 are 4 items and 12 points and c
 test("5,000 timeline items open; 5,001 are refused before anything is checked", () => {
   // 2,500 pairs are 2 × 2,500 = 5,000 items; one lone sketch more is 5,001.
   assert.equal(read(bigDesign({ pairs: 2_500 })).timeline.features.length, 5_000);
-  refused(bigDesign({ pairs: 2_500, lone: 1 }), "Design data has 5001 timeline items, more than the 5000 this Panoshape opens");
+  refused(bigDesign({ pairs: 2_500, lone: 1 }), "Design data has 5001 timeline items, more than the 5000 this Panosolid opens");
   // Counted first: the items are refused, not the broken sketch inside them.
   const broken = bigDesign({ pairs: 2_500, lone: 1 });
   broken.sketches[0].points[0].x = Number.NaN;
-  refused(broken, "Design data has 5001 timeline items, more than the 5000 this Panoshape opens");
+  refused(broken, "Design data has 5001 timeline items, more than the 5000 this Panosolid opens");
 });
 
 test("5,000 profiles open; 5,001 are refused", () => {
@@ -91,41 +91,41 @@ test("5,000 profiles open; 5,001 are refused", () => {
   const profiles = (n: number) => Array.from({ length: n }, (_, k) => ({ id: `profile-${k + 1}`, kind: "rectangle", width: 1, depth: 1, plane }));
   const doc = (n: number) => ({ ...bigDesign({ pairs: 0 }), profiles: profiles(n), nextId: n + 1 });
   assert.equal(readDesignDocument(doc(5_000)).profiles.length, 5_000);
-  refused(doc(5_001), "Design data has 5001 profiles, more than the 5000 this Panoshape opens");
+  refused(doc(5_001), "Design data has 5001 profiles, more than the 5000 this Panosolid opens");
 });
 
 test("more sketches than the timeline may hold are refused by their count", () => {
   // 5,001 sketches with no timeline items: refused by the count, not "has no place in the timeline".
   const d = bigDesign({ pairs: 0 });
   d.sketches = Array.from({ length: 5_001 }, (_, k) => ({ id: `sketch-${k + 1}`, points: [], curves: [], constraints: [] }));
-  refused(d, "Design data has 5001 sketches, more than the 5000 this Panoshape opens");
+  refused(d, "Design data has 5001 sketches, more than the 5000 this Panosolid opens");
 });
 
 test("a sketch of 20,000 points and curves opens; 20,001 is refused, naming the sketch", () => {
   assert.equal(read(bigDesign({ pairs: 1, content: 20_000 })).sketches[0].curves.length, 10_000);
-  refused(bigDesign({ pairs: 1, content: 20_001 }), "Design sketch sketch-1 has 20001 points and curves, more than the 20000 this Panoshape opens");
+  refused(bigDesign({ pairs: 1, content: 20_001 }), "Design sketch sketch-1 has 20001 points and curves, more than the 20000 this Panosolid opens");
 });
 
 test("a kept shape of 20,000 opens; 20,001 is refused, naming its extrude", () => {
   // sketch-1 takes 2..7 and feature-8 is its extrude, so the kept shape is feature-8's.
   assert.equal(Object.keys(read(bigDesign({ pairs: 1, kept: [20_000] })).kept!).length, 1);
-  refused(bigDesign({ pairs: 1, kept: [20_001] }), "Design feature feature-8's kept shape has 20001 points and curves, more than the 20000 this Panoshape opens");
+  refused(bigDesign({ pairs: 1, kept: [20_001] }), "Design feature feature-8's kept shape has 20001 points and curves, more than the 20000 this Panosolid opens");
 });
 
 test("500,000 points and curves in all open; one more is refused, in sketches and in kept shapes", () => {
   // 25 sketches × 20,000 = 500,000; a 26th sketch of one point makes 500,001.
   assert.equal(read(bigDesign({ pairs: 25, content: 20_000 })).sketches.length, 25);
-  refused(bigDesign({ pairs: 25, content: 20_000, lone: 1, loneContent: 1 }), "Design data's sketches have at least 500001 points and curves together, more than the 500000 this Panoshape opens");
+  refused(bigDesign({ pairs: 25, content: 20_000, lone: 1, loneContent: 1 }), "Design data's sketches have at least 500001 points and curves together, more than the 500000 this Panosolid opens");
   // 24 × 20,000 = 480,000 in sketches, then kept shapes of 20,000 (500,000) and 1 (500,001).
   assert.equal(Object.keys(read(bigDesign({ pairs: 24, content: 20_000, kept: [20_000] })).kept!).length, 1);
-  refused(bigDesign({ pairs: 24, content: 20_000, kept: [20_000, 1] }), "Design data's sketches and kept shapes have at least 500001 points and curves together, more than the 500000 this Panoshape opens");
+  refused(bigDesign({ pairs: 24, content: 20_000, kept: [20_000, 1] }), "Design data's sketches and kept shapes have at least 500001 points and curves together, more than the 500000 this Panosolid opens");
 });
 
 test("a version 1 file is counted before it is upgraded", () => {
   // Upgrading spreads every feature's id into Math.max, which overflows the
   // stack for a long list; the count refuses it first with its own message.
   const features = Array.from({ length: 300_000 }, (_, k) => ({ id: `feature-${k + 1}` }));
-  refused({ version: 1, profiles: [], timeline: { features } }, "Design data has 300000 timeline items, more than the 5000 this Panoshape opens");
+  refused({ version: 1, profiles: [], timeline: { features } }, "Design data has 300000 timeline items, more than the 5000 this Panosolid opens");
 });
 
 /** `list` behind a proxy counting reads of its items, so a test can tell one pass over it from a search per item. */

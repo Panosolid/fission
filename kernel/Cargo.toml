@@ -2,7 +2,7 @@
 name = "fission-kernel"
 version = "0.1.0"
 edition = "2021"
-description = "Geometry kernel for Fission CAD"
+description = "Geometry kernel for Panosolid CAD"
 repository = "https://github.com/benpy28/fission"
 
 [lib]

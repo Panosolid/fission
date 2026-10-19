@@ -2,7 +2,7 @@
 // below drive the settings page and the privacy indicator; the providers
 // themselves are in ollama.ts, hosted.ts and local.ts.
 //
-// AI is always optional: every feature in Panoshape works without it, and
+// AI is always optional: every feature in Panosolid works without it, and
 // no provider is active until the user picks one. It costs the project
 // nothing to run: models run on the user's machine, or on a provider the
 // user pays with their own API key.
@@ -80,7 +80,7 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     description: "A small open model running on your graphics card through WebGPU. The default local option: nothing leaves your machine.",
     notes: [
       "The model is downloaded once, and its size is shown before the download starts.",
-      "Needs a reasonably capable graphics card. If yours is too weak, Panoshape suggests Ollama or an API key instead of failing.",
+      "Needs a reasonably capable graphics card. If yours is too weak, Panosolid suggests Ollama or an API key instead of failing.",
     ],
   },
   {
@@ -102,14 +102,14 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     notes: [
       "Consumer chat subscriptions can't be used here: the providers only allow programs to connect with an API key.",
       "Your key is stored only in this browser and sent only to the provider it belongs to.",
-      "Before the first request, Panoshape shows exactly what will be sent.",
+      "Before the first request, Panosolid shows exactly what will be sent.",
     ],
   },
   {
     kind: "browser-built-in",
     title: "Your browser's built-in AI",
     remote: false,
-    description: "If your browser has a model built in, Panoshape can use it. Offered only when the browser reports one.",
+    description: "If your browser has a model built in, Panosolid can use it. Offered only when the browser reports one.",
     notes: ["Availability depends on your browser and its version."],
   },
 ];
