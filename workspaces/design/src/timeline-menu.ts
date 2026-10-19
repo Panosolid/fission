@@ -1,7 +1,8 @@
 // The timeline's item menu wired (step 24f3), the same on the bar's items
 // and the browser's Timeline and Sketches rows (a right-click, or the ⋯ a
-// tap shows): Move the marker here, Suppress or Unsuppress, and Delete,
-// from 24f2's `itemMenu` and `barEdit`. Each choice is recorded as one
+// tap shows): Edit feature (step 25a2: opens the feature's sizes through
+// the host; nothing is recorded until its OK), Move the marker here,
+// Suppress or Unsuppress, and Delete, from 24f2's `itemMenu` and `barEdit`. Each choice is recorded as one
 // undo step with its `TIMELINE_STEPS` name; a delete records 24e4's
 // settled document (`planDelete`) and asks first through its box when
 // something is built from the item. An edit that leaves no body is made
@@ -32,6 +33,8 @@ export interface MenuHost {
   ask(q: DeleteQuestion, go: () => void): void;
   /** Shows why nothing changed. */
   refuse(message: string): void;
+  /** Opens item `id`'s Edit feature panel (step 25a2). */
+  edit(id: string): void;
 }
 
 /**
@@ -48,6 +51,7 @@ export async function chooseEntry(host: MenuHost, id: string, action: MenuEntry[
   if (r.kind === "none") return;
   if (r.kind === "refused") return host.refuse(r.message);
   if (r.kind === "edit") return host.record(r.step, r.doc);
+  if (r.kind === "open") return host.edit(r.id);
   const plan = await planDelete(host.kernel, before, id);
   if (host.current() !== before) return;
   const go = () => {

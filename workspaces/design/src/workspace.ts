@@ -8,6 +8,8 @@ import type { ShapeKind } from "./profiles.ts";
 import { isSketchItem, partFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
 import { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
 import { extrudePanel } from "./extrude-panel.ts";
+import { CHANGED_WHILE_CHECKING, editableFeature, editFeature, editStep, readTyped, refusedSizes } from "./feature-edit.ts";
+import { featureEditPanel } from "./feature-edit-panel.ts";
 import { PART_VIEW, syncGraph } from "./graph.ts";
 import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
@@ -15,7 +17,7 @@ import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { bodyFeatures, browserTree, rowReferences, type BrowserNode } from "./browser.ts";
 import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
-import { DEFAULT_SIZES, propertiesPanel, SIZE_KEYS } from "./properties.ts";
+import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
 import { deleteAsk } from "./delete-ask.ts";
 import { itemName } from "./timeline-edits.ts";
@@ -426,6 +428,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   function clearDesign() {
     leaveExtrude();
+    leaveEdit();
     if (mode.kind !== "none") leaveSketch();
     ctx.selection.clear();
     shape = "box";
@@ -506,6 +509,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     current: () => designDoc(),
     record(step, next) {
       leaveExtrude();
+      leaveEdit();
       if (mode.kind !== "none") leaveSketch();
       // The part the panel shows may now be another feature (the last body that still builds), or none (24f4):
       // then the boxes stay, and a size typed adds a preset of the shape shown (a box when it was an extrude).
@@ -518,6 +522,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     },
     ask: (q, go) => deleting.ask(q, go),
     refuse: (message) => panel.showError(message),
+    edit: (id) => openEdit(id),
   };
 
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
@@ -532,6 +537,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     }
   }
   async function showBuilt(doc: DesignDocument, kind: PartKind) {
+    // The item the Edit feature panel is open on was deleted (the bar, Undo in another way): the panel goes with it.
+    if (editBox.editing !== null && !doc.timeline.features.some((f) => f.id === editBox.editing)) leaveEdit();
     drawBrowser(doc);
     fresh.showFor(doc);
     showFailed(doc);
@@ -681,6 +688,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
   function startSketch() {
     leaveExtrude();
+    leaveEdit();
     if (mode.kind === "edit") leaveSketch();
     mode = { kind: "pick" };
     viewport.showPlanes(originPlanes());
@@ -815,6 +823,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * sketch is the one offered); otherwise the newest sketch.
    */
   function startExtrude() {
+    leaveEdit();
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     const editing = mode.kind === "edit" ? mode.tool.sketch : null;
     if (mode.kind !== "none") leaveSketch();
@@ -873,6 +882,62 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shape = "sketch-extrude";
     inputs[SIZE_KEYS.indexOf("height")].value = typed;
     await update(extrudeStep(before, id), undefined, made.doc);
+  }
+
+  // Edit feature (step 25a2): an earlier feature's sizes from its timeline item or browser row.
+  const editBox = featureEditPanel(ctx.properties, {
+    ok: (typed) => void finishEdit(typed),
+    cancel: () => leaveEdit(),
+  });
+
+  /** Opens item `id`'s sizes in the Edit feature panel, out of any sketch or Extrude panel first. */
+  function openEdit(id: string) {
+    leaveExtrude();
+    if (mode.kind !== "none") leaveSketch();
+    editBox.show(editableFeature(designDoc(), id));
+  }
+
+  function leaveEdit() {
+    editBox.hide();
+  }
+
+  /**
+   * OK: the typed sizes made the item's (`editFeature`), checked by the
+   * kernel (`refusedSizes`) and recorded as one undo step ("Edit Extrude
+   * 1") only when it takes them; the rebuild builds the item and everything
+   * after it. A refused size keeps the panel open with the kernel's words
+   * and records nothing; sizes that change nothing close it.
+   */
+  async function finishEdit(typed: Partial<Record<SizeKey, string>>) {
+    const id = editBox.editing;
+    if (id === null) return;
+    const before = designDoc();
+    let next: DesignDocument;
+    try {
+      const f = editableFeature(before, id);
+      const read = readTyped(f.keys, typed);
+      if ("bad" in read) {
+        const label = f.shape === "sketch-extrude" ? "distance" : parameterRows(f.shape).find((r) => r.key === read.bad)!.label.toLowerCase();
+        return editBox.showError(`Type the ${label} in mm.`);
+      }
+      next = editFeature(before, id, read.sizes);
+    } catch (e) {
+      return editBox.showError(e instanceof Error ? e.message : String(e));
+    }
+    if (next === before) return leaveEdit();
+    editBox.busy(true);
+    let refused: string | null;
+    try {
+      refused = await refusedSizes(kernel, before, next, id);
+    } catch (e) {
+      refused = e instanceof Error ? e.message : String(e);
+    }
+    // Closed, or the design changed while the kernel looked: this edit is out of date.
+    if (editBox.editing !== id) return;
+    editBox.busy(false);
+    if (designDoc() !== before) return editBox.showError(CHANGED_WHILE_CHECKING);
+    if (refused !== null) return editBox.showError(refused);
+    menuHost.record(editStep(before, id), next);
   }
 
   /** The pointer rounded by the kernel: onto the grid with grid snap on, else where it is to within half a pixel (snap.ts `rounding`). */
@@ -1046,6 +1111,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
       if (id === "clear-selection" && mode.kind === "pick") return leaveSketch(), true;
       if (id === "clear-selection" && extrudeBox.shown) return leaveExtrude(), true;
+      if (id === "clear-selection" && editBox.editing !== null) return leaveEdit(), true;
       if (id === "clear-selection" && mode.kind === "edit" && toolBusy(mode.tool)) {
         mode.tool = startTool(mode.tool.kind, mode.tool.sketch);
         mode.snap = null;
