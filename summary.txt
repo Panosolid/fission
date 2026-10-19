@@ -1,10 +1,10 @@
-Fission random testing, all runs so far (updated 2026-10-19 08:40 UTC)
+Fission random testing, all runs so far (updated 2026-10-19 09:14 UTC)
 
-hours of testing:                 460.9
-rounds:                           7604
-random operation chains:          15208000
+hours of testing:                 463.0
+rounds:                           7643
+random operation chains:          15286000
 rounds where the harness failed:  577
-bodies compared with OpenCascade: 30051490
+bodies compared with OpenCascade: 30212678
 OpenCascade disagreements:        346
 last problem found:               2026-10-19 08:39:02 (seed 171215620388073, commit 590af91 on claude/project-thread-husxi8-clearance)
 
@@ -22,8 +22,8 @@ Latest mutation run (whole kernel, lib tests), 2026-10-18 22:38 UTC, commit 5af6
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 590af91 on claude/project-thread-husxi8-clearance, 2026-10-19 08:40 UTC (https://github.com/Panosolid/fission/actions/runs/39205713012)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.31 s (baseline 1.23 s)
+  tested commit 5439424 on claude/project-thread-husxi8-clearance, 2026-10-19 09:14 UTC (https://github.com/Panosolid/fission/actions/runs/39224319074)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.05 s (baseline 1.23 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
