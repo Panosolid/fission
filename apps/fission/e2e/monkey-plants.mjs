@@ -13,7 +13,8 @@
 //
 // Run after `npm run build`, from apps/fission:
 //   node --experimental-strip-types --no-warnings e2e/monkey-plants.mjs [plant…]
-// MONKEY_PLANT_SEEDS (default 6) and MONKEY_STEPS (default 120) bound each hunt.
+// MONKEY_PLANT_SEEDS (default 6; a plant's own `seeds` raises it for that
+// plant) and MONKEY_STEPS (default 120) bound each hunt.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,6 +57,8 @@ export const MONKEY_PLANTS = {
   "body-row-off-by-one": {
     what: "a Bodies row selects the next body",
     expect: "selection agrees",
+    // Since #192 (no Body rows for failed features) the first seed to catch it at 120 steps is 31 (then 36, 38; 1-40 hunted 2026-10-19).
+    seeds: 40,
     edits: [{ file: "workspaces/design/src/browser.ts", find: "  const rows = new Map(bodyRows(doc, failed).map((r) => [r.id, r.feature.id]));", replace: "  const rows = new Map(bodyRows(doc, failed).map((r, i, all) => [r.id, all[(i + 1) % all.length].feature.id]));" }],
   },
   "failed-body-rows": {
@@ -137,12 +140,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         const name = names[next++];
         const p = plants[name];
         let row = { name, what: p.what, expect: p.expect, caught: null };
-        for (let seed = 1; seed <= seeds && !row.caught; seed++) {
+        for (let seed = 1; seed <= Math.max(seeds, p.seeds ?? 0) && !row.caught; seed++) {
           const found = await hunt(join(base, name), 4230 + w, seed);
           if (found) row = { ...row, ...found };
         }
         rows.push(row);
-        console.log(row.caught ? `${name}: caught by "${row.caught}" (seed ${row.seed}, action ${row.actions})${row.caught === row.expect ? "" : `, expected "${row.expect}"`}: ${row.message}` : `${name}: MISSED in ${seeds} seeds (${p.what})`);
+        console.log(row.caught ? `${name}: caught by "${row.caught}" (seed ${row.seed}, action ${row.actions})${row.caught === row.expect ? "" : `, expected "${row.expect}"`}: ${row.message}` : `${name}: MISSED in ${Math.max(seeds, p.seeds ?? 0)} seeds (${p.what})`);
       }
     }),
   );
