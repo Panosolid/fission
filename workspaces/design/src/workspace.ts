@@ -21,7 +21,7 @@ import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey 
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
 import { deleteAsk } from "./delete-ask.ts";
 import { itemName } from "./timeline-edits.ts";
-import { chooseBarAction, chooseEntry, menuEntries, type MenuHost } from "./timeline-menu.ts";
+import { chooseBarAction, chooseEntry, menuEntries, openAction, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
@@ -135,12 +135,13 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<s
  * that selects it (Shift adds or takes out); the others are plain rows
  * until features (step 24) and origin planes (step 21) can be selected.
  * A sketch's row in the Sketches group opens its menu (Delete, 24e4) on a
- * right-click, or from its ⋯ button for touch and the keyboard.
+ * right-click, or from its ⋯ button for touch and the keyboard; a
+ * double-click on it or a Timeline row opens the item (`onOpen`, 25a3).
  * The items the last rebuild failed (`failed`) have no Body row and their
  * Timeline rows select nothing. Rebuilt on every edit and after every
  * rebuild that changes `failed`; folding is kept by id.
  */
-function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<string>, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void) {
+function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<string>, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void, onOpen: (node: string) => void) {
   // Rows with the timeline's item menu (24f3): every Timeline row by its item's id, and each sketch's row in Sketches.
   const items = new Set(doc.timeline.features.map((f) => f.id));
   const refOf = rowReferences(doc, failed);
@@ -176,6 +177,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
         row.dataset.node = n.id;
         if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
         if (items.has(n.id) || n.id.startsWith("sketches/")) {
+          row.addEventListener("dblclick", () => onOpen(n.id));
           // The row's menu: a right-click at the pointer, or the ⋯ button under itself.
           row.addEventListener("contextmenu", (e) => {
             e.preventDefault();
@@ -260,7 +262,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Draws the browser for `doc` with the last rebuild's failed items (no Body row for them). */
   function drawBrowser(doc: DesignDocument) {
     rowsFailed = failedNow;
-    browser(ctx.browser, doc, failedNow, selectRow, openRowMenu);
+    browser(ctx.browser, doc, failedNow, selectRow, openRowMenu, (node) => openItem(rowItem(node)));
   }
 
   /** The browser's Body 1 row: a click selects the body, Shift adds or takes it out. */
@@ -429,7 +431,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   function clearDesign() {
     leaveExtrude();
     leaveEdit();
-    if (mode.kind !== "none") leaveSketch();
+    if (mode.kind !== "none") leaveSketch(false); // update() below shows the fresh design
     ctx.selection.clear();
     shape = "box";
     inputs.forEach((input, i) => (input.value = DEFAULT_SIZES[SIZE_KEYS[i]]));
@@ -455,6 +457,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         showBar(designDoc());
       },
       onMenu: (id, at) => openMenu(id, at),
+      // 25a3: a double-click opens the item: Edit Sketch, or Edit feature.
+      onOpen: (id) => openItem(id),
       // 24f5: the playback buttons, the marker dragged and a tap between items, each one undo step.
       editing: editingId(),
       onAction: (a) => {
@@ -483,9 +487,18 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     }
   }
 
-  /** A row's menu (24e4 for sketches, 24f3 for every timeline item): "sketches/<id>" or an item's id. */
+  /** The timeline item of a browser row with a menu: "sketches/<id>" or an item's id. */
+  const rowItem = (node: string) => (node.startsWith("sketches/") ? node.slice("sketches/".length) : node);
+  /** A row's menu (24e4 for sketches, 24f3 for every timeline item). */
   function openRowMenu(node: string, at: { x: number; y: number }) {
-    openMenu(node.startsWith("sketches/") ? node.slice("sketches/".length) : node, at);
+    openMenu(rowItem(node), at);
+  }
+
+  /** A double-click on item `id` (25a3): its menu's Edit Sketch or Edit feature, refused with the menu's words when that is off. */
+  function openItem(id: string) {
+    const doc = designDoc();
+    if (!doc.timeline.features.some((f) => f.id === id)) return;
+    void chooseEntry(menuHost, id, openAction(doc, id), editingId()).catch((err) => panel.showError(err instanceof Error ? err.message : String(err)));
   }
 
   /** Item `id`'s menu (timeline-menu.ts): Move the marker here, Suppress or Unsuppress, Delete; an entry that is off says why. */
@@ -510,7 +523,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     record(step, next) {
       leaveExtrude();
       leaveEdit();
-      if (mode.kind !== "none") leaveSketch();
+      if (mode.kind !== "none") leaveSketch(false); // update() below shows the new design
       // The part the panel shows may now be another feature (the last body that still builds), or none (24f4):
       // then the boxes stay, and a size typed adds a preset of the shape shown (a box when it was an extrude).
       const part = partOf(next);
@@ -523,12 +536,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ask: (q, go) => deleting.ask(q, go),
     refuse: (message) => panel.showError(message),
     edit: (id) => openEdit(id),
+    editSketch: (id) => openSketch(id),
   };
 
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
   /** Rebuilds asked for and not answered yet: the viewport's `data-rebuilding` says whether any is, so a test reads the page only once it shows the last edit (the monkey). */
   let rebuilding = 0;
+  /** The design last shown and built: a sketch left after edits to it differs, and is rebuilt (25a3). */
+  let shownDoc: DesignDocument | null = null;
   async function show(doc: DesignDocument, kind: PartKind) {
+    shownDoc = doc;
     viewport.element.dataset.rebuilding = String(++rebuilding > 0);
     try {
       await showBuilt(doc, kind);
@@ -667,7 +684,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * Applies a sketch edit to the project: one undo step named `label`
    * (SKETCH_STEPS), the timeline in the graph (a sketch has nothing to
    * build: its outline is asked of the kernel when read), the browser
-   * and the drawing.
+   * and the drawing. What is built from the sketch is marked out of date
+   * and rebuilt when the sketch is left (Finish Sketch, 25a3), as the
+   * reference app does: never part way through drawing an outline.
    */
   function applySketchEdit(next: DesignDocument, label: string, sketchId: string) {
     const before = designDoc();
@@ -681,8 +700,6 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     showFailed(next);
     showKept(); // the rows are new: mark them again until the rebuild says otherwise
     markStale();
-    // The part extrudes this sketch: rebuild it from the edited lines (a live link; an open sketch fails with the kernel's reason).
-    if (partFeature(next)?.dependsOn.includes(sketchId)) void show(next, shape);
   }
 
   /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
@@ -703,6 +720,24 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     applySketchEdit(made.doc, SKETCH_STEPS.create, made.id);
     editingSketch = { id: made.id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID), tool: "line" };
     enterSketch();
+    lookAtSketch();
+  }
+
+  /**
+   * Edit Sketch (25a3, from an item's menu or a double-click): sketch `id`
+   * open again with the line tool, out of any other sketch (rebuilt when
+   * changed), Extrude or Edit feature panel first, looked at straight down.
+   * Nothing is recorded until something is drawn; the kept-shape warning
+   * of what is built from it waits for Finish Sketch.
+   */
+  function openSketch(id: string) {
+    leaveExtrude();
+    leaveEdit();
+    if (mode.kind !== "none") leaveSketch();
+    editingSketch = { id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID), tool: "line" };
+    enterSketch();
+    if (mode.kind !== "edit") return;
+    showKept();
     lookAtSketch();
   }
 
@@ -740,8 +775,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     drawSketches();
   }
 
-  /** Cancel, Finish sketch or Extrude: back to modelling; the sketch stays as drawn. */
-  function leaveSketch() {
+  /**
+   * Cancel, Finish sketch, Extrude, another sketch or item opened: back to
+   * modelling; the sketch stays as drawn. When the design changed since it
+   * was last built (something was drawn), everything is rebuilt from it
+   * (25a3): what is built from the sketch, and everything after that; the
+   * rebuild keeps every body whose spec is unchanged. `rebuild` false: the
+   * caller shows a new design straight after.
+   */
+  function leaveSketch(rebuild = true) {
+    const drew = mode.kind === "edit" && rebuild && designDoc() !== shownDoc;
     mode = { kind: "none" };
     unlock();
     editingSketch = null;
@@ -752,6 +795,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     drawSketches();
     showKept();
     showBar(designDoc());
+    if (drew) void show(designDoc(), shape);
   }
 
   /** Finish Sketch (the toolbar's or the panel's): back to modelling, the camera at the home view (as the owner's CAD suite does, not the view from before the sketch). */

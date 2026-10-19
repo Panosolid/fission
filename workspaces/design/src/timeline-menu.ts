@@ -1,7 +1,9 @@
 // The timeline's item menu wired (step 24f3), the same on the bar's items
 // and the browser's Timeline and Sketches rows (a right-click, or the ⋯ a
 // tap shows): Edit feature (step 25a2: opens the feature's sizes through
-// the host; nothing is recorded until its OK), Move the marker here,
+// the host; nothing is recorded until its OK) or Edit Sketch (step 25a3:
+// opens the sketch again through the host; nothing is recorded until
+// something is drawn), Move the marker here,
 // Suppress or Unsuppress, and Delete, from 24f2's `itemMenu` and `barEdit`. Each choice is recorded as one
 // undo step with its `TIMELINE_STEPS` name; a delete records 24e4's
 // settled document (`planDelete`) and asks first through its box when
@@ -10,7 +12,7 @@
 // view). `workspace.ts` is the host: it records, asks and shows the refusal.
 
 import type { KernelCalls } from "@fission/core";
-import type { DesignDocument } from "./document.ts";
+import { isSketchItem, type DesignDocument } from "./document.ts";
 import { planDelete, type DeleteQuestion } from "./delete-ask.ts";
 import { barEdit, itemMenu, type BarAction, type MenuEntry } from "./timeline-bar.ts";
 
@@ -35,6 +37,8 @@ export interface MenuHost {
   refuse(message: string): void;
   /** Opens item `id`'s Edit feature panel (step 25a2). */
   edit(id: string): void;
+  /** Opens sketch `id` again to draw in (Edit Sketch, step 25a3); Finish Sketch rebuilds what is built from it. */
+  editSketch(id: string): void;
 }
 
 /**
@@ -52,6 +56,7 @@ export async function chooseEntry(host: MenuHost, id: string, action: MenuEntry[
   if (r.kind === "refused") return host.refuse(r.message);
   if (r.kind === "edit") return host.record(r.step, r.doc);
   if (r.kind === "open") return host.edit(r.id);
+  if (r.kind === "sketch") return host.editSketch(r.id);
   const plan = await planDelete(host.kernel, before, id);
   if (host.current() !== before) return;
   const go = () => {
@@ -59,6 +64,13 @@ export async function chooseEntry(host: MenuHost, id: string, action: MenuEntry[
   };
   if (plan.ask) host.ask(plan.ask, go);
   else go();
+}
+
+/** The menu entry a double-click on item `id` runs (25a3): Edit Sketch for a sketch, Edit feature for a solid. */
+export function openAction(doc: DesignDocument, id: string): "edit" | "edit-sketch" {
+  const item = doc.timeline.features.find((f) => f.id === id);
+  if (!item) throw new Error(`there is no item ${id} in the timeline`);
+  return isSketchItem(item) ? "edit-sketch" : "edit";
 }
 
 /**

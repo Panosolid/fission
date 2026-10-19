@@ -211,6 +211,25 @@ mod tests {
     }
 
     #[test]
+    fn a_line_and_an_arc_meeting_almost_straight_on_extrude() {
+        // The line (0,0)→P = (10,0), then a clockwise arc of r = 5 turning
+        // 1 rad that leaves P kinked by ±1e-4 rad (up: bending back across
+        // the line's way, which the clearance rule used to refuse as 5e-4
+        // mm apart), to Q = P + 10·sin(0.5)·(cos, sin)(kink − 0.5), and the
+        // straight side back. The loop runs clockwise: the triangle O, P, Q
+        // has area ½|P × Q| = 5|Q.y|, and the arc bulges out of it by its
+        // segment r²(σ − sin σ)/2 = 25(1 − sin 1)/2. Extruded 2.
+        for kink in [1e-4, -1e-4] {
+            let q = DVec2::new(10.0, 0.0) + DVec2::from_angle(kink - 0.5) * (10.0 * fmath::sin(0.5));
+            let p = Profile { outer: Boundary::Path { corners: v(&[(0.0, 0.0), (10.0, 0.0), (q.x, q.y)]), bulges: vec![0.0, fmath::tan(-0.25), 0.0] }, holes: vec![] };
+            let b = extrude(&p, 2.0).unwrap();
+            let area = 5.0 * q.y.abs() + 25.0 * (1.0 - fmath::sin(1.0)) / 2.0;
+            let m = crate::mass::mass_properties(&b);
+            assert!(rel_eq(m.volume, area * 2.0, FP_REL), "kink {kink}: {} vs {}", m.volume, area * 2.0);
+        }
+    }
+
+    #[test]
     fn bad_profiles_are_clean_errors() {
         let ok_outer = square(0.0, 0.0, 10.0);
         let cases: Vec<(&str, Profile)> = vec![

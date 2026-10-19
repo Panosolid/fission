@@ -158,7 +158,7 @@ export function playbackButtons(doc: DesignDocument, editing: string | null = nu
 
 /** An entry of an item's menu: what it does, its words, and why it is off (null when it can be chosen). */
 export interface MenuEntry {
-  action: "edit" | "marker" | "suppress" | "unsuppress" | "delete";
+  action: "edit" | "edit-sketch" | "marker" | "suppress" | "unsuppress" | "delete";
   label: string;
   off: string | null;
 }
@@ -168,9 +168,26 @@ const rollsBackWords = (name: string) => `The marker can't go before ${name} whi
 const editedWords = (name: string) => `${name} is being edited: finish the sketch first`;
 
 /**
+ * Why Edit Sketch is off for sketch `at` (its place) with sketch `editing`
+ * open: it is that sketch; it is suppressed; or it is after the marker
+ * (opening it would put the sketch being edited after the marker, which the
+ * bar never allows). Null when it can be opened.
+ */
+function sketchOff(doc: DesignDocument, at: number, editing: string | null): string | null {
+  const item = doc.timeline.features[at];
+  const name = itemName(item);
+  if (editing === item.id) return `${name} is open: you are editing it`;
+  if (item.suppressed) return `${name} is suppressed: unsuppress it first`;
+  if (at >= timelineBarItems(doc).marker) return `${name} is after the marker: move the marker past it first`;
+  return null;
+}
+
+/**
  * Item `id`'s menu (a right-click on it, or its ⋯ on a phone): Edit
- * feature (a solid feature's sizes, step 25a2; a sketch has none), Move the
- * marker here, Suppress or Unsuppress, and Delete. Moving the marker is off
+ * feature (a solid feature's sizes, step 25a2) or Edit Sketch (a sketch
+ * opened again, step 25a3), Move the marker here, Suppress or Unsuppress,
+ * and Delete. Edit Sketch is off for the sketch already open, a suppressed
+ * one and one after the marker (`sketchOff`). Moving the marker is off
  * when it is already just after the item, or when it would put the sketch
  * being edited (`editing`, its id) after it; suppressing and deleting are
  * off for the sketch being edited.
@@ -181,9 +198,9 @@ export function itemMenu(doc: DesignDocument, id: string, editing: string | null
   if (at < 0) throw new Error(`there is no item ${id} in the timeline`);
   const item = doc.timeline.features[at];
   const busy = editing === id ? editedWords(itemName(item)) : null;
-  const edit: MenuEntry[] = isSketchItem(item) ? [] : [{ action: "edit", label: "Edit feature", off: null }];
+  const edit: MenuEntry = isSketchItem(item) ? { action: "edit-sketch", label: "Edit Sketch", off: sketchOff(doc, at, editing) } : { action: "edit", label: "Edit feature", off: null };
   return [
-    ...edit,
+    edit,
     { action: "marker", label: "Move the marker here", off: marker === at + 1 ? "The marker is already here" : rollsBack(doc, editing, at + 1) },
     item.suppressed ? { action: "unsuppress", label: "Unsuppress", off: busy } : { action: "suppress", label: "Suppress", off: busy },
     { action: "delete", label: "Delete", off: busy },
@@ -219,13 +236,16 @@ export type BarAction =
  * delete, whose `doc` is `deleteItem`'s (the app records `planDelete`'s,
  * with kept shapes settled) and which asks first when other items are
  * built from it; an item's Edit feature panel to open (step 25a2: nothing
- * changes until its OK); or refused, with the message the bar shows.
+ * changes until its OK); a sketch to open again (Edit Sketch, step 25a3:
+ * nothing changes until something is drawn); or refused, with the message
+ * the bar shows.
  */
 export type BarResult =
   | { kind: "none" }
   | { kind: "edit"; step: string; doc: DesignDocument }
   | { kind: "delete"; step: string; doc: DesignDocument; ask: boolean }
   | { kind: "open"; id: string }
+  | { kind: "sketch"; id: string }
   | { kind: "refused"; message: string };
 
 /** The marker moved to place `place`: nothing when it is already there, refused when it would roll back the sketch being edited. */
@@ -263,6 +283,7 @@ export function barEdit(doc: DesignDocument, a: BarAction, editing: string | nul
   if (!entry) return { kind: "refused", message: `${name} has no ${a.action} in its menu` };
   if (entry.off) return { kind: "refused", message: entry.off };
   if (a.action === "edit") return { kind: "open", id: a.id };
+  if (a.action === "edit-sketch") return { kind: "sketch", id: a.id };
   if (a.action === "marker") return markerTo(doc, k + 1, editing);
   if (a.action === "delete") return { kind: "delete", step: TIMELINE_STEPS.delete(name), doc: deleteItem(doc, a.id), ask: features.some((f) => f.dependsOn.includes(a.id)) };
   const on = a.action === "suppress";
@@ -361,6 +382,25 @@ function dragMarker(list: HTMLElement, marker: HTMLElement, act: (a: BarAction) 
   });
 }
 
+/** The longest time between two clicks or taps on one item that makes them a double-click (25a3), in ms: the usual desktop setting. */
+export const DOUBLE_CLICK_MS = 500;
+
+/**
+ * Whether a click on item `id` at time `at` (ms) is the second of a
+ * double-click: the click before it, `last`, was on the same item at most
+ * DOUBLE_CLICK_MS before. A click on one item redraws the bar, so the
+ * second click lands on a new element and the browser's own dblclick can't
+ * be trusted to fire; the bar keeps the last click itself.
+ */
+export function isDoubleClick(last: { id: string; at: number } | undefined, id: string, at: number): boolean {
+  if (last === undefined || last.id !== id) return false;
+  const gap = at - last.at;
+  return gap >= 0 && gap <= DOUBLE_CLICK_MS;
+}
+
+/** Each bar's last click on an item (by its slot), kept across the redraw the click itself causes. */
+const lastClicks = new WeakMap<HTMLElement, { id: string; at: number }>();
+
 /** What the bar's items do (step 24f3): `failed` are the rebuild's failed items (drawn red); `picked` is the item whose ⋯ shows. */
 export interface BarWiring {
   failed?: ReadonlySet<string>;
@@ -371,6 +411,8 @@ export interface BarWiring {
   onAction?(a: BarAction): void;
   /** A click or tap on an item: it is picked and its ⋯ shows (a phone's way to the menu). */
   onPick?(id: string): void;
+  /** A double-click or double-tap on an item (25a3): Edit Sketch for a sketch, Edit feature for a solid. The second click picks nothing. */
+  onOpen?(id: string): void;
   /** A right-click on an item (or its ⋯, or the keyboard's menu key): its menu at that point of the screen. */
   onMenu?(id: string, at: { x: number; y: number }): void;
 }
@@ -423,7 +465,15 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
       const r = li.getBoundingClientRect();
       wiring.onMenu?.(item.id, m.clientX === 0 && m.clientY === 0 ? { x: r.left, y: r.top } : { x: m.clientX, y: m.clientY });
     });
-    li.addEventListener("click", () => wiring.onPick?.(item.id));
+    li.addEventListener("click", (e) => {
+      const at = e.timeStamp;
+      if (wiring.onOpen && isDoubleClick(lastClicks.get(slot), item.id, at)) {
+        lastClicks.delete(slot);
+        return wiring.onOpen(item.id);
+      }
+      lastClicks.set(slot, { id: item.id, at });
+      wiring.onPick?.(item.id);
+    });
     li.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") wiring.onPick?.(item.id);
     });

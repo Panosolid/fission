@@ -1,0 +1,18 @@
+{
+ "seed": 241,
+ "failure": "step 1 (menu): sketch-2's menu offers Edit Sketch, Move the marker here, Suppress, Delete",
+ "steps": [
+  {
+   "op": "sketch",
+   "a": 0.09376085409894586,
+   "b": 0.20476162806153297,
+   "c": 0.33759423554874957
+  },
+  {
+   "op": "menu",
+   "a": 0.9602830242365599,
+   "b": 0.1307558035477996,
+   "c": 0.9462722793687135
+  }
+ ]
+}
