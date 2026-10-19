@@ -150,16 +150,27 @@ export function clickAt<T extends SketchTool>(doc: DesignDocument, tool: T, at: 
   if (tool.kind === "arc") return arcClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "tangent") return tangentClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "centre") return centreClick(doc, sketchOf(doc, tool.sketch), tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
-  return lineClick(doc, tool as LineTool, at) as { doc: DesignDocument; tool: T; drew: boolean };
+  return lineClick(doc, tool as LineTool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
 }
 
-function lineClick(doc: DesignDocument, tool: LineTool, at: SketchXY): { doc: DesignDocument; tool: LineTool; drew: boolean } {
+/**
+ * Why a line between two points a line already joins draws nothing (25a5,
+ * from the report list): on top of the other, three line ends would meet
+ * at both points and the outline would break ("3 ends meet"). A line that
+ * only partly overlaps another still gets the kernel's warning; two
+ * regions from overlapping curves come with step 28.
+ */
+export const SAME_LINE = "There is a line between these two points already: a second one on top of it would break the outline.";
+
+function lineClick(doc: DesignDocument, tool: LineTool, at: SketchXY): { doc: DesignDocument; tool: LineTool; drew: boolean; note?: string } {
   const sketch = sketchOf(doc, tool.sketch);
   const there = pointAt(sketch, at);
   const end: LineEnd = there ?? [at[0], at[1]];
   if (tool.from === null) return { doc, tool: { ...tool, from: end }, drew: false };
   const [fx, fy] = whereIs(sketch, tool.from);
   if (fx === at[0] && fy === at[1]) return { doc, tool, drew: false };
+  const from = tool.from;
+  if (there !== null && sketch.curves.some((c) => c.kind === "line" && ((c.start === from && c.end === there) || (c.start === there && c.end === from)))) return { doc, tool, drew: false, note: SAME_LINE };
   const drawn = drawLine(doc, tool.sketch, tool.from, end);
   const line = sketchOf(drawn.doc, tool.sketch).curves.find((c) => c.id === drawn.id) as SketchLineCurve;
   return { doc: drawn.doc, tool: { ...tool, from: there ? null : line.end }, drew: true };

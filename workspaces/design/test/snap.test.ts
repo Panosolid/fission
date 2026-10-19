@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import type { SketchDrawing, SketchXY } from "@fission/core";
 import { partDocument, type DesignDocument, type Sketch } from "../src/document.ts";
 import { addSketch, drawArc, drawCircle, drawLine, pointAt, sketchCurves } from "../src/sketch.ts";
-import { clickAt, startTool, type CircleTool, type LineTool, type RectangleTool, type SketchTool } from "../src/sketch-tool.ts";
+import { clickAt, SAME_LINE, startTool, type CircleTool, type LineTool, type RectangleTool, type SketchTool } from "../src/sketch-tool.ts";
 import { MARK_PIXELS, SNAP_PIXELS, snapLabel, snapMarks, snapOnSketch, snapPointer, snapTargets, withSnap, type Snap, type SnapTargets } from "../src/snap.ts";
 
 function blank() {
@@ -184,8 +184,10 @@ test("a click where the snap landed shares the point: a midpoint snap makes a po
   const first = snapOnSketch(d, tool, [16.2, 0.3], [20, 0], 0.1);
   assert.deepEqual(first.at, [16.5, 0]);
   ({ doc: d, tool } = clickAt(d, tool, first.at));
-  // Click 2 on the grid at (20, 30); click 3 back near (16.5, 0): it snaps there exactly and ends the chain on that point.
+  // Clicks 2 and 3 on the grid at (20, 30) and (30, 30); click 4 back near (16.5, 0): it snaps there exactly and ends the chain on that point.
+  // (Straight back from (20, 30) would lie on the line just drawn, which draws nothing: sketch-tool.ts SAME_LINE, 25a5.)
   ({ doc: d, tool } = clickAt(d, tool, [20, 30]));
+  ({ doc: d, tool } = clickAt(d, tool, [30, 30]));
   const back = snapOnSketch(d, tool, [16.6, -0.2], [20, 0], 0.1);
   assert.deepEqual(back, { kind: "endpoint", at: [16.5, 0] });
   const pointsBefore = sketchOf(d, sketch).points.length;
@@ -352,8 +354,13 @@ test("seeded random sketches, tools and pointers: the snap matches the model, an
           assert.ok(id, where);
           if (tool.kind === "line" && tool.from !== null) {
             const done = clickAt(doc, tool, got.at);
-            const drawn = sketchOf(done.doc, sketch).curves.at(-1)!;
-            assert.ok(done.drew && drawn.kind === "line" && drawn.end === id, where);
+            const from = tool.from;
+            // A line already joining the chain's point and this one: nothing drawn, and why (25a5).
+            if (s.curves.some((c) => c.kind === "line" && ((c.start === from && c.end === id) || (c.start === id && c.end === from)))) assert.ok(!done.drew && done.note === SAME_LINE, where);
+            else {
+              const drawn = sketchOf(done.doc, sketch).curves.at(-1)!;
+              assert.ok(done.drew && drawn.kind === "line" && drawn.end === id, where);
+            }
           }
         }
       }
