@@ -329,10 +329,11 @@ pub fn clearance(s: &Seg, t: &Seg, shared: &[DVec2]) -> f64 {
     let near_shared = |x: DVec2| shared.iter().any(|&p| x.distance(p) <= LINEAR);
     let mut best = f64::INFINITY;
     for (u, v) in [(s, t), (t, s)] {
-        let ends = u.ends();
-        for x in u.critical_points(v) {
+        // critical_points lists a line's or arc's two ends first (a whole
+        // circle has none, but shares no corner either, so k is moot).
+        for (k, x) in u.critical_points(v).into_iter().enumerate() {
             let y = v.closest(x);
-            if !near_shared(x) && (ends.contains(&x) || !near_shared(y)) {
+            if !near_shared(x) && (k < 2 || !near_shared(y)) {
                 best = best.min(x.distance(y));
             }
         }
