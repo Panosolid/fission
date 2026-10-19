@@ -13,8 +13,14 @@ const page = await browser.newPage({ viewport: { width: 1000, height: 640 } });
 // The app opens the project it autosaved last (19c); the checks on `page`
 // each expect a fresh app, so every load of it forgets what was stored.
 // IndexedDB runs requests on one database in order, so this delete comes
-// before the app's own open. The autosave check uses a page of its own.
-await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
+// before the app's own open. Changes a page left with before they were
+// stored wait in localStorage's unsaved-changes journal (packages/storage
+// unsaved.ts) and would be put back, so they go too. The autosave check
+// uses a page of its own.
+await page.addInitScript(() => {
+  indexedDB.deleteDatabase("fission");
+  for (const k of Object.keys(localStorage)) if (k.startsWith("panoshape.unsaved/")) localStorage.removeItem(k);
+});
 
 const consoleErrors = [];
 page.on("pageerror", (e) => consoleErrors.push(e.message));
