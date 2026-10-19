@@ -83,5 +83,10 @@ jobs:
           fetch-depth: 0
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The owner's fine-grained token (Pull requests and Contents: read
+          # and write, this repository only), used only to add pull requests
+          # to the merge queue and take them out: GitHub runs no CI for a
+          # queue entry this workflow's own token makes (automerge.py).
+          MERGE_QUEUE_TOKEN: ${{ secrets.MERGE_QUEUE_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
         run: python3 .github/scripts/automerge.py $DRY_RUN
