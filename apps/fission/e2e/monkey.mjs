@@ -37,7 +37,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { preview } from "vite";
 import { launch } from "./browser.mjs";
-import { documentRules, editFile, expectedView, modelVolume, nextAction, rng, shrink, signature } from "./monkey-core.mjs";
+import { documentRules, editFile, expectedView, kernelVerdict, modelVolume, nextAction, rng, shrink, signature } from "./monkey-core.mjs";
 
 const PORT = Number(process.env.MONKEY_PORT || 4210);
 const STEPS = Number(process.env.MONKEY_STEPS || 60);
@@ -131,8 +131,12 @@ function shown() {
   return {
     design: bar !== null,
     items: [...document.querySelectorAll("#timeline li[data-item]")].map((li) => ({ id: li.dataset.item, suppressed: li.dataset.suppressed === "true", rolledBack: li.dataset.rolledBack === "true" })),
+    failed: [...document.querySelectorAll("#timeline li[data-item][data-failed]")].map((li) => li.dataset.item),
     bodies: document.querySelectorAll('#browser .tree-row[data-node^="body-"]').length,
+    rows: [...document.querySelectorAll('#browser .tree-row[data-node^="body-"]')].map((r) => `${r.dataset.node} ${r.textContent}`),
     sketching: view?.dataset.sketching === "true",
+    // A rebuild still running: the bar's failed marks and the Bodies rows are not the last edit's yet.
+    rebuilding: view?.dataset.rebuilding === "true",
     data: { ...(view?.dataset ?? {}) },
     undo: document.getElementById("undo")?.title,
     redo: document.getElementById("redo")?.title,
@@ -142,13 +146,13 @@ function shown() {
   };
 }
 
-/** Waits until the page stops changing (two reads 150 ms apart agree), at most 6 s; a page still changing then is a failure. */
+/** Waits until the page stops changing (two reads 150 ms apart agree, no rebuild running), at most 6 s; a page still changing then is a failure. */
 async function settle(page) {
   let last = "";
   const until = Date.now() + 6000;
   while (Date.now() < until) {
     const now = JSON.stringify(await page.evaluate(shown));
-    if (now === last) return JSON.parse(now);
+    if (now === last && !JSON.parse(now).rebuilding) return JSON.parse(now);
     last = now;
     await page.waitForTimeout(150);
   }
@@ -210,9 +214,18 @@ async function check(s) {
   const broken = documentRules(design);
   if (broken.length) fail("document rules", broken.join("; "));
   if (view.design) {
-    const want = expectedView(design);
+    const failed = new Set(view.failed);
+    const want = expectedView(design, failed);
     if (JSON.stringify(view.items) !== JSON.stringify(want.items)) fail("timeline bar matches the file", `shown ${JSON.stringify(view.items)}, file says ${JSON.stringify(want.items)}`);
-    if (view.bodies !== want.bodies) fail("Bodies group matches the file", `${view.bodies} bodies listed, the file builds ${want.bodies}`);
+    // The bar's failed marks, where the file alone says whether the kernel builds a solid (kernelVerdict).
+    for (const id of want.solids) {
+      const f = design.timeline.features.find((x) => x.id === id);
+      const verdict = kernelVerdict(f);
+      if (verdict !== null && (verdict === "fails") !== failed.has(id)) fail("failed items match the file", `${f.intent.summary} (${id}) ${failed.has(id) ? "is marked failed" : "is not marked failed"}, but by its sizes it ${verdict === "fails" ? "fails" : "builds"}`);
+    }
+    // Finding 5: a row for each solid that built, none for one that failed, each "Body n" by its place among the solids that build.
+    const rows = want.rows.map((r) => `${r.row} Body ${r.place}`);
+    if (JSON.stringify(view.rows) !== JSON.stringify(rows)) fail("Bodies group matches the file", `rows ${JSON.stringify(view.rows)}, the file builds ${JSON.stringify(rows)}`);
     // A rebuild still running may hold a body it is about to free, so a count over is read again before it counts as a leak.
     let held = await s.page.evaluate(() => window.fissionTest.bodyCount());
     for (let i = 0; i < 4 && held > view.bodies; i++) {
@@ -348,12 +361,12 @@ async function act(s, a) {
       const view = await settle(page);
       if (!view.design || view.sketching || view.dialogs.length || view.extruding || !s.saved) return false;
       const design = JSON.parse(s.saved).workspaces.design;
-      const { bodyIds } = expectedView(design);
-      if (bodyIds.length !== view.bodies) return false; // the per-step check reports that
+      const { rows } = expectedView(design, new Set(view.failed));
+      if (rows.length !== view.bodies) return false; // the per-step check reports that
       const blocks = [];
       const wrong = []; // every disagreement, so the message shows the whole pattern
-      for (const [k, id] of bodyIds.entries()) {
-        await page.evaluate((k) => document.querySelector(`#browser .tree-row[data-node="body-${k + 1}"]`).click(), k);
+      for (const { row, place, id } of rows) {
+        await page.evaluate((row) => document.querySelector(`#browser .tree-row[data-node="${row}"]`).click(), row);
         await settle(page);
         const got = await page.evaluate(() => ({
           selection: document.body.dataset.selection ?? "",
@@ -364,7 +377,7 @@ async function act(s, a) {
           highlight: document.querySelector("#viewport").dataset.highlight ?? "",
         }));
         const f = design.timeline.features.find((x) => x.id === id);
-        const name = `Body ${k + 1} (${f.intent.summary})`;
+        const name = `Body ${place} (${f.intent.summary})`;
         if (got.selection !== `body:${id}`) wrong.push(`clicking ${name} selected "${got.selection}"`);
         if (got.intent !== f.intent.summary) wrong.push(`with ${name} selected the Feature panel says "${got.intent}"`);
         const faces = /faces ([\d,]*)/.exec(got.highlight)?.[1].split(",").filter(Boolean).map(Number) ?? [];
@@ -375,7 +388,7 @@ async function act(s, a) {
           // The panel rounds to a few figures (fmt in properties.ts); 0.5% is far inside the gap between any two different bodies the monkey makes, and far outside the kernel's 1e-6 relative volume error.
           if (want !== null && !(Math.abs(volume - want) <= 0.005 * want)) wrong.push(`with ${name} selected the Body panel shows ${got.volume}, but that body is ${want.toPrecision(6)} mm³`);
           // With every body selected (one body alone) the app lights none of them on purpose (scene.ts), so the count is checked from two bodies up.
-          if (bodyIds.length > 1 && faces.length !== shownFaces) wrong.push(`with ${name} selected ${faces.length} faces light up, but the Body panel says it has ${shownFaces}`);
+          if (rows.length > 1 && faces.length !== shownFaces) wrong.push(`with ${name} selected ${faces.length} faces light up, but the Body panel says it has ${shownFaces}`);
         }
         blocks.push(faces);
       }
@@ -383,7 +396,7 @@ async function act(s, a) {
       let next = 0;
       for (const [k, faces] of blocks.entries()) {
         if (!faces.length) continue;
-        if (faces.some((x, i) => x !== faces[0] + i) || faces[0] !== next) wrong.push(`Body ${k + 1} lights faces ${faces[0]}..${faces.at(-1)}, but its faces should start at ${next}, after the bodies before it`);
+        if (faces.some((x, i) => x !== faces[0] + i) || faces[0] !== next) wrong.push(`Body ${rows[k].place} lights faces ${faces[0]}..${faces.at(-1)}, but its faces should start at ${next}, after the bodies before it`);
         next = faces.at(-1) + 1;
       }
       await page.keyboard.press("Escape");

@@ -775,6 +775,94 @@ try {
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();
     });
+
+    // Bug hunt 2026-10-19, finding 5: a feature the kernel refused kept a "Body n" row; clicking it selected a body
+    // that did not exist, and the panel described another body. A failed part also left the old drawing on screen.
+    const failTap = tap && browserName !== "firefox";
+    await check(`a failed body has no Body row and the panel never describes another body; a failed part leaves the rest drawn (finding 5, ${width} px${failTap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, failTap);
+      const layout = LAYOUTS[width];
+      const browserOpen = async () => {
+        if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press(page, "#browser-toggle", failTap);
+        await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => (d.open = true)));
+      };
+      const browserClosed = async () => {
+        if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) === "true") await press(page, "#browser-toggle", failTap);
+      };
+      const rows = () => page.$$eval('#browser [data-node="bodies"] .tree-row', (rs) => rs.map((r) => `${r.dataset.node} ${r.textContent.trim()}`));
+      const panel = () => page.evaluate(() => ({ heading: document.querySelector("#body-heading")?.textContent, volume: document.querySelector("#volume")?.textContent, intent: document.querySelector("#intent")?.textContent, stale: document.querySelector("#stats")?.dataset.stale }));
+      const square = { heading: "Body 2", volume: layout.volume, intent: `Extrude Sketch 1 by ${layout.distance} mm`, stale: "false" };
+
+      // 1. The box's width -5: the box (the part) fails. No Body row; nothing drawn; its last numbers stay, marked out of date.
+      await page.fill("#width", "-5");
+      await until(page, () => /width/.test(document.querySelector("#error")?.textContent ?? ""), null, "the kernel's refusal of the width");
+      await until(page, () => document.querySelector('#timeline [data-item="feature-1"]')?.dataset.failed !== undefined, null, "the box marked failed");
+      assert.deepEqual(await bar(page), ["feature-1 failed", "|"]);
+      assert.deepEqual(await rows(), []);
+      assert.deepEqual(await panel(), { heading: "Body 1", volume: "24,000 mm³", intent: "Box: -5 × 30 × 20 mm", stale: "true" });
+      assert.equal(await page.isVisible("#stale-note"), true);
+      // 2. Then Sketch 1's square, extruded: Extrude 1 builds. The hunt's repro: before the fix the rows were Body 1 and Body 2.
+      // Nothing is drawn, so Look at centres on the origin: clicks through the app's camera.
+      await addSquare(page, failTap, layout, true);
+      assert.deepEqual(await bar(page), ["feature-1 failed", "sketch-2", "feature-11", "|"]);
+      await browserOpen();
+      assert.deepEqual(await rows(), ["body-2 Body 2"], "the failed box has no row; the square keeps its number");
+      // The box's Timeline row selects nothing (a plain row); the square's selects its body.
+      assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="feature-1"]', (r) => r.tagName), "SPAN");
+      await press(page, '#browser [data-node="body-2"]', failTap);
+      await until(page, () => document.body.dataset.selection === "body:feature-11", null, "Body 2 selected");
+      assert.deepEqual(await panel(), square);
+      await browserClosed();
+      // Only the square is drawn: framed on it alone, worked by hand (half its box's diagonal: 1280 px √(10² + 10² + 10²)/2 = √300/2; 375 px √(10² + 10² + 30²)/2 = √1100/2).
+      const alone = width === 1280 ? Math.sqrt(300) / 2 : Math.sqrt(1100) / 2;
+      assert.ok(Math.abs(Number(await page.evaluate(() => document.querySelector("#viewport").dataset.framedRadius)) - alone) < 1e-6, "framed on the square alone");
+      const [empty, top] = await colours(page, [layout.top]);
+      assert.ok(differs(top, empty), "the square is drawn");
+      if (shots) await page.screenshot({ path: `${shots}/failed-no-row-${width}.png` });
+      await page.keyboard.press("Escape");
+
+      // 3. Undo the square's steps and then the width: the box back as it was.
+      for (let i = 0; i < 40 && (await undoTitle(page)) !== "Undo Change width (Ctrl+Z)"; i++) await press(page, "#undo", failTap);
+      await press(page, "#undo", failTap);
+      await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³" && document.querySelector("#stats")?.dataset.stale === "false", null, "the box back");
+      assert.deepEqual(await bar(page), ["feature-1", "|"]);
+      await browserOpen();
+      assert.deepEqual(await rows(), ["body-1 Body 1"]);
+      await browserClosed();
+
+      // 4. A failed part with another body: the square again, Body 1 selected, then the square's distance 0 (the height box edits the part's distance).
+      await addSquare(page, failTap, layout);
+      await browserOpen();
+      await press(page, '#browser [data-node="body-1"]', failTap);
+      await until(page, () => document.body.dataset.selection === "body:feature-1", null, "Body 1 selected");
+      await browserClosed();
+      await page.fill("#height", "0");
+      await until(page, () => document.querySelector('#timeline [data-item="feature-11"]')?.dataset.failed !== undefined, null, "Extrude 1 marked failed");
+      assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "feature-11 failed", "|"]);
+      await browserOpen();
+      assert.deepEqual(await rows(), ["body-1 Body 1"], "the failed square has no row");
+      await browserClosed();
+      // The box selected: the panel describes the box, fresh numbers aside from the part's out-of-date mark.
+      const box = await panel();
+      assert.deepEqual({ ...box, stale: undefined }, { heading: "Body 1", volume: "24,000 mm³", intent: "Box: 40 × 30 × 20 mm", stale: undefined });
+      // Before the fix the old scene stayed: the square still drawn. Now the box alone.
+      assert.deepEqual(await drawn(page, layout), { box: true, square: false });
+      // Nothing selected: the part, Extrude 1, with the numbers it last built, marked out of date.
+      await page.keyboard.press("Escape");
+      await until(page, () => !document.body.dataset.selection, null, "nothing selected");
+      assert.deepEqual(await panel(), { heading: "Body 2", volume: layout.volume, intent: "Extrude Sketch 1 by 0 mm", stale: "true" });
+      assert.equal(await page.isVisible("#stale-note"), true);
+      if (shots) await page.screenshot({ path: `${shots}/failed-part-${width}.png` });
+      // Undo: the square back, drawn, both rows.
+      await press(page, "#undo", failTap);
+      await until(page, (v) => document.querySelector("#volume")?.textContent === v && document.querySelector("#stats")?.dataset.stale === "false", layout.volume, "the square back");
+      assert.deepEqual(await drawn(page, layout), { box: true, square: true });
+      await browserOpen();
+      assert.deepEqual(await rows(), ["body-1 Body 1", "body-2 Body 2"]);
+
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
   }
 
   await check("no errors in the console", async () => assert.deepEqual(errors, []));
