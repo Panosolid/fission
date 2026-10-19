@@ -26,7 +26,8 @@ interface Plant {
 
 export const BAR_PLANTS: Plant[] = [
   { name: "drop-off-by-one", find: "if ((e.left + e.right) / 2 < at) place++;", replace: "if ((e.left + e.right) / 2 <= at) place++;", caught: "landed at" },
-  { name: "item-drop-off-by-one", find: "reorderItem(doc, a.id, a.place > k ? a.place - 1 : a.place)", replace: "reorderItem(doc, a.id, Math.min(a.place, count - 1))", caught: "the bar gave" },
+  // From 25a3 (sketch menus have Edit Sketch, so the sessions pick other entries) the wrong order is seen first.
+  { name: "item-drop-off-by-one", find: "reorderItem(doc, a.id, a.place > k ? a.place - 1 : a.place)", replace: "reorderItem(doc, a.id, Math.min(a.place, count - 1))", caught: "the items are" },
   {
     name: "drag-ignores-scroll",
     find: "export function dropIndex(edges: readonly ItemEdges[], x: number, scroll = 0): number {\n  const at = x + scroll;",
@@ -41,6 +42,10 @@ export const BAR_PLANTS: Plant[] = [
   { name: "buttons-ignore-editing", find: 'const r = barEdit(doc, { kind: "button", button }, editing);', replace: 'const r = barEdit(doc, { kind: "button", button }, null);', caught: "the buttons are" },
   { name: "buttons-ends-swapped", find: "stepTarget(button, marker, count) === 0 ?", replace: "stepTarget(button, marker, count) === count ?", caught: "the buttons are" },
   { name: "delete-never-asks", find: "ask: features.some((f) => f.dependsOn.includes(a.id))", replace: "ask: false", caught: "the bar gave" },
+  // 25a3: Edit Sketch on a sketch after the marker, a suppressed one, or the one already open.
+  { name: "edit-sketch-rolled-back", find: "  if (at >= timelineBarItems(doc).marker) return", replace: "  if (at > timelineBarItems(doc).marker) return", caught: "the bar gave" },
+  { name: "edit-sketch-suppressed", find: "  if (item.suppressed) return `${name} is suppressed: unsuppress it first`;", replace: "", caught: "the bar gave" },
+  { name: "edit-sketch-open-twice", find: "  if (editing === item.id) return `${name} is open: you are editing it`;", replace: "", caught: "the bar gave" },
 ];
 
 /** timeline-bar.ts with `plant` made, loaded from a temporary copy whose relative imports point at src/. */
@@ -82,7 +87,9 @@ test("a planted failure shrinks to a short list that still fails, and fails no m
   const dir = mkdtempSync(join(tmpdir(), "timeline-bar-shrink-"));
   try {
     const bar = await plantedBar(BAR_PLANTS.find((p) => p.name === "refused-reorder-recorded")!, dir);
-    const steps = randomSteps(241, 150);
+    // The first of the twelve seeds that catches it (the test above shows one does).
+    const seed = Array.from({ length: 12 }, (_, i) => 241 + i).find((s) => runBarSession(bar, randomSteps(s, 150)) !== null)!;
+    const steps = randomSteps(seed, 150);
     assert.ok(runBarSession(bar, steps));
     const small = shrink(bar, steps);
     assert.ok(runBarSession(bar, small), "the shrunk list still fails");

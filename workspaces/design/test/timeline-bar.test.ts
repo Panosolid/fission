@@ -6,7 +6,7 @@ import { extrudeSketch } from "../src/extrude.ts";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as bar from "../src/timeline-bar.ts";
-import { barEdit, dropIndex, DRAG_PIXELS, isDrag, itemMenu, stepTarget, TAP_REACH, tapPlace, timelineBarItems } from "../src/timeline-bar.ts";
+import { barEdit, DOUBLE_CLICK_MS, dropIndex, DRAG_PIXELS, isDoubleClick, isDrag, itemMenu, stepTarget, TAP_REACH, tapPlace, timelineBarItems } from "../src/timeline-bar.ts";
 import { deleteWords } from "../src/delete-ask.ts";
 import { OPS, randomSteps, runBarSession, shrink } from "./timeline-bar-session.ts";
 
@@ -158,7 +158,7 @@ test("each item's menu: the marker here, suppress or unsuppress, delete, and why
   assert.deepEqual(offs("feature-3"), [["Edit feature", null], ["Move the marker here", "The marker is already here"], ["Suppress", null], ["Delete", null]]);
   assert.deepEqual(offs("feature-1"), [["Edit feature", null], ["Move the marker here", null], ["Suppress", null], ["Delete", null]]);
   // Editing Sketch 1 (sketch-2): its own suppress and delete are off; the marker on feature-1 would put Sketch 1 after it.
-  assert.deepEqual(offs("sketch-2", "sketch-2"), [["Move the marker here", null], ["Suppress", "Sketch 1 is being edited: finish the sketch first"], ["Delete", "Sketch 1 is being edited: finish the sketch first"]]);
+  assert.deepEqual(offs("sketch-2", "sketch-2"), [["Edit Sketch", "Sketch 1 is open: you are editing it"], ["Move the marker here", null], ["Suppress", "Sketch 1 is being edited: finish the sketch first"], ["Delete", "Sketch 1 is being edited: finish the sketch first"]]);
   assert.deepEqual(offs("feature-1", "sketch-2")[0], ["Edit feature", null], "editing a sketch leaves Edit feature on: opening it finishes the sketch");
   assert.deepEqual(offs("feature-1", "sketch-2")[1], ["Move the marker here", "The marker can't go before Sketch 1 while it is being edited: finish the sketch first"]);
   assert.deepEqual(offs("feature-3", "sketch-2")[2], ["Suppress", null], "other items' entries stay on");
@@ -299,6 +299,45 @@ test(`seeded: ${SESSION_SEEDS} sessions × ${SESSION_STEPS} steps through the ba
   assert.deepEqual([...seen].sort(), [...OPS].sort());
 });
 
+test("hand-worked (25a3): a sketch's menu opens with Edit Sketch, off for the sketch already open, a suppressed one and one after the marker", () => {
+  // Box (feature-1), Sketch 1 (sketch-2), Extrude 1 (feature-3) of it; no marker, so everything is built.
+  const doc = threeItems();
+  assert.deepEqual(itemMenu(doc, "sketch-2")[0], { action: "edit-sketch", label: "Edit Sketch", off: null });
+  // Open, it answers with the sketch to open; nothing is recorded (no document in the answer).
+  assert.deepEqual(barEdit(doc, { kind: "menu", id: "sketch-2", action: "edit-sketch" }), { kind: "sketch", id: "sketch-2" });
+  // Another sketch being edited leaves it on: opening it finishes that one first.
+  const two = addSketch(doc).doc; // Sketch 2 (sketch-4), last
+  assert.deepEqual(barEdit(two, { kind: "menu", id: "sketch-2", action: "edit-sketch" }, "sketch-4"), { kind: "sketch", id: "sketch-2" });
+  // Already open: off with why, and refused with the same words.
+  assert.deepEqual(barEdit(doc, { kind: "menu", id: "sketch-2", action: "edit-sketch" }, "sketch-2"), { kind: "refused", message: "Sketch 1 is open: you are editing it" });
+  // Suppressed: drawn in, nothing it builds would show, so it is unsuppressed first.
+  const sup = { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f) => (f.id === "sketch-2" ? { ...f, suppressed: true } : f)) } };
+  assert.deepEqual(itemMenu(sup, "sketch-2")[0].off, "Sketch 1 is suppressed: unsuppress it first");
+  // After the marker: the marker after the box (place 1) puts Sketch 1 (place 1, counted from 0) after it, so opening it would edit a sketch that is rolled back.
+  const rolled = withMarker(doc, "feature-1");
+  assert.deepEqual(barEdit(rolled, { kind: "menu", id: "sketch-2", action: "edit-sketch" }), { kind: "refused", message: "Sketch 1 is after the marker: move the marker past it first" });
+  // The marker just after Sketch 1 (place 2) leaves it built: on. At the start (place 0): off.
+  assert.equal(itemMenu(withMarker(doc, "sketch-2"), "sketch-2")[0].off, null);
+  assert.equal(itemMenu(withMarker(doc, "start"), "sketch-2")[0].off, "Sketch 1 is after the marker: move the marker past it first");
+  // A solid has no Edit Sketch, a sketch no Edit feature: each refused in the bar's words.
+  assert.deepEqual(barEdit(doc, { kind: "menu", id: "feature-3", action: "edit-sketch" }), { kind: "refused", message: "Extrude 1 has no edit-sketch in its menu" });
+  assert.deepEqual(barEdit(doc, { kind: "menu", id: "sketch-2", action: "edit" }), { kind: "refused", message: "Sketch 1 has no edit in its menu" });
+});
+
+test("hand-worked (25a3): a double-click is two clicks on one item at most DOUBLE_CLICK_MS apart; 0.9× of it counts, 1.1× doesn't", () => {
+  // 500 ms, the usual desktop setting: 450 ms apart is a double-click, 550 ms two single clicks.
+  assert.equal(DOUBLE_CLICK_MS, 500);
+  const first = { id: "sketch-2", at: 1000 };
+  assert.equal(isDoubleClick(first, "sketch-2", 1000 + 0.9 * DOUBLE_CLICK_MS), true);
+  assert.equal(isDoubleClick(first, "sketch-2", 1000 + DOUBLE_CLICK_MS), true, "the limit itself counts");
+  assert.equal(isDoubleClick(first, "sketch-2", 1000 + 1.1 * DOUBLE_CLICK_MS), false);
+  // Another item, no click before, or a clock that went back: never.
+  assert.equal(isDoubleClick(first, "feature-3", 1100), false);
+  assert.equal(isDoubleClick(undefined, "sketch-2", 1100), false);
+  assert.equal(isDoubleClick(first, "sketch-2", 999), false);
+  assert.equal(isDoubleClick(first, "sketch-2", 1000), true, "two clicks in the same instant");
+});
+
 test("seeded: the sessions reach every outcome: nothing, Edit feature opening, each edit, a delete that asks and one that doesn't, and each refusal", () => {
   // A recording bar: the real one, noting each outcome's kind and words.
   const seen = new Set<string>();
@@ -306,12 +345,12 @@ test("seeded: the sessions reach every outcome: nothing, Edit feature opening, e
     ...bar,
     barEdit: (d, a, e) => {
       const r = bar.barEdit(d, a, e);
-      seen.add(r.kind === "edit" ? r.step.split(" ")[0] : r.kind === "delete" ? `delete-${r.ask}` : r.kind === "open" ? "open" : r.kind === "refused" ? (["already here", " while it is being edited", "is being edited", "can't go before", "can't go after"].find((w) => r.message.includes(w)) ?? r.message) : "none");
+      seen.add(r.kind === "edit" ? r.step.split(" ")[0] : r.kind === "delete" ? `delete-${r.ask}` : r.kind === "open" ? "open" : r.kind === "sketch" ? "sketch" : r.kind === "refused" ? (["already here", " while it is being edited", "is being edited", "can't go before", "can't go after", "you are editing it", "unsuppress it first", "move the marker past it"].find((w) => r.message.includes(w)) ?? r.message) : "none");
       return r;
     },
   };
   for (let seed = 241; seed < 241 + SESSION_SEEDS; seed++) assert.equal(runBarSession(spy, randomSteps(seed, SESSION_STEPS)), null);
-  for (const want of ["none", "open", "Move", "Suppress", "Unsuppress", "delete-true", "delete-false", "already here", " while it is being edited", "is being edited", "can't go before", "can't go after"])
+  for (const want of ["none", "open", "sketch", "Move", "Suppress", "Unsuppress", "delete-true", "delete-false", "already here", " while it is being edited", "is being edited", "can't go before", "can't go after", "you are editing it", "unsuppress it first", "move the marker past it"])
     assert.ok(seen.has(want), `no session reached "${want}"; reached: ${[...seen].join(", ")}`);
 });
 
