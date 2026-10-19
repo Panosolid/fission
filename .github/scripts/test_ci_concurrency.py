@@ -83,6 +83,11 @@ def push(branch):
     return {"github": {"event_name": "push", "repository": REPO, "ref": f"refs/heads/{branch}", "ref_name": branch, "head_ref": "", "event": {}}}
 
 
+def merge_group(number, sha):
+    ref = f"gh-readonly-queue/main/pr-{number}-{sha}"
+    return {"github": {"event_name": "merge_group", "repository": REPO, "ref": f"refs/heads/{ref}", "ref_name": ref, "head_ref": "", "event": {}}}
+
+
 class Groups(unittest.TestCase):
     def group(self, context):
         return expand(concurrency()[0], context)
@@ -106,6 +111,15 @@ class Groups(unittest.TestCase):
         # #174, 15:13 UTC on 2026-10-18: auto-merge dispatched CI on the branch 15 s after
         # the push's own run began, the dispatch cancelled it, and the ruleset counted nothing.
         self.assertNotEqual(self.group(dispatch("claude/x")), self.group(pull_request(174, "claude/x")))
+
+    def test_merge_queue_runs_never_cancel_each_other_or_a_pull_request(self):
+        # Two queue groups side by side (build concurrency), and a pull
+        # request's own run of a branch in the queue: three separate groups.
+        a, b = self.group(merge_group(5, "aaa")), self.group(merge_group(6, "bbb"))
+        self.assertEqual(a, "ci-merge_group-Panosolid/fission-gh-readonly-queue/main/pr-5-aaa")
+        self.assertNotEqual(a, b)
+        self.assertNotEqual(a, self.group(pull_request(5, "claude/x")))
+        self.assertNotEqual(a, self.group(push("main")))
 
     def test_a_forks_pull_request_never_cancels_ours(self):
         for branch in ("main", "claude/x"):
