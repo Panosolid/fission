@@ -4,7 +4,7 @@
 // rightly refused.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clearlySimple, type LoopShape } from "../src/sketch-extrude-session.ts";
+import { clearlySimple, reversedLoop, type LoopShape } from "../src/sketch-extrude-session.ts";
 
 test("an arc bent in far enough to cross the straight side next to it is not clearly simple; bent in less, it is", () => {
   // Triangle (0,0) → (40,0) → (0,10), counter-clockwise; side 1, the
@@ -53,4 +53,52 @@ test("issue #140's triangle: the arc from (158,-10) to (183,-39) bent in by 5.84
   // arc at 40° round the centre, (175.23, -21.03), is 3.18 mm past it.
   const shape: LoopShape = { kind: "loop", corners: [[183, -39], [172, 5], [158, -10]], sagitta: [0, 0, -5.840267196986291] };
   assert.equal(clearlySimple(shape), false);
+});
+
+test("a line and an arc meeting almost straight on are not clearly simple, measured on the arc's true tangent", () => {
+  // Side 0 runs along +x from (0,0) to (40,0); side 1 is an arc of turn
+  // φ = 1 rad over a 20 mm chord at angle α from (40,0), bulging right, so
+  // it curves left and leaves (40,0) at α − φ/2 (sagitta h·tan(φ/4) =
+  // 10·tan 0.25 = 2.553); side 2 runs straight back to (0,0). With
+  // α = τ + 0.5 the corner at (40,0) turns τ. The guard refuses turns under
+  // 0.02 rad: τ = 0.9 × 0.02 is refused, 1.1 × 0.02 passes. The arc's first
+  // piece (of 2 + ⌈1/0.05⌉ = 22) points φ/44 = 0.0227 rad further left,
+  // so measured on it (as before issue #140) both passed.
+  const loop = (tau: number): LoopShape => {
+    const alpha = tau + 0.5;
+    return { kind: "loop", corners: [[0, 0], [40, 0], [40 + 20 * Math.cos(alpha), 20 * Math.sin(alpha)]], sagitta: [0, 10 * Math.tan(0.25), 0] };
+  };
+  for (const [tau, want] of [[0.018, false], [0.022, true]] as const) {
+    assert.equal(clearlySimple(loop(tau)), want, `turn ${tau}`);
+    assert.equal(clearlySimple(reversedLoop(loop(tau))), want, `turn ${tau}, drawn the other way`);
+  }
+});
+
+test("issue #140 again: the three loops random testing found on main, each a line and an arc turning under 1e-4 rad, are not clearly simple", () => {
+  // Each corner turn worked from the true tangents: 4.2e-5 rad between a
+  // line and an arc of radius 16.80 (the arc parallel to the line 16.80 ×
+  // 4.2e-5 = 7.06e-4 mm past the corner, the kernel's 7.055894981908582e-4),
+  // 3.3e-5 rad at radius 6.516 (2.15e-4; kernel 2.17e-4) and 6.9e-5 rad at
+  // radius 13.45 (9.3e-4; kernel 9.33e-4).
+  const loops: LoopShape[] = [
+    { kind: "loop", corners: [[7.5, -275], [10, -262.5], [2.5, -245], [20, -230], [45, -227.5], [65, -245], [47.5, -270], [32.5, -267.5]], sagitta: [0, 2.9569460046694185, 0, 0.8281045856958971, -12.711127688581389, 0, 0, 0] },
+    { kind: "loop", corners: [[-107.97000511683193, -325.9538384652543], [-110.37403541185812, -337.72006160599307], [-120.41488816184297, -335.3904534366089], [-113.2268696919924, -322.35552063529036]], sagitta: [-3.986297184012875, -3.7823752193597038, 0, 0] },
+    { kind: "loop", corners: [[-73.5, 258], [-50.5, 274], [-71.5, 294], [-98, 298.5], [-100, 284], [-98, 268.5], [-102.5, 246], [-79.5, 253.5]], sagitta: [1.5611113234386775, 0, 13.86581630586769, 0, -1.5940621349996444, 8.585608708300963, -3.3872431631666404, 2.8585036162413098] },
+  ];
+  for (const [i, shape] of loops.entries()) assert.equal(clearlySimple(shape), false, `loop ${i}`);
+});
+
+test("two arcs crossing 1.47 mm from their narrow corner are not clearly simple, however long their first pieces", () => {
+  // Issue #140, seed 3955982769946476140 on main. Side 4 runs (0,-100) →
+  // (0,-90) bulging west by 5.137: radius (5² + 5.137²)/(2·5.137) = 5.0018,
+  // centre (−0.1347, −95). Side 5 runs (0,-90) → (−20,-90) bulging south by
+  // 0.650: radius (10² + 0.65²)/(2·0.65) = 77.241, centre (−10, −13.409).
+  // They leave (0,-90) 6.2° apart (east-going in, 187.4° out: a turn of
+  // 3.033 rad, inside the 3.042 cusp guard). The two circles meet at the
+  // corner and again at (−1.4573, −90.1762), 1.468 mm along, which lies on
+  // both arcs: a crossing. Side 5's first piece is 20 × 0.26/8 ≈ 2.5 mm
+  // long; leaving it out hid the crossing.
+  const shape: LoopShape = { kind: "loop", corners: [[-10, -80], [0, -80], [10, -80], [10, -90], [0, -100], [0, -90], [-20, -90]], sagitta: [0, -6.435302632380251, 0.48843629388785004, 0, -5.136540470553309, -0.6500593012656113, -2.0228515972102623] };
+  assert.equal(clearlySimple(shape), false);
+  assert.equal(clearlySimple(reversedLoop(shape)), false);
 });
