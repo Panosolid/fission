@@ -22,6 +22,7 @@ export const TIMELINE_STEPS = {
   suppress: (name: string) => `Suppress ${name}`,
   unsuppress: (name: string) => `Unsuppress ${name}`,
   marker: "Move the rollback marker",
+  edit: (name: string) => `Edit ${name}`,
 } as const;
 
 /** Why a reorder is refused: the item would come before an item it is built from, or after one built from it. */

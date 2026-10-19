@@ -165,7 +165,8 @@ export function deleteAsk(slot: HTMLElement): DeleteAsk {
         ...entries.map((e) => {
           const b = button(`row-menu-${e.action}`, e.label);
           b.setAttribute("role", "menuitem");
-          b.setAttribute("aria-label", `${e.label.replace(" here", "")}${e.action === "marker" ? " to just after" : ""} ${name}`);
+          // "Edit feature" reads "Edit Extrude 1" (25a2); "Move the marker here", "Move the marker to just after Sketch 1".
+          b.setAttribute("aria-label", e.action === "edit" ? `Edit ${name}` : `${e.label.replace(" here", "")}${e.action === "marker" ? " to just after" : ""} ${name}`);
           if (e.off !== null) {
             // Greyed, with why under its words (a phone shows no tooltip).
             b.disabled = true;
