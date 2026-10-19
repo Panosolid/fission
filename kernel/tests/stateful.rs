@@ -51,7 +51,7 @@ use fission_kernel::placed::Placed;
 use fission_kernel::sketch;
 use fission_kernel::stl;
 use fission_kernel::face_mass::{face_masses, FaceMass};
-use fission_kernel::geom::Curve;
+use fission_kernel::geom::{Curve, Surface};
 use fission_kernel::topology::{Body, FaceRole, Piece as PieceId};
 use fission_kernel::validate::validate;
 use glam::{DVec2, DVec3};
@@ -62,7 +62,7 @@ use proptest::test_runner::{
 use proptest_state_machine::ReferenceStateMachine;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 use std::fmt;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -1444,7 +1444,12 @@ fn ring_moment(pieces: &[Piece], about: DVec2) -> (f64, DVec2) {
                 let (s, co) = ((phi / 2.0).sin(), (phi / 2.0).cos());
                 let towards = DVec2::new(mid.x * co - mid.y * s, mid.x * s + mid.y * co) / mid.length();
                 let f = phi.abs();
-                (r * r * (f - f.sin()) / 2.0 * phi.signum(), (c - about) + towards * (4.0 * r * (f / 2.0).sin().powi(3) / (3.0 * (f - f.sin()))))
+                // f − sin f by its series: taken directly it cancels to
+                // ~1e-6 of itself on a shallow arc, and the centroid, r
+                // from the centre, moved by that much of r (seed8736e4b0b3df:
+                // r = 251 m tipped a cap's centroid 4.4e-4 mm; issue #102).
+                let tms = theta_minus_sin(f);
+                (r * r * tms / 2.0 * phi.signum(), (c - about) + towards * (4.0 * r * (f / 2.0).sin().powi(3) / (3.0 * tms)))
             }
             Piece::Circle { c, r } => (PI * r * r, c - about),
         };
@@ -1452,6 +1457,21 @@ fn ring_moment(pieces: &[Piece], about: DVec2) -> (f64, DVec2) {
         moment += segment.1 * segment.0;
     }
     (area, moment)
+}
+
+/// θ − sin θ, by its series θ³/3! − θ⁵/5! + … when |θ| ≤ 0.5, where the
+/// direct difference cancels: at θ = 4e-5 it keeps only ~6 of its digits.
+fn theta_minus_sin(t: f64) -> f64 {
+    if t.abs() > 0.5 {
+        return t - t.sin();
+    }
+    // Term k is (−1)^k θ^(2k+3) / (2k+3)!; past k = 7 it is under 1e-17 of the first.
+    let (mut term, mut sum) = (t * t * t / 6.0, 0.0);
+    for k in 0..8 {
+        sum += term;
+        term *= -t * t / (((2 * k + 4) * (2 * k + 5)) as f64);
+    }
+    sum
 }
 
 /// The side wall a piece sweeps, per unit height: its length and the
@@ -1617,6 +1637,32 @@ fn left_bound(c: DVec3, m: DVec3) -> f64 {
     tolerance::FP_REL * ((c - m).length() + m.length())
 }
 
+/// A point inside cylinder face `face`, for the upright edge whose midpoint
+/// is `m`: on the face's first arc edge, from the end of the arc nearer
+/// `m`, half the arc or a quarter turn in, whichever is less, at m's
+/// height. Seen from that upright it lies r·sin(that turn) along the wall,
+/// at least r·sin(turn/2) for any arc, where the centroid of a wall of
+/// almost a full turn is only (1 − cos θ)/θ · r along (issue #185: two
+/// arcs of radius 4.6 m and 27.5 m closing to a 1 µm chord put both walls'
+/// centroids ~2e-11 mm from the upright, under rounding). None for any
+/// other face, or one with no arc edge.
+fn arc_witness(body: &Body, face: usize, m: DVec3) -> Option<DVec3> {
+    if !matches!(body.faces[face].surface, Surface::Cylinder { .. }) {
+        return None;
+    }
+    let edge = body.faces[face].loops.iter().flat_map(|l| &l.coedges).map(|c| &body.edges[c.edge]).find(|e| matches!(e.curve, Curve::Circle { .. }))?;
+    let Curve::Circle { center, axis, .. } = edge.curve else { return None };
+    let (t0, t1) = (edge.t0, edge.t1);
+    let at = edge.curve.closest_param(m);
+    let apart = |t: f64| {
+        let d = (at - t).rem_euclid(TAU);
+        d.min(TAU - d)
+    };
+    let turn = (0.5 * (t1 - t0)).min(0.5 * PI);
+    let t = if apart(t0) <= apart(t1) { t0 + turn } else { t1 - turn };
+    Some(edge.curve.eval(t) + axis * (m - center).dot(axis))
+}
+
 /// `centroids` (each face's, by index) are passed in so a test can move them.
 fn edge_pairs_off(body: &Body, pairs: &[Option<[usize; 2]>], centroids: &[DVec3]) -> Result<(), String> {
     if pairs.len() != body.edges.len() {
@@ -1643,14 +1689,20 @@ fn edge_pairs_off(body: &Body, pairs: &[Option<[usize; 2]>], centroids: &[DVec3]
             }
             let sense = if body.faces[face].sense { 1.0 } else { -1.0 };
             let n = body.faces[face].surface.normal_at(m) * sense;
-            let c = centroids[face];
-            let left = (c - m).dot(n.cross(along));
-            let bound = left_bound(c, m);
-            if left.is_nan() || left < -bound {
-                let way = if face == f { "forwards" } else { "backwards" };
-                return Err(format!("edge {e}: face {face} ({:?}) is said to walk it {way}, but lies on its right ({left:e}, {bound:e} allowed; centroid {c}, midpoint {m}, normal {n}, tangent {along})", body.faces[face].role));
+            // The centroid, then (a wall the centroid can't decide) a point
+            // of the wall a quarter turn in from the edge's end of its arc.
+            for c in std::iter::once(centroids[face]).chain(arc_witness(body, face, m)) {
+                let left = (c - m).dot(n.cross(along));
+                let bound = left_bound(c, m);
+                if left.is_nan() || left < -bound {
+                    let way = if face == f { "forwards" } else { "backwards" };
+                    return Err(format!("edge {e}: face {face} ({:?}) is said to walk it {way}, but lies on its right ({left:e}, {bound:e} allowed; centroid {c}, midpoint {m}, normal {n}, tangent {along})", body.faces[face].role));
+                }
+                if left > bound {
+                    decided = true;
+                    break;
+                }
             }
-            decided |= left > bound;
         }
         if !decided {
             return Err(format!("edge {e}: neither face's centroid is clearly on its left, so which walks it forwards is not checked"));
@@ -2870,4 +2922,119 @@ fn num_round_trips_through_json_exactly() {
         let back: Num = serde_json::from_str(&serde_json::to_string(&Num(v)).unwrap()).unwrap();
         assert!(back.0.to_bits() == v.to_bits() || (v.is_nan() && back.0.is_nan()), "{v:?} → {:?}", back.0);
     }
+}
+
+#[test]
+fn theta_minus_sin_keeps_its_digits_by_hand() {
+    // θ − sin θ = θ³/6 − θ⁵/120 + …: at θ = 4e-5, 6.4e-14/6 − 1.024e-22/120
+    // = 1.0666666666666667e-14 − 8.53e-25 = 1.06666666658133e-14 (40
+    // digits: 1.066666666581333595e-14). Taken directly, 4e-5 − sin 4e-5
+    // cancels all but ~6 digits.
+    let got = theta_minus_sin(4e-5);
+    assert!((got - 1.0666666665813336e-14).abs() <= 4.0 * f64::EPSILON * 1.07e-14, "{got:e}");
+    // At 0.3 (series): 0.004479793338660424398 (40 digits). At the switch,
+    // 0.5, the series and the direct difference agree, and either side of
+    // it the sign is odd: −θ gives −(θ − sin θ).
+    assert!((theta_minus_sin(0.3) - 0.004479793338660424).abs() <= 4.0 * f64::EPSILON * 0.0045);
+    assert!((theta_minus_sin(0.5) - 0.0205744613957970).abs() <= 4.0 * f64::EPSILON * 0.0206);
+    assert!((theta_minus_sin(0.5000001) - (0.5000001 - 0.5000001f64.sin())).abs() <= 1e-14 * 0.0206);
+    assert_eq!(theta_minus_sin(-0.3), -theta_minus_sin(0.3));
+}
+
+#[test]
+fn a_shallow_arcs_segment_centroid_by_hand() {
+    // Issue #102. The chord (−1, 0) → (1, 0) and back over an arc of bulge
+    // 1e-4: sagitta s = (c/2)·β = 1e-4 mm, radius c(1 + β²)/(4β) =
+    // 5000.00005 mm. The cap is the segment alone: area ≈ (2/3)·c·s =
+    // 1.3333e-4 mm², centroid on the y axis 2/5 of s above the chord,
+    // 4e-5 mm, to first order. Integrated along the boundary by Green's
+    // theorem at 50 digits: area 1.333333336000000060e-4, centroid
+    // (0, 4.000000003428571606e-5). The old formula put the centroid
+    // ~r·1e-8 = 4e-5 mm off, as far as the answer itself: f − sin f at
+    // f = 4e-4 kept only ~8 digits.
+    let shape = strip_with_bulges(&[(-1.0, 0.0), (1.0, 0.0)], &[0.0, 1e-4], 1.0);
+    let model = face_model(&shape).unwrap();
+    let &(_, area, c) = model.iter().find(|m| m.0 == FaceRole::Start).unwrap();
+    assert!((area - 1.3333333360000001e-4).abs() <= 1e-12 * 1.34e-4, "{area:e}");
+    assert!(c.distance(DVec3::new(0.0, 4.0000000034285716e-5, 0.0)) <= 1e-11, "{c}");
+    // The random-testing case (seed8736e4b0b3df): a 10 mm strip 2 µm wide
+    // with half-circle ends and a top bowed in by 5e-5 mm (r = 251 m). 50
+    // digits: cap centroid (5.022398685642168736, −8.499016681667049586);
+    // the old formula said y = −8.498580, 4.4e-4 mm off.
+    let shape = strip_with_bulges(&[(0.0, -8.5), (0.0, -8.498), (10.044797371284337, -8.498), (10.044797371284337, -8.5)], &[-1.0, 1e-5, -1.0, -0.0], 0.5);
+    let model = face_model(&shape).unwrap();
+    let &(_, _, c) = model.iter().find(|m| m.0 == FaceRole::Start).unwrap();
+    assert!(c.distance(DVec3::new(5.022398685642169, -8.49901668166705, 0.0)) <= 1e-9, "{c}");
+}
+
+#[test]
+fn an_arc_walls_witness_by_hand() {
+    // A pie slice: (0,0) → (1,0), a quarter circle round the origin to
+    // (0,1), back to (0,0); bulge tan(π/8) turns π/2. Extruded 2 mm, the
+    // arc's wall spans a quarter turn, so the witness for its upright at
+    // (1, 0) is half the arc in: (√½, √½), at the upright's height 1.
+    let piece = |pts: &[(f64, f64)], bulges: &[f64]| {
+        let corners = pts.iter().map(|&(x, y)| DVec2::new(x, y)).collect();
+        extrude::extrude(&Profile { outer: Boundary::Path { corners, bulges: bulges.to_vec() }, holes: vec![] }, 2.0).unwrap()
+    };
+    let wall = |b: &Body| b.faces.iter().position(|f| matches!(f.surface, Surface::Cylinder { .. })).unwrap();
+    let pie = piece(&[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)], &[0.0, (PI / 8.0).tan(), 0.0]);
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let w = arc_witness(&pie, wall(&pie), DVec3::new(1.0, 0.0, 1.0)).unwrap();
+    assert!(w.distance(DVec3::new(h, h, 1.0)) <= 1e-12, "{w}");
+    // A half disc ((−1,0) → (1,0), then bulge 1 back round the top): the
+    // wall turns π, so from either upright it is a quarter turn in, (0, 1).
+    let half = piece(&[(-1.0, 0.0), (1.0, 0.0)], &[0.0, 1.0]);
+    for x in [1.0, -1.0] {
+        let w = arc_witness(&half, wall(&half), DVec3::new(x, 0.0, 1.0)).unwrap();
+        assert!(w.distance(DVec3::new(0.0, 1.0, 1.0)) <= 1e-12, "from {x}: {w}");
+    }
+    // Three quarters of a turn, (1, 0) round the origin to (0, −1), bulge
+    // tan(3π/8), and the line back: from the upright at (1, 0) a quarter
+    // turn in is (0, 1); from the one at (0, −1), (−1, 0). (A witness taken
+    // from the wrong end would swap them.)
+    let three = piece(&[(1.0, 0.0), (0.0, -1.0)], &[(3.0 * PI / 8.0).tan(), 0.0]);
+    for (from, to) in [((1.0, 0.0), (0.0, 1.0)), ((0.0, -1.0), (-1.0, 0.0))] {
+        let w = arc_witness(&three, wall(&three), DVec3::new(from.0, from.1, 1.0)).unwrap();
+        assert!(w.distance(DVec3::new(to.0, to.1, 1.0)) <= 1e-12, "from {from:?}: {w}");
+    }
+    // A plane face has none.
+    let plane = half.faces.iter().position(|f| matches!(f.role, Some(FaceRole::Side(_))) && matches!(f.surface, Surface::Plane { .. })).unwrap();
+    assert!(arc_witness(&half, plane, DVec3::ZERO).is_none());
+}
+
+#[test]
+fn walls_of_almost_a_full_turn_are_decided_by_their_witness() {
+    // Issue #185 (seed3a9e29e38cd7): corners 1 µm apart, joined both ways
+    // by arcs of almost a full turn, radii c(1 + β²)/(4|β|) = 4.6 m and
+    // 27.5 m. Each wall's centroid is (1 − cos θ)/θ · r ≈ 2e-11 mm along
+    // from an upright, inside left_bound's rounding, so the centroids
+    // decide nothing there; each wall's witness is r along.
+    let corners = vec![DVec2::new(-5.0, 0.0), DVec2::new(-4.999, 0.0)];
+    let b = extrude::extrude(&Profile { outer: Boundary::Path { corners, bulges: vec![-18413340.805969886, 110000000.00000001] }, holes: vec![] }, 0.5).unwrap();
+    let pairs = fission_kernel::edge_faces(&b);
+    let centroids = mid(&b);
+    let upright = (0..b.edges.len()).find(|&e| matches!(b.edges[e].curve, Curve::Line { .. })).unwrap();
+    let edge = &b.edges[upright];
+    let mid_t = 0.5 * (edge.t0 + edge.t1);
+    let (m, t) = (edge.curve.eval(mid_t), edge.curve.tangent(mid_t));
+    let [f, g] = pairs[upright].unwrap();
+    for (face, along) in [(f, t), (g, -t)] {
+        let n = b.faces[face].surface.normal_at(m) * if b.faces[face].sense { 1.0 } else { -1.0 };
+        let left = (centroids[face] - m).dot(n.cross(along));
+        assert!(left.abs() <= left_bound(centroids[face], m), "face {face}: centroid decides ({left:e})");
+        let w = arc_witness(&b, face, m).unwrap();
+        assert!((w - m).dot(n.cross(along)) > 4000.0, "face {face}: witness {w}");
+    }
+    edge_pairs_off(&b, &pairs, &centroids).unwrap();
+    // Planted: the upright's coedges flipped on the body, so the loops say
+    // the other wall walks it forwards. The witness catches it.
+    let mut flipped = b.clone();
+    for face in &mut flipped.faces {
+        for l in &mut face.loops {
+            l.coedges.iter_mut().filter(|c| c.edge == upright).for_each(|c| c.reversed = !c.reversed);
+        }
+    }
+    let err = edge_pairs_off(&flipped, &fission_kernel::edge_faces(&flipped), &centroids).unwrap_err();
+    assert!(err.contains(&format!("edge {upright}:")) && err.contains("lies on its right"), "{err}");
 }
