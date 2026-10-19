@@ -26,7 +26,7 @@ interface Plant {
 
 export const BAR_PLANTS: Plant[] = [
   { name: "drop-off-by-one", find: "if ((e.left + e.right) / 2 < at) place++;", replace: "if ((e.left + e.right) / 2 <= at) place++;", caught: "landed at" },
-  { name: "item-drop-off-by-one", find: "reorderItem(doc, a.id, a.place > k ? a.place - 1 : a.place)", replace: "reorderItem(doc, a.id, Math.min(a.place, count - 1))", caught: "the items are" },
+  { name: "item-drop-off-by-one", find: "reorderItem(doc, a.id, a.place > k ? a.place - 1 : a.place)", replace: "reorderItem(doc, a.id, Math.min(a.place, count - 1))", caught: "the bar gave" },
   {
     name: "drag-ignores-scroll",
     find: "export function dropIndex(edges: readonly ItemEdges[], x: number, scroll = 0): number {\n  const at = x + scroll;",

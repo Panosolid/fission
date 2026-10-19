@@ -154,15 +154,17 @@ test("each item's menu: the marker here, suppress or unsuppress, delete, and why
   const doc = threeItems();
   // No marker: it stands after feature-3, so "Move the marker here" on feature-3 is off.
   const offs = (id: string, editing: string | null = null) => itemMenu(doc, id, editing).map((e) => [e.label, e.off]);
-  assert.deepEqual(offs("feature-3"), [["Move the marker here", "The marker is already here"], ["Suppress", null], ["Delete", null]]);
-  assert.deepEqual(offs("feature-1"), [["Move the marker here", null], ["Suppress", null], ["Delete", null]]);
+  // A solid feature's menu opens with Edit feature (25a2), never off: it only opens the feature's sizes.
+  assert.deepEqual(offs("feature-3"), [["Edit feature", null], ["Move the marker here", "The marker is already here"], ["Suppress", null], ["Delete", null]]);
+  assert.deepEqual(offs("feature-1"), [["Edit feature", null], ["Move the marker here", null], ["Suppress", null], ["Delete", null]]);
   // Editing Sketch 1 (sketch-2): its own suppress and delete are off; the marker on feature-1 would put Sketch 1 after it.
   assert.deepEqual(offs("sketch-2", "sketch-2"), [["Move the marker here", null], ["Suppress", "Sketch 1 is being edited: finish the sketch first"], ["Delete", "Sketch 1 is being edited: finish the sketch first"]]);
-  assert.deepEqual(offs("feature-1", "sketch-2")[0], ["Move the marker here", "The marker can't go before Sketch 1 while it is being edited: finish the sketch first"]);
-  assert.deepEqual(offs("feature-3", "sketch-2")[1], ["Suppress", null], "other items' entries stay on");
+  assert.deepEqual(offs("feature-1", "sketch-2")[0], ["Edit feature", null], "editing a sketch leaves Edit feature on: opening it finishes the sketch");
+  assert.deepEqual(offs("feature-1", "sketch-2")[1], ["Move the marker here", "The marker can't go before Sketch 1 while it is being edited: finish the sketch first"]);
+  assert.deepEqual(offs("feature-3", "sketch-2")[2], ["Suppress", null], "other items' entries stay on");
   // A suppressed item offers Unsuppress instead.
   const sup = { ...doc, timeline: { features: doc.timeline.features.map((f) => (f.id === "feature-1" ? { ...f, suppressed: true } : f)) } };
-  assert.deepEqual(itemMenu(sup, "feature-1").map((e) => e.action), ["marker", "unsuppress", "delete"]);
+  assert.deepEqual(itemMenu(sup, "feature-1").map((e) => e.action), ["edit", "marker", "unsuppress", "delete"]);
   assert.throws(() => itemMenu(doc, "feature-9"), /there is no item feature-9 in the timeline/);
 });
 
@@ -297,19 +299,19 @@ test(`seeded: ${SESSION_SEEDS} sessions × ${SESSION_STEPS} steps through the ba
   assert.deepEqual([...seen].sort(), [...OPS].sort());
 });
 
-test("seeded: the sessions reach every outcome: nothing, each edit, a delete that asks and one that doesn't, and each refusal", () => {
+test("seeded: the sessions reach every outcome: nothing, Edit feature opening, each edit, a delete that asks and one that doesn't, and each refusal", () => {
   // A recording bar: the real one, noting each outcome's kind and words.
   const seen = new Set<string>();
   const spy: typeof bar = {
     ...bar,
     barEdit: (d, a, e) => {
       const r = bar.barEdit(d, a, e);
-      seen.add(r.kind === "edit" ? r.step.split(" ")[0] : r.kind === "delete" ? `delete-${r.ask}` : r.kind === "refused" ? (["already here", " while it is being edited", "is being edited", "can't go before", "can't go after"].find((w) => r.message.includes(w)) ?? r.message) : "none");
+      seen.add(r.kind === "edit" ? r.step.split(" ")[0] : r.kind === "delete" ? `delete-${r.ask}` : r.kind === "open" ? "open" : r.kind === "refused" ? (["already here", " while it is being edited", "is being edited", "can't go before", "can't go after"].find((w) => r.message.includes(w)) ?? r.message) : "none");
       return r;
     },
   };
   for (let seed = 241; seed < 241 + SESSION_SEEDS; seed++) assert.equal(runBarSession(spy, randomSteps(seed, SESSION_STEPS)), null);
-  for (const want of ["none", "Move", "Suppress", "Unsuppress", "delete-true", "delete-false", "already here", " while it is being edited", "is being edited", "can't go before", "can't go after"])
+  for (const want of ["none", "open", "Move", "Suppress", "Unsuppress", "delete-true", "delete-false", "already here", " while it is being edited", "is being edited", "can't go before", "can't go after"])
     assert.ok(seen.has(want), `no session reached "${want}"; reached: ${[...seen].join(", ")}`);
 });
 

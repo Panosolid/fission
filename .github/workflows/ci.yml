@@ -7,6 +7,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Once a day on main (6:45am Perth, after the night's random testing): the
+  # whole suite on main itself, and the build caches every pull request's run
+  # starts from (a cache saved on main is visible to every branch).
+  schedule:
+    - cron: "45 22 * * *"
+  # Each merge queue group, tested in full on the exact commit that lands on
+  # main (.github/scripts/ci_mode.py); main's ruleset counts these checks.
+  merge_group:
   # By hand only: main's ruleset doesn't count a dispatched run's checks
   # for merging, so auto-merge.yml never starts one.
   workflow_dispatch:
@@ -28,8 +36,35 @@ permissions:
   contents: read
 
 jobs:
-  kernel:
+  # Quick or full, and whether Firefox and WebKit run (.github/scripts/ci_mode.py).
+  # A pull request's own run is quick only while main requires the merge
+  # queue, which then runs the whole suite on the commit that merges. If this
+  # job fails, the jobs below run in full (they test `!= 'false'`), never less.
+  mode:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.mode.outputs.full }}
+      ui: ${{ steps.mode.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - id: mode
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+        run: python3 .github/scripts/ci_mode.py
+
+  # Required. Quick: clippy, the tests and the CI scripts' tests (about 2.5
+  # minutes); full adds the same-answer and oracle checks (about 7).
+  kernel:
+    needs: mode
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -46,11 +81,14 @@ jobs:
       # natively and in the browser's WebAssembly (kernel/fuzz/same-answer/);
       # then the same check with a planted one-bit change must fail.
       - uses: actions/setup-node@v4
+        if: needs.mode.outputs.full != 'false'
         with:
           node-version: 22
       - run: fuzz/same-answer/check.sh
+        if: needs.mode.outputs.full != 'false'
         working-directory: kernel
-      - run: |
+      - if: needs.mode.outputs.full != 'false'
+        run: |
           out=$(SAME_ANSWER_BREAK=1 fuzz/same-answer/check.sh) && { echo "the planted break was not caught"; exit 1; }
           echo "$out" | grep "differ in: volume"
         working-directory: kernel
@@ -61,6 +99,7 @@ jobs:
       - run: python3 prototypes/vectors.py
       - run: python3 -m unittest discover -s .github/scripts
       - run: python3 -m unittest discover -s prototypes/oracle -p 'test_*.py'
+        if: needs.mode.outputs.full != 'false'
 
   # Mutation testing of the kernel code this change touches: every mutant
   # cargo mutants makes in the changed lines must be caught by a lib test
@@ -93,7 +132,14 @@ jobs:
         working-directory: kernel
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
         run: |
+          # Each pull request's own run already checked its changed lines; a
+          # merge queue group adds none of its own, so it reports and passes.
+          if [ "$EVENT" = merge_group ]; then
+            echo "Merge queue: each pull request's own run checked the mutants in its changed kernel lines." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "count=0" >>"$GITHUB_OUTPUT"; echo "shards=[]" >>"$GITHUB_OUTPUT"; exit 0
+          fi
           base=${BASE:-$(git merge-base origin/main HEAD)}
           git diff --relative "$base" HEAD -- src >"$RUNNER_TEMP/kernel.diff"
           count=0
@@ -212,7 +258,7 @@ jobs:
   # lcov artifacts) and a per-file table in the job summary. Report only, for
   # now; a floor goes into tests/baseline.json once that exists.
   coverage:
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    if: github.event_name != 'merge_group' && (github.event_name != 'push' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -247,6 +293,7 @@ jobs:
   # margin; app time only warns. The table is in the job summary.
   baseline:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -277,11 +324,20 @@ jobs:
 
   app:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+          # One cache of the WebAssembly build for every job that builds the app.
+          shared-key: wasm
+          # Saved by main's runs only: a branch's cache is visible to that branch
+          # alone, main's to every branch.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
@@ -303,7 +359,10 @@ jobs:
   # (e2e/shard.test.mjs, part of npm test above).
   e2e-shard:
     name: e2e (${{ matrix.shard }}/3)
+    needs: mode
+    if: ${{ !cancelled() && needs.mode.outputs.full != 'false' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -313,6 +372,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+          shared-key: wasm
+          save-if: false
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack
@@ -336,20 +400,78 @@ jobs:
           path: apps/fission/e2e/screenshots/*.*.png
           if-no-files-found: ignore
 
-  # The one check auto-merge waits for (REQUIRED_CHECKS in .github/scripts/automerge.py):
-  # green only when every share passed; a failed, cancelled or skipped share fails it.
+  # A quick pull request run's browser check: the whole-app smoke test in
+  # Chromium (about a minute). The merge queue runs every share above before
+  # merging. automerge.py never merges a head that only had this one.
+  e2e-quick:
+    name: e2e (quick)
+    needs: mode
+    if: needs.mode.outputs.full == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+          shared-key: wasm
+          save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run build
+        working-directory: apps/fission
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/fission
+      - run: node e2e/smoke.mjs
+        working-directory: apps/fission
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-screenshots-chromium-quick
+          path: apps/fission/e2e/screenshots/*.*.png
+          if-no-files-found: ignore
+
+  # The one e2e check auto-merge and main's ruleset wait for (REQUIRED_CHECKS
+  # in .github/scripts/automerge.py). Full: green only when every share
+  # passed. Quick: green when the smoke test passed. A failed, cancelled or
+  # skipped job it needs, or a failed mode job, fails it.
   e2e:
-    needs: e2e-shard
+    needs: [mode, e2e-shard, e2e-quick]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - run: test "${{ needs.e2e-shard.result }}" = success || { echo "an e2e share did not pass (${{ needs.e2e-shard.result }})"; exit 1; }
+      - env:
+          FULL: ${{ needs.mode.outputs.full }}
+          SHARDS: ${{ needs.e2e-shard.result }}
+          QUICK: ${{ needs.e2e-quick.result }}
+        run: |
+          if [ "$FULL" = false ]; then
+            test "$QUICK" = success || { echo "the quick e2e check did not pass ($QUICK)"; exit 1; }
+          else
+            test "$SHARDS" = success || { echo "an e2e share did not pass ($SHARDS)"; exit 1; }
+          fi
 
   # The sketch browser tests (and, reported only, the smoke test) in the other two engines
   # people use: Firefox and WebKit (Safari's engine). Pixel probes run in
   # all three; golden images are Chromium's only (testing catch-up TC4).
+  # Reported, not required: on pull requests that change app files (ci_mode.py,
+  # `ui`), and on main's daily run; not in the merge queue, which only
+  # waits for the required checks.
   browsers:
     name: browsers (${{ matrix.browser }})
+    needs: mode
+    if: ${{ !cancelled() && github.event_name != 'merge_group' && needs.mode.outputs.ui != 'false' }}
     timeout-minutes: 45
     runs-on: ubuntu-latest
     strategy:
@@ -361,6 +483,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+          shared-key: wasm
+          save-if: false
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-pack

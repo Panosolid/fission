@@ -9,7 +9,7 @@
 // 24e edit with its undo step's name, or refused with the message shown
 // (`barEdit`). Behaviour copied from the reference app's timeline.
 
-import { buildingItems, type DesignDocument } from "./document.ts";
+import { buildingItems, isSketchItem, type DesignDocument } from "./document.ts";
 import { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS } from "./timeline-edits.ts";
 import { dragItem } from "./timeline-reorder.ts";
 
@@ -158,7 +158,7 @@ export function playbackButtons(doc: DesignDocument, editing: string | null = nu
 
 /** An entry of an item's menu: what it does, its words, and why it is off (null when it can be chosen). */
 export interface MenuEntry {
-  action: "marker" | "suppress" | "unsuppress" | "delete";
+  action: "edit" | "marker" | "suppress" | "unsuppress" | "delete";
   label: string;
   off: string | null;
 }
@@ -168,7 +168,8 @@ const rollsBackWords = (name: string) => `The marker can't go before ${name} whi
 const editedWords = (name: string) => `${name} is being edited: finish the sketch first`;
 
 /**
- * Item `id`'s menu (a right-click on it, or its ⋯ on a phone): Move the
+ * Item `id`'s menu (a right-click on it, or its ⋯ on a phone): Edit
+ * feature (a solid feature's sizes, step 25a2; a sketch has none), Move the
  * marker here, Suppress or Unsuppress, and Delete. Moving the marker is off
  * when it is already just after the item, or when it would put the sketch
  * being edited (`editing`, its id) after it; suppressing and deleting are
@@ -180,7 +181,9 @@ export function itemMenu(doc: DesignDocument, id: string, editing: string | null
   if (at < 0) throw new Error(`there is no item ${id} in the timeline`);
   const item = doc.timeline.features[at];
   const busy = editing === id ? editedWords(itemName(item)) : null;
+  const edit: MenuEntry[] = isSketchItem(item) ? [] : [{ action: "edit", label: "Edit feature", off: null }];
   return [
+    ...edit,
     { action: "marker", label: "Move the marker here", off: marker === at + 1 ? "The marker is already here" : rollsBack(doc, editing, at + 1) },
     item.suppressed ? { action: "unsuppress", label: "Unsuppress", off: busy } : { action: "suppress", label: "Suppress", off: busy },
     { action: "delete", label: "Delete", off: busy },
@@ -215,12 +218,14 @@ export type BarAction =
  * an edit, with the document to record as one undo step named `step`; a
  * delete, whose `doc` is `deleteItem`'s (the app records `planDelete`'s,
  * with kept shapes settled) and which asks first when other items are
- * built from it; or refused, with the message the bar shows.
+ * built from it; an item's Edit feature panel to open (step 25a2: nothing
+ * changes until its OK); or refused, with the message the bar shows.
  */
 export type BarResult =
   | { kind: "none" }
   | { kind: "edit"; step: string; doc: DesignDocument }
   | { kind: "delete"; step: string; doc: DesignDocument; ask: boolean }
+  | { kind: "open"; id: string }
   | { kind: "refused"; message: string };
 
 /** The marker moved to place `place`: nothing when it is already there, refused when it would roll back the sketch being edited. */
@@ -257,6 +262,7 @@ export function barEdit(doc: DesignDocument, a: BarAction, editing: string | nul
   const entry = itemMenu(doc, a.id, editing).find((e) => e.action === a.action);
   if (!entry) return { kind: "refused", message: `${name} has no ${a.action} in its menu` };
   if (entry.off) return { kind: "refused", message: entry.off };
+  if (a.action === "edit") return { kind: "open", id: a.id };
   if (a.action === "marker") return markerTo(doc, k + 1, editing);
   if (a.action === "delete") return { kind: "delete", step: TIMELINE_STEPS.delete(name), doc: deleteItem(doc, a.id), ask: features.some((f) => f.dependsOn.includes(a.id)) };
   const on = a.action === "suppress";

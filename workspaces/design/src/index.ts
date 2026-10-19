@@ -24,3 +24,4 @@ export { deleteAsk, deleteWords, listWords, planDelete, type DeleteAsk, type Del
 export { BodyCache, rebuildTimeline, settleKept, type CurveIds, type FeatureResult, type KeptWarning, type LostCause, type TimelineBuild } from "./rebuild.ts";
 export { barEdit, timelineBarItems, type BarAction, type BarResult } from "./timeline-bar.ts";
 export { dropState, gapX, type DropState } from "./timeline-reorder.ts";
+export { canEditFeature, CHANGED_WHILE_CHECKING, editableFeature, editFeature, editStep, readTyped, refusedSizes, STAND_IN, type EditableFeature } from "./feature-edit.ts";
