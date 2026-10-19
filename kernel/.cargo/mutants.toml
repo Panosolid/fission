@@ -53,7 +53,6 @@ exclude_re = [
   '^src/mass\.rs:\d+:\d+: replace < with <= in theta_minus_sin$', # at exactly 0.1 both forms are within FP_REL; the mutant's series is the more accurate one
   '^src/ops/extrude\.rs:\d+:\d+: replace > with >= in extrude$', # an arc's sweep is never 0
   '^src/face_mass\.rs:\d+:\d+: replace > with >= in face_mass$', # an arc's axis.dot(n) is ±1 and an edge's tb != ta, never a tie
-  '^src/face_mass\.rs:\d+:38: replace - with \+ in face_mass$', # a cylinder face's vector area has no axial part, so `across` only drops rounding (column-anchored: the other - in face_mass are caught)
   # tessellate.rs (reasons also in its top comment)
   '^src/tessellate\.rs:\d+:\d+: replace < with <= in segments$', # chord = 2r: sag angle 2π vs no limit (∞); both clamp to the TAU/3 cap
   '^src/tessellate\.rs:\d+:\d+: replace > with >= in periodic_domain$', # a loop's winding is 0 or ±2π up to ~1e-15 rounding, never exactly π
