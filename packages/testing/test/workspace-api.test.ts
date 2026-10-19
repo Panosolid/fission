@@ -516,7 +516,11 @@ test("Design offers the registry's verbs for the selection, and its STL button r
   assert.equal(row.hidden, true);
   ctx.viewport.onPick!({ face: 1, shift: false });
   assert.deepEqual(verbs(), [], "a face: no verbs yet");
-  (ctx.browser.querySelector("[data-node=body-1]") as HTMLElement).click();
+  // The kernel fails in this test, so the box built no body: no Body row (bug hunt 2026-10-19, finding 5) and its Timeline row selects nothing.
+  assert.equal(ctx.browser.querySelector("[data-node=body-1]"), null);
+  assert.equal(ctx.browser.querySelector("[data-node=feature-1]")!.tagName, "SPAN");
+  // Selected all the same (as the AI assistant or another workspace can): the registry's verb for a body.
+  ctx.selection.set([{ kind: "body", id: "body:feature-1" as StableId }]);
   assert.deepEqual(verbs(), ["design.download-stl"]);
   assert.equal(row.hidden, false);
   // The kernel fails in this test: the verb's outcome shows in the note, nothing throws.

@@ -175,12 +175,15 @@ export function editFile(text, edit, at) {
  * What a saved Design document should show, worked out from the file alone
  * (written apart from document.ts's `builds`, from the rules in
  * workspaces/design/CLAUDE.md): the timeline bar's items in order with
- * their suppressed and rolled-back marks, and how many bodies the Bodies
- * group lists. A solid builds when it is not suppressed, not after the
- * marker, and, for a sketch extrude, its sketch builds, or the sketch is
- * gone and its last shape was kept.
+ * their suppressed and rolled-back marks, and the Bodies group's rows. A
+ * solid builds when it is not suppressed, not after the marker, and, for a
+ * sketch extrude, its sketch builds, or the sketch is gone and its last
+ * shape was kept. Each one is "Body n", n its place among those; one the
+ * kernel refused (`failed`, the ids the timeline bar marks failed, which
+ * the per-step check holds to `kernelVerdict` where that can tell) has no
+ * row (bug hunt 2026-10-19, finding 5).
  */
-export function expectedView(design) {
+export function expectedView(design, failed = new Set()) {
   const features = design.timeline.features;
   const marker = design.timeline.marker;
   const stop = marker === undefined ? features.length : marker === "start" ? 0 : features.findIndex((f) => f.id === marker) + 1;
@@ -195,11 +198,36 @@ export function expectedView(design) {
     return active(s.i);
   };
   const solids = features.filter((f, i) => f.intent.type !== "sketch" && builds(f, i));
+  const rows = solids.flatMap((f, i) => (failed.has(f.id) ? [] : [{ row: `body-${i + 1}`, place: i + 1, id: f.id }]));
   return {
     items: features.map((f, i) => ({ id: f.id, suppressed: f.suppressed === true, rolledBack: i >= stop })),
-    bodies: solids.length,
-    bodyIds: solids.map((f) => f.id),
+    solids: solids.map((f) => f.id),
+    bodies: rows.length,
+    rows,
   };
+}
+
+/**
+ * Whether the kernel builds a solid feature, from the file alone where the
+ * answer is plain: "fails" or "builds", else null (not judged). The
+ * kernel takes lengths from 1 µm to 1 km (kernel/src/tolerance.rs,
+ * MIN_FEATURE and MAX_SIZE, in mm), so a preset whose sizes are all from
+ * 0.01 mm to 100 m builds, and one with a size that is not a number, at
+ * most 0.0001 mm (0 and negatives among them) or over 10 km fails; ten
+ * times inside and outside the limits, so rounding at a limit never
+ * decides. A sketch extrude fails with a distance that is not a number or
+ * is 0; whether its outline builds is not judged here.
+ */
+export function kernelVerdict(f) {
+  const p = f.intent.parameters;
+  const sizes = { box: ["width", "depth", "height"], cylinder: ["diameter", "height"], sphere: ["diameter"] }[f.intent.type];
+  if (sizes) {
+    const v = sizes.map((k) => p[k]);
+    if (v.some((x) => typeof x !== "number" || !Number.isFinite(x) || x <= 1e-4 || x > 1e7)) return "fails";
+    return v.every((x) => x >= 0.01 && x <= 1e5) ? "builds" : null;
+  }
+  if (f.intent.type === "extrude" && Object.hasOwn(p, "sketch") && (typeof p.distance !== "number" || !Number.isFinite(p.distance) || p.distance === 0)) return "fails";
+  return null;
 }
 
 /** The area inside a sketch's curves when they are one circle or one closed loop of lines (shoelace), else null. */
