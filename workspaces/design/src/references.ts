@@ -60,6 +60,23 @@ export function resolveReference(ref: GeometryReference, names: BodyNames | null
 }
 
 /**
+ * How many faces (or edges) of the body `names` names would carry the name
+ * a reference holds, when two or more would (step 25a4): such a name was
+ * dropped, so the reference finds none of them and must not be moved to
+ * one. An edge on a face whose name is shared counts as shared too, by that
+ * face's count: which of the faces it ran along can't be told. 0 when the
+ * name is not shared (it names one thing, or nothing, or another body).
+ */
+export function sharedBy(ref: GeometryReference, names: BodyNames | null): number {
+  const r = readDesignReference(ref);
+  if (names === null || r === null || r.kind === "body" || r.kind === "outline" || r.featureId !== names.feature) return 0;
+  if (r.kind === "face") return names.shared.faces.get(r.part!) ?? 0;
+  const own = names.shared.edges.get(r.part!) ?? 0;
+  if (own > 1) return own;
+  return Math.max(0, ...r.part!.split(/[+>]/).map((face) => names.shared.faces.get(face) ?? 0));
+}
+
+/**
  * The reference for one of the document's profiles, e.g.
  * "outline:profile-1". Profiles have ids of their own in the document, so
  * this one is stable today (sketch profiles at step 21 will be too).
