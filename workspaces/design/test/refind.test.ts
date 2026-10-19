@@ -8,11 +8,11 @@ import assert from "node:assert/strict";
 import { linkTo, RepresentationRegistry, resolveLink, type BodyView, type GeometryReference, type KernelCalls, type StableId } from "@fission/core";
 import { partDocument } from "../src/document.ts";
 import { nameBody } from "../src/naming.ts";
-import { sharedBy } from "../src/references.ts";
+import { designReference, sharedBy } from "../src/references.ts";
 import { designLookup, registerDesign } from "../src/representations.ts";
-import { findInScene, resolveInScene } from "../src/scene.ts";
-import { droppedNote, highlightOf, NAME_SHARED, NOT_ON_BODY, selectionRows, survivors } from "../src/selection.ts";
-import { REAL, runRefindSession, sceneOf, randomBody } from "./refind-session.ts";
+import { findInScene, resolveInScene, sceneHit } from "../src/scene.ts";
+import { droppedNote, highlightOf, NAME_SHARED, NOT_ON_BODY, referenceLabel, selectionRows, survivors } from "../src/selection.ts";
+import { mulberry32 as mulberry, REAL, runRefindSession, sceneOf, randomBody } from "./refind-session.ts";
 import { BOX_VIEW, CYLINDER_VIEW } from "./views.ts";
 
 const ref = (kind: "face" | "edge", feature: string, part: string) => ({ kind, id: `${kind}:${feature}/${part}` as StableId }) as GeometryReference;
@@ -299,4 +299,78 @@ test("the session's model is not Design's: a body it lays out gives the names it
     });
     assert.deepEqual(names.edges, unique(edgeOk), `body ${k} edges`);
   }
+});
+
+test("nasty references never throw, and never find a face or edge whose name isn't exactly theirs (seeded, 12 × 2000)", () => {
+  // Ids built from the pieces names are made of, and the ones that break parsers: separators, escapes, prototype keys, empty parts.
+  const bits = [
+    "face",
+    "edge",
+    "body",
+    "outline",
+    ":",
+    "/",
+    "+",
+    ">",
+    "%2F",
+    "%",
+    "feature-1",
+    "feature-2",
+    "top",
+    "right",
+    "side",
+    "side:line-1",
+    "line-1",
+    "start",
+    "end",
+    "__proto__",
+    "constructor",
+    "toString",
+    "",
+    " ",
+    "é",
+    "\u0000",
+  ];
+  const designed = randomBody(mulberry(3), "feature-1");
+  const seen = { found: 0, gone: 0, shared: 0 };
+  for (let seed = 1; seed <= 12; seed++) {
+    const r = mulberry(seed);
+    const bodies = [designed, randomBody(r, "feature-2"), { ...randomBody(r, "__proto__") }];
+    const sc = sceneOf(REAL, bodies);
+    const lookup = designLookup(partDocument("box", 40, 30, 20), sc, { call: () => Promise.reject(new Error("none")) } as unknown as KernelCalls);
+    for (let k = 0; k < 2000; k++) {
+      const kind = (["face", "edge", "body", "outline"] as const)[Math.floor(r() * 4)];
+      const junk = () => Array.from({ length: 1 + Math.floor(r() * 4) }, () => bits[Math.floor(r() * bits.length)]).join(r() < 0.5 ? "" : bits[Math.floor(r() * 8)]);
+      // Half shaped like a name (kind:feature/part, a real part half the time), half anything.
+      const b = bodies[Math.floor(r() * bodies.length)];
+      const parts = [...b.faces, ...b.edges].filter((x): x is string => x !== null);
+      const id = r() < 0.5 ? junk() : `${kind}:${r() < 0.8 ? encodeURIComponent(b.feature) : junk()}/${r() < 0.5 && parts.length > 0 ? parts[Math.floor(r() * parts.length)] : junk()}`;
+      const item = { kind, id: id as StableId } as GeometryReference;
+      const found = findInScene(item, sc);
+      seen[found.status]++;
+      if (found.status === "found") {
+        // Found means the name is that face's or edge's, exactly: built back from the index, the same id.
+        const hit = sceneHit(sc, item.kind as "face" | "edge", found.index)!;
+        assert.equal(designReference(item.kind as "face" | "edge", sc.bodies[hit.body].names, hit.index)?.id, item.id, `${JSON.stringify(item)} found at ${found.index}`);
+      }
+      survivors([item], sc);
+      droppedNote([item], [item]);
+      selectionRows([item], sc);
+      highlightOf([item], sc);
+      lookup({ kind: "geometry", origin: { workspace: "design", id: "x", label: "x" }, ref: item });
+    }
+  }
+  assert.ok(seen.found >= 100 && seen.shared >= 20 && seen.gone >= 1000, JSON.stringify(seen));
+});
+
+test("regression (25a4 hunt): a name holding a bad escape is labelled as stored, never throws", () => {
+  // Found by the nasty-references test above: "%" not followed by two hex digits made decodeURIComponent throw
+  // "URI malformed" in referenceLabel (selection rows, the note). Design never builds such a name, but a link's
+  // reference read from a file can hold one. A good escape still reads back: "%3A" is ":".
+  const bad = ref("face", "feature-1", "side:line%2");
+  assert.equal(referenceLabel(bad), "Side of line%2 face");
+  assert.equal(referenceLabel(ref("face", "feature-1", "side:a%3Ab")), "Side of a:b face");
+  assert.equal(referenceLabel(ref("edge", "feature-1", "side:%+start")), "Edge of Side of % and Start");
+  assert.deepEqual(selectionRows([bad], scene)[0], { name: "Side of line%2 face", type: NOT_ON_BODY, id: "face:feature-1/side:line%2" });
+  assert.equal(droppedNote([bad]), "Taken out of the selection: Side of line%2 face. The edit took them off the body, so they could not be followed.");
 });

@@ -56,11 +56,20 @@ export const NAME_SHARED = "matches more than one";
 /** Said for a selected outline that is not one of the document's profiles. */
 export const NOT_IN_DESIGN = "not in the design";
 
+/** An escaped id read back ("a%3Ab" → "a:b"); one whose escapes are bad (only in a reference read from a file) as stored. */
+function unescaped(id: string): string {
+  try {
+    return decodeURIComponent(id);
+  } catch {
+    return id;
+  }
+}
+
 /** A face's name part in words: "top" → "Top", "side:line-4" → "Side of line-4". */
 function faceWords(part: string): string {
   const [role, curve] = part.split(":");
   const word = role[0].toUpperCase() + role.slice(1);
-  return curve === undefined ? word : `${word} of ${decodeURIComponent(curve)}`;
+  return curve === undefined ? word : `${word} of ${unescaped(curve)}`;
 }
 
 /** What a face or edge reference is called in the selection list and the note: "Top face", "Edge of Side of line-4 and Start". */

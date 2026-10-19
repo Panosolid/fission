@@ -12,7 +12,7 @@ export { clickAt, hoverTool, SKETCH_TOOLS, startTool, switchTool, toolBusy, type
 export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
 export { PART_VIEW, syncGraph } from "./graph.ts";
 export { designLookup, designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
-export { bodyReference, designReference, NAME_NOTE, profileReference, readProfileReference, resolveReference, sharedBy } from "./references.ts";
+export { bodyReference, designReference, NAME_NOTE, profileReference, readDesignReference, readProfileReference, resolveReference, sharedBy } from "./references.ts";
 export { featureNames, nameBody, outlineCurves, type BodyNames } from "./naming.ts";
 export { pickChange, type SelectionChange } from "./picking.ts";
 export { droppedNote, highlightOf, NAME_SHARED, panelFocus, referenceLabel, selectionRows, survivors, type PanelFocus } from "./selection.ts";

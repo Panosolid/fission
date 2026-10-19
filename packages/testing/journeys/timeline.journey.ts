@@ -403,7 +403,7 @@ test("a selected face keeps its name through an edit that renumbers the kernel's
   assert.ok(close(after.view.face_areas[f], 300) && after.view.face_centroids[f].every((x, k) => close(x, [40, 15, 5][k])));
   // The bottom is a new line: the upright named after the old one is gone; the right's rim and the top stay.
   const kept = survivors(items, sceneOf(after));
-  assert.deepEqual(kept, { kept: [rightFace, topFace, rim], dropped: [corner] });
+  assert.deepEqual(kept, { kept: [rightFace, topFace, rim], dropped: [corner], shared: [] });
   assert.equal(droppedNote(kept.dropped), `Taken out of the selection: Edge of Side of ${bottom} and Side of ${right}. The edit took them off the body, so they could not be followed.`);
   // The highlight finds each kept item where the kernel put it now.
   const lit = highlightOf(kept.kept, sceneOf(after));

@@ -26,7 +26,13 @@ interface Plant {
 
 export const REFIND_PLANTS: Plant[] = [
   // The guess 25a4 rules out: two faces with one name, the first one taken.
-  { name: "shared-name-guessed", file: "naming", find: "  return names.map((n) => (n !== null && seen.get(n) === 1 ? n : null));", replace: "  return names;", caught: "findInScene differs from the model" },
+  {
+    name: "shared-name-guessed",
+    file: "naming",
+    find: "  return names.map((n) => (n !== null && seen.get(n) === 1 ? n : null));",
+    replace: "  return names;",
+    caught: "findInScene differs from the model",
+  },
   {
     name: "shared-not-recorded",
     file: "naming",
@@ -34,18 +40,37 @@ export const REFIND_PLANTS: Plant[] = [
     replace: "shared: { faces: new Map(), edges: new Map() }",
     caught: "findInScene differs from the model",
   },
-  { name: "edge-ignores-its-faces", file: "references", find: "  return Math.max(0, ...r.part!.split(/[+>]/).map((face) => names.shared.faces.get(face) ?? 0));", replace: "  return 0;", caught: "sharedBy differs from the model" },
-  { name: "shared-as-gone", file: "scene", find: '  return count > 1 ? { status: "shared", count } : { status: "gone" };', replace: '  return { status: "gone" };', caught: "findInScene differs from the model" },
+  {
+    name: "edge-ignores-its-faces",
+    file: "references",
+    find: "  return Math.max(0, ...r.part!.split(/[+>]/).map((face) => names.shared.faces.get(face) ?? 0));",
+    replace: "  return 0;",
+    caught: "sharedBy differs from the model",
+  },
+  {
+    name: "shared-as-gone",
+    file: "scene",
+    find: '  return count > 1 ? { status: "shared", count } : { status: "gone" };',
+    replace: '  return { status: "gone" };',
+    caught: "findInScene differs from the model",
+  },
   {
     name: "shared-moved-to-a-face",
     file: "scene",
     find: '  return count > 1 ? { status: "shared", count } : { status: "gone" };',
-    replace: '  return count > 1 ? { status: "found", index: (ref.kind === "face" ? scene.faceStart[b] : scene.edgeStart[b]) + (ref.kind === "face" ? names.faces : names.edges).indexOf(null) } : { status: "gone" };',
+    replace:
+      '  return count > 1 ? { status: "found", index: (ref.kind === "face" ? scene.faceStart[b] : scene.edgeStart[b]) + (ref.kind === "face" ? names.faces : names.edges).indexOf(null) } : { status: "gone" };',
     caught: "findInScene differs from the model",
   },
   { name: "selection-keeps-shared", file: "selection", find: '      keep = found.status === "found";', replace: '      keep = found.status !== "gone";', caught: "survivors differ from the model" },
   { name: "note-forgets-shared", file: "selection", find: "  const twice = dropped.filter(isShared);", replace: "  const twice: GeometryReference[] = [];", caught: "the note differs from the model" },
-  { name: "row-hides-shared", file: "selection", find: "    if (type === undefined && sharedBy(item, shown?.names ?? null) > 1)", replace: "    if (false)", caught: "the selection row differs from the model" },
+  {
+    name: "row-hides-shared",
+    file: "selection",
+    find: "    if (type === undefined && sharedBy(item, shown?.names ?? null) > 1)",
+    replace: "    if (false)",
+    caught: "the selection row differs from the model",
+  },
   {
     name: "link-shared-as-gone",
     file: "representations",
@@ -53,7 +78,13 @@ export const REFIND_PLANTS: Plant[] = [
     replace: "",
     caught: "the link lookup differs from the model",
   },
-  { name: "link-guesses", file: "representations", find: '    return found.status === "found" ? solidOf(scene.bodies[b].feature) : null;', replace: "    return solidOf(scene.bodies[b].feature);", caught: "the link lookup differs from the model" },
+  {
+    name: "link-guesses",
+    file: "representations",
+    find: '    return found.status === "found" ? solidOf(scene.bodies[b].feature) : null;',
+    replace: "    return solidOf(scene.bodies[b].feature);",
+    caught: "the link lookup differs from the model",
+  },
 ];
 
 /** The subject with `plant` made in its file, loaded from a temporary copy whose relative imports point at src/. */

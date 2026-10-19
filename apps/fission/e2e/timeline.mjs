@@ -179,6 +179,8 @@ async function addSquare(page, tap, layout, live = false) {
 
 let failed = 0;
 async function check(name, fn) {
+  // E2E_ONLY runs just the checks whose names hold it (a quicker re-run of one part; CI runs them all).
+  if (process.env.E2E_ONLY && !name.includes(process.env.E2E_ONLY)) return;
   try {
     await fn();
     console.log(`ok - ${name}`);
@@ -1230,6 +1232,8 @@ try {
       };
       /** The canvas's colour at each point, with the box's top selected and then with nothing selected (Escape), and the top picked again. */
       const litAndNot = async (points) => {
+        // The pointer off the canvas, so no hover tint is mistaken for the selection's.
+        if (!tap) await page.mouse.move(1, 1);
         await stillCamera(page);
         const lit = (await colours(page, points)).slice(1);
         await page.keyboard.press("Escape");
