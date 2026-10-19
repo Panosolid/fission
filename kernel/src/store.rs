@@ -15,10 +15,14 @@
 //!   body. They stay below 2^53, so a JavaScript number holds each one
 //!   exactly; past that the store refuses to build (`TooManyBodies`).
 //! - A failed build stores nothing and uses no handle.
-//! - At most `MAX_LIVE_BODIES` bodies at once, so a leak in the app ends
-//!   in a clear error, not in WebAssembly running out of memory (its
-//!   memory never shrinks). `live()` lets the app's tests check that what
-//!   they build they free.
+//! - At most `MAX_LIVE_BODIES` bodies at once, and at most `MAX_HELD_BYTES`
+//!   of them (`held_bytes`), so a leak in the app ends in a clear error,
+//!   not in WebAssembly running out of memory (its memory never shrinks).
+//!   The count alone didn't do it: a 50 mm sphere holds about 1 MB, so
+//!   leaking them filled the browser build's 4 GiB at 4,366 spheres and
+//!   the kernel died ("unreachable", every later call too), long before
+//!   10,000 (kernel crash hunt, 2026-10-19). `live()` lets the app's tests
+//!   check that what they build they free.
 //! - A body is stored with the display mesh its validation made, so its
 //!   view and STL never tessellate it again, and give exactly what
 //!   `view_of` and `stl_of` give for the same spec.
@@ -36,6 +40,15 @@ pub type Handle = u64;
 /// timeline has 200 items.
 pub const MAX_LIVE_BODIES: usize = 10_000;
 
+/// The most the stored bodies may hold at once, by `held_bytes`: 500 MB
+/// counted, about 0.7 GB of the browser build's memory. That memory stops
+/// at 4 GiB (less on some phones), and the costliest legal call needs
+/// ~0.7 GB more while it runs (the plate of `tests/worst_case.rs`: ~0.2 GB
+/// to build, ~0.5 GB more for its view). A design's bodies come nowhere
+/// near it: a box counts 624 bytes, a 50 mm sphere 0.7 MB, that plate
+/// 62 MB.
+pub const MAX_HELD_BYTES: usize = 500_000_000;
+
 /// The largest handle: 2^53 − 1, the largest whole number a JavaScript
 /// number (a double) holds with every whole number below it.
 pub const MAX_HANDLE: Handle = (1 << 53) - 1;
@@ -45,6 +58,8 @@ pub struct BodyStore {
     /// The handle the next stored body gets.
     next: Handle,
     bodies: BTreeMap<Handle, Meshed>,
+    /// The bodies' `held_bytes`, all together.
+    held: usize,
 }
 
 impl Default for BodyStore {
@@ -55,7 +70,7 @@ impl Default for BodyStore {
 
 impl BodyStore {
     pub fn new() -> BodyStore {
-        BodyStore { next: 1, bodies: BTreeMap::new() }
+        BodyStore { next: 1, bodies: BTreeMap::new(), held: 0 }
     }
 
     /// Builds the body `spec` describes (as `build_meshed`) and keeps it.
@@ -71,6 +86,20 @@ impl BodyStore {
             return Err(ApiError::new(ErrorKind::TooManyBodies, vec![], format!("the kernel has handed out all {MAX_HANDLE} body handles")));
         }
         let made = build_meshed(spec)?;
+        let bytes = held_bytes(&made);
+        if bytes > MAX_HELD_BYTES - self.held {
+            return Err(ApiError::new(
+                ErrorKind::TooManyBodies,
+                vec![],
+                format!(
+                    "the kernel's bodies already take {} of the {} MB it keeps for them, and this one needs {} more; free the ones no longer needed",
+                    mb(self.held),
+                    MAX_HELD_BYTES / 1_000_000,
+                    mb(bytes)
+                ),
+            ));
+        }
+        self.held += bytes;
         let handle = self.next;
         self.next += 1;
         self.bodies.insert(handle, made);
@@ -92,7 +121,9 @@ impl BodyStore {
 
     /// Lets a body go. Its handle is never handed out again.
     pub fn free(&mut self, handle: Handle) -> Result<(), ApiError> {
-        self.bodies.remove(&handle).map(|_| ()).ok_or_else(|| unknown(handle))
+        let made = self.bodies.remove(&handle).ok_or_else(|| unknown(handle))?;
+        self.held -= held_bytes(&made);
+        Ok(())
     }
 
     /// How many bodies the store holds.
@@ -100,9 +131,34 @@ impl BodyStore {
         self.bodies.len()
     }
 
+    /// The `held_bytes` of every body the store holds.
+    pub fn held(&self) -> usize {
+        self.held
+    }
+
     fn get(&self, handle: Handle) -> Result<&Meshed, ApiError> {
         self.bodies.get(&handle).ok_or_else(|| unknown(handle))
     }
+}
+
+/// What a stored body holds, as the store counts it against
+/// `MAX_HELD_BYTES`: its display mesh, by far the biggest part, in the
+/// sizes the browser build gives it (a point 24 bytes; a triangle 12, and
+/// 4 more for its face; each edge's line 4 per point, and 12 for the list
+/// itself). Counted from the numbers of things, not from the allocator, so
+/// every build and machine counts the same. It is a lower bound: the
+/// B-rep is left out (a 50 mm sphere's is 2 faces, 1 edge and 1 vertex
+/// beside 24,964 triangles), and so is the allocator's spare room; the
+/// browser build grew by 0.94 MB for each such sphere counted here as
+/// 0.70 MB.
+pub fn held_bytes((_, mesh): &Meshed) -> usize {
+    let lines: usize = mesh.edge_polylines.iter().map(|l| 12 + 4 * l.len()).sum();
+    24 * mesh.positions.len() + 12 * mesh.triangles.len() + 4 * mesh.triangle_face.len() + lines
+}
+
+/// Bytes as megabytes, one decimal.
+fn mb(bytes: usize) -> String {
+    format!("{:.1} MB", bytes as f64 / 1e6)
 }
 
 fn unknown(handle: Handle) -> ApiError {
@@ -209,11 +265,13 @@ mod tests {
     #[test]
     fn the_store_refuses_past_its_limits_and_recovers_after_a_free() {
         let mut store = BodyStore::new();
-        // Filling with real bodies would take a while; the limit only looks
-        // at the count, so fill the map with one body's copies.
+        // Filling with real bodies would take a while; this limit only
+        // looks at the count, so fill the map with one body's copies (and
+        // count their bytes, 10,000 · 624, far under the memory limit).
         let one = build_meshed(cube(1.0)).unwrap();
         for h in 1..=MAX_LIVE_BODIES as Handle {
             store.bodies.insert(h, one.clone());
+            store.held += held_bytes(&one);
         }
         store.next = MAX_LIVE_BODIES as Handle + 1;
         let e = store.build(cube(1.0)).unwrap_err();
@@ -229,6 +287,111 @@ mod tests {
         assert_eq!(store.build(cube(1.0)).unwrap(), MAX_HANDLE);
         assert_eq!(store.build(cube(1.0)).unwrap_err().kind, ErrorKind::TooManyBodies);
         assert_eq!(store.live(), 1);
+    }
+
+    #[test]
+    fn a_box_holds_what_its_mesh_counts_worked_by_hand() {
+        // A box's mesh: its 8 corners, 2 triangles on each of the 6 flat
+        // faces, and each of the 12 edges a line of its 2 ends. In the
+        // browser build's sizes: 8·24 + 12·12 + 12·4 + 12·(12 + 2·4)
+        // = 192 + 144 + 48 + 240 = 624 bytes.
+        let made = build_meshed(BodySpec::Box { width: 40.0, depth: 30.0, height: 20.0 }).unwrap();
+        assert_eq!((made.1.positions.len(), made.1.triangles.len(), made.1.edge_polylines.len()), (8, 12, 12));
+        assert_eq!(held_bytes(&made), 624);
+        let mut store = BodyStore::new();
+        store.build(BodySpec::Box { width: 40.0, depth: 30.0, height: 20.0 }).unwrap();
+        assert_eq!(store.held(), 624);
+    }
+
+    #[test]
+    fn the_memory_limit_takes_a_body_that_just_fits_and_refuses_one_byte_more() {
+        let boxed = || BodySpec::Box { width: 40.0, depth: 30.0, height: 20.0 };
+        // 624 bytes left, the box's own count: it fits, filling the limit.
+        let mut store = BodyStore::new();
+        store.held = MAX_HELD_BYTES - 624;
+        assert_eq!(store.build(boxed()).unwrap(), 1);
+        assert_eq!(store.held(), MAX_HELD_BYTES);
+        // 623 left: refused, nothing stored, no handle used.
+        let mut store = BodyStore::new();
+        store.held = MAX_HELD_BYTES - 623;
+        let e = store.build(boxed()).unwrap_err();
+        assert_eq!((e.kind, e.inputs.len()), (ErrorKind::TooManyBodies, 0));
+        assert_eq!(
+            e.message,
+            "the kernel's bodies already take 500.0 MB of the 500 MB it keeps for them, and this one needs 0.0 MB more; free the ones no longer needed"
+        );
+        assert_eq!((store.live(), store.held()), (0, MAX_HELD_BYTES - 623));
+        // A body 0.9× the room left fits; one 1.1× it doesn't. The box is
+        // 624 bytes: room 624 / 0.9 = 693 fits it, 624 / 1.1 = 567 doesn't.
+        for (room, fits) in [(693, true), (567, false)] {
+            let mut store = BodyStore::new();
+            store.held = MAX_HELD_BYTES - room;
+            assert_eq!(store.build(boxed()).is_ok(), fits, "{room} bytes left");
+        }
+        // Once a body is freed, its bytes are back.
+        let mut store = BodyStore::new();
+        store.held = MAX_HELD_BYTES - 1248;
+        let a = store.build(boxed()).unwrap();
+        store.build(boxed()).unwrap();
+        assert_eq!(store.build(boxed()).unwrap_err().kind, ErrorKind::TooManyBodies);
+        store.free(a).unwrap();
+        assert_eq!(store.build(boxed()).unwrap(), 3);
+    }
+
+    #[test]
+    fn a_leak_of_spheres_is_refused_long_before_the_browser_runs_out() {
+        // The crash hunt's leak (2026-10-19): 50 mm spheres built and never
+        // freed. The browser build died at 4,366 of them ("unreachable", at
+        // its 4 GiB), well under the 10,000-body count, so the count alone
+        // never refused one. Each counts 12,484 points · 24 + 24,964
+        // triangles · 16 + its one edge's line 12 + 159 · 4 = 299,616 +
+        // 399,424 + 648 = 699,688 bytes, so 5e8 / 699,688 = 714.6: the
+        // 714th fits and the 715th is refused.
+        let sphere = || BodySpec::Sphere { radius: 50.0 };
+        let mut store = BodyStore::new();
+        store.build(sphere()).unwrap();
+        let each = store.held();
+        assert_eq!(each, 699_688);
+        // As if 713 had leaked already (only the count matters to the limit).
+        store.held = 713 * each;
+        store.build(sphere()).unwrap();
+        let e = store.build(sphere()).unwrap_err();
+        assert_eq!(e.kind, ErrorKind::TooManyBodies);
+        assert_eq!(
+            e.message,
+            "the kernel's bodies already take 499.6 MB of the 500 MB it keeps for them, and this one needs 0.7 MB more; free the ones no longer needed"
+        );
+    }
+
+    #[test]
+    fn freeing_gives_back_exactly_what_building_counted() {
+        let specs: [fn() -> BodySpec; 4] = [
+            || cube(3.0),
+            || BodySpec::Cylinder { radius: 5.0, height: 10.0 },
+            || BodySpec::Sphere { radius: 7.0 },
+            || BodySpec::Extrude {
+                profile: ProfileIn {
+                    outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 30.0, 0.0, 30.0, 10.0, 0.0, 10.0], bulges: vec![0.0, 0.5, 0.0, 0.0] },
+                    holes: vec![BoundaryIn::Circle { center: [12.0, 5.0], radius: 2.0 }],
+                },
+                distance: 4.0,
+            },
+        ];
+        let each: Vec<usize> = specs.iter().map(|s| held_bytes(&build_meshed(s()).unwrap())).collect();
+        let mut store = BodyStore::new();
+        let handles: Vec<Handle> = specs.iter().map(|s| store.build(s()).unwrap()).collect();
+        assert_eq!(store.held(), each.iter().sum::<usize>());
+        // Freed out of order, the count steps down by each body's own.
+        let mut left = store.held();
+        for i in [2, 0, 3, 1] {
+            store.free(handles[i]).unwrap();
+            left -= each[i];
+            assert_eq!(store.held(), left);
+        }
+        assert_eq!(store.held(), 0);
+        // A refused free gives nothing back.
+        assert!(store.free(handles[0]).is_err());
+        assert_eq!(store.held(), 0);
     }
 
     /// splitmix64: a seeded stream of numbers, so a failing session replays.
@@ -257,17 +420,21 @@ mod tests {
         LoseBody,
         /// Gives one body's handle the other's body.
         SwapBodies,
+        /// Counts a byte that no body holds.
+        MiscountBytes,
     }
 
     /// A random session of builds, views and frees on one store, checked
     /// step by step against a simple model: which handles are live, each
     /// with the volume worked out from its spec by formula (a box w·d·h, a
-    /// cylinder πr²h, a sphere 4πr³/3, a rectangle extruded w·d·h).
-    /// Returns the first disagreement.
+    /// cylinder πr²h, a sphere 4πr³/3, a rectangle extruded w·d·h), and
+    /// the bytes each counted when it was built, which the store's `held`
+    /// must add up to. Returns the first disagreement.
     fn session(seed: u64, steps: usize, fault: Fault) -> Result<(), String> {
         let mut rng = Rng(seed);
         let mut store = BodyStore::new();
         let mut live: BTreeMap<Handle, f64> = BTreeMap::new();
+        let mut bytes: BTreeMap<Handle, usize> = BTreeMap::new();
         let mut freed: Vec<Handle> = vec![];
         let mut last: Handle = 0;
         for step in 0..steps {
@@ -281,6 +448,7 @@ mod tests {
                             store.bodies.remove(&h);
                         }
                     }
+                    Fault::MiscountBytes => store.held += 1,
                     Fault::SwapBodies => {
                         let keys: Vec<Handle> = live.keys().copied().collect();
                         if keys.len() >= 2 {
@@ -329,6 +497,7 @@ mod tests {
                             }
                             last = h;
                             live.insert(h, volume);
+                            bytes.insert(h, held_bytes(&store.bodies[&h]));
                         }
                         (Err(e), true) => {
                             if e.kind != ErrorKind::InvalidInput || e.inputs != vec![Input::Param { name: want_input }] {
@@ -351,6 +520,7 @@ mod tests {
                     let Some(&h) = live.keys().nth(rng.below(live.len().max(1) as u64) as usize) else { continue };
                     store.free(h).map_err(|e| at(format!("freeing live body {h}: {e:?}")))?;
                     live.remove(&h);
+                    bytes.remove(&h);
                     freed.push(h);
                 }
                 // Use a freed or never-made handle: refused, nothing changes.
@@ -365,6 +535,9 @@ mod tests {
             }
             if store.live() != live.len() {
                 return Err(at(format!("the store holds {} bodies, the model {}", store.live(), live.len())));
+            }
+            if store.held() != bytes.values().sum::<usize>() {
+                return Err(at(format!("the store counts {} bytes, its bodies {}", store.held(), bytes.values().sum::<usize>())));
             }
         }
         Ok(())
@@ -382,7 +555,7 @@ mod tests {
         // Each fault, planted half way through, must make at least one of
         // the seeds' sessions fail; else the session check is too weak to
         // trust its passes.
-        for fault in [Fault::ReuseHandles, Fault::LoseBody, Fault::SwapBodies] {
+        for fault in [Fault::ReuseHandles, Fault::LoseBody, Fault::SwapBodies, Fault::MiscountBytes] {
             let caught = (1..=12).filter(|&seed| session(seed, 120, fault).is_err()).count();
             assert!(caught > 0, "{fault:?} went unnoticed in every session");
         }
