@@ -622,9 +622,11 @@ class QueueHandWorked(unittest.TestCase):
                 self.assertIsNone(decide_queue([qpr(5, **bad)]))
 
     def test_drafted_held_or_removed_leave_the_queue(self):
-        for bad in (dict(draft=True), dict(labels=["hold"]), dict(dequeued=True), dict(base_ref="claude/other")):
+        for bad in (dict(draft=True), dict(labels=["hold"]), dict(base_ref="claude/other")):
             with self.subTest(**bad):
                 self.assertEqual(decide_queue([qpr(5, in_queue=True, **bad)]), ("dequeue", 5))
+        # A head the queue removed, queued again by hand (Merge when ready): left in.
+        self.assertIsNone(decide_queue([qpr(5, in_queue=True, dequeued=True)]))
         # A conflict or a red check alone doesn't: GitHub removes it if it can't merge.
         self.assertIsNone(decide_queue([qpr(5, in_queue=True, mergeable=False)]))
         self.assertIsNone(decide_queue([qpr(5, in_queue=True, green=False)]))
@@ -821,7 +823,7 @@ class QueueSimulation(unittest.TestCase):
         for _ in range(1000):
             n = rng.randrange(1, 8)
             p = prs.setdefault(n, qpr(n, green=False))
-            change = rng.choice(("draft", "hold", "dequeue", "push", "green", "conflict", "stack", "bot", "close"))
+            change = rng.choice(("draft", "hold", "dequeue", "push", "green", "conflict", "stack", "bot", "hand", "close"))
             if change == "draft":
                 p["draft"] = not p["draft"]
             elif change == "hold":
@@ -837,6 +839,8 @@ class QueueSimulation(unittest.TestCase):
             elif change == "stack":
                 p["base_ref"] = "claude/t1" if p["base_ref"] == "main" else "main"
                 p["base_in_main"] = rng.random() < 0.5
+            elif change == "hand":  # someone presses Merge when ready
+                p["in_queue"] = automerge.allowed_in_queue(p) or p["in_queue"]
             elif change == "bot":
                 p["bot_auto_merge"] = True
             else:
@@ -861,7 +865,11 @@ class QueueSimulation(unittest.TestCase):
                 self.assertFalse(q["bot_auto_merge"], q)
                 if not can_queue and not was[m]:
                     self.assertFalse(q["in_queue"], q)
-                if not automerge.wanted_in_queue(q):
+                if was[m] and automerge.allowed_in_queue(q):
+                    self.assertTrue(q["in_queue"], q)  # never taken out while allowed
+                if not automerge.allowed_in_queue(q):
+                    self.assertFalse(q["in_queue"], q)
+                elif not automerge.wanted_in_queue(q) and not was[m]:
                     self.assertFalse(q["in_queue"], q)
                 elif can_queue and q["green"] and q["mergeable"] is not False:
                     self.assertTrue(q["in_queue"], q)
