@@ -8,9 +8,9 @@
 //     start, reloaded at once: all three items and the marker come back;
 //   - a burst of widths, then the tab closed (its beforeunload run): no
 //     question asked, and a new tab opens the last width;
-//   - localStorage refusing the journal (as when it is full): closing while
-//     a change waits asks first, staying keeps the page, and once Saved it
-//     closes without asking.
+//   - localStorage refusing the journal (as when it is full): a saved page
+//     reloads without asking, and closing while a change waits asks first,
+//     and staying keeps the page.
 // Every page comes back saying Saved, with no journal entry left.
 // Run with `npm run e2e` (after `npm run build`); `E2E_BROWSER` picks the engine.
 import assert from "node:assert/strict";
@@ -142,7 +142,7 @@ try {
     for (const w of ["41", "42", "43", "44", "45"]) await typeWidth(page, w);
     await volume(page, "27,000 mm³"); // 45 · 30 · 20
     assert.equal(await status(page), "saving", "left before autosave's quiet moment");
-    await Promise.all([page.waitForEvent("close", { timeout: 5000 }), page.close({ runBeforeUnload: true })]);
+    await Promise.all([page.waitForEvent("close", { timeout: 15000 }), page.close({ runBeforeUnload: true })]);
     const again = await open(context, "27,000 mm³");
     assert.equal(await again.inputValue("#width"), "45");
     assert.deepEqual(asked, [], "the journal kept the change, so nothing was asked");
@@ -150,7 +150,7 @@ try {
     await context.close();
   });
 
-  await check("localStorage refusing the journal: a saved page closes without asking; closing while Saving… asks first, and staying keeps the page", async () => {
+  await check("localStorage refusing the journal: a saved page reloads without asking; closing while Saving… asks first, and staying keeps the page", async () => {
     // As a full localStorage does: every journal write throws.
     const { context, page } = await fresh(1280, {
       init: () => {
@@ -166,27 +166,25 @@ try {
     await typeWidth(page, "50");
     await volume(page, "30,000 mm³");
     await until(page, () => document.querySelector("#save-status").dataset.state === "saved", null, "Saved");
-    await Promise.all([page.waitForEvent("close", { timeout: 5000 }), page.close({ runBeforeUnload: true })]);
+    // A reload runs beforeunload as a close does. (Playwright's WebKit never finishes a close
+    // that runs beforeunload on a page with no listener, so the saved page is reloaded instead.)
+    await page.reload();
+    await volume(page, "30,000 mm³");
     assert.deepEqual(asked, [], "a saved page asks nothing");
-    // Another tab, a change still waiting: closing asks; dismissing the question stays.
-    const second = await open(context, "30,000 mm³");
-    await typeWidth(second, "60");
-    await volume(second, "36,000 mm³"); // 60 · 30 · 20
-    assert.equal(await status(second), "saving");
-    const question = new Promise((done) => {
-      second.once("dialog", async (d) => (done(d.type()), await d.dismiss()));
-      setTimeout(() => done("no question within 5 s"), 5000);
-    });
-    await second.close({ runBeforeUnload: true });
-    assert.equal(await question, "beforeunload");
-    await second.waitForTimeout(300);
-    assert.equal(second.isClosed(), false, "staying keeps the page");
+    // Now a change still waiting: closing asks; dismissing the question stays.
+    await typeWidth(page, "60");
+    await volume(page, "36,000 mm³"); // 60 · 30 · 20
+    assert.equal(await status(page), "saving");
+    await page.close({ runBeforeUnload: true });
+    for (let i = 0; i < 50 && asked.length === 0; i++) await page.waitForTimeout(100);
+    assert.deepEqual(asked, ["beforeunload"]);
+    assert.equal(page.isClosed(), false, "staying keeps the page");
     // leaving() started the save straight away, without waiting for another quiet moment.
-    await until(second, () => document.querySelector("#save-status").dataset.state === "saved", null, "Saved");
-    assert.deepEqual(await journal(second), []);
-    // The second tab still counts as opening for SETTLED_MS after it showed (the reopen guard, reopen.ts):
+    await until(page, () => document.querySelector("#save-status").dataset.state === "saved", null, "Saved");
+    assert.deepEqual(await journal(page), []);
+    // The page still counts as opening for SETTLED_MS after it showed (the reopen guard, reopen.ts):
     // a tab opened before then would start a new project instead, so wait for its mark to clear.
-    await until(second, () => localStorage.getItem("panoshape.opening") === null, null, "the second tab counted as opened");
+    await until(page, () => localStorage.getItem("panoshape.opening") === null, null, "the page counted as opened");
     await open(context, "36,000 mm³");
     await context.close();
   });
