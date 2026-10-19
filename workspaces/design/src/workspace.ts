@@ -23,8 +23,8 @@ import { chooseBarAction, chooseEntry, menuEntries, type MenuHost } from "./time
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
-import { droppedNote, highlightOf, panelBody, selectionRows, survivors } from "./selection.ts";
-import { joinBodies, shownBodies, type Scene } from "./scene.ts";
+import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
+import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, withLocks, type Locks } from "./typed-entry.ts";
@@ -111,12 +111,15 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   return made;
 }
 
+/** Whether two sets of ids hold the same ids. */
+const sameIds = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((id) => b.has(id));
+
 /** Browser groups the user folded, kept across rebuilds and workspace switches. */
 const folded = new Set<string>();
 
-/** Lights the browser rows whose geometry is selected (aria-current), and only those. */
-function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly GeometryReference[]) {
-  const refOf = rowReferences(doc);
+/** Lights the browser rows whose geometry is selected (aria-current), and only those; `failed`, the last rebuild's failed ids, select nothing. */
+function lightRows(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<string>, items: readonly GeometryReference[]) {
+  const refOf = rowReferences(doc, failed);
   for (const row of slot.querySelectorAll<HTMLElement>(".tree-row")) {
     const ref = refOf(row.dataset.node!);
     if (ref && items.some((i) => i.kind === ref.kind && i.id === ref.id)) row.setAttribute("aria-current", "true");
@@ -131,12 +134,14 @@ function lightRows(slot: HTMLElement, doc: DesignDocument, items: readonly Geome
  * until features (step 24) and origin planes (step 21) can be selected.
  * A sketch's row in the Sketches group opens its menu (Delete, 24e4) on a
  * right-click, or from its ⋯ button for touch and the keyboard.
- * Rebuilt on every edit; folding is kept by id.
+ * The items the last rebuild failed (`failed`) have no Body row and their
+ * Timeline rows select nothing. Rebuilt on every edit and after every
+ * rebuild that changes `failed`; folding is kept by id.
  */
-function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void) {
+function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<string>, onSelect: (ref: GeometryReference, shift: boolean) => void, onMenu: (node: string, at: { x: number; y: number }) => void) {
   // Rows with the timeline's item menu (24f3): every Timeline row by its item's id, and each sketch's row in Sketches.
   const items = new Set(doc.timeline.features.map((f) => f.id));
-  const refOf = rowReferences(doc);
+  const refOf = rowReferences(doc, failed);
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
@@ -206,7 +211,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, onSelect: (ref: Geometr
   });
   const title = document.createElement("summary");
   title.textContent = "Browser";
-  fold.append(title, list(browserTree(doc)));
+  fold.append(title, list(browserTree(doc, failed)));
   slot.replaceChildren(fold);
 }
 
@@ -242,9 +247,19 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let missed = false;
   /** Every body drawn, with its faces' and edges' names (steps 24c, 24d3b), which the selection holds. */
   let lastScene: Scene | null = null;
+  /** The part's body in the last scene that showed it: the panel's numbers, marked out of date, while the part fails. */
+  let partShown: ShownBody | null = null;
   /** The note about items the last rebuild dropped, and whether that drop is being applied now. */
   let note = "";
   let settling = false;
+
+  /** The failed ids the browser's rows were last drawn with. */
+  let rowsFailed: ReadonlySet<string> = new Set();
+  /** Draws the browser for `doc` with the last rebuild's failed items (no Body row for them). */
+  function drawBrowser(doc: DesignDocument) {
+    rowsFailed = failedNow;
+    browser(ctx.browser, doc, failedNow, selectRow, openRowMenu);
+  }
 
   /** The browser's Body 1 row: a click selects the body, Shift adds or takes it out. */
   function selectRow(ref: GeometryReference, shift: boolean) {
@@ -258,15 +273,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!doc) return;
     const items = ctx.selection.items;
     viewport.showSelection(highlightOf(items, lastScene));
-    lightRows(ctx.browser, doc, items);
+    lightRows(ctx.browser, doc, failedNow, items);
     panel.showSelection(selectionRows(items, lastScene, doc.profiles));
-    // The Feature and Body sections describe the selected body (else the last one), with the browser's number for it.
-    const focus = panelBody(items, lastScene);
-    const feature = focus && doc.timeline.features.find((f) => f.id === focus.feature);
-    const part = partFeature(doc);
-    panel.showFeature(feature ?? part);
-    if (focus && feature) panel.showBody(focus.view, `Body ${focus.place}`);
-    else if (part === null) panel.showNoBody(); // a design with no body (24f4)
+    // The Feature and Body sections describe the selected feature (else the part), with the browser's number for its body.
+    const focus = panelFocus(items, lastScene, doc);
+    panel.showFeature(focus?.feature ?? null);
+    if (focus?.body) panel.showBody(focus.body.view, `Body ${focus.body.place}`);
+    // The part failed: the numbers it last built, marked out of date (markStale, "Out of date: these numbers are for the last part that built").
+    else if (focus && partShown?.feature === focus.feature.id && focus.feature === partFeature(doc)) panel.showBody(partShown.view, `Body ${partShown.place}`);
+    else panel.showNoBody(); // a body that did not build, or a design with no body (24f4)
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
     const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
@@ -294,25 +309,29 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return next;
   });
   /**
-   * Every body the timeline built, joined for drawing (scene.ts, 24d3b)
-   * and, when a body is built from a kept shape, the warning (the last
-   * such); or throws why the part (the last solid feature) has no body.
-   * A design with no part (24f4) builds an empty scene.
+   * Every body the timeline built, joined for drawing (scene.ts, 24d3b);
+   * when a body is built from a kept shape, the warning (the last such);
+   * and, when the part (the last solid feature) has no body, why: the
+   * bodies that did build are drawn all the same (bug hunt 2026-10-19,
+   * finding 5: a failed part left the scene from before, so the browser's
+   * rows and the panel described bodies that were not there). A design
+   * with no part (24f4) builds an empty scene.
    */
   async function buildPart(doc: DesignDocument) {
     const feature = partFeature(doc);
     const build = await rebuildTimeline(doc, bodies, kernel);
     failedNow = new Set(Object.keys(build.results).filter((id) => build.results[id].status === "failed"));
     const result = feature && build.results[feature.id];
-    if (result?.status === "failed") throw new Error(result.message);
-    if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) throw new Error(`${feature.provenance.self.label} is ${result.status}`);
+    let failure: string | undefined;
+    if (result?.status === "failed") failure = result.message;
+    else if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) failure = `${feature.provenance.self.label} is ${result.status}`;
     const drawn = await shownBodies(doc, build, bodies);
     let kept: { feature: string; label: string; warning: KeptWarning } | undefined;
     for (const f of bodyFeatures(doc)) {
       const r = build.results[f.id];
       if (r.status === "built" && r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
     }
-    return { scene: joinBodies(drawn), kept };
+    return { scene: joinBodies(drawn), kept, failure };
   }
   /** The part built from a kept shape (the owner's rule): shown on its timeline row and, once the sketch is finished, in the panel. */
   let keptNow: { feature: string; label: string; warning: KeptWarning } | undefined;
@@ -503,7 +522,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
 
   /** Shows a document the project now holds and builds its part: the browser, sketches, selection, then the body or the reason it failed. */
   async function show(doc: DesignDocument, kind: PartKind) {
-    browser(ctx.browser, doc, selectRow, openRowMenu);
+    drawBrowser(doc);
     fresh.showFor(doc);
     showFailed(doc);
     showKept();
@@ -515,32 +534,41 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!current) return;
       if (!shown) return void (missed = true);
       missed = false;
-      const { scene } = value;
+      const { scene, failure } = value;
+      // The rows were drawn before the rebuild said what failed: a failed item has no Body row.
+      if (!sameIds(rowsFailed, failedNow)) drawBrowser(doc);
       keptNow = value.kept;
       showKept();
       showFailed(doc);
-      // Built from the current inputs: the feature and the numbers are fresh.
-      for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
-      ctx.graph.markFresh(PART_VIEW);
-      markStale();
+      // Built from the current inputs: the feature and the numbers are fresh. A failed part is not (its numbers stay, marked).
+      if (failure === undefined) {
+        for (const f of doc.timeline.features) ctx.graph.markFresh(f.id);
+        ctx.graph.markFresh(PART_VIEW);
+      }
+      markStale(failure !== undefined);
       viewport.showBody(scene.mesh);
       const empty = scene.bodies.length === 0;
       // A different shape is a new part: frame it (not when Undo or Redo put
       // it back: the camera stays unless the body no longer fits). With no
-      // body (24f4) the camera stays where it is, for the body's return.
-      const newPart = kind !== framedKind && !keepCamera;
-      keepCamera = false;
-      if (!empty && (newPart || needsRefit(framed, viewport.bodyFraming()))) {
-        framed = viewport.fit();
-        viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
-        viewport.element.dataset.fits = String(++fits);
+      // body (24f4) the camera stays where it is, for the body's return; so
+      // it does while the part fails, for its return.
+      if (failure === undefined) {
+        const newPart = kind !== framedKind && !keepCamera;
+        keepCamera = false;
+        if (!empty && (newPart || needsRefit(framed, viewport.bodyFraming()))) {
+          framed = viewport.fit();
+          viewport.element.dataset.framedRadius = String(framed?.radius); // read by the e2e test
+          viewport.element.dataset.fits = String(++fits);
+        }
+        if (!empty) framedKind = kind;
       }
-      if (!empty) framedKind = kind;
-      panel.showError("");
+      panel.showError(failure ?? "");
       // Faces and edges the edit took off the body leave the selection, with a
       // note (17e); the rest follow their names, however the kernel numbers them now.
       const { kept, dropped } = survivors(ctx.selection.items, scene, doc.profiles.map((p) => p.id));
       lastScene = scene;
+      const part = partFeature(doc);
+      partShown = scene.bodies.find((b) => b.feature === part?.id) ?? (failure === undefined ? null : partShown);
       note = droppedNote(dropped);
       if (dropped.length > 0) {
         settling = true;
@@ -549,11 +577,12 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       panel.showSelectionNote(note);
       showSelection();
-      viewport.element.dataset.shape = empty ? "none" : kind; // read by the e2e test: what is on screen
+      if (failure === undefined) viewport.element.dataset.shape = empty ? "none" : kind; // read by the e2e test: what is on screen
     } catch (e) {
       if (!shown) return void (missed = true);
       missed = false;
       keptNow = undefined;
+      if (designDoc() === doc && !sameIds(rowsFailed, failedNow)) drawBrowser(doc);
       showKept();
       if (designDoc() === doc) showFailed(doc);
       panel.showError(e instanceof Error ? e.message : String(e));
@@ -630,7 +659,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ctx.project.workspaces.design = next;
     saved = { doc: next, shape, sizes: inputs.map((i) => i.value) };
     ctx.projectChanged(label);
-    browser(ctx.browser, next, selectRow, openRowMenu);
+    drawBrowser(next);
     fresh.showFor(next);
     showFailed(next);
     showKept(); // the rows are new: mark them again until the rebuild says otherwise

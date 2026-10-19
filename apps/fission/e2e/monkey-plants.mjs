@@ -56,7 +56,12 @@ export const MONKEY_PLANTS = {
   "body-row-off-by-one": {
     what: "a Bodies row selects the next body",
     expect: "selection agrees",
-    edits: [{ file: "workspaces/design/src/browser.ts", find: "(bodies[Number(body[1]) - 1]);", replace: "(bodies[Number(body[1]) % bodies.length]);" }],
+    edits: [{ file: "workspaces/design/src/browser.ts", find: "  const rows = new Map(bodyRows(doc, failed).map((r) => [r.id, r.feature.id]));", replace: "  const rows = new Map(bodyRows(doc, failed).map((r, i, all) => [r.id, all[(i + 1) % all.length].feature.id]));" }],
+  },
+  "failed-body-rows": {
+    what: "a feature the kernel refused still gets a Body row (bug hunt 2026-10-19, finding 5)",
+    expect: "Bodies group matches the file",
+    edits: [{ file: "workspaces/design/src/browser.ts", find: "(failed.has(f.id) ? [] :", replace: "(false ? [] :" }],
   },
   "top-bar-spills-on-phone": {
     what: "at phone width the top bar is wider than the window",

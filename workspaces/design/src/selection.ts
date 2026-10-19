@@ -2,8 +2,8 @@
 // in the selection colour, and the properties panel's rows. Pure, so both
 // are unit-tested; workspace.ts applies them on every selection change.
 
-import type { GeometryReference, ViewportHighlight } from "@fission/core";
-import { profileLabel, type ReadyProfile } from "./document.ts";
+import type { Feature, GeometryReference, ViewportHighlight } from "@fission/core";
+import { partFeature, profileLabel, type DesignDocument, type ReadyProfile } from "./document.ts";
 import { readDesignReference, readProfileReference, resolveReference } from "./references.ts";
 import { bodyOf, resolveInScene, type Scene, type ShownBody } from "./scene.ts";
 
@@ -96,20 +96,31 @@ export function selectionRows(items: readonly GeometryReference[], scene: Scene 
   });
 }
 
+/** What the properties panel's Feature and Body sections describe: a feature, and its body when one is shown. */
+export interface PanelFocus {
+  feature: Feature;
+  /** Its body in the scene; null when none is shown (the feature failed, or no rebuild has drawn it yet). */
+  body: ShownBody | null;
+}
+
 /**
- * The body the properties panel's Feature and Body sections describe: the
- * one the newest selected item is on (the body itself, or a face or edge
- * of it), else the last body shown, the part the Parameters edit; null
- * with no body shown. Items on no shown body (a profile, a body that did
- * not build) are passed over.
+ * What the Feature and Body sections describe: the feature of the newest
+ * selected item that names one in `doc` (a body, or a face or edge of it),
+ * with its body when shown; else the part the Parameters edit
+ * (`partFeature`), with its body when shown; null with no part. A selected
+ * body that did not build is described as having none, never by another
+ * body's numbers (bug hunt 2026-10-19, finding 5). Items that name no
+ * feature of `doc` (a profile, a deleted feature) are passed over.
  */
-export function panelBody(items: readonly GeometryReference[], scene: Scene | null): ShownBody | null {
-  if (scene === null || scene.bodies.length === 0) return null;
+export function panelFocus(items: readonly GeometryReference[], scene: Scene | null, doc: DesignDocument): PanelFocus | null {
+  const focus = (feature: Feature): PanelFocus => ({ feature, body: scene?.bodies.find((b) => b.feature === feature.id) ?? null });
   for (let i = items.length - 1; i >= 0; i--) {
-    const b = bodyOf(scene, items[i]);
-    if (b >= 0) return scene.bodies[b];
+    const r = readDesignReference(items[i]);
+    const feature = r && doc.timeline.features.find((f) => f.id === r.featureId);
+    if (feature) return focus(feature);
   }
-  return scene.bodies[scene.bodies.length - 1];
+  const part = partFeature(doc);
+  return part === null ? null : focus(part);
 }
 
 /**

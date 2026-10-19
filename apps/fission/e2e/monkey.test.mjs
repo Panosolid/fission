@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { documentRules, editFile, expectedView, modelVolume, nextAction, outlineArea, rng, shrink, signature, SKIP_TARGETS, weighted } from "./monkey-core.mjs";
+import { documentRules, editFile, expectedView, kernelVerdict, modelVolume, nextAction, outlineArea, rng, shrink, signature, SKIP_TARGETS, weighted } from "./monkey-core.mjs";
 import { MONKEY_PLANTS } from "./monkey-plants.mjs";
 
 /** A box, Sketch 2 on XY, and an extrude of Sketch 2: the smallest file with both kinds of body. */
@@ -49,9 +49,18 @@ test("what a file should show, worked by hand", () => {
       { id: "sketch-2", suppressed: false, rolledBack: false },
       { id: "feature-3", suppressed: false, rolledBack: false },
     ],
+    solids: ["feature-1", "feature-3"],
     bodies: 2,
-    bodyIds: ["feature-1", "feature-3"],
+    rows: [
+      { row: "body-1", place: 1, id: "feature-1" },
+      { row: "body-2", place: 2, id: "feature-3" },
+    ],
   });
+  // Finding 5: the box failed (the bar marks it): no row for it, and the extrude keeps its number, Body 2.
+  assert.deepEqual(expectedView(design(), new Set(["feature-1"])).rows, [{ row: "body-2", place: 2, id: "feature-3" }]);
+  assert.equal(expectedView(design(), new Set(["feature-1"])).bodies, 1);
+  // A failed mark on an item that builds nothing anyway (a sketch) changes no row.
+  assert.equal(expectedView(design(), new Set(["sketch-2"])).bodies, 2);
   // The marker on Sketch 2: the extrude after it is rolled back, leaving the box alone (1 body).
   const marked = design();
   marked.timeline.marker = "sketch-2";
@@ -72,6 +81,28 @@ test("what a file should show, worked by hand", () => {
   assert.equal(expectedView(gone).bodies, 1);
   gone.kept = { "feature-3": { points: [], curves: [] } };
   assert.equal(expectedView(gone).bodies, 2);
+});
+
+test("whether the kernel builds a solid, from the file where it is plain", () => {
+  const box = (width, depth = 30, height = 20) => ({ intent: { type: "box", parameters: { width, depth, height } } });
+  // The kernel takes 0.001 mm to 1,000,000 mm; judged only ten times inside or outside that.
+  assert.equal(kernelVerdict(box(40)), "builds");
+  assert.equal(kernelVerdict(box(0.01)), "builds");
+  assert.equal(kernelVerdict(box(1e5)), "builds");
+  for (const bad of [-5, 0, -0, 1e-9, 1e-4, 1e308, 999999999 * 100, NaN, Infinity, null, "12"]) assert.equal(kernelVerdict(box(bad)), "fails", `width ${bad}`);
+  // Between the bands: not judged (0.001 and 1e6 are the kernel's own limits; 0.0002 and 5e6 sit either side of them).
+  for (const near of [0.0002, 0.001, 0.005, 1e6, 5e6]) assert.equal(kernelVerdict(box(near)), null, `width ${near}`);
+  // One bad size fails it, whichever.
+  assert.equal(kernelVerdict(box(40, 30, -1)), "fails");
+  assert.equal(kernelVerdict({ intent: { type: "cylinder", parameters: { diameter: 40, height: 0 } } }), "fails");
+  assert.equal(kernelVerdict({ intent: { type: "sphere", parameters: { diameter: 7 } } }), "builds");
+  // A sketch extrude: a distance of 0 or no number fails; any other distance is not judged (its outline decides).
+  const ex = (distance) => ({ intent: { type: "extrude", parameters: { sketch: "sketch-2", distance } } });
+  assert.equal(kernelVerdict(ex(0)), "fails");
+  assert.equal(kernelVerdict(ex(null)), "fails");
+  assert.equal(kernelVerdict(ex(10)), null);
+  // A ready-made outline's extrude is not judged.
+  assert.equal(kernelVerdict({ intent: { type: "extrude", parameters: { profile: "profile-1", distance: 0 } } }), null);
 });
 
 test("volumes from the file, worked by hand", () => {

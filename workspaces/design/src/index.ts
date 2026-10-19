@@ -2,7 +2,7 @@
 export { outline, type ProfileKind, type ShapeKind, type Loop, type Outline } from "./profiles.ts";
 export { designWorkspace } from "./workspace.ts";
 export { DESIGN_COMMANDS, documentFor, SHAPES } from "./commands.ts";
-export { bodyFeatures, browserTree, rowReference, rowReferences, type BrowserNode } from "./browser.ts";
+export { bodyFeatures, bodyRows, browserTree, rowReference, rowReferences, type BrowserNode } from "./browser.ts";
 export { parameterRows, propertiesPanel, SIZE_KEYS, type ParameterRow, type Verb, type PropertiesPanel, type SizeKey } from "./properties.ts";
 export { toolbarGroups, type ToolButton, type ToolGroup } from "./toolbar.ts";
 export { buildSpec, specFor } from "./spec.ts";
@@ -15,7 +15,7 @@ export { designObjects, outlineProducer, registerDesign, type FeatureHandle, typ
 export { bodyReference, designReference, NAME_NOTE, profileReference, readProfileReference, resolveReference } from "./references.ts";
 export { featureNames, nameBody, outlineCurves, type BodyNames } from "./naming.ts";
 export { pickChange, type SelectionChange } from "./picking.ts";
-export { droppedNote, highlightOf, panelBody, referenceLabel, selectionRows, survivors } from "./selection.ts";
+export { droppedNote, highlightOf, panelFocus, referenceLabel, selectionRows, survivors, type PanelFocus } from "./selection.ts";
 export { bodyOf, joinBodies, resolveInScene, sceneHit, sceneReference, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 export { COPY_SVG, designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";
 export { rounding, snapOnSketch, SNAP_PIXELS, type Rounding, type Snap } from "./snap.ts";

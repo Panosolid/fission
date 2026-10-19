@@ -36,15 +36,29 @@ export function bodyFeatures(document: DesignDocument): Feature[] {
   return document.timeline.features.filter((f) => !isSketchItem(f) && building.has(f));
 }
 
+/** No feature failed: the browser before any rebuild has answered. */
+const NONE_FAILED: ReadonlySet<string> = new Set();
+
+/**
+ * The Bodies group's rows: one for each feature in `bodyFeatures` that the
+ * last rebuild did not fail (`failed`, its ids), "body-n" and "Body n", n
+ * its place among `bodyFeatures`, so a body keeps its number when one
+ * before it fails. A feature that failed has no body, so no row (bug hunt
+ * 2026-10-19, finding 5: its row selected a body that did not exist).
+ */
+export function bodyRows(document: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): { id: string; label: string; feature: Feature }[] {
+  return bodyFeatures(document).flatMap((f, i) => (failed.has(f.id) ? [] : [{ id: `body-${i + 1}`, label: `Body ${i + 1}`, feature: f }]));
+}
+
 /**
  * The browser's tree for a document. Each feature is a row numbered in
  * build order with its intent summary; a suppressed one says so. Each
- * body is a row "body-n", Body n, n its place among `bodyFeatures`. Each profile
+ * body the last rebuild built is a row (`bodyRows`; `failed` the ids it failed). Each profile
  * is a row by its own id ("profile-1"), selectable as an outline. Each
  * sketch is a timeline row by its id and a row in Sketches by
  * "sketches/<id>", so no two rows share an id.
  */
-export function browserTree(document: DesignDocument): BrowserNode[] {
+export function browserTree(document: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): BrowserNode[] {
   const features = document.timeline.features;
   // Each sketch's item by its id, looked up once (S2: a search per sketch took the timeline's length squared).
   const items = new Map<string, Feature>();
@@ -58,7 +72,7 @@ export function browserTree(document: DesignDocument): BrowserNode[] {
     },
     { id: "sketches", label: "Sketches", children: document.sketches.map((s) => ({ id: `sketches/${s.id}`, label: sketchItemOf(s.id).provenance.self.label })) },
     { id: "profiles", label: "Profiles", children: document.profiles.map((p) => ({ id: p.id, label: profileLabel(p) })) },
-    { id: "bodies", label: "Bodies", children: bodyFeatures(document).map((_, i) => ({ id: `body-${i + 1}`, label: `Body ${i + 1}` })) },
+    { id: "bodies", label: "Bodies", children: bodyRows(document, failed).map(({ id, label }) => ({ id, label })) },
     { id: "origin", label: "Origin", children: ORIGIN },
   ];
 }
@@ -68,10 +82,11 @@ export function browserTree(document: DesignDocument): BrowserNode[] {
  * each selects: "body-n" its body, a profile's row its outline, and (step
  * 24f6) a Timeline row of a solid feature that builds the body it makes,
  * the same as its Body row. A sketch's row selects nothing yet (sketches
- * are not selectable geometry), nor does an item that builds no body.
+ * are not selectable geometry), nor does an item that builds no body,
+ * one the last rebuild failed (`failed`) among them.
  */
-export function rowReference(node: string, doc: DesignDocument): GeometryReference | null {
-  return rowReferences(doc)(node);
+export function rowReference(node: string, doc: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): GeometryReference | null {
+  return rowReferences(doc, failed)(node);
 }
 
 /**
@@ -79,13 +94,13 @@ export function rowReference(node: string, doc: DesignDocument): GeometryReferen
  * are listed once, so the browser's rows take time in proportion to their
  * number (security audit S2: listing them per row took its square).
  */
-export function rowReferences(doc: DesignDocument): (node: string) => GeometryReference | null {
-  const bodies = bodyFeatures(doc);
-  const solids = new Set(bodies.map((f) => f.id));
+export function rowReferences(doc: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): (node: string) => GeometryReference | null {
+  const rows = new Map(bodyRows(doc, failed).map((r) => [r.id, r.feature.id]));
+  const solids = new Set(rows.values());
   const profiles = new Set(doc.profiles.map((p) => p.id));
   return (node) => {
-    const body = /^body-(\d+)$/.exec(node);
-    if (body) return ((f) => (f ? bodyReference(f.id) : null))(bodies[Number(body[1]) - 1]);
+    const body = rows.get(node);
+    if (body !== undefined) return bodyReference(body);
     if (solids.has(node)) return bodyReference(node);
     return profiles.has(node) ? profileReference(node) : null;
   };
