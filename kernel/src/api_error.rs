@@ -37,7 +37,8 @@ pub enum ErrorKind {
     BadRequest,
     /// A body handle the store doesn't hold: freed, or never made.
     UnknownBody,
-    /// The store already holds `store::MAX_LIVE_BODIES` bodies.
+    /// The store already holds `store::MAX_LIVE_BODIES` bodies, or as much
+    /// as `store::MAX_HELD_BYTES` of them.
     TooManyBodies,
     /// The kernel failed in a way none of the above covers (a body it
     /// can't mesh, a value it can't hand over). A kernel bug.
