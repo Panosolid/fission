@@ -169,9 +169,19 @@ try {
         const plateVolume = await volume(page);
         await page.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
         // A visit that opens it fine: the mark names it while it opens, and is gone a few seconds after.
+        // Every write of the mark is recorded as it happens: the mark lives only from the start of opening
+        // to 3 s after it shows (SETTLED_MS), which a slow reload can outlast before a poll would begin.
+        const id = await page.evaluate(() => document.body.dataset.projectId);
+        await context.addInitScript((key) => {
+          const setItem = Storage.prototype.setItem;
+          Storage.prototype.setItem = function (k, v) {
+            if (this === localStorage && k === key) window.openingMarks = [...(window.openingMarks ?? []), v];
+            return setItem.call(this, k, v);
+          };
+        }, OPENING_KEY);
         await page.reload();
-        const id = await (await page.waitForFunction((key) => localStorage.getItem(key), OPENING_KEY)).jsonValue();
         await page.waitForFunction((v) => document.querySelector("#volume")?.textContent === v, plateVolume);
+        assert.deepEqual(await page.evaluate(() => window.openingMarks), [id], "the mark named the plate while it opened");
         await page.waitForFunction((key) => localStorage.getItem(key) === null, OPENING_KEY, { timeout: 10_000 });
         assert.equal(await status(page), "");
         // The next visit froze while opening it: its mark is still there when this one starts.
