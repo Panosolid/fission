@@ -85,7 +85,9 @@ def ci_state(check_runs):
     """'success', 'failure', 'pending', 'none' or 'quick' (tested only by a
     quick run, so not for merging without the queue) for a head's latest
     check runs."""
-    if any(c["name"] == QUICK and c.get("app", {}).get("slug") == "github-actions" for c in check_runs):
+    # A full run lists the quick check too, as skipped: only one that ran counts.
+    if any(c["name"] == QUICK and c.get("app", {}).get("slug") == "github-actions"
+           and c.get("conclusion") != "skipped" for c in check_runs):
         return "quick"
     check_runs = [c for c in check_runs if counts(c)]
     if not check_runs:

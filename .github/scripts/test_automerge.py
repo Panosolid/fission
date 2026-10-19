@@ -632,6 +632,8 @@ class QueueHandWorked(unittest.TestCase):
         self.assertEqual(ci_state(quick), "quick")
         # Planted: the same checks without the quick one are mergeable.
         self.assertEqual(ci_state(quick[:-1]), "success")
+        # A full run lists the quick check as skipped (#197's first run): still mergeable.
+        self.assertEqual(ci_state(quick[:-1] + [check("e2e (quick)", conclusion="skipped")]), "success")
         # Another app's check of that name isn't ours.
         self.assertEqual(ci_state(quick[:-1] + [check("e2e (quick)", app="bot")]), "success")
         self.assertIsNone(decide([pr(5, ci="quick")]))
