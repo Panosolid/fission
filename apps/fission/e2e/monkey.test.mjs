@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { documentRules, editFile, expectedView, kernelVerdict, modelVolume, nextAction, outlineArea, rng, shrink, signature, SKIP_TARGETS, weighted } from "./monkey-core.mjs";
+import { documentRules, editFile, expectedView, kernelVerdict, modelVolume, nextAction, outlineArea, reusedIds, editLeaks, rng, shrink, signature, SKIP_TARGETS, weighted } from "./monkey-core.mjs";
 import { MONKEY_PLANTS } from "./monkey-plants.mjs";
 
 /** A box, Sketch 2 on XY, and an extrude of Sketch 2: the smallest file with both kinds of body. */
@@ -159,6 +159,71 @@ test("a good file keeps every rule, and each broken rule is named", () => {
   assert.deepEqual(documentRules(lost), ["sketch sketch-2 has 0 timeline items"]);
 });
 
+test("a new id comes from the counter, worked by hand (25a5)", () => {
+  const before = design(); // ids 1 to 5 handed out, the counter at 6
+  // Nothing new: nothing to judge.
+  assert.deepEqual(reusedIds(before, design()), []);
+  // A new sketch taking the counter's 6 (and the counter moving to 7) is right.
+  const drawn = design();
+  drawn.sketches.push({ id: "sketch-6", plane: "XY", points: [], curves: [] });
+  drawn.timeline.features.push({ id: "sketch-6", dependsOn: [], intent: { type: "sketch", parameters: { plane: "XY" } }, suppressed: false });
+  drawn.nextId = 7;
+  assert.deepEqual(reusedIds(before, drawn), []);
+  // The "reuse-ids" plant's way: Sketch 2 and its extrude deleted leave feature-1 the largest id in use, so a sketch made next
+  // takes 1 + 1 = 2 instead of the counter's 6: sketch-2 again, a number handed out before.
+  const deleted = design();
+  deleted.timeline.features = deleted.timeline.features.filter((f) => f.id === "feature-1");
+  deleted.sketches = [];
+  const reused = structuredClone(deleted);
+  reused.sketches.push({ id: "sketch-2", plane: "XY", points: [], curves: [] });
+  reused.timeline.features.push({ id: "sketch-2", dependsOn: [], intent: { type: "sketch", parameters: { plane: "XY" } }, suppressed: false });
+  assert.deepEqual(reusedIds(deleted, reused), ["sketch-2 is new, but the counter was already at 6: its number was handed out before"]);
+  // One below the counter (5) is caught; the counter itself (6) is not: the boundary, exactly.
+  const five = structuredClone(deleted);
+  five.profiles.push({ id: "profile-5" });
+  assert.equal(reusedIds(deleted, five).length, 1);
+  const six = structuredClone(deleted);
+  six.profiles.push({ id: "profile-6" });
+  assert.deepEqual(reusedIds(deleted, six), []);
+  // A curve or point inside a sketch counts as well as a feature.
+  const curve = design();
+  curve.sketches[0].curves.push({ id: "line-2", kind: "line" });
+  assert.equal(reusedIds(before, curve).length, 1);
+});
+
+test("an Edit feature step changes only its item's sizes, worked by hand (25a5)", () => {
+  const before = design();
+  // Extrude feature-3's distance 10 → 25: one item, only its sizes. Nothing leaks.
+  const edited = design();
+  edited.timeline.features[2].intent.parameters.distance = 25;
+  assert.deepEqual(editLeaks(before, edited), []);
+  // The box's width 40 → 50 with its summary: still only its sizes.
+  const box = design();
+  box.timeline.features[0].intent = { type: "box", parameters: { width: 50, depth: 30, height: 20 }, summary: "Box: 50 × 30 × 20 mm" };
+  assert.deepEqual(editLeaks(before, box), []);
+  // The "edit-leaks" plant's way: the box changed too when the extrude was edited.
+  const leak = structuredClone(edited);
+  leak.timeline.features[0].intent.parameters.height = 25;
+  assert.deepEqual(editLeaks(before, leak), ["2 items changed (feature-1, feature-3), not one"]);
+  // The edited item suppressed, the marker moved, the sketch or the counter touched: each named.
+  const off = structuredClone(edited);
+  off.timeline.features[2].suppressed = true;
+  assert.deepEqual(editLeaks(before, off), ["feature-3 changed more than its sizes"]);
+  const marker = structuredClone(edited);
+  marker.timeline.marker = "sketch-2";
+  assert.deepEqual(editLeaks(before, marker), ["the marker moved"]);
+  const sketch = structuredClone(edited);
+  sketch.sketches[0].curves[0].radius = 6;
+  assert.deepEqual(editLeaks(before, sketch), ["its sketches changed"]);
+  const counter = structuredClone(edited);
+  counter.nextId = 7;
+  assert.deepEqual(editLeaks(before, counter), ["its nextId changed"]);
+  // An item gone or moved is not an edit at all.
+  const dropped = design();
+  dropped.timeline.features.pop();
+  assert.deepEqual(editLeaks(before, dropped), ["the items went from feature-1, sketch-2, feature-3 to feature-1, sketch-2"]);
+});
+
 test("the edits made to a file before opening it", () => {
   const text = JSON.stringify({ workspaces: { design: design() } });
   const read = (edit, at) => JSON.parse(editFile(text, edit, at)).workspaces.design.timeline;
@@ -200,6 +265,19 @@ test("the next action is the same for the same seed, and never a skipped button"
   const clicked = run(3).filter((a) => a.do === "click").map((a) => a.sel);
   assert.ok(clicked.length > 20);
   assert.ok(clicked.every((s) => !SKIP_TARGETS.has(s)), "a skipped button was clicked");
+});
+
+test("MONKEY_FOCUS=edit opens item menus and double-clicks about four times as often (25a5)", () => {
+  const page = { prompt: false, targets: [{ sel: "#extrude", hot: true }], inputs: [], rows: [{ sel: "li[data-item=\"sketch-2\"]", sketch: true }], sketching: false, haveSave: true };
+  const share = (focus) => {
+    const random = rng(5);
+    const all = Array.from({ length: 4000 }, () => nextAction(random, { ...page, focus }));
+    return all.filter((a) => a.do === "menu" || a.do === "double").length / all.length;
+  };
+  // Without it menu and double weigh 5 + 4 = 9 of 30 + 12 + 3 + 4 + 2 + 12 + 5 + 6 + 4 + 3 + 6 + 1 + 7 + 4 + 3 + 4 = 106: 8.5%.
+  // With it 20 + 16 = 36 of 133: 27%. 4000 draws spread a share by about sqrt(0.27 × 0.73 / 4000) ≈ 0.7%, so 2% is three of those.
+  assert.ok(Math.abs(share(undefined) - 9 / 106) < 0.02, `without focus ${share(undefined)}`);
+  assert.ok(Math.abs(share("edit") - 36 / 133) < 0.02, `with focus ${share("edit")}`);
 });
 
 test("every monkey plant still applies to its file", () => {

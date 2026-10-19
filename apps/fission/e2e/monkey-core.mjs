@@ -70,10 +70,11 @@ export function nextAction(random, page) {
     drag: 4,
     wheel: 2,
     key: 12,
-    menu: page.rows.length ? 5 : 0,
+    // `focus` "edit" (MONKEY_FOCUS, 25a5): item menus and double-clicks four times as often, for hunts on editing early items.
+    menu: page.rows.length ? (page.focus === "edit" ? 20 : 5) : 0,
     row: page.rows.length ? 6 : 0,
     // 25a3: a double-click on a bar item or a browser row opens it (Edit Sketch, Edit feature).
-    double: page.rows.length ? 4 : 0,
+    double: page.rows.length ? (page.focus === "edit" ? 16 : 4) : 0,
     resize: 3,
     open: page.haveSave ? 6 : 0,
     reload: 1,
@@ -315,6 +316,61 @@ export function documentRules(design) {
     }
   });
   return broken;
+}
+
+/** Every id a Design document hands out (features, profiles, sketches and their points and curves; a sketch's timeline item shares its sketch's id). */
+function idsOf(design) {
+  return new Set([
+    ...design.timeline.features.map((f) => f.id),
+    ...(design.profiles ?? []).map((p) => p.id),
+    ...(design.sketches ?? []).flatMap((s) => [s.id, ...(s.points ?? []).map((p) => p.id), ...(s.curves ?? []).map((c) => c.id)]),
+  ]);
+}
+
+/**
+ * Ids handed out again (25a5): every id that is new in `after` (not in
+ * `before`, the document one action earlier) must come from the counter,
+ * so its number is at least `before.nextId`; one below it was the
+ * counter's before, given to something since deleted, and now names
+ * something else. documentRules can't see this in one file: the id is
+ * unique and below the counter there. Only judged when `after` is a
+ * document not seen before in the run, since Undo and Redo bring back
+ * earlier documents, ids and all, on purpose. Returns the ids at fault.
+ */
+export function reusedIds(before, after) {
+  const had = idsOf(before);
+  const out = [];
+  for (const id of idsOf(after)) {
+    if (had.has(id)) continue;
+    const n = Number(/-(\d+)$/.exec(id)?.[1]);
+    if (Number.isFinite(n) && n < before.nextId) out.push(`${id} is new, but the counter was already at ${before.nextId}: its number was handed out before`);
+  }
+  return out;
+}
+
+/**
+ * What an Edit feature step (25a2) changed besides its own item's sizes
+ * (25a5; the "edit-leaks" plant): `after` must have the same items in the
+ * same order, every one but at most one exactly as in `before`, and that
+ * one keeping its id, inputs and suppressed flag, only its intent's sizes
+ * and summary changed; the sketches, the marker, the kept shapes and the
+ * counter as they were. A preset's own outline (profiles) is its sizes'
+ * too, so it isn't compared. Returns what changed that shouldn't have.
+ */
+export function editLeaks(before, after) {
+  const out = [];
+  const a = before.timeline.features;
+  const b = after.timeline.features;
+  if (a.map((f) => f.id).join() !== b.map((f) => f.id).join()) return [`the items went from ${a.map((f) => f.id).join(", ")} to ${b.map((f) => f.id).join(", ")}`];
+  const changed = a.filter((f, i) => JSON.stringify(f) !== JSON.stringify(b[i])).map((f) => f.id);
+  if (changed.length > 1) out.push(`${changed.length} items changed (${changed.join(", ")}), not one`);
+  for (const id of changed) {
+    const [x, y] = [a.find((f) => f.id === id), b.find((f) => f.id === id)];
+    if (JSON.stringify(x.dependsOn) !== JSON.stringify(y.dependsOn) || x.suppressed !== y.suppressed || x.intent.type !== y.intent.type) out.push(`${id} changed more than its sizes`);
+  }
+  for (const key of ["sketches", "kept", "nextId"]) if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) out.push(`its ${key} changed`);
+  if (before.timeline.marker !== after.timeline.marker) out.push("the marker moved");
+  return out;
 }
 
 /**
