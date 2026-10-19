@@ -285,7 +285,7 @@ export function noticeTexts(pkg) {
  * The notices file: every shipped package with the licence it ships under
  * and that licence's text, each distinct text printed once.
  */
-export function noticesFile({ npm, crates, embedded = EMBEDDED, app = "Panoshape" }) {
+export function noticesFile({ npm, crates, embedded = EMBEDDED, app = "Panosolid" }) {
   const printed = new Map();
   const out = [
     `Third-party licences for ${app}`,

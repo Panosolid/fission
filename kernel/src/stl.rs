@@ -46,9 +46,9 @@ pub fn export(mesh: &Mesh, name: &str) -> StlExport {
     let n = mesh.triangles.len();
     let mut bytes = Vec::with_capacity(HEADER_BYTES + TRIANGLE_BYTES * n);
     // A header starting with "solid" makes some readers take the file for
-    // ASCII STL, so ours always starts with "Fission".
+    // ASCII STL, so ours always starts with "Panosolid".
     let mut header = [b' '; 80];
-    let text = format!("Fission STL: {name}");
+    let text = format!("Panosolid STL: {name}");
     let len = text.len().min(80);
     header[..len].copy_from_slice(&text.as_bytes()[..len]);
     bytes.extend_from_slice(&header);
@@ -149,7 +149,7 @@ mod tests {
         let b = make_box(2.0, 3.0, 4.0).unwrap();
         let out = export(&tessellate(&b, &TessOptions::DISPLAY).unwrap(), "box");
         assert_eq!(out.bytes.len(), 684);
-        assert_eq!(&out.bytes[..17], b"Fission STL: box ");
+        assert_eq!(&out.bytes[..19], b"Panosolid STL: box ");
         assert_eq!(&out.bytes[80..84], &[12, 0, 0, 0]); // u32 12, little-endian
         assert_eq!(out.rounding, 0.0);
         assert_eq!(out.warning, None);
