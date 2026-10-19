@@ -10,6 +10,8 @@
 // scene and the same project and selection. Change notes (X5) show over
 // each pane's viewport, for the workspace in that pane.
 /// <reference types="vite/client" />
+// First, before any module that starts work: a framed page stops here (audit S10).
+import "./frame-guard.ts";
 import "@fission/ui/theme.css";
 // Every feature's own styles (src/styles/<feature>.css in packages/ui and the
 // workspaces), loaded without a list, so two features never edit one file.
@@ -18,7 +20,7 @@ import { ActionRegistry, CLIPBOARD_CHORDS, chordLabel, chordOf, SHELL_SHORTCUTS,
 import { changeNote, shortcutList, defaultSplit, showPlaceholder, SPLIT_MIN_WIDTH_PX, splitChoices, WarmPool, workspaceSwitcher } from "@fission/ui";
 import { paneViewports, Viewer, type ViewportView } from "@fission/viewport";
 import { communityPage } from "@fission/community";
-import { localStore, reopenGuard, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
+import { localStore, recoverUnsaved, reopenGuard, startAutosave, type Autosave, type AutosaveStatus } from "@fission/storage";
 import { createAssistant } from "./assistant.ts";
 import { designWorkspace } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
@@ -480,24 +482,42 @@ function closeSplit() {
 // Each project has its own stored id: an opened file becomes a new stored
 // project rather than overwriting the one that was open.
 const store = localStore(workspaces);
+/** The browser's localStorage, or null when storage is turned off (then the guard and the journal keep nothing). */
+const local = (() => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+})();
 // Marks the project being opened, so one that froze or crashed the tab isn't
 // reopened on the next visit (audit S2, reopen.ts in @fission/storage).
-const guard = reopenGuard(
-  (() => {
-    try {
-      return window.localStorage;
-    } catch {
-      return null; // storage turned off: projects reopen as before
-    }
-  })(),
-);
+const guard = reopenGuard(local);
 window.addEventListener("pagehide", () => guard.finished());
 let autosave: Autosave | null = null;
+// Leaving (timeline hunt, finding 1): when the page is hidden, reloaded or
+// closed, the changes not stored yet go to the unsaved-changes journal at
+// once (unsaved.ts), and are put back on the next visit; the store's save
+// starts too. Only when the journal can't be written (storage off or full)
+// does the page ask before going, and only while a change waits, so a saved
+// page never asks and stays fit for the back/forward cache.
+const leaving = () => autosave?.leaving() ?? true;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") leaving();
+});
+window.addEventListener("pagehide", leaving);
+function askBeforeLeaving(e: BeforeUnloadEvent) {
+  if (leaving()) return;
+  e.preventDefault();
+  e.returnValue = ""; // older browsers ask only when this is set
+}
 const saveStatus = (s: AutosaveStatus) => {
   const el = $("save-status");
   el.dataset.state = s.state; // read by the e2e test
   el.textContent = s.state === "saving" ? "Saving…" : s.state === "saved" ? "Saved" : `Not saved: ${s.message}`;
   el.title = el.textContent; // the words behind the mark at phone width
+  if (s.state === "saved") window.removeEventListener("beforeunload", askBeforeLeaving);
+  else window.addEventListener("beforeunload", askBeforeLeaving);
 };
 const newId = () => globalThis.crypto?.randomUUID?.() ?? `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 /** False once the browser has shown it can't keep projects: then nothing autosaves, and Save/Open use files. */
@@ -506,7 +526,7 @@ function keep(id: string) {
   keepOnChange = null;
   autosave?.stop();
   if (!canKeep) return;
-  autosave = startAutosave(store, id, () => ctx.project, saveStatus);
+  autosave = startAutosave(store, id, () => ctx.project, saveStatus, { journal: local });
   document.body.dataset.projectId = id; // read by the e2e test
 }
 /** A new project in place of the last one, kept once it is changed (`keepOnChange`). */
@@ -807,6 +827,9 @@ window.addEventListener("hashchange", () => show(fromHash()));
 // app (Save and Open use files). Never a blank app.
 async function start() {
   const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  // Changes the last visit left with before they were stored go back first, so the project reopens with them.
+  const unsaved = await recoverUnsaved(store, local, workspaces);
+  if (unsaved.length > 0) fileStatus(`${unsaved.join(". ")}.`.replace(/^./, (c) => c.toUpperCase()));
   let newest: string | undefined;
   try {
     newest = (await store.list())[0]?.id;
