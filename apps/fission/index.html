@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Content Security Policy (audit S10): scripts only from this site (and WebAssembly), no plugins, no <base> or form tricks. connect-src stays open: the AI assistant talks to an address the user types. frame-ancestors can't be set here; src/frame-guard.ts refuses frames instead. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' http: https: ws: wss: blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Panoshape</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
