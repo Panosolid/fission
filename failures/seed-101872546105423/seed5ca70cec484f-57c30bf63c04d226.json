@@ -1,0 +1,47 @@
+{
+  "seed": 101872546105423,
+  "failure": "step 1 (Add { shape: Extrude { outer: Path { pts: [[0.0, -99999999.0], [0.001, -99999999.0]], bulges: [-110000000.00000001, 13999.99992857143] }, holes: [], dist: 0.5, expect: None, sketch: Some(0) }, axis: [1.0, 0.0, 0.0], angle: 5.577015346397465, at: [0.0, 0.0, 0.0] }): edge 4: neither face's centroid is clearly on its left, so which walks it forwards is not checked",
+  "ops": [
+    {
+      "Add": {
+        "shape": {
+          "Extrude": {
+            "outer": {
+              "Path": {
+                "pts": [
+                  [
+                    "0.0",
+                    "-99999999.0"
+                  ],
+                  [
+                    "0.001",
+                    "-99999999.0"
+                  ]
+                ],
+                "bulges": [
+                  "-110000000.00000001",
+                  "13999.99992857143"
+                ]
+              }
+            },
+            "holes": [],
+            "dist": "0.5",
+            "expect": null,
+            "sketch": 0
+          }
+        },
+        "axis": [
+          "1.0",
+          "0.0",
+          "0.0"
+        ],
+        "angle": "5.577015346397465",
+        "at": [
+          "0.0",
+          "0.0",
+          "0.0"
+        ]
+      }
+    }
+  ]
+}
