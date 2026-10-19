@@ -24,12 +24,19 @@ per head commit naming the conflicted files, in case its thread missed
 GitHub's notice (`needs_reminder`).
 
 Once main's ruleset requires GitHub's merge queue, none of that waiting is
-needed and auto-merge only steers the queue (`decide_queue`): it turns on
-"merge when ready" for every qualifying pull request, and GitHub queues it
-when its own (quick) checks pass, tests it with main and the pull requests
-ahead of it in full (ci.yml's merge_group run, the checks the ruleset
-counts) and merges it, with no thread having to merge main in. A draft, a
-`hold` label or a stacked base turns it off again. A pull request the queue
+needed and auto-merge only steers the queue (`decide_queue`): it adds every
+qualifying pull request whose own (quick) checks passed to the queue, and
+GitHub tests it with main and the pull requests ahead of it in full
+(ci.yml's merge_group run, the checks the ruleset counts) and merges it,
+with no thread having to merge main in. A draft, a `hold` label or a
+stacked base takes it out again. It queues with the MERGE_QUEUE_TOKEN
+secret (the owner's token), never this workflow's own token: GitHub starts
+no workflow for an event that token causes, so a queue entry it made would
+never get its merge_group run, and "merge when ready" turned on with it
+never queued at all (found 2026-10-19, #196 and #198 sat green and
+unqueued). Without the secret, ready pull requests wait for someone to
+press "Merge when ready"; any "merge when ready" this workflow's token
+turned on earlier is turned off. A pull request the queue
 removes (a failed check, a conflict, or by hand) gets one comment per head
 naming why (`dequeued_text`) and isn't queued again until its thread pushes
 a new head. A head whose own run was quick (ci.yml's `e2e (quick)` check)
@@ -39,8 +46,8 @@ quick-tested head into main.
 `decide` and `decide_queue` hold every rule and are pure (tested in
 test_automerge.py); `run` does the GitHub calls. Usage:
 automerge.py [--dry-run | --dequeued]; needs GITHUB_TOKEN and
-GITHUB_REPOSITORY (and DEQUEUED_PR, DEQUEUED_HEAD, DEQUEUED_REASON with
---dequeued).
+GITHUB_REPOSITORY, and MERGE_QUEUE_TOKEN to queue (and DEQUEUED_PR,
+DEQUEUED_HEAD, DEQUEUED_REASON with --dequeued).
 """
 
 import calendar
@@ -81,12 +88,13 @@ def counts(check):
         " (" in check["name"] and check["name"].split(" (")[0] in SHARDS)
 
 
-def ci_state(check_runs):
+def ci_state(check_runs, quick_ok=False):
     """'success', 'failure', 'pending', 'none' or 'quick' (tested only by a
     quick run, so not for merging without the queue) for a head's latest
-    check runs."""
+    check runs. quick_ok: a quick run's success is 'success' (the queue's
+    own run tests it in full)."""
     # A full run lists the quick check too, as skipped: only one that ran counts.
-    if any(c["name"] == QUICK and c.get("app", {}).get("slug") == "github-actions"
+    if not quick_ok and any(c["name"] == QUICK and c.get("app", {}).get("slug") == "github-actions"
            and c.get("conclusion") != "skipped" for c in check_runs):
         return "quick"
     check_runs = [c for c in check_runs if counts(c)]
@@ -154,24 +162,29 @@ def wanted_in_queue(pr):
     return pr["base_ref"] == MAIN and not pr["draft"] and HOLD not in pr["labels"] and not pr["dequeued"]
 
 
-def decide_queue(prs, skip=()):
+def decide_queue(prs, skip=(), can_queue=True):
     """The single next action while main requires the merge queue, or None.
 
-    Each pr is a dict as for `decide`, plus queued (merge when ready is on,
-    or it is in the queue) and dequeued (the queue removed this head).
-    Actions: ("retarget", n), ("enable", n) (merge when ready: GitHub queues
-    it once its checks pass), ("disable", n) (leave the queue: drafted, held,
-    stacked, or removed by the queue).
+    Each pr is a dict as for `decide`, plus green (every required check of
+    its own run passed, quick or full), in_queue, bot_auto_merge ("merge
+    when ready" turned on by this workflow's token) and dequeued (the queue
+    removed this head). can_queue: the MERGE_QUEUE_TOKEN secret is set.
+    Actions: ("retarget", n), ("disable", n) (turn off the bot's merge when
+    ready, which GitHub never acts on), ("enqueue", n), ("dequeue", n)
+    (drafted, held, stacked, or removed by the queue).
     """
     mine = sorted((p for p in prs if is_claude_pr(p) and p["number"] not in skip), key=lambda p: p["number"])
     for p in mine:
         if p["base_ref"] != MAIN and p["base_ref"].startswith(PREFIX) and p["base_in_main"]:
             return ("retarget", p["number"])
     for p in mine:
-        if wanted_in_queue(p) and not p["queued"] and p["mergeable"] is not False:
-            return ("enable", p["number"])
-        if not wanted_in_queue(p) and p["queued"]:
+        if p["bot_auto_merge"]:
             return ("disable", p["number"])
+        if (can_queue and wanted_in_queue(p) and not p["in_queue"] and p["green"]
+                and p["mergeable"] is not False):
+            return ("enqueue", p["number"])
+        if not wanted_in_queue(p) and p["in_queue"]:
+            return ("dequeue", p["number"])
     return None
 
 
@@ -244,18 +257,21 @@ def iso_seconds(stamp):
 
 
 class GitHub:
-    def __init__(self, repo, token):
+    def __init__(self, repo, token, queue_token=None):
         self.repo = repo
         self.base = f"https://api.github.com/repos/{repo}"
         self.token = token
+        self.queue_token = queue_token or None
 
-    def graphql(self, query, variables):
-        """Merge when ready and the queue have no REST calls."""
+    def graphql(self, query, variables, as_owner=False):
+        """The queue has no REST calls. as_owner: with MERGE_QUEUE_TOKEN, so
+        GitHub runs CI for what it does (see the module docstring)."""
+        token = self.queue_token if as_owner else self.token
         req = urllib.request.Request(
             "https://api.github.com/graphql",
             method="POST",
             data=json.dumps({"query": query, "variables": variables}).encode(),
-            headers={"Authorization": f"Bearer {self.token}"} if self.token else {},
+            headers={"Authorization": f"Bearer {token}"} if token else {},
         )
         with urllib.request.urlopen(req) as res:
             out = json.loads(res.read())
@@ -297,19 +313,24 @@ def queue_required(gh):
 
 QUEUE_STATE = """query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) { id isInMergeQueue autoMergeRequest { enabledAt } }
+    pullRequest(number: $number) { id isInMergeQueue autoMergeRequest { enabledBy { login } } }
   }
 }"""
 
 
+BOT = "github-actions"
+
+
 def gather_queue(gh, prs):
-    """Adds node_id, queued and dequeued to each pull request from gather."""
+    """Adds node_id, in_queue, bot_auto_merge and dequeued to each pull
+    request from gather."""
     owner, name = gh.repo.split("/")
     for p in prs:
         state = gh.graphql(QUEUE_STATE, {"owner": owner, "name": name, "number": p["number"]})["repository"]["pullRequest"]
         p["node_id"] = state["id"]
         p["in_queue"] = state["isInMergeQueue"]
-        p["queued"] = state["isInMergeQueue"] or state["autoMergeRequest"] is not None
+        request = state["autoMergeRequest"]
+        p["bot_auto_merge"] = request is not None and ((request.get("enabledBy") or {}).get("login") or "").startswith(BOT)
         comments = [c["body"] or "" for c in gh.call("GET", f"/issues/{p['number']}/comments?per_page=100")]
         p["dequeued"] = any(DEQUEUED.format(p["head_sha"]) in c for c in comments)
     return prs
@@ -336,6 +357,7 @@ def gather(gh):
         pr["up_to_date"] = contains(gh, pr["head_sha"], MAIN)
         runs = gh.call("GET", f"/commits/{pr['head_sha']}/check-runs?filter=latest&per_page=100")
         pr["ci"] = ci_state(runs["check_runs"])
+        pr["green"] = ci_state(runs["check_runs"], quick_ok=True) == "success"
         pr["base_in_main"] = False
         if pr["base_ref"] != MAIN and pr["base_ref"].startswith(PREFIX):
             try:
@@ -386,7 +408,7 @@ def act(gh, action, prs):
         gh.call("POST", f"/issues/{number}/comments", {"body": behind_text(pr, pr["main_sha"])})
 
 
-ENABLE = "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }"
+ENQUEUE = "mutation($id: ID!) { enqueuePullRequest(input: {pullRequestId: $id}) { clientMutationId } }"
 DISABLE = "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }"
 DEQUEUE = "mutation($id: ID!) { dequeuePullRequest(input: {id: $id}) { clientMutationId } }"
 
@@ -396,16 +418,18 @@ def act_queue(gh, action, prs):
     pr = next(p for p in prs if p["number"] == number)
     if kind == "retarget":
         gh.call("PATCH", f"/pulls/{number}", {"base": MAIN})
-    elif kind == "enable":
-        gh.graphql(ENABLE, {"id": pr["node_id"]})
     elif kind == "disable":
-        gh.graphql(DEQUEUE if pr["in_queue"] else DISABLE, {"id": pr["node_id"]})
+        gh.graphql(DISABLE, {"id": pr["node_id"]})
+    elif kind == "enqueue":
+        gh.graphql(ENQUEUE, {"id": pr["node_id"]}, as_owner=True)
+    elif kind == "dequeue":
+        gh.graphql(DEQUEUE, {"id": pr["node_id"]}, as_owner=bool(gh.queue_token))
 
 
 def ensure_pages(gh, dry_run, log):
-    """Deploy main if its head has no Pages run yet. A merge made by the
-    queue may start no workflows when this workflow's token turned on merge
-    when ready, so this looks rather than assumes."""
+    """Deploy main if its head has no Pages run yet: a safety net in case a
+    queue merge starts no push workflows, so this looks rather than
+    assumes."""
     main_sha = gh.call("GET", f"/commits/{MAIN}")["sha"]
     runs = gh.call("GET", "/actions/workflows/pages.yml/runs?branch=main&per_page=5")["workflow_runs"]
     if any(r["head_sha"] == main_sha for r in runs):
@@ -418,14 +442,18 @@ def ensure_pages(gh, dry_run, log):
 
 def run_queue(gh, dry_run=False, log=print, now=None, files_for=conflicted_files):
     skip = set()
+    can_queue = bool(getattr(gh, "queue_token", None))
+    if not can_queue:
+        log("no MERGE_QUEUE_TOKEN secret: ready pull requests wait for someone to press Merge when ready")
     for step in range(MAX_ACTIONS):
         prs = gather_queue(gh, gather(gh))
         if step == 0:
             remind_conflicts(gh, prs, time.time() if now is None else now, files_for, dry_run, log)
         for p in prs:
             log(f"#{p['number']} {p['head_ref']} -> {p['base_ref']}: draft={p['draft']} "
-                f"mergeable={p['mergeable']} queued={p['queued']} dequeued={p['dequeued']} ci={p['ci']}")
-        action = decide_queue(prs, skip)
+                f"mergeable={p['mergeable']} green={p['green']} in_queue={p['in_queue']} "
+                f"bot_auto_merge={p['bot_auto_merge']} dequeued={p['dequeued']}")
+        action = decide_queue(prs, skip, can_queue)
         log(f"next: {action}")
         if action is None or dry_run:
             break
@@ -485,7 +513,7 @@ def run(gh, dry_run=False, log=print, now=None, files_for=conflicted_files):
 
 
 if __name__ == "__main__":
-    gh = GitHub(os.environ["GITHUB_REPOSITORY"], os.environ.get("GITHUB_TOKEN"))
+    gh = GitHub(os.environ["GITHUB_REPOSITORY"], os.environ.get("GITHUB_TOKEN"), os.environ.get("MERGE_QUEUE_TOKEN"))
     if "--dequeued" in sys.argv:
         # A pull request the queue just removed (auto-merge.yml's dequeued job).
         note_dequeued(gh, int(os.environ["DEQUEUED_PR"]), os.environ["DEQUEUED_HEAD"],

@@ -584,45 +584,58 @@ class ConflictSimulation(unittest.TestCase):
 
 
 def qpr(number, **kw):
-    """A pull request as decide_queue sees it."""
-    return pr(number, **dict(dict(queued=False, dequeued=False), **kw))
+    """A pull request as decide_queue sees it: green, not queued."""
+    return pr(number, **dict(dict(green=True, in_queue=False, bot_auto_merge=False, dequeued=False), **kw))
 
 
 class QueueHandWorked(unittest.TestCase):
     """decide_queue, each case worked out from automerge.py's docstring."""
 
-    def test_ready_ones_are_queued(self):
-        # Ready, no hold, targets main, never removed by the queue: merge when ready.
-        self.assertEqual(decide_queue([qpr(5)]), ("enable", 5))
-        # Already queued: nothing to do.
-        self.assertIsNone(decide_queue([qpr(5, queued=True)]))
-        # Its own checks don't matter here: GitHub waits for them before queueing.
-        for ci in ("pending", "failure", "none", "quick"):
-            self.assertEqual(decide_queue([qpr(5, ci=ci)]), ("enable", 5), ci)
-        # Behind main is fine: the queue tests it with main.
-        self.assertEqual(decide_queue([qpr(5, up_to_date=False)]), ("enable", 5))
+    def test_green_ones_are_queued(self):
+        # Ready, no hold, targets main, own checks green, never removed: queue it.
+        self.assertEqual(decide_queue([qpr(5)]), ("enqueue", 5))
+        # A quick run's green counts (the queue runs the full suite); behind main is fine too.
+        self.assertEqual(decide_queue([qpr(5, ci="quick", up_to_date=False)]), ("enqueue", 5))
+        # Already in the queue: nothing to do.
+        self.assertIsNone(decide_queue([qpr(5, in_queue=True)]))
+        # Its own checks not green yet: wait for them (CI finishing wakes auto-merge).
+        self.assertIsNone(decide_queue([qpr(5, green=False)]))
+
+    def test_never_queues_without_the_owners_token(self):
+        # The 2026-10-19 stall: a queue entry made with the workflow's own token never gets CI.
+        self.assertIsNone(decide_queue([qpr(5)], can_queue=False))
+        # Taking one out still works without it.
+        self.assertEqual(decide_queue([qpr(5, in_queue=True, draft=True)], can_queue=False), ("dequeue", 5))
+
+    def test_the_bots_merge_when_ready_is_turned_off(self):
+        # #196 and #198: merge when ready turned on by the workflow's token, never queued by GitHub.
+        self.assertEqual(decide_queue([qpr(5, bot_auto_merge=True)]), ("disable", 5))
+        self.assertEqual(decide_queue([qpr(5, bot_auto_merge=True)], can_queue=False), ("disable", 5))
+        # Then queued properly.
+        self.assertEqual(decide_queue([qpr(5)]), ("enqueue", 5))
 
     def test_refusals(self):
         for bad in (dict(draft=True), dict(labels=["hold"]), dict(dequeued=True),
                     dict(mergeable=False), dict(same_repo=False), dict(head_ref="feature/x"),
-                    dict(base_ref="claude/other")):
+                    dict(base_ref="claude/other"), dict(green=False)):
             with self.subTest(**bad):
                 self.assertIsNone(decide_queue([qpr(5, **bad)]))
 
     def test_drafted_held_or_removed_leave_the_queue(self):
         for bad in (dict(draft=True), dict(labels=["hold"]), dict(dequeued=True), dict(base_ref="claude/other")):
             with self.subTest(**bad):
-                self.assertEqual(decide_queue([qpr(5, queued=True, **bad)]), ("disable", 5))
-        # A conflict alone doesn't: GitHub won't queue it, and a push fixes it.
-        self.assertIsNone(decide_queue([qpr(5, queued=True, mergeable=False)]))
+                self.assertEqual(decide_queue([qpr(5, in_queue=True, **bad)]), ("dequeue", 5))
+        # A conflict or a red check alone doesn't: GitHub removes it if it can't merge.
+        self.assertIsNone(decide_queue([qpr(5, in_queue=True, mergeable=False)]))
+        self.assertIsNone(decide_queue([qpr(5, in_queue=True, green=False)]))
 
     def test_lowest_number_first_and_skips(self):
-        self.assertEqual(decide_queue([qpr(6), qpr(5)]), ("enable", 5))
-        self.assertEqual(decide_queue([qpr(6), qpr(5)], skip={5}), ("enable", 6))
+        self.assertEqual(decide_queue([qpr(6), qpr(5)]), ("enqueue", 5))
+        self.assertEqual(decide_queue([qpr(6), qpr(5)], skip={5}), ("enqueue", 6))
 
     def test_stack(self):
         child = qpr(6, base_ref="claude/t5")
-        self.assertIsNone(decide_queue([qpr(5, queued=True), child]))
+        self.assertIsNone(decide_queue([qpr(5, in_queue=True), child]))
         child["base_in_main"] = True
         self.assertEqual(decide_queue([child]), ("retarget", 6))
 
@@ -630,6 +643,9 @@ class QueueHandWorked(unittest.TestCase):
         quick = [check("kernel"), check("app"), check("e2e"), check("mutants-in-diff"), check("baseline"),
                  check("e2e (quick)")]
         self.assertEqual(ci_state(quick), "quick")
+        # The queue takes it: the quick run's checks all passed.
+        self.assertEqual(ci_state(quick, quick_ok=True), "success")
+        self.assertEqual(ci_state(quick[:-2] + [check("baseline", conclusion="failure"), quick[-1]], quick_ok=True), "failure")
         # Planted: the same checks without the quick one are mergeable.
         self.assertEqual(ci_state(quick[:-1]), "success")
         # A full run lists the quick check as skipped (#197's first run): still mergeable.
@@ -641,32 +657,43 @@ class QueueHandWorked(unittest.TestCase):
 
 
 class QueueFake(Fake):
-    """Fake plus GraphQL: the queue state of each pull request, and every mutation."""
+    """Fake plus GraphQL: the queue state of each pull request, and every
+    mutation with the token it used ("owner" for MERGE_QUEUE_TOKEN)."""
 
-    def __init__(self, table, state):
+    def __init__(self, table, state, queue_token="t"):
         super().__init__(table)
-        self.repo, self.state = "o/r", state
+        self.repo, self.state, self.queue_token = "o/r", state, queue_token
 
-    def graphql(self, query, variables):
+    def graphql(self, query, variables, as_owner=False):
         if query.startswith("query"):
             n = variables["number"]
             return {"repository": {"pullRequest": dict(id=f"N{n}", **self.state[n])}}
-        self.writes.append(("GRAPHQL", query.split("(")[1].split("{")[-1].strip(), variables))
+        name = query.split("(")[1].split("{")[-1].strip()
+        self.writes.append(("GRAPHQL", name, variables, "owner" if as_owner else "workflow"))
+        if name == "enqueuePullRequest":
+            self.state[variables["number"] if "number" in variables else 1]["isInMergeQueue"] = True
+        elif name == "dequeuePullRequest":
+            self.state[1]["isInMergeQueue"] = False
+        elif name == "disablePullRequestAutoMerge":
+            self.state[1]["autoMergeRequest"] = None
         return {}
 
 
-def queue_repo(labels=(), state=None, comments=(), pages_sha="m1"):
+def queue_repo(labels=(), state=None, comments=(), pages_sha="m1", queue_token="t"):
     gh = fake_repo()
     raw = gh.table["/pulls?state=open&per_page=100"][0]
     raw["labels"] = [dict(name=l) for l in labels]
     gh.table["/pulls/1"]["labels"] = raw["labels"]
-    q = QueueFake(gh.table, {1: state or dict(isInMergeQueue=False, autoMergeRequest=None)})
+    q = QueueFake(gh.table, {1: state or dict(isInMergeQueue=False, autoMergeRequest=None)}, queue_token)
     q.table.update({
         "/rules/branches/main": QUEUE_RULES,
         "/issues/1/comments?per_page=100": [dict(body=b) for b in comments],
         "/actions/workflows/pages.yml/runs?branch=main&per_page=5": dict(workflow_runs=[dict(head_sha=pages_sha)]),
     })
     return q
+
+
+BOT_REQUEST = dict(enabledBy=dict(login="github-actions"))
 
 
 class QueueCalls(unittest.TestCase):
@@ -680,48 +707,63 @@ class QueueCalls(unittest.TestCase):
         # Can't read the rules: the old way, which only merges fully tested heads.
         self.assertFalse(automerge.queue_required(Down({})))
 
-    def test_turns_on_merge_when_ready_and_never_merges_itself(self):
+    def test_queues_with_the_owners_token_and_never_merges_itself(self):
         gh = queue_repo()
-        orig = gh.graphql
-
-        def graphql(query, variables):
-            r = orig(query, variables)
-            if "enablePullRequestAutoMerge" in query:
-                gh.state[1]["autoMergeRequest"] = dict(enabledAt="now")
-            return r
-        gh.graphql = graphql
         automerge.run(gh, log=lambda s: None)
-        self.assertEqual(gh.writes, [("GRAPHQL", "enablePullRequestAutoMerge", {"id": "N1"})])
+        self.assertEqual(gh.writes, [("GRAPHQL", "enqueuePullRequest", {"id": "N1"}, "owner")])
         # The next run finds it queued: nothing more.
         automerge.run(gh, log=lambda s: None)
         self.assertEqual(len(gh.writes), 1)
 
+    def test_without_the_token_nothing_is_queued(self):
+        gh = queue_repo(queue_token=None)
+        logs = []
+        automerge.run(gh, log=logs.append)
+        self.assertEqual(gh.writes, [])
+        self.assertTrue(any("MERGE_QUEUE_TOKEN" in line for line in logs))
+
+    def test_the_bots_merge_when_ready_goes_then_the_owner_queues(self):
+        # #196 on 2026-10-19: merge when ready on (by the workflow's token), never queued.
+        gh = queue_repo(state=dict(isInMergeQueue=False, autoMergeRequest=BOT_REQUEST))
+        automerge.run(gh, log=lambda s: None)
+        self.assertEqual(gh.writes, [
+            ("GRAPHQL", "disablePullRequestAutoMerge", {"id": "N1"}, "workflow"),
+            ("GRAPHQL", "enqueuePullRequest", {"id": "N1"}, "owner"),
+        ])
+        # The owner's own merge when ready is left alone.
+        gh = queue_repo(state=dict(isInMergeQueue=False, autoMergeRequest=dict(enabledBy=dict(login="benpy28"))))
+        automerge.run(gh, log=lambda s: None)
+        self.assertEqual([w[1] for w in gh.writes], ["enqueuePullRequest"])
+
     def test_hold_takes_it_out_of_the_queue(self):
         gh = queue_repo(labels=["hold"], state=dict(isInMergeQueue=True, autoMergeRequest=None))
-        orig = gh.graphql
-
-        def graphql(query, variables):
-            r = orig(query, variables)
-            if "dequeuePullRequest" in query:
-                gh.state[1]["isInMergeQueue"] = False
-            return r
-        gh.graphql = graphql
         automerge.run(gh, log=lambda s: None)
-        self.assertEqual(gh.writes, [("GRAPHQL", "dequeuePullRequest", {"id": "N1"})])
-        # Not yet in the queue, only waiting for its checks: merge when ready goes off instead.
-        gh = queue_repo(labels=["hold"], state=dict(isInMergeQueue=False, autoMergeRequest=dict(enabledAt="x")))
-        automerge.run(gh, dry_run=False, log=lambda s: None)
-        self.assertEqual(gh.writes[0], ("GRAPHQL", "disablePullRequestAutoMerge", {"id": "N1"}))
+        self.assertEqual(gh.writes, [("GRAPHQL", "dequeuePullRequest", {"id": "N1"}, "owner")])
+        gh = queue_repo(labels=["hold"], state=dict(isInMergeQueue=True, autoMergeRequest=None), queue_token=None)
+        automerge.run(gh, log=lambda s: None)
+        self.assertEqual(gh.writes, [("GRAPHQL", "dequeuePullRequest", {"id": "N1"}, "workflow")])
+
+    def test_a_quick_green_head_is_queued(self):
+        # Every pull request's own run is quick while the queue is on: green means queue it.
+        gh = queue_repo()
+        gh.table["/commits/h1/check-runs?filter=latest&per_page=100"]["check_runs"].append(check("e2e (quick)"))
+        automerge.run(gh, log=lambda s: None)
+        self.assertEqual(gh.writes, [("GRAPHQL", "enqueuePullRequest", {"id": "N1"}, "owner")])
+
+    def test_a_red_head_waits(self):
+        gh = queue_repo()
+        gh.table["/commits/h1/check-runs?filter=latest&per_page=100"]["check_runs"][-1]["conclusion"] = "failure"
+        automerge.run(gh, log=lambda s: None)
+        self.assertEqual(gh.writes, [])
 
     def test_a_removed_head_is_not_queued_again_until_a_push(self):
         gh = queue_repo(comments=[automerge.dequeued_text("h1", "CI_FAILURE", "o/r")])
         automerge.run(gh, log=lambda s: None)
         self.assertEqual(gh.writes, [])
-        # A new head (h2) goes back in.
+        # A new head (the comment was for h0) goes back in.
         gh = queue_repo(comments=[automerge.dequeued_text("h0", "CI_FAILURE", "o/r")])
-        gh.graphql = lambda q, v, f=gh.graphql: (gh.state[1].update(autoMergeRequest={}) if "enablePullRequestAutoMerge" in q else None) or f(q, v)
         automerge.run(gh, log=lambda s: None)
-        self.assertEqual(gh.writes, [("GRAPHQL", "enablePullRequestAutoMerge", {"id": "N1"})])
+        self.assertEqual(gh.writes, [("GRAPHQL", "enqueuePullRequest", {"id": "N1"}, "owner")])
 
     def test_dequeued_note_once_per_head(self):
         gh = queue_repo()
@@ -763,49 +805,63 @@ class QueueCalls(unittest.TestCase):
 class QueueSimulation(unittest.TestCase):
     """Seeded random pull requests and thread actions against decide_queue.
     After auto-merge has run to quiet, exactly the pull requests that should
-    be queued (ready, no hold, on main, head not removed by the queue, not
-    conflicted) are, and nothing else is; it never takes more than one action
-    per pull request per run."""
+    be in the queue (ready, no hold, on main, green, head not removed by the
+    queue, not conflicted) are, none still has the bot's merge when ready,
+    nothing unwanted stays queued, and without the owner's token nothing is
+    ever added."""
 
     def test_runs(self):
         for seed in range(5):
-            with self.subTest(seed=seed):
-                rng = random.Random(seed)
-                prs = {}
-                for _ in range(1000):
-                    n = rng.randrange(1, 8)
-                    p = prs.setdefault(n, qpr(n))
-                    change = rng.choice(("draft", "hold", "dequeue", "push", "conflict", "stack", "close"))
-                    if change == "draft":
-                        p["draft"] = not p["draft"]
-                    elif change == "hold":
-                        p["labels"] = [] if p["labels"] else ["hold"]
-                    elif change == "dequeue":
-                        p["queued"], p["dequeued"] = False, True
-                    elif change == "push":
-                        p["dequeued"], p["mergeable"] = False, rng.random() < 0.8
-                    elif change == "conflict":
-                        p["mergeable"] = False
-                    elif change == "stack":
-                        p["base_ref"] = "claude/t1" if p["base_ref"] == "main" else "main"
-                        p["base_in_main"] = rng.random() < 0.5
-                    else:
-                        del prs[n]
-                    acted = 0
-                    while (action := decide_queue(list(prs.values()))) is not None:
-                        acted += 1
-                        self.assertLessEqual(acted, 2 * len(prs))
-                        kind, m = action
-                        q = prs[m]
-                        if kind == "retarget":
-                            q["base_ref"] = "main"
-                        elif kind == "enable":
-                            q["queued"] = True
-                        else:
-                            q["queued"] = False
-                    for q in prs.values():
-                        should = automerge.wanted_in_queue(q) and q["mergeable"] is not False
-                        if should:
-                            self.assertTrue(q["queued"], q)
-                        elif not automerge.wanted_in_queue(q):
-                            self.assertFalse(q["queued"], q)
+            for can_queue in (True, False):
+                with self.subTest(seed=seed, can_queue=can_queue):
+                    self.play(random.Random(seed), can_queue)
+
+    def play(self, rng, can_queue):
+        prs = {}
+        for _ in range(1000):
+            n = rng.randrange(1, 8)
+            p = prs.setdefault(n, qpr(n, green=False))
+            change = rng.choice(("draft", "hold", "dequeue", "push", "green", "conflict", "stack", "bot", "close"))
+            if change == "draft":
+                p["draft"] = not p["draft"]
+            elif change == "hold":
+                p["labels"] = [] if p["labels"] else ["hold"]
+            elif change == "dequeue":
+                p["in_queue"], p["dequeued"] = False, True
+            elif change == "push":
+                p["dequeued"], p["green"], p["mergeable"] = False, False, rng.random() < 0.8
+            elif change == "green":
+                p["green"] = True
+            elif change == "conflict":
+                p["mergeable"] = False
+            elif change == "stack":
+                p["base_ref"] = "claude/t1" if p["base_ref"] == "main" else "main"
+                p["base_in_main"] = rng.random() < 0.5
+            elif change == "bot":
+                p["bot_auto_merge"] = True
+            else:
+                del prs[n]
+            was = {m: q["in_queue"] for m, q in prs.items()}
+            acted = 0
+            while (action := decide_queue(list(prs.values()), can_queue=can_queue)) is not None:
+                acted += 1
+                self.assertLessEqual(acted, 3 * len(prs))
+                kind, m = action
+                q = prs[m]
+                if kind == "retarget":
+                    q["base_ref"] = "main"
+                elif kind == "enqueue":
+                    self.assertTrue(can_queue)
+                    q["in_queue"] = True
+                elif kind == "dequeue":
+                    q["in_queue"] = False
+                else:
+                    q["bot_auto_merge"] = False
+            for m, q in prs.items():
+                self.assertFalse(q["bot_auto_merge"], q)
+                if not can_queue and not was[m]:
+                    self.assertFalse(q["in_queue"], q)
+                if not automerge.wanted_in_queue(q):
+                    self.assertFalse(q["in_queue"], q)
+                elif can_queue and q["green"] and q["mergeable"] is not False:
+                    self.assertTrue(q["in_queue"], q)
