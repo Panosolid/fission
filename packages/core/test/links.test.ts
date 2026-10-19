@@ -46,3 +46,15 @@ test("a link whose source is gone warns, never breaks silently", async () => {
   });
   await assert.rejects(fetchLinked(link, lookup, registry), /can't be found after the last edit/);
 });
+
+test("a source that can't be followed for a reason of its own says why, never pretending to be live", async () => {
+  const { registry, source } = setup();
+  const lookup: SourceLookup = () => ({ unresolved: "now matches more than one face after the last edit" });
+  const link = linkTo("l", source, ["solid"]);
+  assert.deepEqual(resolveLink(link, lookup), {
+    state: "unresolved",
+    warning: "Linked to Feature 1 (box) in Design, which now matches more than one face after the last edit. Pick a new source or break the link to keep the last copy.",
+  });
+  await assert.rejects(fetchLinked(link, lookup, registry), /now matches more than one face/);
+  await assert.rejects(breakLink(link, lookup, registry), /now matches more than one face/);
+});

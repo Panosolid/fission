@@ -416,13 +416,13 @@ test("a selected face keeps its name through an edit that renumbers the kernel's
   // √(10² + 30²) = √1000 long, so √1000 × 10 mm², centred half way up its middle (45, 15, 5).
   const moved = movePoint(doc, sketch.id, pointAt(doc.sketches[0], [40, 30])!, 50, 30);
   const third = await builtNames(kernel, moved);
-  assert.deepEqual(survivors(kept.kept, sceneOf(third)), { kept: kept.kept, dropped: [] });
+  assert.deepEqual(survivors(kept.kept, sceneOf(third)), { kept: kept.kept, dropped: [], shared: [] });
   const g = index(rightFace, third.names)!;
   assert.ok(close(third.view.face_areas[g], Math.sqrt(1000) * 10) && third.view.face_centroids[g].every((x, k) => close(x, [45, 15, 5][k])));
 
   // The right side deleted: its face and its edges leave the selection, the top's stays.
   const gone = await builtNames(kernel, drawLine(deleteCurve(doc, sketch.id, right), sketch.id, pointAt(s, [40, 0])!, pointAt(s, [40, 30])!).doc);
-  assert.deepEqual(survivors(kept.kept, sceneOf(gone)), { kept: [topFace], dropped: [rightFace, rim] });
+  assert.deepEqual(survivors(kept.kept, sceneOf(gone)), { kept: [topFace], dropped: [rightFace, rim], shared: [] });
   // Nothing on the new body is ever named like the deleted side's face.
   assert.ok(!gone.names.faces.includes(`side:${right}`));
 });

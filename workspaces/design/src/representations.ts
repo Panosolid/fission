@@ -6,10 +6,12 @@
 // profiles are one kind; sketches (step 21b) register as another type with
 // this same producer, so there is no sketch-only path.
 
-import type { KernelCalls, Outline, Plane, Producible, Producer, RepresentationRegistry } from "@fission/core";
+import type { KernelCalls, Outline, Plane, Producible, Producer, RepresentationRegistry, SourceLookup } from "@fission/core";
 import { partFeature, type DesignDocument, type SketchPlane } from "./document.ts";
 import { featureSpec } from "./extrude.ts";
 import { outline } from "./profiles.ts";
+import { readDesignReference, readProfileReference } from "./references.ts";
+import { bodyOf, findInScene, type Scene } from "./scene.ts";
 import { planeOf, sketchItem, sketchOutline } from "./sketch.ts";
 import { buildSpec } from "./spec.ts";
 
@@ -53,6 +55,36 @@ export function designObjects(document: DesignDocument, kernel: KernelCalls): (O
   const part = partFeature(document);
   const solid: FeatureHandle[] = part === null ? [] : [{ type: "design.feature", id: part.id, document }];
   return [...profiles, ...sketches, ...solid];
+}
+
+/**
+ * How a link another workspace holds finds what it points at in Design
+ * (step 25a4), after every rebuild: an object by its id (a profile, a
+ * sketch, the part), and a body, face or edge by its stable name on the
+ * bodies shown (`scene`, null before the first build), never by the
+ * kernel's index. A face or edge found delivers the solid of the body it
+ * is on (its feature's), the link keeping the name of which face; one the
+ * edit took off its body, or a body not shown, is gone (null, so the link
+ * warns); one whose name the edit gave to two or more faces or edges says
+ * so and is never moved to one of them. Sources from other workspaces are
+ * not Design's to find (null).
+ */
+export function designLookup(document: DesignDocument, scene: Scene | null, kernel: KernelCalls): SourceLookup {
+  const solidOf = (featureId: string): FeatureHandle => ({ type: "design.feature", id: featureId, document });
+  return (source) => {
+    if (source.origin.workspace !== "design") return null;
+    if (source.kind === "object") return designObjects(document, kernel).find((o) => o.id === source.origin.id) ?? null;
+    const { ref } = source;
+    const profile = readProfileReference(ref);
+    if (profile !== null) return designObjects(document, kernel).find((o) => o.type === "design.profile" && o.id === profile) ?? null;
+    if (scene === null || readDesignReference(ref) === null) return null;
+    const b = bodyOf(scene, ref);
+    if (b < 0) return null;
+    if (ref.kind === "body") return solidOf(scene.bodies[b].feature);
+    const found = findInScene(ref, scene);
+    if (found.status === "shared") return { unresolved: `now matches more than one ${ref.kind} after the last edit, so it was not moved to any of them` };
+    return found.status === "found" ? solidOf(scene.bodies[b].feature) : null;
+  };
 }
 
 /** Says what Design produces. `kernel` builds meshes. */

@@ -43,8 +43,12 @@ export type LinkStatus =
   | { state: "frozen" }
   | { state: "unresolved"; warning: string };
 
-/** Finds a source object in the current project, or null if it is gone. */
-export type SourceLookup = (source: LinkSource) => Producible | null;
+/**
+ * Finds a source object in the current project: null if it is gone, or
+ * `unresolved` with why it can't be followed when it is not simply gone
+ * (a face whose name the last edit gave to two faces: never a guess).
+ */
+export type SourceLookup = (source: LinkSource) => Producible | null | { unresolved: string };
 
 /** A new link from a paste or drop: live by default. */
 export function linkTo(id: string, source: LinkSource, accepts: RepresentationKind[]): LiveLink {
@@ -55,11 +59,12 @@ export function linkTo(id: string, source: LinkSource, accepts: RepresentationKi
 export function resolveLink(link: Link, lookup: SourceLookup): LinkStatus {
   if (link.mode === "frozen") return { state: "frozen" };
   const object = lookup(link.source);
-  if (object) return { state: "live", object };
+  if (object && !("unresolved" in object)) return { state: "live", object };
   const { label, workspace } = link.source.origin;
+  const why = object ? object.unresolved : "can't be found after the last edit";
   return {
     state: "unresolved",
-    warning: `Linked to ${label} in ${workspace[0].toUpperCase()}${workspace.slice(1)}, which can't be found after the last edit. Pick a new source or break the link to keep the last copy.`,
+    warning: `Linked to ${label} in ${workspace[0].toUpperCase()}${workspace.slice(1)}, which ${why}. Pick a new source or break the link to keep the last copy.`,
   };
 }
 

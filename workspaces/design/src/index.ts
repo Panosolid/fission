@@ -11,12 +11,12 @@ export { addSketch, askOutline, deleteCurve, drawArc, drawCircle, drawLine, draw
 export { clickAt, hoverTool, SKETCH_TOOLS, startTool, switchTool, toolBusy, type LineTool, type RectangleTool, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
 export { PART_VIEW, syncGraph } from "./graph.ts";
-export { designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
-export { bodyReference, designReference, NAME_NOTE, profileReference, readProfileReference, resolveReference } from "./references.ts";
+export { designLookup, designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
+export { bodyReference, designReference, NAME_NOTE, profileReference, readProfileReference, resolveReference, sharedBy } from "./references.ts";
 export { featureNames, nameBody, outlineCurves, type BodyNames } from "./naming.ts";
 export { pickChange, type SelectionChange } from "./picking.ts";
-export { droppedNote, highlightOf, panelFocus, referenceLabel, selectionRows, survivors, type PanelFocus } from "./selection.ts";
-export { bodyOf, joinBodies, resolveInScene, sceneHit, sceneReference, shownBodies, type Scene, type ShownBody } from "./scene.ts";
+export { droppedNote, highlightOf, NAME_SHARED, panelFocus, referenceLabel, selectionRows, survivors, type PanelFocus } from "./selection.ts";
+export { bodyOf, findInScene, joinBodies, resolveInScene, sceneHit, sceneReference, shownBodies, type Found, type Scene, type ShownBody } from "./scene.ts";
 export { COPY_SVG, designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";
 export { rounding, snapOnSketch, SNAP_PIXELS, type Rounding, type Snap } from "./snap.ts";
 export { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS, type ReorderCause, type Reordered } from "./timeline-edits.ts";

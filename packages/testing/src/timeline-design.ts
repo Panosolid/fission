@@ -23,7 +23,7 @@
 // body_build calls the rebuild's cache makes (step 24e), so the session
 // checks an edit rebuilds only what it changed. A held reference resolves
 // as the app's selection does (step 24e3): Design's reference for the
-// name, found by `resolveInScene` on the scene `shownBodies` and
+// name, found by `findInScene` (25a4: one face, none, or two or more) on the scene `shownBodies` and
 // `joinBodies` draw. `faults` plants bugs in
 // Design's side to prove the checks catch them.
 
@@ -49,7 +49,7 @@ import {
   joinBodies,
   rebuildTimeline,
   reorderItem,
-  resolveInScene,
+  findInScene,
   sceneHit,
   settleKept,
   shownBodies,
@@ -427,11 +427,14 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
     },
     async resolve(name) {
       // As the app keeps a selection through an edit (selection.ts `survivors`): the name as Design's reference, resolved
-      // on the scene by Design's own `resolveInScene`, and the face it lands on named back.
+      // on the scene by Design's own `findInScene`, and the face it lands on named back; a name it finds on two faces
+      // (25a4) is told apart from one it finds on none.
       const s = await scene();
       const part = name.curve === undefined ? name.role : `${name.role}:${encodeURIComponent(name.curve)}`;
-      const i = resolveInScene({ kind: "face", id: `face:${encodeURIComponent(name.feature)}/${part}` as StableId }, s);
-      if (i === null) return null;
+      const found = findInScene({ kind: "face", id: `face:${encodeURIComponent(name.feature)}/${part}` as StableId }, s);
+      if (found.status === "shared") return "shared";
+      if (found.status === "gone") return null;
+      const i = found.index;
       const hit = sceneHit(s, "face", i);
       if (hit === null) throw new Error(`Design resolved ${faceKey(name)} to face ${i}, which no shown body has`);
       const body = s.bodies[hit.body];

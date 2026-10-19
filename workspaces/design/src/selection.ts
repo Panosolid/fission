@@ -4,8 +4,8 @@
 
 import type { Feature, GeometryReference, ViewportHighlight } from "@fission/core";
 import { partFeature, profileLabel, type DesignDocument, type ReadyProfile } from "./document.ts";
-import { readDesignReference, readProfileReference, resolveReference } from "./references.ts";
-import { bodyOf, resolveInScene, type Scene, type ShownBody } from "./scene.ts";
+import { readDesignReference, readProfileReference, resolveReference, sharedBy } from "./references.ts";
+import { bodyOf, findInScene, resolveInScene, type Scene, type ShownBody } from "./scene.ts";
 
 /**
  * The viewport highlight for these items on the bodies shown (`scene`,
@@ -51,6 +51,8 @@ export interface SelectionRow {
 
 /** Said in place of a type the last built body cannot give. */
 export const NOT_ON_BODY = "not on the current body";
+/** Said in place of a type when the edit gave the item's name to more than one face or edge (step 25a4). */
+export const NAME_SHARED = "matches more than one";
 /** Said for a selected outline that is not one of the document's profiles. */
 export const NOT_IN_DESIGN = "not in the design";
 
@@ -92,6 +94,7 @@ export function selectionRows(items: readonly GeometryReference[], scene: Scene 
     const i = shown ? resolveReference(item, shown.names) : null;
     const types = r.kind === "face" ? shown?.view.face_types : shown?.view.edge_types;
     const type = i !== null && types ? types[i] : undefined;
+    if (type === undefined && sharedBy(item, shown?.names ?? null) > 1) return { name: referenceLabel(item), type: NAME_SHARED, id: item.id };
     return { name: referenceLabel(item), type: type ?? (scene ? NOT_ON_BODY : "…"), id: item.id };
   });
 }
@@ -129,31 +132,61 @@ export function panelFocus(items: readonly GeometryReference[], scene: Scene | n
  * whatever the kernel now numbers it (a resize, a corner moved, the
  * outline walked from another line), and dropped when its face is gone
  * (its sketch curve deleted, a box turned into a cylinder, which has no
- * front). Body references stay; references this function cannot read, or
+ * front). One whose name the edit gave to two or more faces or edges is
+ * dropped too and listed in `shared` (step 25a4): it is never moved to one
+ * of them. Body references stay; references this function cannot read, or
  * to a feature with no body shown, are left alone (not Design's to judge
  * here). A profile (an outline reference Design built) is kept while
  * `profileIds` has it: a change to a shape with no profile, a box, drops it.
  */
-export function survivors(items: readonly GeometryReference[], scene: Scene, profileIds: readonly string[] = []): { kept: GeometryReference[]; dropped: GeometryReference[] } {
+export function survivors(
+  items: readonly GeometryReference[],
+  scene: Scene,
+  profileIds: readonly string[] = [],
+): { kept: GeometryReference[]; dropped: GeometryReference[]; shared: GeometryReference[] } {
   const kept: GeometryReference[] = [];
   const dropped: GeometryReference[] = [];
+  const shared: GeometryReference[] = [];
   for (const item of items) {
     const r = readDesignReference(item);
     let keep = true;
     const profile = readProfileReference(item);
     if (profile !== null) keep = profileIds.includes(profile);
-    else if (r && r.kind !== "body" && bodyOf(scene, item) >= 0) keep = resolveInScene(item, scene) !== null;
+    else if (r && r.kind !== "body" && bodyOf(scene, item) >= 0) {
+      const found = findInScene(item, scene);
+      keep = found.status === "found";
+      if (found.status === "shared") shared.push(item);
+    }
     (keep ? kept : dropped).push(item);
   }
-  return { kept, dropped };
+  return { kept, dropped, shared };
 }
 
-/** The visible note for references a rebuild dropped ("" when none were). */
-export function droppedNote(dropped: readonly GeometryReference[]): string {
+/** "A", "A and B", "A, B and C". */
+function listed(names: readonly string[]): string {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The visible note for references a rebuild dropped ("" when none were);
+ * `shared`, the ones among them whose name the edit gave to more than one
+ * face or edge, are said apart, so the user knows to pick again.
+ */
+export function droppedNote(dropped: readonly GeometryReference[], shared: readonly GeometryReference[] = []): string {
   if (dropped.length === 0) return "";
+  const isShared = (d: GeometryReference) => shared.some((s) => s.kind === d.kind && s.id === d.id);
   const names = dropped.map((d) => (readProfileReference(d) !== null ? "the profile" : referenceLabel(d)));
+  const gone = dropped.filter((d) => d.kind !== "outline" && !isShared(d));
+  const twice = dropped.filter(isShared);
+  const one = (n: number, it: string, they: string) => (n === 1 ? it : they);
   const why = [
-    ...(dropped.some((d) => d.kind !== "outline") ? ["The edit took them off the body, so they could not be followed."] : []),
+    ...(gone.length > 0 && twice.length === 0 ? ["The edit took them off the body, so they could not be followed."] : []),
+    ...(gone.length > 0 && twice.length > 0 ? [`The edit took ${listed(gone.map(referenceLabel))} off the body, so ${one(gone.length, "it", "they")} could not be followed.`] : []),
+    ...(twice.length > 0
+      ? [
+          `${listed(twice.map(referenceLabel))} now ${one(twice.length, "matches", "match")} more than one ${twice.every((d) => d.kind === "face") ? "face" : twice.every((d) => d.kind === "edge") ? "edge" : "face or edge"}, so ${one(twice.length, "it was", "they were")} not moved to any of them: pick again.`,
+        ]
+      : []),
     ...(dropped.some((d) => d.kind === "outline") ? ["The part has no profile now."] : []),
   ];
   return `Taken out of the selection: ${names.join(", ")}. ${why.join(" ")}`;

@@ -10,7 +10,7 @@ import { bodyFeatures } from "./browser.ts";
 import type { DesignDocument } from "./document.ts";
 import { nameBody, outlineCurves, type BodyNames } from "./naming.ts";
 import type { BodyCache, TimelineBuild } from "./rebuild.ts";
-import { designReference, readDesignReference, resolveReference } from "./references.ts";
+import { designReference, readDesignReference, resolveReference, sharedBy } from "./references.ts";
 
 /** One built body: the feature that built it, the kernel's view of it, and its faces' and edges' names. */
 export interface ShownBody {
@@ -128,11 +128,29 @@ export function bodyOf(scene: Scene, ref: GeometryReference): number {
   return scene.bodies.findIndex((b) => (r.kind === "body" ? b.feature === r.featureId : b.names.feature === r.featureId));
 }
 
-/** The joined index of the face or edge a reference names; null when no shown body has it. */
-export function resolveInScene(ref: GeometryReference, scene: Scene): number | null {
+/**
+ * What a face or edge reference finds on the bodies shown (step 25a4): its
+ * one face or edge, by joined index; nothing, when no shown body is its
+ * feature's or the edit took its face off that body; or more than one, when
+ * the edit gave its name to two or more faces or edges (`count`, from
+ * `sharedBy`). Then it is never moved to any of them, as a sketch on a face
+ * whose name two faces share holds its last place (naming-model.ts
+ * `placeOn`): the holder shows a warning and the user picks again.
+ */
+export type Found = { status: "found"; index: number } | { status: "gone" } | { status: "shared"; count: number };
+
+export function findInScene(ref: GeometryReference, scene: Scene): Found {
   const b = bodyOf(scene, ref);
-  if (b < 0) return null;
-  const i = resolveReference(ref, scene.bodies[b].names);
-  if (i === null) return null;
-  return i + (ref.kind === "face" ? scene.faceStart[b] : scene.edgeStart[b]);
+  if (b < 0) return { status: "gone" };
+  const names = scene.bodies[b].names;
+  const i = resolveReference(ref, names);
+  if (i !== null) return { status: "found", index: i + (ref.kind === "face" ? scene.faceStart[b] : scene.edgeStart[b]) };
+  const count = sharedBy(ref, names);
+  return count > 1 ? { status: "shared", count } : { status: "gone" };
+}
+
+/** The joined index of the face or edge a reference names; null when no shown body has it, or more than one face or edge does. */
+export function resolveInScene(ref: GeometryReference, scene: Scene): number | null {
+  const found = findInScene(ref, scene);
+  return found.status === "found" ? found.index : null;
 }

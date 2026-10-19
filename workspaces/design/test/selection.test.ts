@@ -47,13 +47,13 @@ test("properties rows give each item's name, type and stable name", () => {
 test("a rebuild keeps every face and edge whose name is still on the body, wherever the kernel numbers it now", () => {
   const items = [face(1), edge(4), body];
   // A wider box: the same names.
-  assert.deepEqual(survivors(items, boxScene), { kept: items, dropped: [] });
+  assert.deepEqual(survivors(items, boxScene), { kept: items, dropped: [], shared: [] });
   // The same box with its faces listed the other way round: renumbered, every name still there.
   const reversed = nameBody("feature-1", { ...BOX_VIEW, face_roles: [...BOX_VIEW.face_roles].reverse(), edge_faces: BOX_VIEW.edge_faces.map((p) => p && ([5 - p[0], 5 - p[1]] as [number, number])) } as BodyView, () => null);
-  assert.deepEqual(survivors(items, onlyBody(BOX_VIEW, reversed)), { kept: items, dropped: [] });
+  assert.deepEqual(survivors(items, onlyBody(BOX_VIEW, reversed)), { kept: items, dropped: [], shared: [] });
   assert.deepEqual(highlightOf(items, onlyBody(BOX_VIEW, reversed)), { body: true, faces: [4], edges: [4] });
   // Box to cylinder (the same feature, changed): its top is still the top; the top front edge is gone. The body stays.
-  assert.deepEqual(survivors(items, cylinderScene), { kept: [face(1), body], dropped: [edge(4)] });
+  assert.deepEqual(survivors(items, cylinderScene), { kept: [face(1), body], dropped: [edge(4)], shared: [] });
 });
 
 test("references to another feature, and ids Design did not build, are left alone", () => {
@@ -98,9 +98,9 @@ test("a selected profile: named as the browser names it, of type outline, drawn 
 
 test("a rebuild keeps the profile while the part has it; a change to a box drops it, with a note", () => {
   // A resize or a change of profile kind keeps profile-1.
-  assert.deepEqual(survivors([profile, body], boxScene, ["profile-1"]), { kept: [profile, body], dropped: [] });
+  assert.deepEqual(survivors([profile, body], boxScene, ["profile-1"]), { kept: [profile, body], dropped: [], shared: [] });
   // A box has no profiles.
-  assert.deepEqual(survivors([profile, body], boxScene, []), { kept: [body], dropped: [profile] });
+  assert.deepEqual(survivors([profile, body], boxScene, []), { kept: [body], dropped: [profile], shared: [] });
   assert.equal(droppedNote([profile]), "Taken out of the selection: the profile. The part has no profile now.");
   assert.equal(
     droppedNote([face(1), profile]),

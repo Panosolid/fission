@@ -134,7 +134,7 @@ export const PLANTS: Record<ModelFault, Plant> = {
   },
   "sphere-one-name": {
     what: "nameBody names a sphere's lower half as its upper",
-    edits: [{ file: NAMING, find: '      if (r.role !== "side" || r.piece === undefined) return r.role;', replace: '      if (r.role !== "side" || r.piece === undefined) return r.role === "lower" ? "upper" : r.role;' }],
+    edits: [{ file: NAMING, find: '    if (r.role !== "side" || r.piece === undefined) return r.role;', replace: '    if (r.role !== "side" || r.piece === undefined) return r.role === "lower" ? "upper" : r.role;' }],
     run: ["timeline"],
     caught: "the rebuild differs from the model",
     why: "Design drops a name two faces share (naming.ts onlyOnce), so both halves lose their names instead of sharing one",
@@ -185,13 +185,13 @@ export const PLANTS: Record<ModelFault, Plant> = {
   },
   "cap-edges-swapped": {
     what: "nameBody swaps an extrude's start and end caps",
-    edits: [{ file: NAMING, find: '      if (r.role !== "side" || r.piece === undefined) return r.role;', replace: '      if (r.role !== "side" || r.piece === undefined) return r.role === "start" ? "end" : r.role === "end" ? "start" : r.role;' }],
+    edits: [{ file: NAMING, find: '    if (r.role !== "side" || r.piece === undefined) return r.role;', replace: '    if (r.role !== "side" || r.piece === undefined) return r.role === "start" ? "end" : r.role === "end" ? "start" : r.role;' }],
     run: ["timeline"],
     caught: "the rebuild differs from the model",
   },
   "end-edges-named-start": {
     what: "nameBody names an extrude's end cap as its start",
-    edits: [{ file: NAMING, find: '      if (r.role !== "side" || r.piece === undefined) return r.role;', replace: '      if (r.role !== "side" || r.piece === undefined) return r.role === "end" ? "start" : r.role;' }],
+    edits: [{ file: NAMING, find: '    if (r.role !== "side" || r.piece === undefined) return r.role;', replace: '    if (r.role !== "side" || r.piece === undefined) return r.role === "end" ? "start" : r.role;' }],
     run: ["timeline"],
     caught: "the rebuild differs from the model",
     why: "Design drops a name two faces share (naming.ts onlyOnce), so both caps and their edges lose their names instead of sharing them",
