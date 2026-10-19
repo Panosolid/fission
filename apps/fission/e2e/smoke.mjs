@@ -1472,6 +1472,16 @@ try {
           [canvasOf(sel), x, y],
         );
       const isBody = ([r, g, b]) => r + g + b > 3 * 80; // lit grey-blue, far brighter than the background
+      // A canvas shown again is resized, which clears it until the next animation frame draws:
+      // read the pixel until it shows the body, for at most 2 s, and give back the last reading.
+      const pixelOnceDrawn = async (sel, x, y) => {
+        const end = Date.now() + 2000;
+        for (;;) {
+          const px = await pixelAt(sel, x, y);
+          if (isBody(px) || Date.now() > end) return px;
+          await wide.waitForTimeout(50);
+        }
+      };
       const selected = () => wide.evaluate(() => document.body.dataset.selection ?? "");
       const settle = () => wide.waitForTimeout(300); // orbit damping settles, a frame or two paints
       const box = (sel) => wide.locator(canvasOf(sel)).boundingBox();
@@ -1559,7 +1569,7 @@ try {
       // Within 0.05 mm: orbit damping may still have been settling its last fraction of a pixel when the pose was read.
       const back = await splitPose();
       for (const key of ["position", "target", "up"]) assert.ok(back[key].every((v, i) => Math.abs(v - topPose[key][i]) < 0.05), `the second camera stayed on Top (${key}: ${back[key]} vs ${topPose[key]})`);
-      assert.ok(isBody(await pixelAt("#split-viewport", topInSplit.x, topInSplit.y)), "drawn from the top again");
+      assert.ok(isBody(await pixelOnceDrawn("#split-viewport", topInSplit.x, topInSplit.y)), "drawn from the top again");
 
       // Back to Design in the first pane and Image beside it.
       await wide.click("[data-workspace=design]");
