@@ -187,6 +187,13 @@ async function app(start: DesignDocument, plugin: WorkspacePlugin = designWorksp
       view.shortcut?.(id);
       await settle();
     },
+    /** Another workspace shown, then Design again (X7: asleep, then woken). */
+    async away() {
+      view.sleep?.();
+      await settle();
+      view.wake?.();
+      await settle();
+    },
     async finish() {
       $("#finish-sketch")!.click();
       await settle();
@@ -358,6 +365,58 @@ test("hand-worked: Edit Sketch is refused with the menu's words for the sketch a
   assert.equal(await a.menu(ids[0].sketch, "edit-sketch"), "Sketch 1 is after the marker: move the marker past it first");
   assert.equal(a.sketching(), false);
   assert.ok(await a.close());
+});
+
+test("odd orders: Edit feature, a delete, another workspace and a reload while a sketch with a new line is open each leave it rebuilt", async () => {
+  const { doc, ids } = await design([{ width: 40, distance: 20 }]);
+  const stray = async (a: Awaited<ReturnType<typeof app>>) => {
+    await a.menu(ids[0].sketch, "edit-sketch");
+    await a.click(10, 60);
+    await a.click(30, 60);
+  };
+  // Edit feature on Extrude 1 while Sketch 1 is open with a stray line: the sketch is left (rebuilt: the warning shows) and the panel opens.
+  const a = await app(doc);
+  await stray(a);
+  assert.equal(a.warning(), null);
+  await a.menu(ids[0].extrude, "edit");
+  assert.equal(a.sketching(), false);
+  assert.equal(a.$("#feature-edit")!.hidden, false, "the Edit feature panel is open");
+  assert.match(a.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  assert.ok(close(a.volume(), BOX + 24000 + LAST));
+  assert.ok(await a.close());
+  // Extrude 1 deleted from its menu while Sketch 1 is open with the line: one step, the sketch left, the box and the last box alone (1120).
+  const b = await app(doc);
+  await stray(b);
+  await b.menu(ids[0].extrude, "delete");
+  assert.equal(b.sketching(), false);
+  assert.equal(b.history.undoLabel(), "Delete Extrude 1");
+  assert.ok(close(b.volume(), BOX + LAST), `${b.volume()}`);
+  assert.equal(b.warning(), null);
+  // Undo: Extrude 1 back with the warning (its sketch has the line).
+  await b.undo();
+  assert.ok(close(b.volume(), BOX + 24000 + LAST));
+  assert.match(b.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  assert.ok(await b.close());
+  // Another workspace shown and back while the line is drawn: still open, nothing rebuilt; Finish rebuilds.
+  const c = await app(doc);
+  await stray(c);
+  await c.away();
+  assert.equal(c.sketching(), true);
+  assert.equal(c.warning(), null);
+  await c.finish();
+  assert.match(c.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  assert.ok(await c.close());
+  // A reload while the line is drawn: the line was already an undo step in the project, so the page opens with the sketch closed and Extrude 1 rebuilt (kept, warned).
+  const d = await app(doc);
+  await stray(d);
+  const saved = projectToJson({ ...emptyProject("Edit Sketch"), workspaces: { design: d.doc() } });
+  const e = await app(projectFromJson(saved, [designWorkspace]).workspaces.design as DesignDocument);
+  assert.equal(e.sketching(), false);
+  assert.match(e.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  assert.ok(close(e.volume(), BOX + 24000 + LAST), `${e.volume()}`);
+  // A fresh page starts with no history: nothing to undo.
+  assert.equal(e.history.undoLabel(), null);
+  assert.ok(await e.close());
 });
 
 // ---- Seeded sessions against a plain model ----

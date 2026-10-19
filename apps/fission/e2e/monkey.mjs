@@ -259,6 +259,12 @@ async function act(s, a) {
       await loc.click({ timeout: 2000, button: a.do === "menu" ? "right" : "left" }).catch(() => {});
       return true;
     }
+    case "double": {
+      const loc = await find();
+      if (!loc) return false;
+      await loc.dblclick({ timeout: 2000 }).catch(() => {});
+      return true;
+    }
     case "type": {
       const loc = await find();
       if (!loc) return false;
