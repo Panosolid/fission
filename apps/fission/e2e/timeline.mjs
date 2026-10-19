@@ -226,6 +226,7 @@ try {
       assert.deepEqual(
         await page.$$eval("#row-menu button", (bs) => bs.map((b) => [b.id, b.disabled, b.getAttribute("aria-label")])),
         [
+          ["row-menu-edit", false, "Edit Extrude 1"],
           ["row-menu-marker", true, "Move the marker to just after Extrude 1"],
           ["row-menu-suppress", false, "Suppress Extrude 1"],
           ["row-menu-delete", false, "Delete Extrude 1"],
@@ -859,6 +860,157 @@ try {
       assert.deepEqual(await drawn(page, layout), { box: true, square: true });
       await browserOpen();
       assert.deepEqual(await rows(), ["body-1 Body 1", "body-2 Body 2"]);
+
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+  }
+
+  // 25a2: Edit feature on an earlier item, from the bar and from the browser's rows.
+  for (const { width, tap } of [{ width: 1280, tap: false }, { width: 375, tap: true }]) {
+    await check(`Edit feature (25a2): the box's height from the bar and Extrude 1's distance from the browser, the rest rebuilt and kept; a refused size records nothing; Escape and Cancel change nothing; one undo step each, pixels probed (${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      const layout = LAYOUTS[width];
+      await addSquare(page, tap, layout);
+      const browserOpen = async () => {
+        if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press(page, "#browser-toggle", tap);
+        await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => (d.open = true)));
+      };
+      const browserClosed = async () => {
+        if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) === "true") await press(page, "#browser-toggle", tap);
+      };
+      const barMenu = async (id) => {
+        const item = page.locator(`#timeline [data-item="${id}"]`);
+        await item.scrollIntoViewIfNeeded();
+        if (tap) {
+          // A tap on the picked item unpicks it: its ⋯ is tapped straight away when it already shows.
+          if (!(await page.isVisible(`#timeline [data-more="${id}"]`))) await item.tap();
+          await page.tap(`#timeline [data-more="${id}"]`);
+        } else await item.click({ button: "right" });
+        await until(page, () => document.getElementById("row-menu").open, null, `${id}'s menu from the bar`);
+      };
+      const rowMenu = async (id) => {
+        await browserOpen();
+        const row = page.locator(`#browser [data-node="timeline"] .tree-row[data-node="${id}"]`);
+        await row.scrollIntoViewIfNeeded();
+        if (tap) await page.tap(`#browser [data-node="timeline"] [data-more="${id}"]`);
+        else await row.click({ button: "right" });
+        await until(page, () => document.getElementById("row-menu").open, null, `${id}'s menu from the browser`);
+      };
+      /** Edit feature chosen in the open menu: the panel opens on the item. */
+      const openEdit = async (id) => {
+        await press(page, "#row-menu-edit", tap);
+        await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed");
+        await browserClosed();
+        await until(page, (w) => document.getElementById("feature-edit")?.hidden === false && document.getElementById("feature-edit-title")?.textContent === w, `Edit ${id}`, "the Edit feature panel");
+      };
+      const boxes = () => page.$$eval("#feature-edit input", (is) => is.map((i) => [i.id, i.value]));
+      const panelClosed = () => until(page, () => document.getElementById("feature-edit")?.hidden === true, null, "the panel closed");
+      /** Body `n`'s numbers, selected from its Bodies row, then the selection cleared. */
+      const bodyPanel = async (n) => {
+        await browserOpen();
+        await press(page, `#browser [data-node="body-${n}"]`, tap);
+        await until(page, (w) => document.querySelector("#body-heading")?.textContent === w, `Body ${n}`, `Body ${n} selected`);
+        const got = await page.evaluate(() => ({ volume: document.querySelector("#volume")?.textContent, intent: document.querySelector("#intent")?.textContent }));
+        await browserClosed();
+        await page.keyboard.press("Escape");
+        await until(page, () => !document.body.dataset.selection, null, "nothing selected");
+        return got;
+      };
+      const square = { volume: layout.volume, intent: `Extrude Sketch 1 by ${layout.distance} mm` };
+      assert.deepEqual(await bodyPanel(1), { volume: "24,000 mm³", intent: "Box: 40 × 30 × 20 mm" });
+      const lastStep = await undoTitle(page);
+
+      // 1. The box's menu from the bar: Edit feature first, reading "Edit Feature 1 (box)".
+      await barMenu("feature-1");
+      assert.deepEqual(await page.$eval("#row-menu button", (b) => [b.id, b.disabled, b.getAttribute("aria-label"), b.textContent]), ["row-menu-edit", false, "Edit Feature 1 (box)", "Edit feature"]);
+      await openEdit("Feature 1 (box)");
+      assert.deepEqual(await boxes(), [["edit-width", "40"], ["edit-depth", "30"], ["edit-height", "20"]]);
+      const box = await page.locator("#feature-edit").boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= width, `the panel fits across the screen: ${JSON.stringify(box)}`);
+      // The first box has the keys: typing goes into it.
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "edit-width");
+
+      // 2. A height of 0: the kernel's words, nothing recorded, the panel stays open.
+      await page.fill("#edit-height", "0");
+      await press(page, "#feature-edit-ok", tap);
+      await until(page, () => document.getElementById("feature-edit-error")?.textContent === "height must be between 0.001 and 1000000 mm, got 0", null, "the kernel's refusal");
+      assert.equal(await undoTitle(page), lastStep, "nothing recorded");
+      assert.equal(await page.isVisible("#feature-edit"), true);
+      // A box left empty: named, nothing recorded.
+      await page.fill("#edit-height", "");
+      await press(page, "#feature-edit-ok", tap);
+      await until(page, () => document.getElementById("feature-edit-error")?.textContent === "Type the height in mm.", null, "the empty box named");
+      assert.equal(await undoTitle(page), lastStep, "nothing recorded");
+      if (shots) await page.screenshot({ path: `${shots}/edit-refused-${width}.png` });
+
+      // 3. 35 high, by Enter: one step "Edit Feature 1 (box)"; the box 40 · 30 · 35 = 42,000 mm³; Extrude 1, after it, rebuilt as it was.
+      await page.fill("#edit-height", "35");
+      await page.press("#edit-height", "Enter");
+      await panelClosed();
+      await undoIs(page, "Edit Feature 1 (box)");
+      assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "feature-11", "|"]);
+      assert.deepEqual(await bodyPanel(1), { volume: "42,000 mm³", intent: "Box: 40 × 30 × 35 mm" });
+      assert.deepEqual(await bodyPanel(2), square);
+      assert.deepEqual(await drawn(page, layout), { box: true, square: true });
+      if (shots) await page.screenshot({ path: `${shots}/edit-box-${width}.png` });
+      // One Undo: 20 high again; one Redo: 35.
+      await press(page, "#undo", tap);
+      await until(page, () => document.getElementById("undo").title !== "Undo Edit Feature 1 (box) (Ctrl+Z)", null, "undone");
+      assert.equal(await undoTitle(page), lastStep);
+      assert.deepEqual(await bodyPanel(1), { volume: "24,000 mm³", intent: "Box: 40 × 30 × 20 mm" });
+      await press(page, "#redo", tap);
+      await undoIs(page, "Edit Feature 1 (box)");
+      assert.deepEqual(await bodyPanel(1), { volume: "42,000 mm³", intent: "Box: 40 × 30 × 35 mm" });
+
+      // 4. Extrude 1 from its browser row: its distance doubled; the part's numbers follow; the box stays 42,000.
+      await rowMenu("feature-11");
+      await openEdit("Extrude 1");
+      assert.deepEqual(await boxes(), [["edit-height", String(layout.distance)]]);
+      await page.fill("#edit-height", String(2 * layout.distance));
+      await press(page, "#feature-edit-ok", tap);
+      await panelClosed();
+      await undoIs(page, "Edit Extrude 1");
+      const doubled = width === 1280 ? "2,000 mm³" : "6,000 mm³"; // 10 · 10 · 20, or 10 · 10 · 60
+      await until(page, (v) => document.querySelector("#volume")?.textContent === v, doubled, "Extrude 1 doubled");
+      assert.deepEqual(await bodyPanel(2), { volume: doubled, intent: `Extrude Sketch 1 by ${2 * layout.distance} mm` });
+      assert.deepEqual(await bodyPanel(1), { volume: "42,000 mm³", intent: "Box: 40 × 30 × 35 mm" });
+      assert.deepEqual(await drawn(page, layout), { box: true, square: true });
+      if (shots) await page.screenshot({ path: `${shots}/edit-extrude-${width}.png` });
+
+      // 5. Escape and Cancel close the panel with nothing recorded, whatever was typed.
+      await barMenu("feature-11");
+      await openEdit("Extrude 1");
+      await page.fill("#edit-height", "99");
+      await page.keyboard.press("Escape");
+      await panelClosed();
+      assert.equal(await undoTitle(page), "Undo Edit Extrude 1 (Ctrl+Z)");
+      await rowMenu("feature-1");
+      await openEdit("Feature 1 (box)");
+      await page.fill("#edit-width", "99");
+      await press(page, "#feature-edit-cancel", tap);
+      await panelClosed();
+      assert.equal(await undoTitle(page), "Undo Edit Extrude 1 (Ctrl+Z)");
+      // The same sizes typed again: OK closes, nothing recorded.
+      await barMenu("feature-1");
+      await openEdit("Feature 1 (box)");
+      await press(page, "#feature-edit-ok", tap);
+      await panelClosed();
+      assert.equal(await undoTitle(page), "Undo Edit Extrude 1 (Ctrl+Z)");
+      // A sketch's menu has no Edit feature (Edit Sketch is 25a3).
+      await barMenu("sketch-2");
+      assert.equal(await page.$("#row-menu-edit"), null);
+      await page.keyboard.press("Escape");
+      await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed");
+
+      // 6. Deleting the item while its panel is open closes the panel.
+      await barMenu("feature-11");
+      await openEdit("Extrude 1");
+      await barMenu("feature-11");
+      await press(page, "#row-menu-delete", tap);
+      await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed");
+      await panelClosed();
+      assert.deepEqual(await bar(page), ["feature-1", "sketch-2", "|"]);
 
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();

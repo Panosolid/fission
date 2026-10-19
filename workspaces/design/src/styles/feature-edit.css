@@ -1,0 +1,15 @@
+/* The Edit feature panel (step 25a2, feature-edit-panel.ts): at the top of
+   the properties while an earlier feature's sizes are edited, with the
+   Extrude panel's accent edge so it reads as the mode you are in; controls
+   are 44 px tall at phone width, so they can be tapped. */
+.feature-edit { border-left: 3px solid #6cc4ff; padding: 4px 0 8px 10px; margin-bottom: 12px; }
+.feature-edit h2 { margin-top: 0; overflow-wrap: anywhere; }
+.feature-edit p { margin: 6px 0; }
+.feature-edit .feature-edit-row { display: block; margin: 6px 0; }
+.feature-edit .feature-edit-row input { width: 6em; }
+.feature-edit .feature-edit-note { color: #8b95a3; font-size: 0.9em; }
+.feature-edit .feature-edit-buttons { display: flex; gap: 6px; margin-top: 4px; }
+.feature-edit button:disabled { opacity: 0.45; cursor: default; }
+@media (max-width: 700px) {
+  .feature-edit button, .feature-edit input { min-height: 44px; }
+}

@@ -8,7 +8,7 @@
 // bottom line, right half circle, top line and left half circle; a
 // circle), corners and slot sizes moved with movePoint, curves deleted
 // with deleteCurve and drawn again between the same corners, extrudes,
-// presets and their sizes, and the timeline edits (step 24e2: deleteItem,
+// presets and their sizes (step 25a2: through Edit feature, `editFeature`), and the timeline edits (step 24e2: deleteItem,
 // reorderItem with its refusals, suppressItem, moveMarker). A circle's
 // radius (no edit yet) is written into the data as a later Panoshape would.
 // After every edit Design's
@@ -31,11 +31,11 @@ import { emptyProject, projectFromJson, projectToJson, type BodyView, type Kerne
 import {
   addSketch,
   BodyCache,
-  changePreset,
   deleteCurve,
   drawArc,
   drawCircle,
   drawLine,
+  editFeature,
   extrudeSketch,
   deleteItem,
   insertPreset,
@@ -51,7 +51,6 @@ import {
   reorderItem,
   resolveInScene,
   sceneHit,
-  setExtrudeDistance,
   settleKept,
   shownBodies,
   shapeOf,
@@ -259,7 +258,8 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
       }
       case "set-size": {
         const f = doc.timeline.features.find((x) => x.id === op.item)!;
-        if (isSketchExtrude(f)) return { state: { doc: setExtrudeDistance(doc, op.value, op.item), meta }, made: [] };
+        // Step 25a2: an item's size goes through Edit feature (`editFeature`), as the app's OK does.
+        if (isSketchExtrude(f)) return { state: { doc: editFeature(doc, op.item, { height: op.value }), meta }, made: [] };
         const m = meta[op.item];
         if (m !== undefined) {
           (m.shape as Record<string, unknown>)[op.key] = op.value;
@@ -278,11 +278,10 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
           }
           throw new Error(`harness: a polygon sketch has no size`);
         }
-        const { shape, sizes } = shapeOf(doc, f);
+        const { shape } = shapeOf(doc, f);
         if (shape === "sketch-extrude") throw new Error("harness: a preset read as an extrude");
         const key = op.key === "diameter" ? "width" : op.key;
-        const z = { width: 0, depth: 0, height: 0, ...sizes, [key]: op.value };
-        return { state: { doc: changePreset(doc, op.item, shape, z.width, shape === "box" ? z.depth : z.width, shape === "sphere" ? z.width : z.height), meta }, made: [] };
+        return { state: { doc: editFeature(doc, op.item, { [key]: op.value }), meta }, made: [] };
       }
       case "move-corner": {
         const pid = cornerPoint(meta, doc, op.sketch, op.corner);

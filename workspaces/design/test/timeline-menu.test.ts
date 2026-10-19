@@ -49,7 +49,7 @@ type Menu = typeof menu;
 function host(m: Menu, start: DesignDocument, closed = true) {
   let doc = start;
   const history = createHistory({ capture: () => JSON.stringify(doc), restore: (s) => (doc = JSON.parse(s)) });
-  const log = { records: [] as string[], refused: [] as string[], asked: [] as DeleteQuestion[], confirm: null as null | (() => void) };
+  const log = { records: [] as string[], refused: [] as string[], asked: [] as DeleteQuestion[], opened: [] as string[], confirm: null as null | (() => void) };
   const h = {
     kernel: kernel(closed),
     current: () => doc,
@@ -63,6 +63,7 @@ function host(m: Menu, start: DesignDocument, closed = true) {
       log.confirm = go;
     },
     refuse: (message: string) => void log.refused.push(message),
+    edit: (id: string) => void log.opened.push(id),
   };
   return { h, log, history, doc: () => doc, set: (d: DesignDocument) => (doc = d), run: (id: string, action: Parameters<Menu["chooseEntry"]>[2], editing: string | null = null) => m.chooseEntry(h, id, action, editing) };
 }
@@ -75,14 +76,17 @@ test("hand-worked: the menu of each item of the box, Sketch 1 and Extrude 1, wit
   // Box: the marker after it rolls back Sketch 1 and Extrude 1 and leaves
   // the box, a body; suppressing the box leaves Extrude 1, a body.
   assert.deepEqual(menu.menuEntries(d, "feature-1"), [
+    { action: "edit", label: "Edit feature", off: null },
     { action: "marker", label: "Move the marker here", off: null },
     { action: "suppress", label: "Suppress", off: null },
     { action: "delete", label: "Delete", off: null },
   ]);
   // Sketch 1 suppressed: Extrude 1 fails (its sketch is suppressed), the box still builds.
   assert.equal(menu.menuEntries(d, "sketch-2")[1].off, null);
+  // A sketch has no Edit feature (its sketch is reopened with Edit Sketch, 25a3).
+  assert.deepEqual(menu.menuEntries(d, "sketch-2").map((e) => e.action), ["marker", "suppress", "delete"]);
   // Extrude 1: the marker is already just after it.
-  assert.equal(menu.menuEntries(d, "feature-11")[0].off, "The marker is already here");
+  assert.equal(menu.menuEntries(d, "feature-11")[1].off, "The marker is already here");
 });
 
 test("hand-worked (24f4): with the box suppressed, the edits that leave no body are on, and each records one step whose design has no body", async () => {
@@ -109,7 +113,7 @@ test("hand-worked (24f4): with the box suppressed, the edits that leave no body 
     assert.equal(partFeature(t.doc())?.id, "feature-11");
   }
   // Unsuppressing the box brings a second body: on, as always.
-  assert.deepEqual(menu.menuEntries(d, "feature-1")[1], { action: "unsuppress", label: "Unsuppress", off: null });
+  assert.deepEqual(menu.menuEntries(d, "feature-1")[2], { action: "unsuppress", label: "Unsuppress", off: null });
 });
 
 /** The designs every entry is tried on: no marker, the marker after Sketch 1 or the box or at the start (nothing built, 24f4), the box suppressed, Sketch 1 suppressed, both solids suppressed (nothing built), an unused Sketch 2 last, and only sketches left. */
@@ -124,7 +128,7 @@ const DESIGNS: [string, () => DesignDocument][] = [
   ["unused Sketch 2 last", withSketch2],
   ["only sketches left", () => deleteItem(deleteItem(withSketch2(), "feature-11"), "feature-1")],
 ];
-const ACTIONS = ["marker", "suppress", "unsuppress", "delete"] as const;
+const ACTIONS = ["edit", "marker", "suppress", "unsuppress", "delete"] as const;
 
 /** Runs every entry of every item of every design through `m`, confirming every ask; the first broken rule, or null. */
 async function everyEntry(m: Menu): Promise<string | null> {
@@ -141,7 +145,12 @@ async function everyEntry(m: Menu): Promise<string | null> {
           t.log.confirm?.();
           const after = json(t.doc());
           if (!entry) {
-            if (t.log.records.length > 0) return `${where}: recorded an entry the menu doesn't offer`;
+            if (t.log.records.length > 0 || t.log.opened.length > 0) return `${where}: did an entry the menu doesn't offer`;
+            continue;
+          }
+          // Edit feature (25a2) only opens the item's sizes: nothing recorded, nothing refused, the document as it was.
+          if (action === "edit") {
+            if (t.log.opened.join() !== id || t.log.records.length > 0 || t.log.refused.length > 0 || after !== before) return `${where}: Edit feature opened ${t.log.opened.join() || "nothing"} and recorded ${t.log.records.length}`;
             continue;
           }
           // An entry is off only for the bar's own reasons (24f2's itemMenu): never for leaving no body (24f4).

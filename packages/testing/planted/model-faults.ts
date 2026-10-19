@@ -121,13 +121,12 @@ export const PLANTS: Record<ModelFault, Plant> = {
     caught: "a broken reference resolved to another face",
   },
   "edit-leaks": {
-    what: "setExtrudeDistance also changes the first extrude's distance",
+    what: "Edit feature (editFeature, step 25a2) also gives the first extrude the distance typed for another",
     edits: [
       {
-        file: "workspaces/design/src/extrude.ts",
-        find: "features: doc.timeline.features.map((f) => (f === old ? feature : f)) } };",
-        replace:
-          "features: doc.timeline.features.map((f) => (f === old ? feature : f === doc.timeline.features.find(isSketchExtrude) ? { ...f, intent: { ...f.intent, parameters: { ...f.intent.parameters, distance } } } : f)) } };",
+        file: "workspaces/design/src/feature-edit.ts",
+        find: '  if (now.shape === "sketch-extrude") return setExtrudeDistance(doc, sizes.height!, id);',
+        replace: '  if (now.shape === "sketch-extrude") return setExtrudeDistance(setExtrudeDistance(doc, sizes.height!, doc.timeline.features.find(isSketchExtrude)!.id), sizes.height!, id);',
       },
     ],
     run: ["timeline"],
