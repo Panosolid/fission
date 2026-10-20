@@ -179,6 +179,8 @@ async function addSquare(page, tap, layout, live = false) {
 
 let failed = 0;
 async function check(name, fn) {
+  // E2E_ONLY runs just the checks whose names hold it (a quicker re-run of one part; CI runs them all).
+  if (process.env.E2E_ONLY && !name.includes(process.env.E2E_ONLY)) return;
   try {
     await fn();
     console.log(`ok - ${name}`);
@@ -1204,6 +1206,90 @@ try {
       if (width === 1280) assert.deepEqual(await probe(), { square: true, added: false });
       await press(page, "#redo", tap);
       await until(page, (v) => document.querySelector("#volume")?.textContent === v && document.querySelector("#kept-warning").hidden, twice, "redone");
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+  }
+
+  // 25a4: a selected face follows its name through Edit feature on an earlier item, Undo and Redo; the highlight is
+  // checked on the canvas where the face is now (selected and not, at the same point), never read from the names.
+  for (const { width, tap } of [{ width: 1280, tap: false }, { width: 375, tap: true }]) {
+    await check(`References follow an edit (25a4): the box's top, picked, stays selected and lit at its new height through Edit feature, Undo and Redo; the front stays unlit (${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      await addSquare(page, tap, LAYOUTS[width]);
+      const selection = () => page.evaluate(() => document.body.dataset.selection ?? "");
+      const rows = () => page.$$eval("#selection-list li", (lis) => lis.map((li) => li.textContent));
+      const note = () => page.evaluate(() => (document.getElementById("selection-note").hidden ? "" : document.getElementById("selection-note").textContent));
+      /** A click (or tap) on model point `p` where the app's camera puts it, after checking only the canvas is there. */
+      const clickAt = async (p) => {
+        const cam = await stillCamera(page);
+        const box = await page.locator("#viewport canvas").boundingBox();
+        const [fx, fy] = onCanvas(cam, box, p);
+        const [x, y] = [box.x + fx * box.width, box.y + fy * box.height];
+        assert.equal(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.tagName, [x, y]), "CANVAS", `${p} is under something else`);
+        if (tap) await page.touchscreen.tap(x, y);
+        else await page.mouse.click(x, y);
+      };
+      /** The canvas's colour at each point, with the box's top selected and then with nothing selected (Escape), and the top picked again. */
+      const litAndNot = async (points) => {
+        // The pointer off the canvas, so no hover tint is mistaken for the selection's.
+        if (!tap) await page.mouse.move(1, 1);
+        await stillCamera(page);
+        const lit = (await colours(page, points)).slice(1);
+        await page.keyboard.press("Escape");
+        await until(page, () => !document.body.dataset.selection, null, "nothing selected");
+        const plain = (await colours(page, points)).slice(1);
+        return { lit, plain };
+      };
+      const top = (z) => [20, 15, z]; // the middle of the 40 × 30 box's top
+      const front = (z) => [20, 0, z / 2]; // the middle of its front (y = 0), half way up
+      const pickTop = async (z) => {
+        await clickAt(top(z));
+        await until(page, () => document.body.dataset.selection === "face:feature-1/top", null, `the box's top picked at z = ${z} (got ${await selection(page)})`);
+      };
+      const checkLit = async (z, when) => {
+        const { lit, plain } = await litAndNot([top(z), front(z)]);
+        assert.ok(differs(lit[0], plain[0]), `${when}: the top at z = ${z} is lit (${lit[0]} against ${plain[0]})`);
+        assert.ok(!differs(lit[1], plain[1]), `${when}: the front is not lit (${lit[1]} against ${plain[1]})`);
+        await pickTop(z);
+      };
+
+      // 1. The box's top (40 × 30 × 20) picked by a click at its middle: one row, its name.
+      await pickTop(20);
+      assert.deepEqual(await rows(), ["Top face · plane face:feature-1/top"]);
+      await checkLit(20, "picked");
+
+      // 2. Edit feature on the box from the bar: 35 high. The selection is the same name, no note, and the lit face is the top at z = 35.
+      const item = page.locator('#timeline [data-item="feature-1"]');
+      await item.scrollIntoViewIfNeeded();
+      if (tap) {
+        if (!(await page.isVisible('#timeline [data-more="feature-1"]'))) await item.tap();
+        await page.tap('#timeline [data-more="feature-1"]');
+      } else await item.click({ button: "right" });
+      await until(page, () => document.getElementById("row-menu").open, null, "the box's menu");
+      await press(page, "#row-menu-edit", tap);
+      await until(page, () => document.getElementById("feature-edit")?.hidden === false, null, "the Edit feature panel");
+      await page.fill("#edit-height", "35");
+      await press(page, "#feature-edit-ok", tap);
+      await undoIs(page, "Edit Feature 1 (box)");
+      await until(page, () => document.querySelector("#viewport").dataset.rebuilding !== "true", null, "rebuilt");
+      await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
+      assert.equal(await selection(page), "face:feature-1/top");
+      assert.deepEqual(await rows(), ["Top face · plane face:feature-1/top"]);
+      assert.equal(await note(), "");
+      if (shots) await page.screenshot({ path: `${shots}/refind-edited-${width}.png` });
+      await checkLit(35, "after Edit feature");
+
+      // 3. Undo: 20 high, the top still selected and lit there; Redo: 35 again.
+      await press(page, "#undo", tap);
+      await until(page, () => document.getElementById("undo").title !== "Undo Edit Feature 1 (box) (Ctrl+Z)", null, "undone");
+      await until(page, () => document.body.dataset.selection === "face:feature-1/top", null, "still the top after Undo");
+      await checkLit(20, "after Undo");
+      await press(page, "#redo", tap);
+      await undoIs(page, "Edit Feature 1 (box)");
+      await until(page, () => document.body.dataset.selection === "face:feature-1/top", null, "still the top after Redo");
+      await checkLit(35, "after Redo");
+      assert.equal(await note(), "");
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();
     });

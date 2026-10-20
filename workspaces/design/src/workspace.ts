@@ -598,12 +598,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       panel.showError(failure ?? "");
       // Faces and edges the edit took off the body leave the selection, with a
-      // note (17e); the rest follow their names, however the kernel numbers them now.
-      const { kept, dropped } = survivors(ctx.selection.items, scene, doc.profiles.map((p) => p.id));
+      // note (17e); so do ones whose name now names two (25a4: never a guess);
+      // the rest follow their names, however the kernel numbers them now.
+      const { kept, dropped, shared } = survivors(ctx.selection.items, scene, doc.profiles.map((p) => p.id));
       lastScene = scene;
       const part = partFeature(doc);
       partShown = scene.bodies.find((b) => b.feature === part?.id) ?? (failure === undefined ? null : partShown);
-      note = droppedNote(dropped);
+      note = droppedNote(dropped, shared);
       if (dropped.length > 0) {
         settling = true;
         ctx.selection.set(kept);

@@ -17,209 +17,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rmSync, readFileSync, writeFileSync } from "node:fs";
-import { ActionRegistry, ChangeNotes, createHistory, createSelection, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, type DisplayMesh, type KernelCalls, type MountedWorkspace, type SharedViewport, type SketchPointer, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
-import { addSketch, deleteCurve, designWorkspace, drawRectangle, extrudeSketch, insertPreset, movePoint, partDocument, settleKept, type DesignDocument } from "@fission/design";
-import { nodeKernel } from "../src/node-kernel.ts";
-
-const kernel = nodeKernel();
-const { Window } = await import("happy-dom");
-
-/** The volume inside a closed mesh, from its triangles: Σ a · (b × c) / 6 (each body's triangles face outward, so bodies side by side add up). */
-export function meshVolume(mesh: DisplayMesh): number {
-  const p = mesh.positions;
-  const at = (i: number) => [p[3 * i], p[3 * i + 1], p[3 * i + 2]];
-  let six = 0;
-  for (let t = 0; t < mesh.indices.length; t += 3) {
-    const [a, b, c] = [at(mesh.indices[t]), at(mesh.indices[t + 1]), at(mesh.indices[t + 2])];
-    six += a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
-  }
-  return six / 6;
-}
-
-/** Equal to a millionth: the kernel's meshes of flat-sided bodies are exact up to rounding. */
-const close = (got: number, want: number) => Math.abs(got - want) <= 1e-6 * Math.max(1, Math.abs(want));
-
-/**
- * The app around Design, as the shell runs it: slots in a real DOM, one
- * undo history over the project as JSON whose restore mounts the
- * workspace afresh, a viewport that keeps the last mesh, and a kernel that
- * counts its body_build calls. `plugin` is Design, or a planted copy.
- */
-/** The app last made, put away before the next is made: a test that failed part way leaves it mounted, and Design keeps the open sketch in its module. */
-let previous: { close(): Promise<boolean> } | null = null;
-
-async function app(start: DesignDocument, plugin: WorkspacePlugin = designWorkspace) {
-  await previous?.close();
-  const window = new Window({ width: 1280, height: 800 });
-  const document = window.document as unknown as Document;
-  const slot = () => {
-    const el = document.createElement("div") as HTMLElement;
-    document.body.append(el);
-    return el;
-  };
-  let mesh: DisplayMesh | null = null;
-  let builds = 0;
-  const counted: KernelCalls = {
-    call: ((op: string, ...args: unknown[]) => {
-      if (op === "body_build") builds++;
-      return (kernel.call as (op: string, ...a: unknown[]) => Promise<unknown>)(op, ...args);
-    }) as KernelCalls["call"],
-  };
-  const element = slot();
-  const viewport: SharedViewport = {
-    element,
-    showBody: (m) => void (mesh = m),
-    bodyFraming: () => ({ centre: [0, 0, 0], radius: 0 }),
-    fit: () => null,
-    setView: () => null,
-    fitSelection: () => null,
-    lookAt: () => null,
-    setOverlay() {},
-    clearOverlay() {},
-    showSelection() {},
-    onPick: null,
-    onSketchPointer: null,
-    showImage() {},
-    clearImage() {},
-    showSketches() {},
-    showPlanes() {},
-  };
-  let view: MountedWorkspace;
-  let mounting = false;
-  const mount = () => {
-    mounting = true;
-    try {
-      view = plugin.mount(ctx);
-    } finally {
-      mounting = false;
-    }
-  };
-  const ctx: WorkspaceContext = {
-    project: { ...emptyProject("Edit Sketch"), workspaces: { design: start } },
-    projectChanged(label = "Edit", mergeKey) {
-      if (!mounting) history.record(label, mergeKey);
-    },
-    kernel: counted,
-    selection: createSelection(),
-    history: undefined as never,
-    graph: new DependencyGraph(),
-    toolbar: slot(),
-    browser: slot(),
-    properties: slot(),
-    timeline: slot(),
-    viewport,
-    representations: new RepresentationRegistry(),
-    actions: new ActionRegistry(),
-    downstream: new DownstreamRegistry(),
-    changeNotes: new ChangeNotes(),
-    openWorkspace() {},
-    workspaceTitle: (id) => id,
-  };
-  // The shell's restore: the snapshot read like an opened file, the workspace mounted afresh on it.
-  const history = createHistory({
-    capture: () => projectToJson(ctx.project),
-    restore(text) {
-      ctx.project = projectFromJson(text, [plugin]);
-      view.unmount();
-      mount();
-    },
-  });
-  ctx.history = history;
-  const startBodies = (await kernel.call("body_count")) as number;
-  mount();
-  const $ = (sel: string) => document.querySelector(sel) as HTMLElement | null;
-  /** Every reply the kernel owes, and every rebuild, finished. */
-  const settle = async () => {
-    for (let i = 0; i < 40 || element.dataset.rebuilding === "true"; i++) await new Promise((r) => setImmediate(r));
-  };
-  await settle();
-  const a = {
-    history,
-    window,
-    $,
-    settle,
-    doc: () => ctx.project.workspaces.design as DesignDocument,
-    volume: () => (mesh ? meshVolume(mesh) : 0),
-    builds: () => builds,
-    /** The sketch bar's Finish Sketch is on screen: a sketch is open. */
-    sketching: () => $("#finish-sketch") !== null && $("#finish-sketch")!.closest("[hidden]") === null,
-    warning: () => ($("#kept-warning")!.hidden ? null : $("#kept-warning")!.textContent),
-    error: () => $("#error")!.textContent,
-    /** Item `id`'s menu by a right-click on its bar item, then an entry. */
-    async menu(id: string, entry: string) {
-      $(`[data-item="${id}"]`)!.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 300, clientY: 780 }) as unknown as Event);
-      const button = $(`#row-menu-${entry}`) as HTMLButtonElement;
-      assert.ok(button, `the menu has ${entry}`);
-      // An off entry is greyed (disabled): a click on it does nothing, as in a browser.
-      if (button.disabled) {
-        $("#row-menu")!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }) as unknown as Event);
-        (button.closest("dialog") as HTMLDialogElement | null)?.close();
-        return button.title;
-      }
-      button.click();
-      await settle();
-      return null;
-    },
-    /** A double-click on bar item `id` (two clicks 100 ms apart, the bar drawn again between them as a pick does). */
-    async doubleClick(id: string) {
-      for (const t of [1000, 1100]) {
-        const e = new window.MouseEvent("click", { bubbles: true, cancelable: true });
-        Object.defineProperty(e, "timeStamp", { value: t + doubleClicks * 10000 });
-        $(`[data-item="${id}"]`)!.dispatchEvent(e as unknown as Event);
-      }
-      doubleClicks++;
-      await settle();
-    },
-    /** A double-click on the browser's row `node` (its own dblclick event: rows are not redrawn by a click). */
-    async rowDoubleClick(node: string) {
-      const row = [...document.querySelectorAll<HTMLElement>(".tree-row")].find((r) => r.dataset.node === node);
-      assert.ok(row, `a browser row ${node}`);
-      row.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }) as unknown as Event);
-      await settle();
-    },
-    /** A click on the view at sketch point (x, y), a pixel 0.1 mm wide (snaps reach 1 mm). */
-    async click(x: number, y: number) {
-      const pointer: SketchPointer = { kind: "click", at: [x, y], pixel: 0.1 };
-      viewport.onSketchPointer?.(pointer);
-      await settle();
-    },
-    async key(id: string) {
-      view.shortcut?.(id);
-      await settle();
-    },
-    /** Another workspace shown, then Design again (X7: asleep, then woken). */
-    async away() {
-      view.sleep?.();
-      await settle();
-      view.wake?.();
-      await settle();
-    },
-    async finish() {
-      $("#finish-sketch")!.click();
-      await settle();
-    },
-    async undo() {
-      const label = history.undo();
-      await settle();
-      return label;
-    },
-    async redo() {
-      const label = history.redo();
-      await settle();
-      return label;
-    },
-    /** Puts Design away (as a page closed) and says whether every body it kept was freed. */
-    async close() {
-      if (previous === a) previous = null;
-      view.unmount();
-      await settle();
-      return ((await kernel.call("body_count")) as number) === startBodies;
-    },
-  };
-  let doubleClicks = 0;
-  previous = a;
-  return a;
-}
+import { emptyProject, projectFromJson, projectToJson, type WorkspacePlugin } from "@fission/core";
+import { addSketch, deleteCurve, designWorkspace, drawRectangle, extrudeSketch, insertPreset, movePoint, partDocument, SAME_LINE, settleKept, type DesignDocument } from "@fission/design";
+import { app, close, kernel } from "./design-app.ts";
 
 /**
  * A box (feature-1, 10 × 10 × 10 = 1000 mm³), then per entry of `sketches`
@@ -332,6 +132,33 @@ test("hand-worked: a stray line breaks a closed 40 × 30 outline through Edit Sk
   assert.equal(a.warning(), null);
   await a.finish();
   assert.match(a.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  assert.ok(await a.close());
+});
+
+test("regression (25a5 hunt, seed 18 × 120 steps): a stray line drawn again on the one already there draws nothing and says why, so one Undo takes the stray out and the outline closes", async () => {
+  // Sketch 1: a closed 40 × 30 rectangle extruded by 20 = 24000 mm³. A stray from (10, 60) to (15, 60), then a second click pair
+  // from (10.5, 60) to (15, 60): the first click snaps to the stray's end (10, 60), 0.5 mm away, within the 1 mm reach (10 px of
+  // 0.1 mm), so the second line would join the same two points as the first: SAME_LINE, nothing drawn. The session model counted two
+  // strays here, so its one Undo left one stray and blamed the wrong extrude.
+  const { doc, ids } = await design([{ width: 40, distance: 20 }]);
+  const a = await app(doc);
+  await a.doubleClick(ids[0].sketch);
+  await a.click(10, 60);
+  await a.click(15, 60);
+  await a.key("clear-selection");
+  const lines = a.doc().sketches[0].curves.length;
+  await a.click(10.5, 60);
+  await a.click(15, 60);
+  assert.equal(a.doc().sketches[0].curves.length, lines, "the second line is not drawn");
+  assert.equal(a.$("#sketch-grid-error")!.textContent, SAME_LINE);
+  assert.equal(a.history.undoLabel(), "Draw line");
+  await a.key("clear-selection");
+  await a.finish();
+  assert.match(a.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  // One Undo takes the one stray out: the rectangle closes again, no warning, 24000 mm³ from the sketch itself.
+  await a.undo();
+  assert.equal(a.warning(), null);
+  assert.ok(close(a.volume(), BOX + 24000 + LAST));
   assert.ok(await a.close());
 });
 
@@ -479,7 +306,9 @@ function randomSteps(seed: number, n: number, sketches: number): Step[] {
     const u = r();
     if (u < 0.2) steps.push({ do: "open", i: Math.floor(r() * sketches), how: (["menu", "bar", "row"] as const)[Math.floor(r() * 3)] });
     else if (u < 0.35) steps.push({ do: "close" });
-    else if (u < 0.55) steps.push({ do: "stray", x: Math.floor(r() * 35), y: 50 + 5 * Math.floor(r() * 10), len: 3 + Math.floor(r() * 5) });
+    // Each stray on a row of its own (5 mm apart, beyond the 1 mm snap reach): the model counts strays, so one must never snap onto
+    // another's ends, where a second line on the same two points draws nothing (SAME_LINE; the hand-worked regression above, 25a5).
+    else if (u < 0.55) steps.push({ do: "stray", x: Math.floor(r() * 35), y: 50 + 5 * k, len: 3 + Math.floor(r() * 5) });
     else if (u < 0.7) steps.push({ do: "finish" });
     else if (u < 0.82) steps.push({ do: "undo" });
     else if (u < 0.9) steps.push({ do: "redo" });
@@ -647,7 +476,12 @@ const STEPS = Number(process.env.FISSION_SESSION_STEPS ?? 80);
 
 test(`seeded: ${SEEDS} sessions × ${STEPS} steps of Edit Sketch, drawing, Finish, Undo and Redo match the model after every step, reaching every case`, async () => {
   const reached = new Set<string>();
-  for (let seed = 1; seed <= SEEDS; seed++) assert.equal(await runSession(seed, randomSteps(seed, STEPS, randomSpecs(seed).specs.length), designWorkspace, reached), null);
+  // FISSION_SEED replays one session (as the failure message names it) and skips the reach check.
+  const only = process.env.FISSION_SEED ? Number(process.env.FISSION_SEED) : null;
+  for (let seed = only ?? 1; seed <= (only ?? SEEDS); seed++) assert.equal(await runSession(seed, randomSteps(seed, STEPS, randomSpecs(seed).specs.length), designWorkspace, reached), null);
+  if (only !== null) return;
+  // The 25a5 hunt's failing session, kept (it failed before strays got rows of their own).
+  assert.equal(await runSession(18, randomSteps(18, 120, randomSpecs(18).specs.length), designWorkspace, reached), null);
   const every = ["open by menu", "open by bar", "open by row", "refused: already open", "switch after drawing", "switch with nothing drawn", "closed: builds", "closed: strays still there", "stray: breaks a closing outline", "stray: on an open outline", "finish after drawing", "finish with nothing drawn", "undo inside a sketch", "undo outside a sketch", "redo inside a sketch", "redo outside a sketch"];
   assert.deepEqual(every.filter((c) => !reached.has(c)), [], `reached: ${[...reached].join(", ")}`);
 });

@@ -50,7 +50,7 @@ test("open returns an equal project (self-consistency), read by each workspace",
   assert.deepEqual(back, { ...p, workspaces: { design: { version: 1, read: true } } });
 });
 
-test("what is stored is exactly the .fission.json file text", async () => {
+test("what is stored is exactly the .panosolid.json file text", async () => {
   const kv = memoryKeyValue();
   const p = part("Box");
   await projectStore(kv, [design]).save("box", p);
@@ -59,7 +59,7 @@ test("what is stored is exactly the .fission.json file text", async () => {
 
 test("a stored version-1 project migrates on open, like an opened file", async () => {
   const kv = memoryKeyValue();
-  // Written by hand as an old Panoshape would have stored it: version 1 had no "links".
+  // Written by hand as an old Panosolid would have stored it: version 1 had no "links".
   kv.entries.set("project/old", `{"formatVersion": 1, "name": "Old", "units": {"length": "mm"}, "materials": [], "workspaces": {"design": {"version": 1}}}`);
   kv.entries.set("summary/old", `{"name": "Old", "modified": "2025-01-01T00:00:00.000Z"}`);
   const p = await projectStore(kv, [design]).open("old");
@@ -96,9 +96,9 @@ test("a stored corrupt project is refused with its reason, not thrown as a crash
     return store.open("p");
   };
   // Each way of breaking a valid stored project gives its own message.
-  await assert.rejects(corrupt(good.slice(0, good.length / 2)), /^Error: can't open the stored project "p": not a Panoshape project: the file is not valid JSON \(/);
-  await assert.rejects(corrupt(good.replace('"formatVersion": 2', '"formatVersion": 3')), /^Error: can't open the stored project "p": this project was saved by a newer Panoshape \(format 3/);
-  await assert.rejects(corrupt(good.replace('"workspaces"', '"elsewhere"')), /^Error: can't open the stored project "p": not a Panoshape project: "workspaces" is missing$/);
+  await assert.rejects(corrupt(good.slice(0, good.length / 2)), /^Error: can't open the stored project "p": not a Panosolid project: the file is not valid JSON \(/);
+  await assert.rejects(corrupt(good.replace('"formatVersion": 2', '"formatVersion": 3')), /^Error: can't open the stored project "p": this project was saved by a newer Panosolid \(format 3/);
+  await assert.rejects(corrupt(good.replace('"workspaces"', '"elsewhere"')), /^Error: can't open the stored project "p": not a Panosolid project: "workspaces" is missing$/);
   await assert.rejects(corrupt(good.replace('"version": 1', '"versio": 1')), /^Error: can't open the stored project "p": can't open the design workspace's data: no version$/);
   // And the unbroken text still opens, so the breaks above are what was refused.
   kv.entries.set("project/p", good);

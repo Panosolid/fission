@@ -19,7 +19,8 @@
 //   on the subject alone, without the model);
 // - every face reference held earlier resolves to the face with that name
 //   when the model still has it, and to nothing when it doesn't, never to
-//   another face;
+//   another face, nor to "two or more faces" (step 25a4: the model's names
+//   are unique, so such an answer is a naming bug);
 // - saving and opening changes neither the rebuild nor the saved text;
 // - when the subject counts the bodies its rebuild builds (`builds`, step
 //   24e), the first rebuild after each step builds no fewer than the bodies
@@ -90,8 +91,12 @@ export interface TimelineSubject {
   save(): Maybe<string>;
   /** Opens saved text, with a fresh undo history, as opening a file does; a document with nothing built too (Design from 24f4). */
   open(text: string): Maybe<void>;
-  /** The name of the face this name resolves to now, or null when it resolves to none. */
-  resolve(name: FaceName): Maybe<FaceName | null>;
+  /**
+   * The name of the face this name resolves to now, null when it resolves
+   * to none, or "shared" when the subject finds two or more faces with it
+   * and so resolves it to none of them (step 25a4).
+   */
+  resolve(name: FaceName): Maybe<FaceName | null | "shared">;
   /**
    * How many bodies `rebuild` has built so far (step 24e), when it keeps
    * them between rebuilds; a rebuild from scratch doesn't count. Leave it
@@ -532,8 +537,10 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
       const there = resolveFace(expected, ref) !== null;
       const name = nameTo(ref, to);
       const found = await subject.resolve(name);
-      if (there && (found === null || !sameName(found, name))) fail("a reference was lost", `${faceKey(name)} resolved to ${found ? faceKey(found) : "nothing"}`);
-      if (!there && found !== null) fail("a broken reference resolved to another face", `${faceKey(name)} resolved to ${faceKey(found)}`);
+      // The model's names are unique (checked above), so a name the subject finds on two faces is always wrong here.
+      if (found === "shared") fail("a reference resolved to more than one face", `${faceKey(name)} matched two or more faces, model ${there ? "one" : "none"}`);
+      else if (there && (found === null || !sameName(found, name))) fail("a reference was lost", `${faceKey(name)} resolved to ${found ? faceKey(found) : "nothing"}`);
+      else if (!there && found !== null) fail("a broken reference resolved to another face", `${faceKey(name)} resolved to ${faceKey(found)}`);
       const owner = expected.results[ref.feature];
       count(there ? "ref:kept" : owner?.status === "built" ? "ref:missing-on-built-feature" : "ref:missing");
     }

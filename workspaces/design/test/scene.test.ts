@@ -97,9 +97,9 @@ test("a rebuild drops a face only from the body it was on", () => {
   const front = designReference("face", box.names, 2)!;
   const cylTop = sceneReference("face", scene, 7)!;
   const after = joinBodies([shown("feature-1", CYLINDER_VIEW), cylinder]);
-  assert.deepEqual(survivors([front, cylTop], after), { kept: [cylTop], dropped: [front] });
+  assert.deepEqual(survivors([front, cylTop], after), { kept: [cylTop], dropped: [front], shared: [] });
   // With feature-4's body gone from the scene (suppressed, say), its face is left alone, not dropped.
-  assert.deepEqual(survivors([cylTop], joinBodies([box])), { kept: [cylTop], dropped: [] });
+  assert.deepEqual(survivors([cylTop], joinBodies([box])), { kept: [cylTop], dropped: [], shared: [] });
 });
 
 test("a display mesh that disagrees with its body is refused, each way", () => {

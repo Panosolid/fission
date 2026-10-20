@@ -5,7 +5,7 @@
 // going, autosave writes the latest state here (`leaving()` in
 // autosave.ts), in the browser's localStorage, which is written before the
 // call returns. Each kept project has its own entry, the exact text of its
-// .fission.json file. An entry is removed once the store holds that state
+// .panosolid.json file. An entry is removed once the store holds that state
 // or a newer one; one still here on the next visit holds the newest state
 // of its project, and `recoverUnsaved` puts it in the store before the app
 // lists or opens anything.

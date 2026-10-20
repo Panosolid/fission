@@ -803,7 +803,7 @@ function placement(): GuideScene {
   );
 }
 
-/** Panoshape's tolerance in nanometres (kernel/src/tolerance.rs: LINEAR = 1e-5 mm). */
+/** Panosolid's tolerance in nanometres (kernel/src/tolerance.rs: LINEAR = 1e-5 mm). */
 export const TOLERANCE_NM = 10;
 /** The tolerance chapter's gap at scroll p, in nm: 30 closing to 0. */
 export function gapNm(p: number): number {

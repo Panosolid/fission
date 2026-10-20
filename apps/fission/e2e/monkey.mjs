@@ -10,7 +10,10 @@
 // a reload. Then it checks, after every step:
 //   - no uncaught error and nothing written to the console as an error;
 //   - Save gives a file, and its Design data keeps its rules (ids unique and
-//     never reused, the marker on an item, nothing built from a later item);
+//     never reused, the marker on an item, nothing built from a later item),
+//     and every id new since the last step comes from the counter, unless
+//     the document is one seen before (Undo and Redo bring old ids back);
+//   - an Edit feature OK changed that item's sizes and nothing else;
 //   - the timeline bar and the Bodies group show what that file says, by a
 //     model written apart from Design's own (`expectedView`, monkey-core.mjs);
 //   - the kernel holds no more bodies than the Bodies group lists (a leak);
@@ -31,13 +34,15 @@
 // Environment: FISSION_SEED (one seed) or MONKEY_SEEDS ("1-40" or "3,7"),
 // default 1-3; MONKEY_STEPS, default 60; MONKEY_REPLAY=<file> replays one
 // action list; MONKEY_SHRINK=0 skips shrinking; MONKEY_KNOWN=0 fails on the
-// known bugs too (KNOWN_BUGS); MONKEY_PORT (default 4210);
+// known bugs too (KNOWN_BUGS); MONKEY_FOCUS=edit picks item menus and
+// double-clicks four times as often (hunts on editing early items, 25a5);
+// MONKEY_PORT (default 4210);
 // MONKEY_OUT serves another build folder than dist (the plants build there).
 // Run after `npm run build`: node e2e/monkey.mjs
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { preview } from "vite";
 import { launch } from "./browser.mjs";
-import { documentRules, editFile, expectedView, kernelVerdict, modelVolume, nextAction, rng, shrink, signature } from "./monkey-core.mjs";
+import { documentRules, editFile, editLeaks, expectedView, kernelVerdict, modelVolume, nextAction, reusedIds, rng, shrink, signature } from "./monkey-core.mjs";
 
 const PORT = Number(process.env.MONKEY_PORT || 4210);
 const STEPS = Number(process.env.MONKEY_STEPS || 60);
@@ -82,16 +87,16 @@ async function open(browser) {
   page.on("dialog", (d) => d.dismiss().catch(() => {}));
   await page.goto(url);
   await page.waitForSelector('#timeline li[data-item]', { timeout: 20000 });
-  return { context, page, errors, saved: null, savedName: "Untitled.fission.json", known: new Set() };
+  return { context, page, errors, saved: null, savedName: "Untitled.panosolid.json", known: new Set(), design: null, seen: new Set() };
 }
 
 /** In the page: what can be clicked, typed into and right-clicked now, each with a selector a replay can find again. */
 function offered() {
   // The modelling flow (sketch, draw, extrude, delete, start fresh) is picked more often than the other workspaces' tabs.
-  const HOT = '#create-sketch, [id^="sketch-"], [id^="extrude"], [id^="start-fresh"], [id^="delete-ask"], [id^="row-menu"], #finish-sketch, [data-workspace="design"], #extrude-panel button, #sketch-panel button';
+  const HOT = '#create-sketch, [id^="sketch-"], [id^="extrude"], [id^="start-fresh"], [id^="delete-ask"], [id^="row-menu"], #finish-sketch, [data-workspace="design"], #extrude-panel button, #sketch-panel button, #feature-edit button';
   const COLD = '[data-workspace]:not([data-workspace="design"]), #community, #split-toggle';
-  // The controls of the mode the app is in (a sketch, the Extrude panel, a dialog, a menu): a user mostly works there.
-  const LOCAL = "#sketch-panel, .sketchbar, #typed-entry, #extrude-panel, dialog[open], #row-menu";
+  // The controls of the mode the app is in (a sketch, the Extrude panel, the Edit feature panel (25a5), a dialog, a menu): a user mostly works there.
+  const LOCAL = "#sketch-panel, .sketchbar, #typed-entry, #extrude-panel, dialog[open], #row-menu, #feature-edit";
   const KEYS = ["workspace", "op", "shape", "node", "nav", "view", "item", "field", "kind"];
   const sel = (e) => {
     if (e.id) return `#${CSS.escape(e.id)}`;
@@ -213,6 +218,19 @@ async function check(s) {
   if (!design) fail("save", "the saved file has no Design data");
   const broken = documentRules(design);
   if (broken.length) fail("document rules", broken.join("; "));
+  // 25a5: a new id comes from the counter, unless the document is one seen before (Undo, Redo, a fresh start).
+  const key = canonical(JSON.stringify(design));
+  if (s.design && !s.seen.has(key)) {
+    const reused = reusedIds(s.design, design);
+    if (reused.length) fail("ids come from the counter", reused.join("; "));
+    // A new document whose last step is an Edit feature OK ("Undo Edit Extrude 1"): that item's sizes changed and nothing else.
+    if (/^Undo Edit /.test(view.undo ?? "")) {
+      const leaks = editLeaks(s.design, design);
+      if (leaks.length) fail("an edit changes only its item", `${view.undo}: ${leaks.join("; ")}`);
+    }
+  }
+  s.seen.add(key);
+  s.design = design;
   if (view.design) {
     const failed = new Set(view.failed);
     const want = expectedView(design, failed);
@@ -457,7 +475,7 @@ async function run(browser, { actions, random, steps }) {
       if (actions) a = actions[i];
       else {
         const page = await s.page.evaluate(offered);
-        a = nextAction(random, { ...page, haveSave: s.saved !== null });
+        a = nextAction(random, { ...page, haveSave: s.saved !== null, focus: process.env.MONKEY_FOCUS });
       }
       done.push(a);
       const did = await Promise.race([act(s, a), s.page.waitForTimeout(30000).then(() => fail("settles", "an action took over 30 s"))]);

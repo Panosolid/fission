@@ -1,8 +1,8 @@
 """Exact volume and area of the harness's shapes, the oracle's referee.
 
 OpenCascade integrates mass properties numerically in the coordinates it is
-given, so it rounds too, sometimes far more than Fission (a profile drawn
-100 km out lost 3x of its volume in it). When Fission and OpenCascade
+given, so it rounds too, sometimes far more than Panosolid (a profile drawn
+100 km out lost 3x of its volume in it). When Panosolid and OpenCascade
 disagree, this says who is right: every shape the harness makes (box,
 cylinder, sphere, extruded profile of lines and arcs with holes) has a
 closed-form volume and area, worked out here at 50 significant digits from
@@ -31,7 +31,7 @@ mp.dps = 50
 
 def _x(v):
     # float() first: the harness writes each double as its shortest repr,
-    # and the shape Fission built is that double, not the decimal.
+    # and the shape Panosolid built is that double, not the decimal.
     return mpf(float(v))
 
 
@@ -82,8 +82,8 @@ def volume_area(shape):
 
 
 def judge(fission, occ, exact, allowed):
-    """Who is off for one quantity: 'agree' (Fission within `allowed` of the
-    reference), 'fission' (Fission is off: a finding), or 'occ' (Fission
+    """Who is off for one quantity: 'agree' (Panosolid within `allowed` of the
+    reference), 'fission' (Panosolid is off: a finding), or 'occ' (Panosolid
     matches the exact value and only OpenCascade is off: its own rounding,
     not counted). The reference is the exact value when there is one, else
     OpenCascade's."""

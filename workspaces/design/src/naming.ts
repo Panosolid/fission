@@ -30,6 +30,13 @@ export interface BodyNames {
   faces: (string | null)[];
   /** The part after "edge:<feature>/": "side:line-4+start", "side:line-4>side:arc-6". */
   edges: (string | null)[];
+  /**
+   * Each name two or more faces (or edges) would have had, and how many:
+   * dropped from `faces` and `edges`, but kept here so a reference holding
+   * one is told apart from one whose face is gone (step 25a4), and is never
+   * moved to one of them.
+   */
+  shared: { faces: ReadonlyMap<string, number>; edges: ReadonlyMap<string, number> };
 }
 
 /**
@@ -41,11 +48,22 @@ export type CurveOf = (boundary: number, piece: number) => string | null;
 
 const esc = encodeURIComponent;
 
-/** Names repeated in the list replaced by null: a name must point at one thing. */
-function onlyOnce(names: (string | null)[]): (string | null)[] {
+/** How many times each name is in the list. */
+function counts(names: readonly (string | null)[]): Map<string, number> {
   const seen = new Map<string, number>();
   for (const n of names) if (n !== null) seen.set(n, (seen.get(n) ?? 0) + 1);
+  return seen;
+}
+
+/** Names repeated in the list replaced by null: a name must point at one thing. */
+function onlyOnce(names: (string | null)[]): (string | null)[] {
+  const seen = counts(names);
   return names.map((n) => (n !== null && seen.get(n) === 1 ? n : null));
+}
+
+/** The names in the list more than once, with how many times. */
+function repeated(names: readonly (string | null)[]): Map<string, number> {
+  return new Map([...counts(names)].filter(([, k]) => k > 1));
 }
 
 /**
@@ -55,26 +73,26 @@ function onlyOnce(names: (string | null)[]): (string | null)[] {
  * two faces or two edges would share, are null.
  */
 export function nameBody(feature: string, view: BodyView, curveOf: CurveOf): BodyNames {
-  const faces = onlyOnce(
-    view.face_roles.map((r) => {
-      if (r === null) return null;
-      if (r.role !== "side" || r.piece === undefined) return r.role;
-      const curve = curveOf(r.boundary ?? 0, r.piece);
-      return curve === null ? null : `side:${esc(curve)}`;
-    }),
-  );
+  const given = view.face_roles.map((r) => {
+    if (r === null) return null;
+    if (r.role !== "side" || r.piece === undefined) return r.role;
+    const curve = curveOf(r.boundary ?? 0, r.piece);
+    return curve === null ? null : `side:${esc(curve)}`;
+  });
+  const faces = onlyOnce(given);
   // Two sides of an extrude (each with a piece) meet in order; everything else is a set.
   const isSide = (f: number) => view.face_roles[f]?.role === "side" && view.face_roles[f]?.piece !== undefined;
-  const edges = onlyOnce(
+  const edgeNames = (on: readonly (string | null)[]) =>
     view.edge_faces.map((pair) => {
       if (pair === null) return null;
-      const [a, b] = [faces[pair[0]] ?? null, faces[pair[1]] ?? null];
+      const [a, b] = [on[pair[0]] ?? null, on[pair[1]] ?? null];
       if (a === null || b === null) return null;
       if (isSide(pair[0]) && isSide(pair[1])) return `${a}>${b}`;
       return a <= b ? `${a}+${b}` : `${b}+${a}`;
-    }),
-  );
-  return { feature: esc(feature), faces, edges };
+    });
+  const edges = onlyOnce(edgeNames(faces));
+  // The names that would have pointed at two things: faces as given, edges as named from those faces.
+  return { feature: esc(feature), faces, edges, shared: { faces: repeated(given), edges: repeated(edgeNames(given)) } };
 }
 
 /**

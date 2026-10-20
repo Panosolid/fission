@@ -27,7 +27,8 @@ export const MONKEY_PLANTS = {
   "throw-on-empty-length": {
     what: "a length box left empty throws instead of saying what to type",
     expect: "no errors",
-    edits: [{ file: "workspaces/design/src/typed-entry.ts", find: '  const t = text.trim().replace(/\\s*mm$/i, "");', replace: '  const t = text.trim().replace(/\\s*mm$/i, "");\n  if (t === "") throw new Error("planted: an empty length");' }],
+    // 25a5: on the box's own reading of its text (typed-boxes.ts `mark`), since readLength never sees an empty box: `mark` and `locks` skip one first, so the plant in readLength was dead.
+    edits: [{ file: "workspaces/design/src/typed-boxes.ts", find: '    const r = text === "" ? null : read(f, text);', replace: '    if (text === "") throw new Error("planted: an empty length");\n    const r = read(f, text);' }],
   },
   "bar-forgets-suppressed": {
     what: "the timeline bar draws a suppressed item as if it were built",
@@ -77,7 +78,9 @@ export const MONKEY_PLANTS = {
 };
 
 /** The timeline model's plants the monkey should catch too (by name in model-faults.ts). */
-const MODEL_PLANTS = { "reuse-ids": "document rules", "save-stamps": "save then open gives the same file", "ignore-marker": "timeline bar matches the file" };
+// Not "edit-leaks" (25a5): it only shows when a second sketch extrude is edited, which 40 monkey seeds never did (MONKEY_FOCUS=edit too);
+// the monkey's "an edit changes only its item" check is there for it, and the timeline sessions and edit-chaos.journey.ts (seed 3) catch it.
+const MODEL_PLANTS = { "reuse-ids": "ids come from the counter", "save-stamps": "save then open gives the same file", "ignore-marker": "timeline bar matches the file" };
 
 export async function allPlants() {
   const { PLANTS } = await import("../../../packages/testing/planted/model-faults.ts");

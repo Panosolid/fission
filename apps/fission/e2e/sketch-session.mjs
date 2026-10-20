@@ -73,6 +73,8 @@ function click(m, at) {
   };
   if (m.tool === "line") {
     if (key(from) === key(at)) return null;
+    // A line already joining the two places draws nothing, and the chain stays (SAME_LINE, 25a5).
+    if (m.lines.some((l) => (key(l.a) === key(from) && key(l.b) === key(at)) || (key(l.a) === key(at) && key(l.b) === key(from)))) return null;
     const existed = pointsOf(m).has(key(at));
     const label = draw(STEP.line, () => m.lines.push({ a: from, b: at }));
     m.pending = existed ? null : at;

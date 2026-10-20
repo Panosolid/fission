@@ -118,7 +118,7 @@ function readPng(b: Uint8Array): PhysicalSize {
 function pngDensity(width: number, height: number, xPerUnit: number, yPerUnit: number, unit: number): PhysicalSize {
   if (unit !== 1) return assumed("png", width, height, "This PNG stores only the shape of its pixels, not their size");
   if (xPerUnit === 0 || yPerUnit === 0) return assumed("png", width, height, "This PNG says 0 pixels per metre, which is not a size");
-  if (xPerUnit !== yPerUnit) return assumed("png", width, height, "This PNG's pixels are not square, which Panoshape can't show yet");
+  if (xPerUnit !== yPerUnit) return assumed("png", width, height, "This PNG's pixels are not square, which Panosolid can't show yet");
   return fromFile("png", width, height, 1000 / xPerUnit);
 }
 
@@ -156,7 +156,7 @@ function readJpeg(b: Uint8Array): PhysicalSize {
       if (length < 8) throw new ImageError("damaged", `This JPEG's frame header is ${length} bytes long, too short to hold a size.`);
       const height = u16(b, data + 1);
       const width = u16(b, data + 3);
-      if (height === 0) throw new ImageError("unsupported", "This JPEG gives its height after the image data (a DNL marker), which Panoshape can't read yet.");
+      if (height === 0) throw new ImageError("unsupported", "This JPEG gives its height after the image data (a DNL marker), which Panosolid can't read yet.");
       checkPixelSize(width, height);
       return jpegDensity(width, height, jfif);
     }
@@ -169,6 +169,6 @@ function jpegDensity(width: number, height: number, jfif: { unit: number; x: num
   const perMm = jfif.unit === 1 ? 1 / MM_PER_INCH : jfif.unit === 2 ? 1 / 10 : 0;
   if (perMm === 0) return assumed("jpeg", width, height, "This JPEG stores only the shape of its pixels, not their size");
   if (jfif.x === 0 || jfif.y === 0) return assumed("jpeg", width, height, "This JPEG says 0 pixels per inch, which is not a size");
-  if (jfif.x !== jfif.y) return assumed("jpeg", width, height, "This JPEG's pixels are not square, which Panoshape can't show yet");
+  if (jfif.x !== jfif.y) return assumed("jpeg", width, height, "This JPEG's pixels are not square, which Panosolid can't show yet");
   return fromFile("jpeg", width, height, 1 / (jfif.x * perMm));
 }

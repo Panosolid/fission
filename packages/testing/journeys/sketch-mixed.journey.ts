@@ -9,7 +9,7 @@
 // Run with `npm run journeys` after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addSketch, buildSpec, clickAt, deleteCurve, extrudeSketch, featureSpec, lastFeature, partDocument, sketchCurves, startTool, type DesignDocument, type SketchTool, type ToolKind } from "@fission/design";
+import { addSketch, buildSpec, clickAt, deleteCurve, drawLine, extrudeSketch, featureSpec, lastFeature, partDocument, SAME_LINE, sketchCurves, startTool, type DesignDocument, type SketchTool, type ToolKind } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 import { compareOutline, isClosed, modelOutline, type ModelOutline, type XY } from "../src/outline-model.ts";
@@ -121,9 +121,14 @@ test("hand-worked: lines that run back over themselves close up but are refused:
   let { doc, sketch, tool } = fresh();
   ({ doc, tool } = clicks(doc, tool, [[0, 0], [40, 0], [20, 0], [0, 0]]));
   assert.equal((await agree(doc, sketch, "flat triangle")).kind, "not a profile");
-  // (0,0) → (10,0) → (0,0): a loop of two corners.
+  // (0,0) → (10,0) → (0,0): a loop of two corners. The line tool no longer draws the way back, which lies on the line out (SAME_LINE,
+  // 25a5): it says so and draws nothing. Drawn as data, the kernel still refuses the two lines.
   ({ doc, sketch, tool } = fresh());
-  ({ doc } = clicks(doc, tool, [[0, 0], [10, 0], [0, 0]]));
+  ({ doc, tool } = clicks(doc, tool, [[0, 0], [10, 0]]));
+  const back = clickAt(doc, tool, [0, 0]);
+  assert.deepEqual([back.drew, back.note], [false, SAME_LINE]);
+  const [a, b] = doc.sketches[0].points.map((p) => p.id);
+  doc = drawLine(doc, sketch, b, a).doc;
   const m = await agree(doc, sketch, "there and back");
   assert.deepEqual([m.kind, m.kind === "not a profile" && m.why], ["not a profile", "2 corners"]);
 });
