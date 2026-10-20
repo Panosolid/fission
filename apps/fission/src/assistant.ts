@@ -292,7 +292,7 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
     const away = s !== null && sendsAway(s);
     const elsewhere = s?.kind === "ollama" && away ? ollamaOrigin(s) : null;
     $("ai-status-detail").textContent = !info
-      ? "AI is off. Nothing is sent anywhere, and everything in Panoshape works without it."
+      ? "AI is off. Nothing is sent anywhere, and everything in Panosolid works without it."
       : elsewhere
         ? `Using Ollama at ${elsewhere}, which is not this computer: your requests go there, and the first one is shown to you before it is sent.`
         : away

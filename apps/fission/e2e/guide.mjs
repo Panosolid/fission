@@ -1,4 +1,4 @@
-// Browser check of the guide (How Panoshape works): opened from the top bar's
+// Browser check of the guide (How Panosolid works): opened from the top bar's
 // Guide button (inside Menu at 375 px) and from a ?guide link; Next walks
 // through every chapter in order and each chapter's 3D scene really draws
 // (the stage with the canvas differs from the stage with it hidden); keys
@@ -276,7 +276,7 @@ try {
     assert.equal(new URL(notices.url()).pathname, "/third-party-licences.txt");
     const text = await notices.evaluate(() => document.body.innerText);
     await notices.close();
-    assert.match(text, /^Third-party licences for Panoshape/);
+    assert.match(text, /^Third-party licences for Panosolid/);
     for (const line of [/\nthree 0\.\d+\.\d+: MIT\n/, /three\.js authors/, /\n@mlc-ai\/web-llm [\d.]+: Apache-2\.0\n/, /\nglam [\d.]+: MIT \(offered as MIT OR Apache-2\.0\)\n/, /UNICODE LICENSE V3/, /\ntslib \(TypeScript's helpers\), inside @mlc-ai\/web-llm: 0BSD\n/]) assert.match(text, line);
     const response = await page.request.get(`${url}third-party-licences.txt`);
     assert.equal(response.status(), 200);

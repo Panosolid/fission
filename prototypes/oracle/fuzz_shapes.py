@@ -13,7 +13,7 @@ Each body is checked three ways:
 - volume and area against the exact values (exact.py, 50 digits, from the
   very doubles the kernel was given, no shared code with the kernel), to
   the rounding the shape allows (`allowed`);
-- face count against OpenCascade's rebuild (Fission's hemispheres: 2 faces
+- face count against OpenCascade's rebuild (Panosolid's hemispheres: 2 faces
   where OpenCascade has 1);
 - bounds against OpenCascade's for extrudes;
 - validity: an extrude's profile, which the kernel accepted, must not cross
@@ -85,7 +85,7 @@ def size_perimeter(shape):
 
 
 def allowed(case, volume, area):
-    """How far Fission's exact volume and area may be from the exact ones:
+    """How far Panosolid's exact volume and area may be from the exact ones:
     REL of the answer and of the profile's size (the kernel's volume of a
     thin part is a difference of bigger triangle and segment areas), plus
     every coordinate's rounding, 64 EPS of how far the body reaches (step):
@@ -109,7 +109,7 @@ def allowed(case, volume, area):
     return REL * abs(volume) + area * step, REL * abs(area) + edges * step
 
 
-# Faces per primitive (Fission, OpenCascade), as compare.py.
+# Faces per primitive (Panosolid, OpenCascade), as compare.py.
 FACES = {"Box": (6, 6), "Cylinder": (3, 3), "Sphere": (2, 1)}
 
 
