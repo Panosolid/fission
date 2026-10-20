@@ -1,6 +1,6 @@
 // Proof that the monkey tester (monkey.mjs) catches bugs before its clean
 // runs are trusted: each plant below is a deliberate mistake in the real
-// app's code, one or more for each of the monkey's checks, plus four of the
+// app's code, one or more for each of the monkey's checks, plus three of the
 // timeline model's plants (packages/testing/planted/model-faults.ts). For
 // each, this edits the source in place, builds the app into a folder of its
 // own (vite only; the kernel's WASM is already built) and puts the file
@@ -78,7 +78,9 @@ export const MONKEY_PLANTS = {
 };
 
 /** The timeline model's plants the monkey should catch too (by name in model-faults.ts). */
-const MODEL_PLANTS = { "reuse-ids": "ids come from the counter", "save-stamps": "save then open gives the same file", "ignore-marker": "timeline bar matches the file", "edit-leaks": "an edit changes only its item" };
+// Not "edit-leaks" (25a5): it only shows when a second sketch extrude is edited, which 40 monkey seeds never did (MONKEY_FOCUS=edit too);
+// the monkey's "an edit changes only its item" check is there for it, and the timeline sessions and edit-chaos.journey.ts (seed 3) catch it.
+const MODEL_PLANTS = { "reuse-ids": "ids come from the counter", "save-stamps": "save then open gives the same file", "ignore-marker": "timeline bar matches the file" };
 
 export async function allPlants() {
   const { PLANTS } = await import("../../../packages/testing/planted/model-faults.ts");
