@@ -94,7 +94,11 @@ export class ViewportView {
 
     this.camera.position.set(80, -100, 70);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
+    // No damping: an orbit, pan or zoom stops the moment the button is let
+    // go, as the owner's reference CAD does. With OrbitControls' easing the
+    // camera spun on after a fast flick, frame by frame, so for seconds where
+    // frames are slow, and could roll under the sketch plane (25a5's hunt).
+    this.controls.enableDamping = false;
     // Moving the camera by hand (SF3a, the owner's bindings): middle-drag pans and
     // the wheel zooms toward the pointer (navigate(), with the maths in
     // navigation.ts); Shift+middle-drag orbits, which OrbitControls does
@@ -413,7 +417,6 @@ export class ViewportView {
     if (!mesh || this.image) return null;
     const framing = faces.length || edges.length ? selectionFraming(mesh, faces, edges) : body ? this.host.bodyFraming() : null;
     if (!framing || !(framing.radius > 0)) return null;
-    this.spendDamping();
     const towardCamera = this.camera.position.clone().sub(this.controls.target).normalize();
     const dist = fitDistance(framing.radius, this.camera.fov, this.camera.aspect);
     const target = new THREE.Vector3(...framing.centre);
@@ -424,15 +427,7 @@ export class ViewportView {
     return framing;
   }
 
-  /** Spends any orbit still easing out (damping), so the camera does not drift from a new framing over the next frames. */
-  private spendDamping() {
-    this.controls.enableDamping = false;
-    this.controls.update();
-    this.controls.enableDamping = true;
-  }
-
   private place(position: readonly number[], target: readonly number[], up: readonly number[]) {
-    this.spendDamping();
     // The orbit stays about Z (camera.up); straight down or up, the view's
     // own up picks the camera's roll (orbitSafeOffset).
     const raw = new THREE.Vector3(...position).sub(new THREE.Vector3(...target));
@@ -522,7 +517,6 @@ export class ViewportView {
     this.applyButtons();
     this.controls.minDistance = 0;
     this.controls.maxDistance = Infinity;
-    this.spendDamping();
     this.controls.target.copy(saved.target);
     this.camera.position.copy(saved.position);
     this.camera.near = saved.near;

@@ -178,6 +178,39 @@ await check("middle-drag pans: the grabbed point follows the pointer; it never p
   }
 });
 
+await check("an orbit stops when the button is let go: no spin after a fast Shift+middle flick, and the sketch grid holds still (25a5 monkey seed 3)", async () => {
+  const page = await fresh();
+  try {
+    // The monkey's steps: a sketch on XY, then a fast Shift+middle flick
+    // across most of the view in 5 moves. With the old easing the camera
+    // reached the same end pose (under the plane: the flick's upward part
+    // tips it past the horizon) but only seconds after the release, frame
+    // by frame, so longest where frames are slow, and the grid's spacing
+    // followed it on the way (1, 10, 100 mm and back).
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketchGrid);
+    await settle(page);
+    const box = await canvasBox(page);
+    await page.keyboard.down("Shift");
+    await page.mouse.move(box.x + 0.914 * box.width, box.y + 0.516 * box.height);
+    await page.mouse.down({ button: "middle" });
+    await page.mouse.move(box.x + 0.229 * box.width, box.y + 0.2 * box.height, { steps: 5 });
+    await page.mouse.up({ button: "middle" });
+    await page.keyboard.up("Shift");
+    await page.waitForTimeout(150); // a frame or two after the release
+    const released = await camera(page);
+    const grid = await page.evaluate(() => document.querySelector("#viewport").dataset.sketchGrid);
+    for (const wait of [300, 1000]) {
+      await page.waitForTimeout(wait);
+      closeTo((await camera(page)).position, released.position, 1e-6, `${wait} ms more after the release, the camera is where it was let go`);
+      assert.equal(await page.evaluate(() => document.querySelector("#viewport").dataset.sketchGrid), grid, "the grid holds still");
+    }
+  } finally {
+    await page.context().close();
+  }
+});
+
 await check("the bar's Pan and Zoom make the left button pan and zoom; Orbit gives it back", async () => {
   const page = await fresh();
   try {
