@@ -31,13 +31,13 @@ Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, 
   PENDING Part to simulation and back: waits for Simulate (S3), parameters (34, I18)
 journeys/flags.txt lists every FLAG line so far.
 
-Fuzzing (the STL reader, the project loader, the sketch-extrude sessions and the kernel fuzz targets), all runs so far (updated 2026-10-19 00:18 UTC)
-  hours of fuzzing: 8.2
-  placed   rounds 2, inputs 81352, rounds that found something 0, last: none yet
-  sessions rounds 2426, inputs 4852000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
-  stl      rounds 5297, inputs 10594000, rounds that found something 0, last: none yet
-  extrude  rounds 2, inputs 78476, rounds that found something 0, last: none yet
-  sketch   rounds 2, inputs 217319, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
-  project  rounds 11292, inputs 22584000, rounds that found something 4, last: 4116269961039615875 (commit 0a2363b on main)
+Fuzzing (the STL reader, the project loader, the sketch-extrude sessions and the kernel fuzz targets), all runs so far (updated 2026-10-20 00:24 UTC)
+  hours of fuzzing: 12.7
+  placed   rounds 3, inputs 107886, rounds that found something 0, last: none yet
+  sessions rounds 4140, inputs 8280000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
+  stl      rounds 7232, inputs 14464000, rounds that found something 0, last: none yet
+  extrude  rounds 3, inputs 123648, rounds that found something 0, last: none yet
+  sketch   rounds 3, inputs 359195, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
+  project  rounds 15866, inputs 31732000, rounds that found something 4, last: 4116269961039615875 (commit 0a2363b on main)
 fuzz/log.csv has one line per round; fuzz/failures/seed-<seed>/ has each failing round's
 fuzz-report.txt and its shrunk failing inputs.
