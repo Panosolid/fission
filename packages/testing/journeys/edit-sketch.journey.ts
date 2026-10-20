@@ -18,7 +18,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rmSync, readFileSync, writeFileSync } from "node:fs";
 import { emptyProject, projectFromJson, projectToJson, type WorkspacePlugin } from "@fission/core";
-import { addSketch, deleteCurve, designWorkspace, drawRectangle, extrudeSketch, insertPreset, movePoint, partDocument, settleKept, type DesignDocument } from "@fission/design";
+import { addSketch, deleteCurve, designWorkspace, drawRectangle, extrudeSketch, insertPreset, movePoint, partDocument, SAME_LINE, settleKept, type DesignDocument } from "@fission/design";
 import { app, close, kernel } from "./design-app.ts";
 
 /**
@@ -132,6 +132,33 @@ test("hand-worked: a stray line breaks a closed 40 × 30 outline through Edit Sk
   assert.equal(a.warning(), null);
   await a.finish();
   assert.match(a.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  assert.ok(await a.close());
+});
+
+test("regression (25a5 hunt, seed 18 × 120 steps): a stray line drawn again on the one already there draws nothing and says why, so one Undo takes the stray out and the outline closes", async () => {
+  // Sketch 1: a closed 40 × 30 rectangle extruded by 20 = 24000 mm³. A stray from (10, 60) to (15, 60), then a second click pair
+  // from (10.5, 60) to (15, 60): the first click snaps to the stray's end (10, 60), 0.5 mm away, within the 1 mm reach (10 px of
+  // 0.1 mm), so the second line would join the same two points as the first: SAME_LINE, nothing drawn. The session model counted two
+  // strays here, so its one Undo left one stray and blamed the wrong extrude.
+  const { doc, ids } = await design([{ width: 40, distance: 20 }]);
+  const a = await app(doc);
+  await a.doubleClick(ids[0].sketch);
+  await a.click(10, 60);
+  await a.click(15, 60);
+  await a.key("clear-selection");
+  const lines = a.doc().sketches[0].curves.length;
+  await a.click(10.5, 60);
+  await a.click(15, 60);
+  assert.equal(a.doc().sketches[0].curves.length, lines, "the second line is not drawn");
+  assert.equal(a.$("#sketch-grid-error")!.textContent, SAME_LINE);
+  assert.equal(a.history.undoLabel(), "Draw line");
+  await a.key("clear-selection");
+  await a.finish();
+  assert.match(a.warning() ?? "", /^Extrude 1 keeps its last shape/);
+  // One Undo takes the one stray out: the rectangle closes again, no warning, 24000 mm³ from the sketch itself.
+  await a.undo();
+  assert.equal(a.warning(), null);
+  assert.ok(close(a.volume(), BOX + 24000 + LAST));
   assert.ok(await a.close());
 });
 
@@ -279,7 +306,9 @@ function randomSteps(seed: number, n: number, sketches: number): Step[] {
     const u = r();
     if (u < 0.2) steps.push({ do: "open", i: Math.floor(r() * sketches), how: (["menu", "bar", "row"] as const)[Math.floor(r() * 3)] });
     else if (u < 0.35) steps.push({ do: "close" });
-    else if (u < 0.55) steps.push({ do: "stray", x: Math.floor(r() * 35), y: 50 + 5 * Math.floor(r() * 10), len: 3 + Math.floor(r() * 5) });
+    // Each stray on a row of its own (5 mm apart, beyond the 1 mm snap reach): the model counts strays, so one must never snap onto
+    // another's ends, where a second line on the same two points draws nothing (SAME_LINE; the hand-worked regression above, 25a5).
+    else if (u < 0.55) steps.push({ do: "stray", x: Math.floor(r() * 35), y: 50 + 5 * k, len: 3 + Math.floor(r() * 5) });
     else if (u < 0.7) steps.push({ do: "finish" });
     else if (u < 0.82) steps.push({ do: "undo" });
     else if (u < 0.9) steps.push({ do: "redo" });
@@ -447,7 +476,12 @@ const STEPS = Number(process.env.FISSION_SESSION_STEPS ?? 80);
 
 test(`seeded: ${SEEDS} sessions × ${STEPS} steps of Edit Sketch, drawing, Finish, Undo and Redo match the model after every step, reaching every case`, async () => {
   const reached = new Set<string>();
-  for (let seed = 1; seed <= SEEDS; seed++) assert.equal(await runSession(seed, randomSteps(seed, STEPS, randomSpecs(seed).specs.length), designWorkspace, reached), null);
+  // FISSION_SEED replays one session (as the failure message names it) and skips the reach check.
+  const only = process.env.FISSION_SEED ? Number(process.env.FISSION_SEED) : null;
+  for (let seed = only ?? 1; seed <= (only ?? SEEDS); seed++) assert.equal(await runSession(seed, randomSteps(seed, STEPS, randomSpecs(seed).specs.length), designWorkspace, reached), null);
+  if (only !== null) return;
+  // The 25a5 hunt's failing session, kept (it failed before strays got rows of their own).
+  assert.equal(await runSession(18, randomSteps(18, 120, randomSpecs(18).specs.length), designWorkspace, reached), null);
   const every = ["open by menu", "open by bar", "open by row", "refused: already open", "switch after drawing", "switch with nothing drawn", "closed: builds", "closed: strays still there", "stray: breaks a closing outline", "stray: on an open outline", "finish after drawing", "finish with nothing drawn", "undo inside a sketch", "undo outside a sketch", "redo inside a sketch", "redo outside a sketch"];
   assert.deepEqual(every.filter((c) => !reached.has(c)), [], `reached: ${[...reached].join(", ")}`);
 });

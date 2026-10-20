@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import type { SketchXY } from "@fission/core";
 import { partDocument, readDesignDocument, type DesignDocument } from "../src/document.ts";
 import { addSketch, drawArc, drawCircle, drawRectangle, SKETCH_STEPS, sketchCurves, sketchLines } from "../src/sketch.ts";
-import { arcSegments, CIRCLE_SEGMENTS, circleSegments, clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, previewLine, previewSegments, SKETCH_TOOLS, sketchDrawings, startTool, toolBusy, type CircleTool, type LineTool, type RectangleTool, type SketchTool } from "../src/sketch-tool.ts";
+import { arcSegments, CIRCLE_SEGMENTS, circleSegments, clickAt, curveCount, DEFAULT_GRID, drawStep, ORIGIN_PLANES, originPlanes, PLANE_VIEWS, previewLine, previewSegments, SAME_LINE, SKETCH_TOOLS, sketchDrawings, startTool, toolBusy, type CircleTool, type LineTool, type RectangleTool, type SketchTool } from "../src/sketch-tool.ts";
 import { DESIGN_SHORTCUTS, sketchToolKey } from "../src/shortcuts.ts";
 
 function fresh() {
@@ -62,6 +62,29 @@ test("a click on the chain's last point draws nothing; a chain started on a poin
   assert.equal(r.doc.sketches[0].points.length, 3, "one new point only");
   // A chain ending on another line's end stops there, as closing does.
   assert.equal(clickAt(r.doc, r.tool, [0, 0]).tool.from, null);
+});
+
+test("a line on top of one already there draws nothing and says why; the chain stays where it was (25a5, the report list's \"3 ends meet\")", () => {
+  // The closed 40 × 30 rectangle of the first test: point-3 (0, 0), point-4 (40, 0), point-6 (40, 30), point-8 (0, 30), counter 11.
+  const f = fresh();
+  const closed = clicks(f.doc, f.tool, [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]);
+  // A chain started on (0, 0) then a click on (40, 0): line-5 already joins point-3 and point-4. A second line there would make three
+  // line ends meet at both corners and break the outline, so nothing is drawn, the counter stays at 11 and the chain stays at point-3.
+  const start = clickAt(closed.doc, closed.tool, [0, 0]);
+  const again = clickAt(start.doc, start.tool, [40, 0]);
+  assert.equal(again.drew, false);
+  assert.equal(again.doc, start.doc, "the document is unchanged");
+  assert.equal(again.note, SAME_LINE);
+  assert.equal((again.tool as LineTool).from, "point-3");
+  // The other way round (point-8 → point-3 is line-10, clicked from (0, 0) to (0, 30)) is the same line: refused too.
+  const back = clickAt(again.doc, again.tool, [0, 30]);
+  assert.equal(back.drew, false);
+  assert.equal(back.note, SAME_LINE);
+  // A diagonal to (40, 30) joins two points no line joins: drawn, line-11, and the chain ends there (an existing point).
+  const diagonal = clickAt(back.doc, back.tool, [40, 30]);
+  assert.equal(diagonal.drew, true);
+  assert.equal(diagonal.note, undefined);
+  assert.deepEqual(diagonal.doc.sketches[0].curves.at(-1), { id: "line-11", kind: "line", start: "point-3", end: "point-6" });
 });
 
 test("the preview runs from the chain's last point to the pointer, and only while a chain is going", () => {
@@ -363,6 +386,7 @@ function rng(seed: number) {
 test("seeded sessions of random clicks, Escapes and tool switches match a model that knows only coordinates", () => {
   let rectangles = 0;
   let circles = 0;
+  let refused = 0;
   const next = { line: "rectangle", rectangle: "circle", circle: "line" } as const;
   for (const seed of [1, 2, 3, 4, 5]) {
     const random = rng(seed);
@@ -394,7 +418,11 @@ test("seeded sessions of random clicks, Escapes and tool switches match a model 
       doc = r.doc;
       if (tool.kind === "line") {
         if (from === null) from = key;
-        else if (from !== key) {
+        else if (from !== key && (segments.includes(`${from} ${key}`) || segments.includes(`${key} ${from}`))) {
+          // A line already joins the two places (a side drawn again): nothing drawn, the chain stays (25a5).
+          assert.equal(r.note, SAME_LINE);
+          refused++;
+        } else if (from !== key) {
           const existed = points.has(key);
           segments.push(`${from} ${key}`);
           points.add(from).add(key);
@@ -435,6 +463,7 @@ test("seeded sessions of random clicks, Escapes and tool switches match a model 
   }
   assert.ok(rectangles >= 100, `the sessions drew ${rectangles} rectangles`);
   assert.ok(circles >= 100, `the sessions drew ${circles} circles`);
+  assert.ok(refused >= 20, `the sessions tried ${refused} lines on top of another`);
 });
 
 test("hand-worked: arcs drawn as segments, a quarter turn in 16 like a quarter of a drawn circle (23a)", () => {
