@@ -36,6 +36,7 @@ Several threads run at once, one per workstream. So they never edit the same lin
 - `booleans.md`: the boolean design review B0 and the boolean steps.
 - `image.md`: the Image workspace (G…).
 - `ai.md`: the AI assistant (AI1…, and the A items in `docs/roadmap.md`).
+- `video.md`: the Video workspace (F0–F14: design decisions and every substep's test plan).
 - A new workstream (Render, Vector, Layout…) gets a new file here the day it starts, added to this list in its own small PR.
 
 Rules:

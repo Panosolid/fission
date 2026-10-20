@@ -10,8 +10,101 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.25.12 (2026-10-20)
+
+- Fix: the camera stops when an orbit, pan or zoom is let go, so a sketch's grid no longer keeps changing after a fast orbit. #213
+
+## 0.25.11 (2026-10-20)
+
+- Fix: lines behind a body (an extruded sketch's back lines) no longer show through it, and a bottom edge keeps its selection green on the ground grid. #212
+- Step 25a5: a bug hunt on editing early items; a line drawn on top of an existing line is refused with a note instead of breaking the outline. Step 25a (edit any feature) is done. #211
+
+## 0.25.10 (2026-10-19)
+
+- Fix: a narrow curved wall far from the origin gets its centre in the right place. #206
+- Rename: the app is now called Panosolid everywhere (the repository, saved files and storage keys keep their names, and old .fission.json files still open). #203
+- Step 25a4: references re-find their face by name after every edit; two faces are never guessed between. #208
+- CI: random testing every 6 hours until Wednesday 07:00 UTC. #209
+
+## 0.25.9 (2026-10-19)
+
+- Fix: two flaky browser checks (split view's pixel probe, reopen's opening mark) now wait properly. #207
+
+## 0.25.8 (2026-10-19)
+
+- Fix: the kernel no longer refuses a line and an arc that meet almost straight on. #200
+- Step 25a3: Edit Sketch reopens a finished sketch, and Finish Sketch rebuilds everything after it. #201
+
+## 0.25.7 (2026-10-19)
+
+- Fix: three random-testing checks that misread valid extrudes (#102, #183, #184, #185). #199
+
+## 0.25.6 (2026-10-19)
+
+- Fix: the sessions' simple-loop check measures true tangents and keeps next-door pieces (#140 again). #198
+
+## 0.25.5 (2026-10-19)
+
+- Fix: a long side ending on a tiny arc no longer runs the mesher out of points (#189). #196
+- CI: merge queue support, quick pull request checks, timeouts and build caching. #197
+- Auto-merge queues pull requests with the owner's token, not the workflow's. #202
+
+## 0.25.4 (2026-10-19)
+
+- Fix: a profile id that isn't text is refused in words (#139). #193
+- Step 25a2: Edit feature for any extrude or preset from its timeline item. #194
+- A seeded monkey tester joins `npm run e2e`. #195
+
+## 0.25.3 (2026-10-19)
+
+- Fix: the kernel body store caps its memory, not just its count (kernel crash hunt). #191
+
+## 0.25.2 (2026-10-19)
+
+- Fix: a failed feature no longer gets a Body row (timeline hunt finding 5). #192
+
+## 0.25.1 (2026-10-19)
+
+- Fix: changes are kept when the page is reloaded or closed straight after an edit (timeline hunt finding 1). #190
+
+## 0.25.0 (2026-10-18)
+
+- Step 25a1: the naming test plan and harness, from the owner's Fusion answers. #188
+- Testing: the sketch outline is checked against an independent Python model. #187
+- Security (audit S10): the app refuses to run inside a frame and has a Content Security Policy. #186
+
+## 0.24.13 (2026-10-18)
+
+- Step 24f6: drag a timeline item to a new place; Timeline rows select their body. #181
+- Security (audit S2, N1, N2): big project files can't freeze the app; odd ids and huge angles are refused. #178
+- Licences (audit L2): third-party licence notices beside the app, and a licence allowlist in CI. #182
+- Security (audit S3): Ollama at another computer's address counts as remote. #180
+- Security: workflows and the AI command check hardened; auto-merge works with the ruleset. #174
+- Step 24f5: drag the timeline marker, tap between items, and the playback buttons. #179
+- Kernel: the MIT licence line is removed from Cargo.toml (L1). #176
+- Arc tools: typed sizes for arc points and a hint by the pointer. #177
+- Step 24f4: the app shows a design with no body (marker at the start, everything suppressed or deleted); the panel says so, and typing a size or sketching adds a new body. #171
+- Roadmap: a detailed plan for the Video workspace (F0 to F14), and Office-style placeholders. #173, #175
+- Fix: Save and Open wait for the last project to reopen. #172
+
+## 0.24.12 (2026-10-18)
+
+- Rename: Fission becomes Panoshape in everything users see (renamed again to Panosolid in 0.25.10). #168
+- Bug hunt 1: a seeded monkey tester for the Design app. #166
+- Fix: a grid size answered after Undo closed the sketch is dropped. #170
+
+## 0.24.11 (2026-10-18)
+
+- Browser panel: floating rows over the view, so the part shows between them. #163
+- Split view: one toolbar row per pane, and "Coming soon" for placeholders; split opens on the first working workspace. #165
+- Fix: the properties panel shows the selected body, not always the last. #167
+
 ## 0.24.10 (2026-10-18)
 
+- Step 24f3: the timeline's item menu on the bar and in the browser (suppress, marker, delete, edit). #164
+- Step 24f2: the timeline bar's logic (drops, taps, buttons, menu, edits). #162
+- Step 24f1: the timeline bar's test plan, undo timing checked. #160
+- Bug hunt: two earlier findings (#149, #92) kept as permanent tests. #161
 - Bug hunt: the file reader (#139), the sessions' loop check (#140), the oracle's corner allowance (#138) and a regression from #145 fixed. #148
 - Step 24d3b: Design draws every body. #150
 - CI: the browser checks run as three parallel jobs, so a pull request's checks finish much sooner. #151
