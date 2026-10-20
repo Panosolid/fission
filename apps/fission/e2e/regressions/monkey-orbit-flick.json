@@ -1,0 +1,23 @@
+{
+  "seed": 3,
+  "what": "Create sketch, XY, then a fast Shift+middle flick: the page was still changing 6 s later (the camera's easing spun on frame by frame after the release, the sketch grid's spacing following it); fixed by turning the easing off, so an orbit stops when the button is let go",
+  "actions": [
+    {
+      "do": "click",
+      "sel": "#create-sketch"
+    },
+    {
+      "do": "click",
+      "sel": "#sketch-plane-XY"
+    },
+    {
+      "do": "drag",
+      "x": 0.914,
+      "y": 0.516,
+      "x2": 0.229,
+      "y2": 0.2,
+      "button": "middle",
+      "shift": true
+    }
+  ]
+}
