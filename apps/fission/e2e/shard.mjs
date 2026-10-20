@@ -24,6 +24,7 @@ export const SECONDS = {
   "snap.mjs": 11,
   "sketch-session.mjs": 109,
   "sketch-pixels.mjs": 5,
+  "hidden-edges.mjs": 8,
   "free-placement.mjs": 10,
   "sketch-view.mjs": 15,
   "navigation.mjs": 32,

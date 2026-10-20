@@ -592,6 +592,18 @@ export const GRID_OPACITY = 0.16;
 export const AXIS_OPACITY = 1;
 /** How opaque the body's faces and edges are while a sketch is edited, so what is drawn shows through it (SF2). */
 export const BODY_FADE = { faces: 0.3, edges: 0.35 };
+/**
+ * Draw order of the opaque lines and the body (three.js draws opaque objects
+ * by renderOrder). The ground grid and axes come first and write no depth,
+ * like a backdrop: every body and sketch is drawn over them, and a body edge
+ * or sketch line lying on one (an extrude's bottom edges on the grid's
+ * centre line, a box's corner edge on the Z axis) never fights it for the
+ * pixels. Then finished sketches, then the body (0): a later line at the
+ * same depth wins, so a body edge on a sketch line keeps its selection or
+ * hover colour.
+ */
+const GROUND_ORDER = -2;
+const FINISHED_SKETCH_ORDER = -1;
 
 /** Empties a group, freeing its geometry and materials. */
 function clearGroup(group: THREE.Group) {
@@ -650,6 +662,10 @@ export class Viewer implements SharedViewport {
     this.scene.background = new THREE.Color(0x14161a);
     const grid = (this.grid = new THREE.GridHelper(200, 20, 0x3a3f47, 0x2a2e35));
     grid.rotation.x = Math.PI / 2; // lay the grid on the XY plane
+    for (const ground of [grid, this.axes]) {
+      ground.renderOrder = GROUND_ORDER;
+      (ground.material as THREE.Material).depthWrite = false;
+    }
     const key = new THREE.DirectionalLight(0xffffff, 2.2);
     key.position.set(1, -2, 3);
     const fill = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -755,9 +771,15 @@ export class Viewer implements SharedViewport {
   }
 
   /**
-   * Draws the sketches over the body (no depth test, so a sketch on a face
-   * of the body never hides in it): lines, and for the one being edited its
-   * grid, its points, the rubber-band line and the snap's marks. Replaces what was drawn.
+   * Draws the sketches: lines, and for the one being edited its grid, its
+   * points, the rubber-band line and the snap's marks. The edited one is
+   * drawn over everything (no depth test; the body is see-through meanwhile).
+   * A finished one is depth-tested like the body's edges, so the body hides
+   * what is behind it (as an extruded sketch's back lines) and the faces'
+   * polygon offset keeps a line lying on a face in front of it; drawn after
+   * the ground grid and axes but before the body (FINISHED_SKETCH_ORDER), so
+   * where it lies on a body edge the edge, with its selection or hover
+   * colour, is drawn over it. Replaces what was drawn.
    */
   showSketches(drawings: readonly SketchDrawing[]) {
     clearGroup(this.sketches);
@@ -771,13 +793,14 @@ export class Viewer implements SharedViewport {
         if (pairs.length === 0) return;
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(pairs.flatMap(([a, b]) => [...at(a), ...at(b)]), 3));
-        const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: colour, depthTest: false, transparent: true }));
+        const finished = order === FINISHED_SKETCH_ORDER;
+        const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial(finished ? { color: colour } : { color: colour, depthTest: false, transparent: true }));
         l.renderOrder = order;
         this.sketches.add(l);
       };
       lines += d.lines.length;
       if (!d.editing) {
-        segments(d.lines, SKETCH_COLOURS.finished, 2);
+        segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
         continue;
       }
       this.editedPlane = d.plane;
