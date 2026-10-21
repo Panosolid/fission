@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.26.3 (2026-10-22)
+
+- Fix (a failing check): the new browser check for snapping onto a face's edges failed in Firefox and WebKit on a phone-width screen. After a tap, the snap marker and its guide lines stay drawn where the tap landed, and the check read the picture with them still on it. Moving the test's mouse away clears them in Chromium, but Firefox gives the canvas no mouse events on a touch page, so on phone width the check now finishes the sketch and opens it again before reading the picture (that clears them in every browser); with a mouse it still moves the pointer away. A miss says what colours it found. No change to the app.
+
 ## 0.26.2 (2026-10-21)
 
 - Step 26f: in a sketch on a face, the pointer now snaps onto that face's corners, the middles of its edges and the centres of its round edges (they aren't drawn into the sketch, as in Fusion). A point placed there is tied to it: when an earlier feature changes (the box made wider, say), the point moves with the corner, and so does whatever is extruded from the sketch, in the same undo step as the change. If the corner or edge goes, the point stays where it last was and the sketch's row, its timeline item and the panel say so. Moving the point by hand unties it. The kernel now gives the exact positions of corners, edge middles and centres (the picture on screen is a few micrometres off). Checked by hand-worked cases, Fusion's answer as ten test cases, random sessions against the model on the real kernel, 21 deliberately planted bugs (each caught), a Design app journey on the real kernel, and browser checks at 1280 and 375 px with pixel probes. Found and fixed while doing it: a sketch just made on a face offered no edges until something rebuilt it, and Edit feature or a typed size moved the body but left the sketch's point drawn (and saved) where it was.
