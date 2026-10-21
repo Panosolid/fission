@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.25.14 (2026-10-21)
+
+- Fix: random testing no longer reports a far-out curved extrusion as wrongly refused (issue #205). The kernel was right to refuse it: the test's own prediction worked out a nearly whole circle from the size it asked for, but 100 km out the short flat closing it rounds, which made the circle 1.1 mm bigger and pushed it past the modelling range. The prediction now measures the shape as built and checks every arc's reach itself.
+
 ## 0.25.13 (2026-10-21)
 
 - Step 25c4: browser checks of the app with a sketch open: an image dropped, pasted or opened goes to Image and Design comes back with the sketch as it was, a refused file changes nothing, a dropped project replaces the design, split view keeps the sketch drawing, and the shortcut list names the sketch keys (Chromium, Firefox and WebKit; 1280 and 375 px). A second magic-moment journey, sketch to STL in 8 clicks. Step 25 is done.
