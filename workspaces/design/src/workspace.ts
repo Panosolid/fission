@@ -24,7 +24,7 @@ import { itemName } from "./timeline-edits.ts";
 import { chooseBarAction, chooseEntry, menuEntries, openAction, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
-import { BodyCache, rebuildTimeline, settleKept, type TimelineBuild } from "./rebuild.ts";
+import { BodyCache, followedDoc, rebuildTimeline, settleKept, type TimelineBuild } from "./rebuild.ts";
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
@@ -362,7 +362,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (result?.status === "failed") failure = result.message;
     else if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) failure = `${feature.provenance.self.label} is ${result.status}`;
     const drawn = await shownBodies(doc, build, bodies);
-    return { scene: joinBodies(drawn), warnings: warningsOf(doc, build), failure };
+    return { scene: joinBodies(drawn), warnings: warningsOf(doc, build), failure, followed: followedDoc(doc, build) };
   }
   /**
    * The rebuild's warnings in timeline order: an extrude built from its kept
@@ -498,8 +498,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let failedNow: ReadonlySet<string> = new Set();
   /** Where the last rebuild placed each sketch on a face (26c), by sketch id: drawn and looked at there. */
   let placedNow: ReadonlyMap<string, Plane> = new Map();
-  /** What a pointer on sketch `id` may snap to on its face's edges (26f): their ends, middles and centres where the last rebuild placed the sketch. */
-  const edgeTargets = (id: string) => sketchEdgeTargets(designDoc(), id, lastScene, placedNow.get(id));
+  /**
+   * What a pointer on sketch `id` may snap to on its face's edges (26f):
+   * their ends, middles and centres in the plane the sketch is drawn in
+   * (the last rebuild's placement, or, for a sketch just made on a face and
+   * not rebuilt since, the frame it was made in).
+   */
+  const edgeTargets = (id: string) => sketchEdgeTargets(designDoc(), id, lastScene, sketchPlane(designDoc(), id, placedNow));
   /** The bar's item whose ⋯ shows (a click or tap picked it). */
   let picked: string | null = null;
   /** The sketch being edited, whose own Suppress and Delete are off. */
@@ -640,6 +645,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!shown) return void (missed = true);
       missed = false;
       const { scene, failure } = value;
+      // Points pinned to a face's edges (26f) where this rebuild found them, taken into the edit's own undo step (the
+      // typing in a box still one step): drawn there, and held there should their edge go. Not while an undo or redo is
+      // putting a snapshot back (it was taken in when that step was made), nor once the design has changed again.
+      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring()) {
+        ctx.project.workspaces.design = value.followed;
+        if (saved?.doc === doc) saved = { ...saved, doc: value.followed };
+        if (shownDoc === doc) shownDoc = value.followed;
+        ctx.history.amend(true);
+      }
       // The rows were drawn before the rebuild said what failed: a failed item has no Body row.
       if (!sameIds(rowsFailed, failedNow)) drawBrowser(doc);
       warningsNow = value.warnings;

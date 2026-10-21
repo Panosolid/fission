@@ -44,6 +44,8 @@ test("design.json mutates from shapeOf's first line to readDesignDocument's last
   for (const f of files) assert.ok(existsSync(join(root, "workspaces/design", f)), `${f} is not in workspaces/design`);
   // The kept shapes' checks are in the range, so their tests must run.
   assert.ok(files.includes("test/kept.test.ts"));
+  // So are a face sketch's pins' checks (26f).
+  assert.ok(files.includes("test/face-edges.test.ts"));
 });
 
 test("a range one line off at either end is caught, with which end and where it should be", () => {

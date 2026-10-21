@@ -485,9 +485,9 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     caught: "seeded",
   },
   "pin-not-settled": {
-    what: "the settle never writes a pinned point's new place into the sketch, so what is drawn and saved stays behind what is built",
-    edits: [{ file: REBUILD, find: "      const to = new Map((r.pinned ?? []).map((p) => [p.point, p.at]));", replace: "      const to = new Map<string, SketchXY>();" }],
+    what: "neither the settle nor the app writes a pinned point's new place into the sketch, so what is drawn and saved stays behind what is built",
+    edits: [{ file: REBUILD, find: "  const to = new Map(r.pinned.map((p) => [p.point, p.at]));", replace: "  const to = new Map<string, SketchXY>();" }],
     run: ["naming"],
-    caught: "Fusion answers",
+    caught: "seeded",
   },
 };

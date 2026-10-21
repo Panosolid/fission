@@ -1,8 +1,8 @@
 {
   "$comment": "Mutation testing of reading and upgrading Design's data (hunt 3a). Run through run.sh, from workspaces/design.",
   "testRunner": "command",
-  "commandRunner": { "command": "node --experimental-strip-types --no-warnings --test test/document.test.ts test/timeline-data.test.ts test/sketch.test.ts test/extrude.test.ts test/arc-tool.test.ts test/sketch-tool.test.ts test/tangent-tool.test.ts test/mutation-survivors.test.ts test/kept.test.ts test/reader-every-feature.test.ts test/empty-design.test.ts test/big-files.test.ts test/odd-ids.test.ts test/face-sketch.test.ts" },
-  "mutate": ["src/document.ts:315-595"],
+  "commandRunner": { "command": "node --experimental-strip-types --no-warnings --test test/document.test.ts test/timeline-data.test.ts test/sketch.test.ts test/extrude.test.ts test/arc-tool.test.ts test/sketch-tool.test.ts test/tangent-tool.test.ts test/mutation-survivors.test.ts test/kept.test.ts test/reader-every-feature.test.ts test/empty-design.test.ts test/big-files.test.ts test/odd-ids.test.ts test/face-sketch.test.ts test/face-edges.test.ts" },
+  "mutate": ["src/document.ts:321-623"],
   "reporters": ["clear-text", "json"],
   "jsonReporter": { "fileName": "../../node_modules/.cache/stryker/design.json" },
   "clearTextReporter": { "allowColor": false, "logTests": false, "reportMutants": false },

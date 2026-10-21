@@ -328,14 +328,11 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
       if (r.plane === undefined) keep = undefined;
       else if (held === undefined) keep = (await wasAt(content.id))?.plane;
       changed ||= keep !== held;
-      let settled = keep === held ? content : { ...content, face: keep ? { ...face, held: keep } : face };
+      const settled = keep === held ? content : { ...content, face: keep ? { ...face, held: keep } : face };
       // Step 26f: each pinned point that found its edge goes where the edge is now; one that didn't stays where it was.
-      const to = new Map((r.pinned ?? []).map((p) => [p.point, p.at]));
-      if (settled.points.some((p) => to.has(p.id) && (to.get(p.id)![0] !== p.x || to.get(p.id)![1] !== p.y))) {
-        settled = { ...settled, points: settled.points.map((p) => (to.has(p.id) ? { ...p, x: to.get(p.id)![0], y: to.get(p.id)![1] } : p)) };
-        changed = true;
-      }
-      sketches.push(settled);
+      const followed = followedSketch(settled, r);
+      changed ||= followed !== settled;
+      sketches.push(followed);
     }
     return changed ? { ...doc, sketches } : doc;
   } finally {
@@ -460,6 +457,30 @@ async function placeSketch(f: Feature, done: Record<string, FeatureResult>, cach
  * warning ("point-lost" when any lost its edge, else "point-ambiguous").
  * Nothing for a sketch without pins.
  */
+/** Sketch `content` with each of its pinned points where `r` (its result in a rebuild) found it (26f), or `content` itself when none moved. */
+export function followedSketch(content: Sketch, r: FeatureResult | undefined): Sketch {
+  if (r?.status !== "built" || !r.pinned) return content;
+  const to = new Map(r.pinned.map((p) => [p.point, p.at]));
+  if (!content.points.some((p) => to.has(p.id) && (to.get(p.id)![0] !== p.x || to.get(p.id)![1] !== p.y))) return content;
+  return { ...content, points: content.points.map((p) => (to.has(p.id) ? { ...p, x: to.get(p.id)![0], y: to.get(p.id)![1] } : p)) };
+}
+
+/**
+ * `doc` with every pinned point where `build` (a rebuild of `doc`) found
+ * it (26f), or `doc` itself when none moved: what the app takes into the
+ * edit's undo step once the edit has rebuilt, so the sketch is drawn, and
+ * a point whose edge goes later held, where the point followed to.
+ */
+export function followedDoc(doc: DesignDocument, build: TimelineBuild): DesignDocument {
+  let moved = false;
+  const sketches = doc.sketches.map((s) => {
+    const next = followedSketch(s, build.results[s.id]);
+    moved ||= next !== s;
+    return next;
+  });
+  return moved ? { ...doc, sketches } : doc;
+}
+
 function followPins(f: Feature, index: DocIndex, view: BodyView, names: BodyNames, plane: Plane): { pinned?: { point: string; at: SketchXY }[]; points?: PointWarning } {
   const content = index.sketches.get(f.id)!;
   if (!content.pins) return {};

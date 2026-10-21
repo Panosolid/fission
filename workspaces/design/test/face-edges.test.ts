@@ -15,6 +15,7 @@ import { nameBody } from "../src/naming.ts";
 import { addFaceSketch, deleteCurve, drawCircle, drawLine, drawRectangle, movePoint, pinNewPoints } from "../src/sketch.ts";
 import { SNAP_PIXELS, snapLabel, snapPointer, snapTargets } from "../src/snap.ts";
 import { startTool } from "../src/sketch-tool.ts";
+import { followedDoc, type TimelineBuild } from "../src/rebuild.ts";
 import { boxView, cylinderView } from "./views.ts";
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
@@ -174,6 +175,28 @@ test("hand-worked: a new point exactly on a face's corner or middle is pinned th
   const all: EdgeTarget[] = [...targets, { at: [0, 0], kind: "endpoint", name: "a" }, { at: [40, 0], kind: "endpoint", name: "b" }, { at: [0, 30], kind: "endpoint", name: "c" }];
   const r = drawRectangle(doc, id, [0, 0], [40, 30]);
   assert.equal(pinNewPoints(doc, r.doc, id, all).sketches.find((s) => s.id === id)!.pins!.length, 4);
+});
+
+test("hand-worked: a rebuild's followed points are taken into the document, and a document whose points are all where they were is the same object", () => {
+  // A circle centred on the top's back right corner (40, 30), the box then
+  // 60 wide: the rebuild found the corner at (60, 30), so the centre goes
+  // there; the circle's radius point (45, 30) is not pinned and stays.
+  const { doc, id } = onTop();
+  const c = drawCircle(doc, id, [40, 30], 5);
+  const pinned = pinNewPoints(doc, c.doc, id, targets);
+  const sketch = pinned.sketches.find((s) => s.id === id)!;
+  const centre = (sketch.curves[0] as { centre: string }).centre;
+  const build = (results: TimelineBuild["results"]) => ({ results }) as TimelineBuild;
+  const moved = followedDoc(pinned, build({ [id]: { status: "built", pinned: [{ point: centre, at: [60, 30] }] } }));
+  const points = (d: DesignDocument) => d.sketches.find((s) => s.id === id)!.points.map((p) => [p.id, p.x, p.y]);
+  assert.deepEqual(points(moved), points(pinned).map(([p, x, y]) => (p === centre ? [p, 60, 30] : [p, x, y])));
+  assert.deepEqual(moved.sketches.find((s) => s.id === id)!.pins, sketch.pins, "still pinned");
+  // Found where it is: nothing to take in, the same document.
+  assert.equal(followedDoc(pinned, build({ [id]: { status: "built", pinned: [{ point: centre, at: [40, 30] }] } })), pinned);
+  // Lost (no place found), greyed, or not built: held where it is.
+  assert.equal(followedDoc(pinned, build({ [id]: { status: "built", pinned: [] } })), pinned);
+  assert.equal(followedDoc(pinned, build({ [id]: { status: "greyed", by: "feature-1" } })), pinned);
+  assert.equal(followedDoc(pinned, build({})), pinned);
 });
 
 test("a pinned point moved by hand, or left by every curve, loses its pin; the list goes when it is empty", () => {

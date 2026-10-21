@@ -40,10 +40,14 @@ export interface History {
    * filling in its defaults the first time it is shown). Returns false when
    * there was nothing to take in, or during a restore. A present step left
    * the same as the state before it has nothing to undo, so it is removed.
-   * The next record starts a step of its own (no merging across this).
+   * The next record starts a step of its own (no merging across this),
+   * unless `keepMerging`: for a change that follows from the step just
+   * recorded (a sketch point following the edge it is pinned to, once the
+   * edit has rebuilt: step 26f), which must not split the typing in one box
+   * into a step per key.
    * Inside a step (below) it does nothing: the step takes everything in.
    */
-  amend(): boolean;
+  amend(keepMerging?: boolean): boolean;
   /**
    * Runs `run` as ONE undo step named `label`, however many changes it
    * makes: an ownership hand-over, or an accepted AI command (commands
@@ -186,7 +190,7 @@ export function createHistory(options: HistoryOptions): History {
       start();
       changed();
     },
-    amend() {
+    amend(keepMerging = false) {
       if (restoring || grouping > 0) return false;
       const snapshot = options.capture();
       if (snapshot === entries[index].snapshot) return false;
@@ -194,8 +198,8 @@ export function createHistory(options: HistoryOptions): History {
       if (index > 0 && snapshot === entries[index - 1].snapshot) {
         entries.splice(index, 1);
         index--;
-      }
-      lastWasRecord = false;
+        lastWasRecord = false;
+      } else if (!keepMerging) lastWasRecord = false;
       changed();
       return true;
     },
