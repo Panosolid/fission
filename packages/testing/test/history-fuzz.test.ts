@@ -31,6 +31,17 @@
 // says leaves nothing built is made like any other (24f4), and Design's
 // `partFeature` must then be none too; a width typed then adds a new box
 // at the marker, and a default filling in a size has none to fill.
+//
+// Step 25b2 adds the step 25 edits. Edit feature (25a2) changes any solid
+// item's size, not only the part's (a box's width, an extrude's distance),
+// as one step "Edit <item>" that never merges; the same size gives the same
+// document and records nothing. The model keeps several sketches, each with
+// its own curves: a new sketch goes in at the marker (when none can be
+// opened, and now and then besides), and drawing, deleting and moving go
+// into a sketch the app lets you open (Edit Sketch, 25a3: not suppressed,
+// not after the marker), mostly the newest, sometimes an earlier one with
+// extrudes built from it. Opening a sketch records nothing; each edit in it
+// is its own step, as before.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHistory, emptyProject, projectFromJson, projectToJson, type Feature, type Project } from "@fission/core";
@@ -44,6 +55,8 @@ import {
   drawArc,
   drawCircle,
   drawLine,
+  editFeature,
+  editStep,
   extrudeSketch,
   extrudeStep,
   isSketchExtrude,
@@ -89,16 +102,15 @@ type Item = { id: string; kind: "box"; size: number; off: boolean } | { id: stri
 
 /**
  * The model's state: the timeline's items in order, the marker ("start",
- * an item's id, or null for everything built), the sketch's id (null once
- * deleted) and its curves in drawing order, and the part, which the model
- * works out (`partOf`) and the project's is read by Design's partFeature.
- * As text, so states compare with ===.
+ * an item's id, or null for everything built), the sketches in the order
+ * they were made, each with its curves in drawing order (25b2: several),
+ * and the part, which the model works out (`partOf`) and the project's is
+ * read by Design's partFeature. As text, so states compare with ===.
  */
 interface Model {
   items: Item[];
   marker: string | null;
-  sketch: string | null;
-  lines: Line[];
+  sketches: { id: string; lines: Line[] }[];
 }
 const state = (m: Model) => JSON.stringify({ part: partOf(m), ...m });
 const parse = (s: string): Model => {
@@ -131,6 +143,18 @@ function insert(m: Model, item: Item): Model {
   return { ...m, items, marker: m.marker === null ? null : item.id };
 }
 const clone = (m: Model): Model => JSON.parse(JSON.stringify(m));
+/** Where a new item goes in (as `insert`): an extrude there can only use a sketch before it. */
+const insertPlace = (m: Model) => (m.marker === null ? m.items.length : m.marker === "start" ? 0 : m.items.findIndex((i) => i.id === m.marker) + 1);
+/** Whether sketch `id` comes at or after where a new item goes in, so an extrude of it is refused. */
+const isLate = (m: Model, id: string) => m.items.findIndex((i) => i.id === id) >= insertPlace(m);
+/** Whether sketch `id` can be opened to draw in (Edit Sketch, 25a3, the item menu's rule): not suppressed, not after the marker. */
+function canOpen(m: Model, id: string): boolean {
+  const at = m.items.findIndex((i) => i.id === id);
+  if (at < 0 || m.items[at].off || m.marker === "start") return false;
+  return m.marker === null || at <= m.items.findIndex((i) => i.id === m.marker);
+}
+/** The model with sketch `id`'s curves replaced. */
+const withLines = (m: Model, id: string, lines: Line[]): Model => ({ ...m, sketches: m.sketches.map((k) => (k.id === id ? { id, lines } : k)) });
 
 /** The project's state, read the same way: what the model must match. */
 function stateOf(p: Project): string {
@@ -144,21 +168,18 @@ function stateOf(p: Project): string {
     assert.equal(shape, "box", `${f.id} is a ${shape}`);
     return { id: f.id, kind: "box", size: sizes.width, off: f.suppressed };
   });
-  assert.ok(doc.sketches.length <= 1, "more than one sketch");
-  const sketch = doc.sketches[0];
-  const lines = !sketch
-    ? []
-    : (() => {
-        const at = new Map(sketch.points.map((q) => [q.id, [q.x, q.y]]));
-        // No point is left that no curve uses, and no two points share a place.
-        const ends = new Set(sketch.curves.flatMap(curvePoints));
-        assert.deepEqual(new Set(sketch.points.map((q) => q.id)), ends, "a point no curve uses");
-        assert.equal(new Set(sketch.points.map((q) => `${q.x},${q.y}`)).size, sketch.points.length, "two points at one place");
-        return sketch.curves.map(
-          (c): Line => (c.kind === "line" ? [c.id, ...at.get(c.start)!, ...at.get(c.end)!] : c.kind === "circle" ? [c.id, ...at.get(c.centre)!, c.radius] : [c.id, ...at.get(c.start)!, ...at.get(c.end)!, ...at.get(c.centre)!]) as Line,
-        );
-      })();
-  return JSON.stringify({ part: partFeature(doc)?.id ?? null, items, marker: doc.timeline.marker ?? null, sketch: sketch?.id ?? null, lines });
+  const sketches = doc.sketches.map((sketch) => {
+    const at = new Map(sketch.points.map((q) => [q.id, [q.x, q.y]]));
+    // No point is left that no curve uses, and no two points of one sketch share a place.
+    const ends = new Set(sketch.curves.flatMap(curvePoints));
+    assert.deepEqual(new Set(sketch.points.map((q) => q.id)), ends, `${sketch.id}: a point no curve uses`);
+    assert.equal(new Set(sketch.points.map((q) => `${q.x},${q.y}`)).size, sketch.points.length, `${sketch.id}: two points at one place`);
+    const lines = sketch.curves.map(
+      (c): Line => (c.kind === "line" ? [c.id, ...at.get(c.start)!, ...at.get(c.end)!] : c.kind === "circle" ? [c.id, ...at.get(c.centre)!, c.radius] : [c.id, ...at.get(c.start)!, ...at.get(c.end)!, ...at.get(c.centre)!]) as Line,
+    );
+    return { id: sketch.id, lines };
+  });
+  return JSON.stringify({ part: partFeature(doc)?.id ?? null, items, marker: doc.timeline.marker ?? null, sketches });
 }
 
 interface Undo {
@@ -190,7 +211,7 @@ function session(seed: bigint, steps: number) {
   /** The model of a fresh project: the box feature-1 and the sketch the project's addSketch made. */
   const fresh = (w: number): Model => {
     const id = designOf(project).sketches[0].id;
-    return { items: [{ id: "feature-1", kind: "box", size: w, off: false }, { id, kind: "sketch", off: false }], marker: null, sketch: id, lines: [] };
+    return { items: [{ id: "feature-1", kind: "box", size: w, off: false }, { id, kind: "sketch", off: false }], marker: null, sketches: [{ id, lines: [] }] };
   };
   // The model.
   let present = state(fresh(40));
@@ -199,7 +220,7 @@ function session(seed: bigint, steps: number) {
   let lastWasRecord = false;
   const now = () => parse(present);
   /** Every id in a state undo can go back to: an item's or a curve's. */
-  const usedIds = () => new Set([present, ...undos.map((u) => u.before)].flatMap((s) => [...parse(s).items.map((i) => i.id), ...parse(s).lines.map(([id]) => id)]));
+  const usedIds = () => new Set([present, ...undos.map((u) => u.before)].flatMap((s) => [...parse(s).items.map((i) => i.id), ...parse(s).sketches.flatMap((k) => k.lines.map(([id]) => id))]));
   /** A new id: in no state undo can go back to. */
   const isNew = (id: string, at: string) => assert.ok(!usedIds().has(id), `${at}: ${id} was used before`);
   /** A box width to go back to: the part's when it is a box, else a new one. */
@@ -220,9 +241,9 @@ function session(seed: bigint, steps: number) {
     isNew(made, at);
     return insert(m, { id: made, kind: "box", size: w, off: false });
   };
-  /** A place no point of the sketch is at, on a 0.1 mm grid. */
-  const freePlace = (): [number, number] => {
-    const used = new Set(now().lines.flatMap(placesOf));
+  /** A place no point of sketch `id` is at, on a 0.1 mm grid. */
+  const freePlace = (id: string): [number, number] => {
+    const used = new Set(now().sketches.find((k) => k.id === id)!.lines.flatMap(placesOf));
     for (;;) {
       const xy: [number, number] = [Math.floor(r.next() * 1001 - 500) / 10, Math.floor(r.next() * 1001 - 500) / 10];
       if (!used.has(`${xy[0]},${xy[1]}`)) return xy;
@@ -254,6 +275,8 @@ function session(seed: bigint, steps: number) {
     itemsDeleted: 0, sketchDeleted: 0, markerMovedBack: 0, reorders: 0, reorderedInPlace: 0, refusedBefore: 0, refusedAfter: 0, suppressed: 0, unsuppressed: 0, markers: 0, markersSame: 0, nothingBuilt: 0, partNotLast: 0,
     // Step 24f4: a design with no body.
     boxIntoEmpty: 0, amendsNoBody: 0, stepsOnEmpty: 0, deletedAll: 0,
+    // Step 25b2: several sketches, Edit Sketch on an earlier one, Edit feature on any solid item.
+    moreSketches: 0, earlierSketch: 0, sketchWithExtrude: 0, featureEdits: 0, featureEditsSame: 0, featureEditsNotPart: 0, featureEditsExtrude: 0, featureEditsUnbuilt: 0,
   };
 
   for (let i = 0; i < steps; i++) {
@@ -303,76 +326,87 @@ function session(seed: bigint, steps: number) {
       // or a point already there), draw an arc (from a new place or a point
       // already there, to a new place, round a new place: the kernel judges
       // whether the centre is midway, which this test doesn't), delete a
-      // curve, move a point, or extrude the sketch (open or not: the kernel
+      // curve, move a point, or extrude a sketch (open or not: the kernel
       // judges the outline when it builds, which this test doesn't; refused
-      // when the sketch is after the marker). With the sketch deleted, a new
-      // one is made first, as its own step.
+      // when the sketch is after the marker). Drawing, deleting and moving go
+      // into a sketch the app lets you open (25b2: canOpen), mostly the
+      // newest, sometimes an earlier one; with none to open (deleted,
+      // suppressed or rolled back), a new one is made first, as its own
+      // step, and now and then a second or third one besides.
       const m = now();
       const doc = designOf(project);
-      if (m.sketch === null) {
+      const open = m.sketches.filter((k) => canOpen(m, k.id));
+      if (open.length === 0 || (m.sketches.length < 3 && r.next() < 0.08)) {
         const made = addSketch(doc);
         isNew(made.id, at);
         project = { ...project, workspaces: { design: made.doc } };
-        recordStep(SKETCH_STEPS.create, { ...insert(m, { id: made.id, kind: "sketch", off: false }), sketch: made.id, lines: [] }, at);
+        recordStep(SKETCH_STEPS.create, { ...insert(m, { id: made.id, kind: "sketch", off: false }), sketches: [...m.sketches, { id: made.id, lines: [] }] }, at);
         counts.sketchesAdded++;
+        if (m.sketches.length > 0) counts.moreSketches++;
       } else {
-        const sketch = doc.sketches[0];
-        const { lines } = m;
-        // An extrude is refused while the sketch is after the marker: tried more often then, so that path is reached.
-        const late = m.marker !== null && m.items.findIndex((x) => x.id === m.sketch) > (m.marker === "start" ? -1 : m.items.findIndex((x) => x.id === m.marker));
-        const kind = late && r.next() < 0.6 ? "extrude" : lines.length === 0 ? pick(r, ["draw", "circle", "arc"] as const) : pick(r, ["draw", "draw", "circle", "arc", "delete", "move", "extrude"] as const);
+        let target = r.next() < 0.6 ? open[open.length - 1] : pick(r, open);
+        // An extrude is refused while its sketch is after the marker: tried more often then, so that path is reached.
+        const late = m.sketches.filter((k) => isLate(m, k.id));
+        const kind = late.length > 0 && r.next() < 0.3 ? "extrude" : target.lines.length === 0 ? pick(r, ["draw", "circle", "arc"] as const) : pick(r, ["draw", "draw", "circle", "arc", "delete", "move", "extrude"] as const);
+        if (kind === "extrude" && late.length > 0 && r.next() < 0.6) target = pick(r, late);
+        const sketch = doc.sketches.find((k) => k.id === target.id)!;
+        const { lines } = target;
+        if (kind !== "extrude") {
+          if (target.id !== m.sketches[m.sketches.length - 1].id) counts.earlierSketch++;
+          if (m.items.some((x) => x.kind === "extrude" && x.sketch === target.id)) counts.sketchWithExtrude++;
+        }
+        const free = () => freePlace(target.id);
         let after: Model;
         let label: string = kind === "extrude" ? extrudeStep(doc, sketch.id) : SKETCH_STEPS[kind];
         if (kind === "draw") {
           const chain = sketch.points.length > 0 && r.next() < 0.5;
           const start = chain ? pick(r, sketch.points) : null;
-          const from = start ? start.id : freePlace();
+          const from = start ? start.id : free();
           const fromXY = start ? [start.x, start.y] : (from as [number, number]);
           const others = sketch.points.filter((q) => q !== start);
           const end = others.length > 0 && r.next() < 0.2 ? pick(r, others) : null;
-          const to = end ? end.id : freePlace();
+          const to = end ? end.id : free();
           const toXY = end ? [end.x, end.y] : (to as [number, number]);
           const drawn = drawLine(doc, sketch.id, from, to);
           isNew(drawn.id, at);
           project = { ...project, workspaces: { design: drawn.doc } };
-          after = { ...m, lines: [...lines, [drawn.id, fromXY[0], fromXY[1], toXY[0], toXY[1]]] };
+          after = withLines(m, target.id, [...lines, [drawn.id, fromXY[0], fromXY[1], toXY[0], toXY[1]]]);
           counts.draws++;
           if (chain) counts.chained++;
         } else if (kind === "circle") {
           const shared = sketch.points.length > 0 && r.next() < 0.3 ? pick(r, sketch.points) : null;
-          const centre = shared ? shared.id : freePlace();
+          const centre = shared ? shared.id : free();
           const [cx, cy] = shared ? [shared.x, shared.y] : (centre as [number, number]);
           const radius = (1 + Math.floor(r.next() * 200)) / 10;
           const drawn = drawCircle(doc, sketch.id, centre, radius);
           isNew(drawn.id, at);
           project = { ...project, workspaces: { design: drawn.doc } };
-          after = { ...m, lines: [...lines, [drawn.id, cx, cy, radius]] };
+          after = withLines(m, target.id, [...lines, [drawn.id, cx, cy, radius]]);
           counts.circles++;
           if (shared) counts.centred++;
         } else if (kind === "arc") {
           const shared = sketch.points.length > 0 && r.next() < 0.4 ? pick(r, sketch.points) : null;
-          const start = shared ? shared.id : freePlace();
+          const start = shared ? shared.id : free();
           const startXY = shared ? [shared.x, shared.y] : (start as [number, number]);
-          let end = freePlace();
-          let centre = freePlace();
-          while (centre[0] === end[0] && centre[1] === end[1]) centre = freePlace();
-          while (!shared && ((end[0] === startXY[0] && end[1] === startXY[1]) || (centre[0] === startXY[0] && centre[1] === startXY[1]))) [end, centre] = [freePlace(), freePlace()];
+          let end = free();
+          let centre = free();
+          while (centre[0] === end[0] && centre[1] === end[1]) centre = free();
+          while (!shared && ((end[0] === startXY[0] && end[1] === startXY[1]) || (centre[0] === startXY[0] && centre[1] === startXY[1]))) [end, centre] = [free(), free()];
           const drawn = drawArc(doc, sketch.id, start, end, centre);
           isNew(drawn.id, at);
           project = { ...project, workspaces: { design: drawn.doc } };
-          after = { ...m, lines: [...lines, [drawn.id, startXY[0], startXY[1], end[0], end[1], centre[0], centre[1]]] };
+          after = withLines(m, target.id, [...lines, [drawn.id, startXY[0], startXY[1], end[0], end[1], centre[0], centre[1]]]);
           counts.arcs++;
           if (shared) counts.arcsChained++;
         } else if (kind === "delete") {
           const [gone] = pick(r, lines);
           project = { ...project, workspaces: { design: deleteCurve(doc, sketch.id, gone) } };
-          after = { ...m, lines: lines.filter(([id]) => id !== gone) };
+          after = withLines(m, target.id, lines.filter(([id]) => id !== gone));
           counts.deletes++;
         } else if (kind === "extrude") {
           const d = 1 + Math.floor(r.next() * 20);
           // The sketch must come before where the extrude goes in (at the marker).
-          const place = m.marker === null ? m.items.length : m.marker === "start" ? 0 : m.items.findIndex((x) => x.id === m.marker) + 1;
-          if (m.items.findIndex((x) => x.id === m.sketch) >= place) {
+          if (isLate(m, sketch.id)) {
             assert.throws(() => extrudeSketch(doc, sketch.id, d), /comes after the rollback marker/, at);
             counts.extrudesRefused++;
             check(at);
@@ -385,10 +419,10 @@ function session(seed: bigint, steps: number) {
           counts.extrudes++;
         } else {
           const p = pick(r, sketch.points);
-          const [x, y] = freePlace();
+          const [x, y] = free();
           project = { ...project, workspaces: { design: movePoint(doc, sketch.id, p.id, x, y) } };
           const move = (a: number, b: number) => (a === p.x && b === p.y ? [x, y] : [a, b]);
-          after = { ...m, lines: lines.map((c) => (c.length === 4 ? [c[0], ...move(c[1], c[2]), c[3]] : [c[0], ...Array.from({ length: (c.length - 1) / 2 }, (_, k) => move(c[1 + 2 * k] as number, c[2 + 2 * k] as number)).flat()]) as Line) };
+          after = withLines(m, target.id, lines.map((c) => (c.length === 4 ? [c[0], ...move(c[1], c[2]), c[3]] : [c[0], ...Array.from({ length: (c.length - 1) / 2 }, (_, k) => move(c[1 + 2 * k] as number, c[2 + 2 * k] as number)).flat()]) as Line));
           counts.moves++;
         }
         recordStep(label, after, at);
@@ -403,14 +437,22 @@ function session(seed: bigint, steps: number) {
         check(at);
         continue;
       }
-      const edit = pick(r, ["delete", "reorder", "reorder", "reorder", "suppress", "marker"] as const);
+      const edit = pick(r, ["delete", "reorder", "reorder", "reorder", "suppress", "marker", "edit", "edit"] as const);
+      // Edit feature (25a2) takes a solid item: with none (only sketches), nothing to edit.
+      const solids = m.items.filter((x) => x.kind !== "sketch");
+      if (edit === "edit" && solids.length === 0) {
+        check(at);
+        continue;
+      }
       // Mostly any item; sometimes the one each edit's rarer paths need: the item the marker is on (a delete moves the
       // marker back), an extrude or a sketch (a reorder can be refused), a suppressed item (unsuppress).
       const linked = m.items.filter((x) => x.kind === "extrude" || m.items.some((y) => y.kind === "extrude" && y.sketch === x.id));
       // A delete also often takes the last item (24f4): deleting from the end empties the timeline, and the states with no body come up often.
       const ends = r.next() < 0.5 ? [m.items[m.items.length - 1]] : m.items.filter((x) => x.id === m.marker);
-      const wanted = { delete: ends, reorder: linked, suppress: m.items.filter((x) => x.off), marker: [] }[edit];
-      const item = wanted.length > 0 && r.next() < 0.6 ? pick(r, wanted) : pick(r, m.items);
+      const wanted = { delete: ends, reorder: linked, suppress: m.items.filter((x) => x.off), marker: [], edit: solids }[edit];
+      // An edit takes an extrude half the time when there is one: extrudes are fewer than boxes.
+      const extrudes = solids.filter((x) => x.kind === "extrude");
+      const item = edit === "edit" ? pick(r, extrudes.length > 0 && r.next() < 0.5 ? extrudes : solids) : wanted.length > 0 && r.next() < 0.6 ? pick(r, wanted) : pick(r, m.items);
       const feature = doc.timeline.features.find((f) => f.id === item.id) as Feature;
       const name = itemName(feature);
       let after: Model;
@@ -421,7 +463,7 @@ function session(seed: bigint, steps: number) {
         const k = m.items.indexOf(item);
         after = { ...clone(m), items: m.items.filter((x) => x !== item) };
         if (m.marker === item.id) after.marker = k === 0 ? "start" : m.items[k - 1].id;
-        if (item.kind === "sketch") Object.assign(after, { sketch: null, lines: [] });
+        if (item.kind === "sketch") after.sketches = after.sketches.filter((k) => k.id !== item.id);
         next = deleteItem(doc, item.id);
         label = TIMELINE_STEPS.delete(name);
       } else if (edit === "reorder") {
@@ -453,6 +495,16 @@ function session(seed: bigint, steps: number) {
         after = { ...m, items: m.items.map((x) => (x === item ? { ...x, off: on } : x)) };
         next = suppressItem(doc, item.id, on);
         label = (on ? TIMELINE_STEPS.suppress : TIMELINE_STEPS.unsuppress)(name);
+      } else if (edit === "edit") {
+        // Edit feature on any solid item, the part or not, built or not: a box's width, an extrude's distance (its
+        // height box); sometimes the size it has, which gives the same document back and records nothing.
+        const solid = item as Extract<Item, { size: number }>;
+        const size = r.next() < 0.15 ? solid.size : 1 + Math.floor(r.next() * 20);
+        next = editFeature(doc, item.id, solid.kind === "box" ? { width: size } : { height: size });
+        after = { ...m, items: m.items.map((x) => (x === item ? { ...solid, size } : x)) };
+        label = editStep(doc, item.id);
+        assert.equal(label, TIMELINE_STEPS.edit(name), at);
+        if (size === solid.size) assert.equal(next, doc, `${at}: an Edit feature that changes nothing gave a new document`);
       } else {
         const to = r.next() < 0.2 ? "start" : r.next() < 0.3 ? null : item.id;
         after = { ...m, marker: to };
@@ -466,6 +518,7 @@ function session(seed: bigint, steps: number) {
         // At its own place, or the marker where it was: the same document, no step.
         assert.equal(h.record(label), false, at);
         if (edit === "marker") counts.markersSame++;
+        if (edit === "edit") counts.featureEditsSame++;
       } else {
         recordStep(label, after, at);
         if (edit === "delete") {
@@ -474,6 +527,12 @@ function session(seed: bigint, steps: number) {
           if (m.marker === item.id) counts.markerMovedBack++;
         } else if (edit === "suppress") counts[item.off ? "unsuppressed" : "suppressed"]++;
         else if (edit === "marker") counts.markers++;
+        else if (edit === "edit") {
+          counts.featureEdits++;
+          if (item.id !== partOf(m)) counts.featureEditsNotPart++;
+          if (item.kind === "extrude") counts.featureEditsExtrude++;
+          if (!buildsIn(m, item)) counts.featureEditsUnbuilt++;
+        }
       }
       // The part isn't always the last item: the marker or a suppression can leave later items out.
       if (partOf(after) !== after.items.filter((x) => x.kind !== "sketch").at(-1)?.id) counts.partNotLast++;
@@ -612,7 +671,7 @@ function session(seed: bigint, steps: number) {
         const k = m.items.length - 1;
         const after: Model = { ...clone(m), items: m.items.slice(0, k) };
         if (m.marker === item.id) after.marker = k === 0 ? "start" : m.items[k - 1].id;
-        if (item.kind === "sketch") Object.assign(after, { sketch: null, lines: [] });
+        if (item.kind === "sketch") after.sketches = after.sketches.filter((k) => k.id !== item.id);
         const doc = designOf(project);
         const name = itemName(doc.timeline.features.find((f) => f.id === item.id)!);
         project = { ...project, workspaces: { design: deleteItem(doc, item.id) } };
@@ -641,7 +700,7 @@ function session(seed: bigint, steps: number) {
 test("random edit/undo/redo sessions on a real project match the model at every step", () => {
   for (const seed of SEEDS) {
     const c = session(seed, 5_000);
-    if (process.env.FISSION_COUNTS) console.log(seed, JSON.stringify({ nothingBuilt: c.nothingBuilt, boxIntoEmpty: c.boxIntoEmpty, amendsNoBody: c.amendsNoBody, stepsOnEmpty: c.stepsOnEmpty, deletedAll: c.deletedAll }));
+    if (process.env.FISSION_COUNTS) console.log(seed, JSON.stringify({ nothingBuilt: c.nothingBuilt, boxIntoEmpty: c.boxIntoEmpty, amendsNoBody: c.amendsNoBody, stepsOnEmpty: c.stepsOnEmpty, deletedAll: c.deletedAll, moreSketches: c.moreSketches, earlierSketch: c.earlierSketch, sketchWithExtrude: c.sketchWithExtrude, featureEdits: c.featureEdits, featureEditsSame: c.featureEditsSame, featureEditsNotPart: c.featureEditsNotPart, featureEditsExtrude: c.featureEditsExtrude, featureEditsUnbuilt: c.featureEditsUnbuilt }));
     // Every path must be reached, or the test proves nothing.
     for (const [k, n] of Object.entries(c)) assert.ok(n > 5, `seed ${seed}: only ${n} ${k}`);
   }
@@ -649,4 +708,51 @@ test("random edit/undo/redo sessions on a real project match the model at every 
 
 test("the same seed gives the same session", () => {
   assert.deepEqual(session(7n, 500), session(7n, 500));
+});
+
+test("Edit feature on an early item and Edit Sketch on an earlier sketch, by hand (25b2)", () => {
+  // A 40 × 30 × 20 box, Sketch 1 with one line, Extrude 1 of it (10 mm), then Sketch 2 with one line.
+  let doc = partDocument("box", 40, 30, 20);
+  const s1 = addSketch(doc);
+  doc = drawLine(s1.doc, s1.id, [0, 0], [10, 0]).doc;
+  const e1 = extrudeSketch(doc, s1.id, 10);
+  const s2 = addSketch(e1.doc);
+  doc = drawLine(s2.doc, s2.id, [5, 5], [5, 15]).doc;
+  let project: Project = { ...emptyProject(), workspaces: { design: doc } };
+  const h = createHistory({ capture: () => projectToJson(project), restore: (text) => void (project = projectFromJson(text, [designWorkspace])), limit: LIMIT, mergeMs: MERGE, now: () => 0 });
+  const box = () => shapeOf(designOf(project), designOf(project).timeline.features[0]).sizes;
+  const extrude = () => designOf(project).timeline.features.find((f) => f.id === e1.id)!.intent.parameters.distance;
+  const lines = (id: string) => designOf(project).sketches.find((s) => s.id === id)!.curves.length;
+
+  // Edit feature on the box (not the part, which is Extrude 1, the last solid): width 40 → 55, one step named for the box.
+  project = { ...project, workspaces: { design: editFeature(designOf(project), "feature-1", { width: 55 }) } };
+  assert.equal(h.record(editStep(doc, "feature-1")), true);
+  assert.equal(h.undoLabel(), "Edit Feature 1 (box)");
+  assert.deepEqual(box(), { width: 55, depth: 30, height: 20 });
+  assert.equal(partFeature(designOf(project))!.id, e1.id);
+  // The same width again: the same document, nothing recorded.
+  assert.equal(editFeature(designOf(project), "feature-1", { width: 55 }), designOf(project));
+  assert.equal(h.record("Edit Feature 1 (box)"), false);
+  // Extrude 1's distance 10 → 4 through Edit feature (its height box): a second step; the box keeps 55.
+  project = { ...project, workspaces: { design: editFeature(designOf(project), e1.id, { height: 4 }) } };
+  assert.equal(h.record(editStep(designOf(project), e1.id)), true);
+  assert.deepEqual([box().width, extrude()], [55, 4]);
+
+  // Edit Sketch on Sketch 1 (before Extrude 1 and Sketch 2): a second line drawn there is one step; Sketch 2 keeps its one line.
+  project = { ...project, workspaces: { design: drawLine(designOf(project), s1.id, [10, 0], [10, 8]).doc } };
+  assert.equal(h.record(SKETCH_STEPS.draw), true);
+  assert.deepEqual([lines(s1.id), lines(s2.id)], [2, 1]);
+
+  // Undo takes back the line, then the distance, then the width, each alone; Redo puts them back in order.
+  assert.equal(h.undo(), SKETCH_STEPS.draw);
+  assert.deepEqual([lines(s1.id), lines(s2.id), extrude(), box().width], [1, 1, 4, 55]);
+  assert.equal(h.undo(), "Edit Extrude 1");
+  assert.deepEqual([extrude(), box().width], [10, 55]);
+  assert.equal(h.undo(), "Edit Feature 1 (box)");
+  assert.deepEqual([extrude(), box().width], [10, 40]);
+  assert.equal(h.undo(), null);
+  assert.equal(h.redo(), "Edit Feature 1 (box)");
+  assert.equal(h.redo(), "Edit Extrude 1");
+  assert.equal(h.redo(), SKETCH_STEPS.draw);
+  assert.deepEqual([lines(s1.id), lines(s2.id), extrude(), box().width], [2, 1, 4, 55]);
 });
