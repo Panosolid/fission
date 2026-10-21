@@ -22,7 +22,37 @@
 // shortest text that fails the same way.
 
 import { FORMAT_VERSION, MAX_NESTING, emptyProject, projectFromJson, projectToJson, type DataReader, type Project } from "@fission/core";
-import { addSketch, designWorkspace, drawArc, drawCircle, drawLine, extrudeSketch, insertPreset, migrateDesignV1, migrateDesignV2, partDocument, partFeature, partOf, specOf, withPart, type DesignDocument } from "@fission/design";
+import {
+  addSketch,
+  builds,
+  buildingItems,
+  deleteCurve,
+  deleteItem,
+  designWorkspace,
+  drawArc,
+  drawCircle,
+  drawLine,
+  drawRectangle,
+  editFeature,
+  extrudeSketch,
+  insertAt,
+  insertPreset,
+  isSketchExtrude,
+  isSketchItem,
+  migrateDesignV1,
+  migrateDesignV2,
+  moveMarker,
+  partDocument,
+  partFeature,
+  partOf,
+  reorderItem,
+  SKETCH_PLANES,
+  specOf,
+  suppressItem,
+  withPart,
+  type DesignDocument,
+  type KeptShape,
+} from "@fission/design";
 import { renderWorkspace } from "@fission/render";
 import { simulateWorkspace } from "@fission/simulate";
 import { manufactureWorkspace } from "@fission/manufacture";
@@ -91,13 +121,106 @@ function randomJson(r: SeededRandom, depth = 0): unknown {
   return Object.fromEntries(Array.from({ length: below(r, 4) }, (_, i) => [pick(r, ["a", "id", "version", "items", `k${i}`]), randomJson(r, depth + 1)]));
 }
 
+/** One curve drawn in sketch `id` with Design's own functions: a line, circle or arc, from a point already there or a new one. */
+function drawCurve(r: SeededRandom, doc: DesignDocument, id: string): DesignDocument {
+  const points = doc.sketches.find((x) => x.id === id)!.points;
+  const from = points.length > 0 && r.next() < 0.6 ? pick(r, points).id : ([below(r, 100) - 50, below(r, 100) / 10] as const);
+  const k = r.next();
+  if (k < 0.2) return drawCircle(doc, id, from, (1 + below(r, 1000)) / 10).doc;
+  if (k < 0.4) return drawArc(doc, id, from, [below(r, 100), -below(r, 1000) / 100], [-1 - below(r, 100), below(r, 100) / 7]).doc;
+  return drawLine(doc, id, from, [below(r, 100), -below(r, 1000) / 100]).doc;
+}
+
+/** A new sketch on any plane, put in at the marker: often a closed rectangle, sometimes with loose curves too (the kernel judges the outline when it builds). */
+function drawSketch(r: SeededRandom, doc: DesignDocument): DesignDocument {
+  const sketch = addSketch(doc, pick(r, SKETCH_PLANES));
+  let next = sketch.doc;
+  if (r.next() < 0.7) {
+    const [x, y] = [below(r, 60) - 30, below(r, 60) - 30];
+    next = drawRectangle(next, sketch.id, [x, y], [x + 1 + below(r, 60), y + 1 + below(r, 40)]).doc;
+  }
+  for (let k = r.next() < 0.6 ? 0 : 1 + below(r, 3); k > 0; k--) next = drawCurve(r, next, sketch.id);
+  return next;
+}
+
+/**
+ * The kept shapes an edit that lost sketch `id`'s outline leaves (24d2):
+ * each extrude of it with no kept shape yet keeps the sketch as it was in
+ * `before`. Design's `settleKept` keeps it only when the kernel found an
+ * outline in it then; without a kernel here, most keep it and some don't,
+ * and a file holds either (an extrude with neither fails naming its sketch).
+ */
+function keepFor(r: SeededRandom, before: DesignDocument, after: DesignDocument, id: string): DesignDocument {
+  const was = before.sketches.find((s) => s.id === id);
+  if (!was || was.curves.length === 0) return after;
+  const kept: Record<string, KeptShape> = { ...after.kept };
+  for (const f of after.timeline.features)
+    if (isSketchExtrude(f) && f.intent.parameters.sketch === id && !Object.hasOwn(kept, f.id) && r.next() < 0.8) kept[f.id] = { points: was.points, curves: was.curves };
+  return Object.keys(kept).length === 0 ? after : { ...after, kept };
+}
+
+/**
+ * A timeline as the steps 24 and 25 edits leave it (25b): 3 to 12 seeded
+ * edits made with Design's own functions on the part document: sketches
+ * (closed or not) and extrudes of them put in at the marker, presets,
+ * Edit feature on any solid item, accepted reorders, suppress and
+ * unsuppress, the marker anywhere, deletes (a deleted sketch's extrudes
+ * keeping its last shape or failing), and a sketch losing a curve (its
+ * extrudes keeping their shape while the sketch is still there). So valid
+ * files hold kept shapes, suppressed and rolled-back items, items that
+ * fail, and edited early items in any order Design allows.
+ */
+function timelineEdits(r: SeededRandom, start: DesignDocument): DesignDocument {
+  // A sketch extruded first, so most timelines have an extrude for the later edits to break.
+  let doc = drawSketch(r, start);
+  if (r.next() < 0.8) doc = extrudeSketch(doc, doc.sketches.at(-1)!.id, 1 + below(r, 50)).doc;
+  for (let k = 3 + below(r, 10); k > 0; k--) {
+    const items = doc.timeline.features;
+    const e = r.next();
+    if (e < 0.15 || items.length === 0) doc = drawSketch(r, doc);
+    else if (e < 0.35) {
+      // An extrude goes in at the marker, so only a sketch before it can be extruded.
+      const open = items.slice(0, insertAt(doc)).filter(isSketchItem);
+      if (open.length > 0) doc = extrudeSketch(doc, pick(r, open).id, (below(r, 401) - 200) / 10 || 5).doc;
+    } else if (e < 0.41) doc = insertPreset(doc, pick(r, SHAPES), 1 + below(r, 50), 1 + below(r, 50), 1 + below(r, 50)).doc;
+    else if (e < 0.5) {
+      const solids = items.filter((f) => !isSketchItem(f));
+      if (solids.length > 0) {
+        const f = pick(r, solids);
+        // An extrude's height is its distance, which may point either way.
+        const height = isSketchExtrude(f) ? (below(r, 401) - 200) / 10 || 3 : 1 + below(r, 80);
+        doc = editFeature(doc, f.id, { width: 1 + below(r, 80), depth: 1 + below(r, 80), height });
+      }
+    } else if (e < 0.6) {
+      const got = reorderItem(doc, pick(r, items).id, below(r, items.length));
+      if ("doc" in got) doc = got.doc;
+    } else if (e < 0.69) {
+      const f = pick(r, items);
+      doc = suppressItem(doc, f.id, !f.suppressed);
+    } else if (e < 0.77) doc = moveMarker(doc, r.next() < 0.15 ? "start" : r.next() < 0.2 ? null : pick(r, items).id);
+    else if (e < 0.89) {
+      const f = pick(r, items);
+      const after = deleteItem(doc, f.id);
+      doc = isSketchItem(f) ? keepFor(r, doc, after, f.id) : after;
+    } else {
+      const drawn = doc.sketches.filter((s) => s.curves.length > 0);
+      if (drawn.length > 0) {
+        const s = pick(r, drawn);
+        doc = keepFor(r, doc, deleteCurve(doc, s.id, pick(r, s.curves).id), s.id);
+      }
+    }
+  }
+  return doc;
+}
+
 /**
  * Design's data as Panosolid saves it: sometimes with sketches (lines, some
  * chained, so they share points, circles (22b), some round a point
  * already there, and arcs (23a), some from a point already there;
  * sometimes the part extrudes one; from 24d1 several solid features and a
  * rollback marker; from 24f4 sometimes nothing built: the marker at the
- * start, every solid suppressed, or everything deleted), sometimes as the
+ * start, every solid suppressed, or everything deleted; from 25b a
+ * timeline left by Design's own edits, `timelineEdits`), sometimes as the
  * version 1 data saved before step 21b
  * (no sketches, no counter), sometimes as version 2 (steps 21b to 24c,
  * which a save upgrades: its earlier solid features suppressed).
@@ -109,18 +232,12 @@ function designData(r: SeededRandom, part: DesignDocument): unknown {
     return { ...v1, version: 1 };
   }
   let doc = part;
-  if (n < 0.6) return doc;
+  if (n < 0.4) return doc;
+  if (n < 0.7) return timelineEdits(r, doc);
   for (let s = 0; s < 1 + below(r, 2); s++) {
     const sketch = addSketch(doc);
     doc = sketch.doc;
-    for (let l = 0; l < below(r, 5); l++) {
-      const points = doc.sketches.find((x) => x.id === sketch.id)!.points;
-      const from = points.length > 0 && r.next() < 0.6 ? pick(r, points).id : ([below(r, 100) - 50, below(r, 100) / 10] as const);
-      const k = r.next();
-      if (k < 0.2) doc = drawCircle(doc, sketch.id, from, (1 + below(r, 1000)) / 10).doc;
-      else if (k < 0.4) doc = drawArc(doc, sketch.id, from, [below(r, 100), -below(r, 1000) / 100], [-1 - below(r, 100), below(r, 100) / 7]).doc;
-      else doc = drawLine(doc, sketch.id, from, [below(r, 100), -below(r, 1000) / 100]).doc;
-    }
+    for (let l = 0; l < below(r, 5); l++) doc = drawCurve(r, doc, sketch.id);
   }
   // Sometimes the part is an extrude of one of them (step 21d), open or
   // closed (the kernel judges that when it builds), sometimes a preset again after it.
@@ -254,6 +371,54 @@ export function makeCase(r: SeededRandom): string {
   return t;
 }
 
+// ---- The build model, written from docs/project-format.md apart from Design's code.
+
+interface ModelItem {
+  id: string;
+  suppressed: boolean;
+  intent: { type: string; parameters: Record<string, unknown> };
+}
+
+/**
+ * Which items of an opened design build, in timeline order, and the part
+ * (the last solid item that builds, or null), from the file's data alone:
+ * an item builds when it is at or before the marker (none: all of them;
+ * "start": none) and not suppressed, and an extrude of a sketch also
+ * needs its sketch item to build, or, when that sketch is gone, a kept
+ * shape under the extrude's id. The kernel judges outlines later; a file
+ * can't say whether one closes.
+ */
+export function buildModel(design: unknown): { building: string[]; part: string | null } {
+  const d = design as { timeline: { features: ModelItem[]; marker?: string }; kept?: Record<string, unknown> };
+  const items = d.timeline.features;
+  const marker = d.timeline.marker;
+  const place = new Map<string, number>();
+  items.forEach((f, i) => place.has(f.id) || place.set(f.id, i));
+  const end = marker === undefined ? items.length : marker === "start" ? 0 : place.get(marker)! + 1;
+  const live = (i: number) => i < end && !items[i].suppressed;
+  const building: string[] = [];
+  let part: string | null = null;
+  for (const [i, f] of items.entries()) {
+    if (!live(i)) continue;
+    if (f.intent.type === "extrude" && Object.hasOwn(f.intent.parameters, "sketch")) {
+      const at = place.get(f.intent.parameters.sketch as string);
+      const sketch = at !== undefined && items[at].intent.type === "sketch" ? at : undefined;
+      if (sketch === undefined ? !(d.kept !== undefined && Object.hasOwn(d.kept, f.id)) : !live(sketch)) continue;
+    }
+    building.push(f.id);
+    if (f.intent.type !== "sketch") part = f.id;
+  }
+  return { building, part };
+}
+
+/** Design's three answers to what builds, checked against the build model; a test swaps one for a broken one. */
+export interface BuildRules {
+  buildingItems: typeof buildingItems;
+  builds: typeof builds;
+  partFeature: typeof partFeature;
+}
+export const DESIGN_RULES: BuildRules = { buildingItems, builds, partFeature };
+
 // ---- The checks.
 
 const OWN_MESSAGES = [/^not a Panosolid project: /, /^this project was saved by a newer Panosolid /, /^can't open the [a-z]+ workspace's data: /];
@@ -278,7 +443,7 @@ function guard<T>(stage: string, f: () => T): T | Problem {
 const isProblem = (x: unknown): x is Problem => isObj(x) && typeof x.kind === "string" && typeof x.detail === "string" && Object.keys(x).length === 2;
 
 /** null if the loader behaves on this text; otherwise what went wrong. */
-export function checkText(text: string, readers: readonly DataReader[] = READERS): Problem | null {
+export function checkText(text: string, readers: readonly DataReader[] = READERS, rules: BuildRules = DESIGN_RULES): Problem | null {
   let parsed: unknown;
   let parses = true;
   try {
@@ -307,13 +472,24 @@ export function checkText(text: string, readers: readonly DataReader[] = READERS
   const design = project.workspaces.design as DesignDocument | undefined;
   if (design) {
     const shown = guard("showing the Design part", () => {
-      // An extrude of a sketch needs the kernel for its outline; readDesignDocument checked its sketch and distance.
-      // A design with no body (24f4) has no part to show.
-      const part = partOf(design);
-      if (part === null || part.shape === "sketch-extrude") return null;
-      return specOf(design, partFeature(design)!);
+      // Every preset that builds is a body to show; an extrude of a sketch needs the kernel for its
+      // outline (readDesignDocument checked its sketch and distance). A design with no body (24f4) shows none.
+      partOf(design);
+      for (const f of rules.buildingItems(design)) if (!isSketchItem(f) && !isSketchExtrude(f)) specOf(design, f);
+      return null;
     });
     if (isProblem(shown)) return shown;
+    const built = guard("asking Design what builds", () => {
+      const model = buildModel(design);
+      const all = [...rules.buildingItems(design)].map((f) => f.id);
+      const each = design.timeline.features.filter((f) => rules.builds(design, f)).map((f) => f.id);
+      const part = rules.partFeature(design)?.id ?? null;
+      if (all.join() !== model.building.join()) return { kind: "Design's buildingItems is not the build model's", detail: `Design ${all.join()}; model ${model.building.join()}` };
+      if (each.join() !== model.building.join()) return { kind: "Design's builds is not the build model's", detail: `Design ${each.join()}; model ${model.building.join()}` };
+      if (part !== model.part) return { kind: "Design's part is not the build model's", detail: `Design ${part}; model ${model.part}` };
+      return null;
+    });
+    if (built !== null) return built;
   }
   const saved = guard("saving the opened project", () => projectToJson(project));
   if (isProblem(saved)) return saved;
@@ -330,8 +506,8 @@ export function checkText(text: string, readers: readonly DataReader[] = READERS
 }
 
 /** The shortest text (by deleting runs of characters) that still fails the same way. */
-export function shrink(text: string, kind: string, readers: readonly DataReader[] = READERS): string {
-  const same = (t: string) => checkText(t, readers)?.kind === kind;
+export function shrink(text: string, kind: string, readers: readonly DataReader[] = READERS, rules: BuildRules = DESIGN_RULES): string {
+  const same = (t: string) => checkText(t, readers, rules)?.kind === kind;
   let chunk = 2 ** Math.ceil(Math.log2(Math.max(1, text.length)));
   while (chunk >= 1) {
     let at = 0;
@@ -345,29 +521,49 @@ export function shrink(text: string, kind: string, readers: readonly DataReader[
   return text;
 }
 
+/** The timelines an opened file can hold (25b), each of which a round must reach. */
+const timelineCounts = () => ({ openedKept: 0, openedKeptSketchThere: 0, openedSuppressed: 0, openedMarkerOnItem: 0, openedFailedExtrude: 0, openedSeveralExtrudes: 0 });
+
+function countTimeline(design: DesignDocument, counts: ReturnType<typeof timelineCounts>) {
+  const { features, marker } = design.timeline;
+  const kept = Object.keys(design.kept ?? {});
+  const extrudes = features.filter(isSketchExtrude);
+  const building = buildingItems(design);
+  const end = marker === undefined ? features.length : marker === "start" ? 0 : features.findIndex((f) => f.id === marker) + 1;
+  if (kept.length > 0) counts.openedKept++;
+  // A kept shape while its sketch is still there: the sketch lost its outline (open-outline).
+  if (extrudes.some((f) => kept.includes(f.id) && features.some((s) => s.id === f.intent.parameters.sketch))) counts.openedKeptSketchThere++;
+  if (features.some((f) => f.suppressed)) counts.openedSuppressed++;
+  if (marker !== undefined && marker !== "start") counts.openedMarkerOnItem++;
+  // In range and not suppressed, yet not built: its sketch is suppressed, rolled back or deleted with no kept shape.
+  if (extrudes.some((f) => features.indexOf(f) < end && !f.suppressed && !building.has(f))) counts.openedFailedExtrude++;
+  if (extrudes.length >= 2) counts.openedSeveralExtrudes++;
+}
+
 export interface Failure extends Problem {
   index: number;
   input: string;
 }
 
 /** One round: `cases` texts from `seed`; one shrunk failure per kind, and how the cases fell. */
-export function fuzzRound(seed: bigint, cases: number, readers: readonly DataReader[] = READERS) {
+export function fuzzRound(seed: bigint, cases: number, readers: readonly DataReader[] = READERS, rules: BuildRules = DESIGN_RULES) {
   const r = seeded(seed);
   const failures: Failure[] = [];
-  const counts = { opened: 0, openedNoBody: 0, refusedInvalidJson: 0, refusedOuter: 0, refusedByReader: 0, nested: 0, proto: 0 };
+  const counts = { opened: 0, openedNoBody: 0, ...timelineCounts(), refusedInvalidJson: 0, refusedOuter: 0, refusedByReader: 0, nested: 0, proto: 0 };
   for (let index = 0; index < cases; index++) {
     const text = makeCase(r);
     if (text.includes("[[[[[[[[[[")) counts.nested++;
     if (text.includes('"__proto__"')) counts.proto++;
-    const problem = checkText(text, readers);
+    const problem = checkText(text, readers, rules);
     if (problem) {
-      if (!failures.some((f) => f.kind === problem.kind)) failures.push({ ...problem, index, input: shrink(text, problem.kind, readers) });
+      if (!failures.some((f) => f.kind === problem.kind)) failures.push({ ...problem, index, input: shrink(text, problem.kind, readers, rules) });
       continue;
     }
     try {
       const design = projectFromJson(text, readers).workspaces.design as DesignDocument | undefined;
       counts.opened++;
       if (design && partFeature(design) === null) counts.openedNoBody++;
+      if (design) countTimeline(design, counts);
     } catch (e) {
       const m = (e as Error).message;
       if (m.includes("not valid JSON")) counts.refusedInvalidJson++;
