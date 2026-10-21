@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- A page of words: no script, no outside requests (audit 2026-10-22, M1). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Panosolid: privacy and terms</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <style>
+      :root { --bg: #14161a; --text: #e6e8eb; --muted: #a9b0b8; --link: #4aa8ff; --rule: #2a2e35; }
+      @media (prefers-color-scheme: light) { :root { --bg: #ffffff; --text: #1b1e22; --muted: #50575f; --link: #0b62c4; --rule: #dde1e6; } }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, sans-serif; }
+      main { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; overflow-wrap: break-word; }
+      h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; }
+      h2 { font-size: 21px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--rule); }
+      h3 { font-size: 17px; margin: 24px 0 4px; }
+      p, li { margin: 8px 0; }
+      ul { padding-left: 22px; }
+      a { color: var(--link); }
+      .updated, .back { color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="back"><a href="./">Back to Panosolid</a></p>
+      <h1>Privacy and terms</h1>
+      <p class="updated">Last changed 22 October 2026. Every change to this page is public in the <a href="https://github.com/Panosolid/fission/commits/main/apps/fission/public/privacy.html">project's history</a>.</p>
+
+      <h2 id="privacy">Privacy</h2>
+      <p><strong>The short version:</strong> Panosolid has no accounts, no ads, no analytics, no cookies and no trackers. Your designs stay in your browser on your device. The people who make Panosolid never receive them, or anything else about you.</p>
+
+      <h3>What is kept, and where</h3>
+      <ul>
+        <li>Your projects, and the copy kept as you work, are saved in this browser's own storage on this device. They are not sent anywhere and not synced to other devices. Use Save to keep a copy as a file.</li>
+        <li>Settings, including the AI assistant's settings and any AI key you enter, are kept in this browser's storage on this device.</li>
+        <li>If you download the in-browser AI model, its files (about 0.9 GB) are kept in this browser's cache.</li>
+      </ul>
+
+      <h3>What leaves your device</h3>
+      <ul>
+        <li><strong>Loading the site.</strong> Panosolid is hosted by GitHub Pages. Like any web host, GitHub sees your IP address and browser details when you load it, under <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</li>
+        <li><strong>The AI assistant.</strong> Nothing is sent to an online AI service unless you choose one and give it your own key. When you open the assistant, an AI that runs on your own device may be chosen for you; that one keeps everything on your device.
+          <ul>
+            <li>With Anthropic, OpenAI or another address you type, your request and a short summary of your project (the names and sizes of its features and any recent errors, not the shapes themselves) go straight from your browser to that provider, using your own key. Before the first request to each address, Panosolid shows exactly what will be sent and waits for you. That provider's own privacy policy and terms then apply, and you pay them directly. Panosolid never sees your requests or your key.</li>
+            <li>With Ollama on your own computer, nothing leaves your computer. If you point it at another computer's address, it is treated like any other provider and asks you first.</li>
+            <li>The in-browser model is downloaded once from Hugging Face and GitHub, and after that runs on your device: your requests stay there.</li>
+          </ul>
+        </li>
+        <li><strong>Files you save or export</strong> (projects, STL files and the like) are downloaded to your device. Where they go next is up to you.</li>
+      </ul>
+
+      <h3>Children and students</h3>
+      <p>Panosolid asks for no personal information, so anyone can use it. The hosted AI providers set their own minimum ages (many require you to be 18, some allow 13 with a parent's permission). If you are under a provider's age, don't use a key for it; Ollama and the in-browser model need no account.</p>
+
+      <h3>Deleting your data</h3>
+      <p>Everything Panosolid keeps is in your browser, so you control it:</p>
+      <ul>
+        <li>To remove an AI key, open the assistant panel and choose Remove key.</li>
+        <li>To delete everything (projects, settings, keys and any downloaded model), clear the site data for panosolid.github.io in your browser's settings. This can't be undone, so save any project you want to keep to a file first.</li>
+        <li>There is no other copy anywhere for us to delete. For anything you sent to an AI provider, ask that provider.</li>
+      </ul>
+
+      <h2 id="terms">Terms of use</h2>
+      <ul>
+        <li><strong>Free.</strong> Panosolid is free to use, with no account and no payments.</li>
+        <li><strong>Your designs are yours.</strong> Panosolid claims no rights over anything you make with it.</li>
+        <li><strong>Check before you make.</strong> Panosolid is in early development and is provided as it is, without any warranty. Like any software it can have bugs, including ones that give wrong sizes or shapes. Check every measurement before you make or rely on anything, above all parts that carry weight, get hot, hold pressure, or keep people safe. As far as the law allows, the people who make Panosolid are not responsible for losses from using it. Nothing here takes away rights that the law (such as the Australian Consumer Law) says can't be taken away.</li>
+        <li><strong>Keep copies.</strong> Browsers can clear their storage, for example when a device runs low on space. Save projects you care about to files.</li>
+        <li><strong>The AI assistant can be wrong.</strong> It only suggests changes: nothing changes until you choose Accept, and it never controls a machine. Using a provider is between you and that provider, under their terms.</li>
+        <li><strong>Use it lawfully.</strong> Don't use Panosolid to break the law or to copy other people's designs, patents or trademarks without permission.</li>
+        <li><strong>The code.</strong> Panosolid's source code is public on <a href="https://github.com/Panosolid/fission">GitHub</a>, but no licence for it has been chosen yet, so these terms let you use the app, not reuse its code. The free code it is built with keeps its own <a href="third-party-licences.txt">licences</a>.</li>
+        <li><strong>Changes.</strong> These terms may change as Panosolid grows (for example when sharing designs with others arrives). The date at the top says when they last changed.</li>
+      </ul>
+
+      <h2 id="contact">Questions</h2>
+      <p>Open an issue on <a href="https://github.com/Panosolid/fission/issues">Panosolid's GitHub page</a>. Please don't put anything private in it: issues are public.</p>
+    </main>
+  </body>
+</html>
