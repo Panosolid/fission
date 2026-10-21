@@ -202,9 +202,9 @@ test("hand-worked: the outline's sketch deleted, its extrude keeps the sketch's 
 
 // ---------------------------------------------------------------- Ben's answers
 
-test("every one of Ben's Fusion answers that holds without a cut holds on Design (1, 2, 5, 7, Q1, Q2, Q3)", async () => {
+test("every one of Ben's Fusion answers that holds without a cut holds on Design (1, 2, 5, 7, Q1, Q2, Q3, Q4)", async () => {
   const cases = FUSION_CASES.filter((c) => !c.cuts);
-  assert.deepEqual([...new Set(cases.map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3"]);
+  assert.deepEqual([...new Set(cases.map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3", "Q4"]);
   const start = await kernel.call("body_count");
   for (const c of cases) {
     const subject = namingDesignSubject(kernel);
@@ -277,6 +277,10 @@ test(`seeded: ${SEEDS} sessions × ${STEPS} steps on Design agree with the model
     "op:undo:done",
     "op:redo:done",
     "save-open",
+    "pin:corner",
+    "pin:middle",
+    "pin:moved",
+    "sketch:point-lost",
   ];
   if (SEEDS >= 12) for (const key of reached) assert.ok((total[key] ?? 0) >= 3, `${key} reached ${total[key] ?? 0} times: ${JSON.stringify(total)}`);
 });

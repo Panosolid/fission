@@ -12,6 +12,7 @@
 import type { Feature, KernelCalls, Outline, Plane, SketchArc, SketchCircle, SketchLine } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
 import { faceFeature, isFacePlane, squared, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
+import type { EdgeTarget, SketchPin } from "./face-edges.ts";
 import { curvePoints, insertAt, insertItem, isSketchItem, profileLabel, shown, type DesignDocument, type ReadyProfile, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
 import { readProfileReference } from "./references.ts";
 
@@ -242,26 +243,58 @@ export function drawRectangle(doc: DesignDocument, sketchId: string, a: readonly
   return { doc: next, ids };
 }
 
-/** The sketch without this curve, and without the points only it used. The counter stays where it is. */
+/** The sketch without this curve, and without the points only it used (and their pins, 26f). The counter stays where it is. */
 export function deleteCurve(doc: DesignDocument, sketchId: string, curveId: string): DesignDocument {
   const sketch = sketchIn(doc, sketchId);
   if (!sketch.curves.some((c) => c.id === curveId)) throw new Error(`sketch ${sketchId} has no curve ${curveId}`);
   const curves = sketch.curves.filter((c) => c.id !== curveId);
   const used = new Set(curves.flatMap(curvePoints));
-  return withSketch(doc, { ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) });
+  return withSketch(doc, withPins({ ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) }, (sketch.pins ?? []).filter((p) => used.has(p.point))));
+}
+
+/** The sketch with these pins, or without the list when there are none (26f: a file never holds an empty one). */
+function withPins(sketch: Sketch, pins: SketchPin[]): Sketch {
+  const rest: Sketch = { ...sketch };
+  delete rest.pins;
+  return pins.length === 0 ? rest : { ...rest, pins };
+}
+
+/**
+ * The document after a sketch edit from `before` to `after`, with every
+ * point the edit added to sketch `sketchId` exactly on one of `targets`
+ * (its face's edges' ends, middles and centres where the sketch lies now,
+ * face-edges.ts `faceEdgeTargets`) pinned there (step 26f, Q4): the first
+ * target listed at those coordinates. A point already there is left as it
+ * was; a sketch on an origin plane has no targets. `after` itself when
+ * nothing is pinned.
+ */
+export function pinNewPoints(before: DesignDocument, after: DesignDocument, sketchId: string, targets: readonly EdgeTarget[]): DesignDocument {
+  if (targets.length === 0) return after;
+  const had = new Set(before.sketches.find((s) => s.id === sketchId)?.points.map((p) => p.id) ?? []);
+  const sketch = sketchIn(after, sketchId);
+  const pins = [...(sketch.pins ?? [])];
+  for (const p of sketch.points) {
+    if (had.has(p.id) || pins.some((x) => x.point === p.id)) continue;
+    const t = targets.find((x) => x.at[0] === p.x && x.at[1] === p.y);
+    if (t) pins.push({ point: p.id, kind: t.kind, name: t.name });
+  }
+  return pins.length === (sketch.pins?.length ?? 0) ? after : withSketch(after, withPins(sketch, pins));
 }
 
 /**
  * The sketch with one point moved; every line ending there and circle or
  * arc using it follows, since curves name points. Until constraints (29)
  * nothing else moves with it, so moving one end of an arc leaves its
- * centre off the midway line and the kernel then says so.
+ * centre off the midway line and the kernel then says so. A point pinned
+ * to its face's edge (26f) is moved off it, so its pin goes.
  */
 export function movePoint(doc: DesignDocument, sketchId: string, pointId: string, x: number, y: number): DesignDocument {
   const sketch = sketchIn(doc, sketchId);
   if (!sketch.points.some((p) => p.id === pointId)) throw new Error(`sketch ${sketchId} has no point ${pointId}`);
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`a sketch point needs x and y in mm, not ${x}, ${y}`);
-  return withSketch(doc, { ...sketch, points: sketch.points.map((p) => (p.id === pointId ? { ...p, x, y } : p)) });
+  // Moved off the edge it was pinned to (26f), it is pinned no longer.
+  const moved = { ...sketch, points: sketch.points.map((p) => (p.id === pointId ? { ...p, x, y } : p)) };
+  return withSketch(doc, sketch.pins ? withPins(moved, sketch.pins.filter((p) => p.point !== pointId)) : moved);
 }
 
 /** The sketch's lines as the kernel takes them, rebuilt from point ids (its circles and arcs are in `sketchCurves`). */
