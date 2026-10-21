@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, createHistory, RepresentationRegistry, createSelection, NO_HIGHLIGHT, SHELL_SHORTCUTS, ShortcutTable, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, createHistory, RepresentationRegistry, createSelection, NO_HIGHLIGHT, SHELL_SHORTCUTS, ShortcutTable, type BodyView, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
 const workspaceDirs = readdirSync(join(root, "workspaces"), { withFileTypes: true })
@@ -504,10 +504,25 @@ test("Design shows a kernel failure in its panel rather than throwing", async ()
 // Verbs, not apps (X1): the selection shows what the action registry offers
 // for it, and Design's toolbar STL button runs the same registered verb.
 test("Design offers the registry's verbs for the selection, and its STL button runs the registered verb", async () => {
-  const ctx = testContext();
+  // A kernel that builds the box and refuses to export it. The box's view as make_box gives it (workspaces/design/test/views.ts
+  // works its faces and edges out), with no mesh to draw: 40 · 30 · 20 = 24000 mm³, 2(1200 + 800 + 600) = 5200 mm².
+  const view = {
+    vertices: 8,
+    edges: 12,
+    faces: 6,
+    face_types: Array(6).fill("plane"),
+    edge_types: Array(12).fill("line"),
+    face_roles: [{ role: "bottom" }, { role: "top" }, { role: "front" }, { role: "back" }, { role: "left" }, { role: "right" }],
+    edge_faces: [[0, 4], [0, 3], [5, 0], [2, 0], [1, 2], [1, 5], [3, 1], [4, 1], [2, 5], [4, 2], [3, 4], [5, 3]],
+    mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [], edge_line_edges: [] },
+    volume: 24000,
+    area: 5200,
+    errors: [],
+  } as unknown as BodyView;
+  const ctx = { ...testContext(), kernel: { call: ((op: string) => (op === "body_build" ? Promise.resolve(1) : op === "body_view" ? Promise.resolve(view) : op === "body_free" ? Promise.resolve() : Promise.reject(new Error("no STL in this test")))) as KernelCalls["call"] } };
   const design = plugins.find((p) => p.id === "design")!;
   design.registerActions!(ctx.actions);
-  const view = design.mount(ctx);
+  const mounted = design.mount(ctx);
   await settle();
   const verbs = () => [...ctx.properties.querySelectorAll("#selection-actions button")].map((b) => (b as HTMLElement).dataset.action);
   const row = ctx.properties.querySelector("#selection-actions") as HTMLElement;
@@ -516,21 +531,19 @@ test("Design offers the registry's verbs for the selection, and its STL button r
   assert.equal(row.hidden, true);
   ctx.viewport.onPick!({ face: 1, shift: false });
   assert.deepEqual(verbs(), [], "a face: no verbs yet");
-  // The kernel fails in this test, so the box built no body: no Body row (bug hunt 2026-10-19, finding 5) and its Timeline row selects nothing.
-  assert.equal(ctx.browser.querySelector("[data-node=body-1]"), null);
-  assert.equal(ctx.browser.querySelector("[data-node=feature-1]")!.tagName, "SPAN");
-  // Selected all the same (as the AI assistant or another workspace can): the registry's verb for a body.
-  ctx.selection.set([{ kind: "body", id: "body:feature-1" as StableId }]);
+  // The box built: its Body row selects it, and the registry's verb for a body is offered.
+  (ctx.browser.querySelector("[data-node=body-1]") as HTMLElement).click();
+  assert.deepEqual(ctx.selection.items.map((i) => i.id), ["body:feature-1"]);
   assert.deepEqual(verbs(), ["design.download-stl"]);
   assert.equal(row.hidden, false);
-  // The kernel fails in this test: the verb's outcome shows in the note, nothing throws.
+  // The kernel refuses the export: the verb's outcome shows in the note, nothing throws.
   (ctx.properties.querySelector("[data-action='design.download-stl']") as HTMLElement).click();
   await settle();
-  assert.equal(note(), "no kernel in this test");
+  assert.equal(note(), "no STL in this test");
   ctx.properties.querySelector<HTMLElement>("#action-note")!.textContent = "";
   ctx.selection.clear();
   assert.deepEqual(verbs(), []);
-  // The toolbar's STL button exports the whole part with nothing selected, through the registry.
+  // The toolbar's STL button exports every body shown with nothing selected, through the registry.
   let ran = 0;
   const real = ctx.actions.get("design.download-stl")!;
   const run = real.run;
@@ -542,7 +555,33 @@ test("Design offers the registry's verbs for the selection, and its STL button r
   (ctx.toolbar.querySelector("[data-op=export_stl]") as HTMLElement).click();
   await settle();
   assert.equal(ran, 1);
-  assert.equal(note(), "no kernel in this test");
+  assert.equal(note(), "no STL in this test");
+  real.run = run;
+  mounted.unmount();
+});
+
+test("a body the kernel failed is not shown: it offers no verb, and the STL button says there is no body (25c1)", async () => {
+  const ctx = testContext();
+  const design = plugins.find((p) => p.id === "design")!;
+  design.registerActions!(ctx.actions);
+  const view = design.mount(ctx);
+  await settle();
+  const verbs = () => [...ctx.properties.querySelectorAll("#selection-actions button")].map((b) => (b as HTMLElement).dataset.action);
+  const note = () => ctx.properties.querySelector("#action-note")!.textContent;
+  // The kernel fails in this test, so the box built no body: no Body row (bug hunt 2026-10-19, finding 5) and its Timeline row selects nothing.
+  assert.equal(ctx.browser.querySelector("[data-node=body-1]"), null);
+  assert.equal(ctx.browser.querySelector("[data-node=feature-1]")!.tagName, "SPAN");
+  // Selected all the same (as the AI assistant or another workspace can): nothing to download, so no verb.
+  ctx.selection.set([{ kind: "body", id: "body:feature-1" as StableId }]);
+  assert.deepEqual(verbs(), []);
+  // The STL button: no body shown, so it says so and never runs the verb.
+  const real = ctx.actions.get("design.download-stl")!;
+  const run = real.run;
+  real.run = () => assert.fail("the verb must not run with no body shown");
+  (ctx.toolbar.querySelector("[data-op=export_stl]") as HTMLElement).click();
+  await settle();
+  assert.equal(note(), "There is no body to download: nothing in the timeline builds.");
+  real.run = run;
   view.unmount();
 });
 

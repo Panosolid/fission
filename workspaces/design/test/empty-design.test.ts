@@ -103,18 +103,19 @@ test("no body to download, and no solid for other workspaces: the sketch's outli
   assert.equal(partBody(d), null);
   assert.deepEqual(representationsOf(body, d), []);
   assert.equal(partBody(part())?.id, "body:feature-11");
-  // Download STL asked for a body that is not the part's: a bad outcome, never a call to the kernel.
+  // Download STL asked for a body that is not shown: a bad outcome, never a call to the kernel.
   const r = new ActionRegistry();
   registerDesignActions(r, () => assert.fail("nothing is saved"));
   const project = emptyProject();
   project.workspaces.design = d;
   const ctx = { project, kernel: { call: () => assert.fail("no kernel call") }, viewport: {} } as unknown as WorkspaceContext;
-  assert.deepEqual(await r.get(DOWNLOAD_STL)!.run([body], ctx), { message: "body:feature-11 is not a body of the part, so there is nothing to download.", bad: true });
+  assert.deepEqual(await r.get(DOWNLOAD_STL)!.run([body], ctx), { message: "body:feature-11 is not a body shown in the design, so there is nothing to download.", bad: true });
   assert.equal(NO_BODY_STL, "There is no body to download: nothing in the timeline builds.");
   // Other workspaces see Sketch 1's outline, and no design.feature.
   const kernel = {} as KernelCalls;
   assert.deepEqual(designObjects(d, kernel).map((o) => o.type), ["design.sketch"]);
-  assert.deepEqual(designObjects(part(), kernel).map((o) => `${o.type} ${o.id}`), ["design.sketch sketch-2", "design.feature feature-11"]);
+  // Both bodies shown are offered (25c1): the box (feature-1) and Extrude 1 (feature-11), in build order.
+  assert.deepEqual(designObjects(part(), kernel).map((o) => `${o.type} ${o.id}`), ["design.sketch sketch-2", "design.feature feature-1", "design.feature feature-11"]);
 });
 
 test("hand-worked: the part's view reads nothing once no body builds, and a result reading it is told the part was removed", () => {

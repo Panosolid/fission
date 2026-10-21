@@ -17,7 +17,7 @@ export { featureNames, nameBody, outlineCurves, type BodyNames } from "./naming.
 export { pickChange, type SelectionChange } from "./picking.ts";
 export { droppedNote, highlightOf, NAME_SHARED, panelFocus, referenceLabel, selectionRows, survivors, type PanelFocus } from "./selection.ts";
 export { bodyOf, findInScene, joinBodies, resolveInScene, sceneHit, sceneReference, shownBodies, type Found, type Scene, type ShownBody } from "./scene.ts";
-export { COPY_SVG, designActions, DOWNLOAD_STL, partBody, registerDesignActions, representationsOf, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";
+export { COPY_SVG, designActions, DOWNLOAD_STL, joinStl, partBody, registerDesignActions, representationsOf, shownBodyRefs, STL_OVERLAY, targetsOf, type CopySvg, type SaveFile } from "./actions.ts";
 export { rounding, snapOnSketch, SNAP_PIXELS, type Rounding, type Snap } from "./snap.ts";
 export { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS, type ReorderCause, type Reordered } from "./timeline-edits.ts";
 export { deleteAsk, deleteWords, listWords, planDelete, type DeleteAsk, type DeletePlan, type DeleteQuestion } from "./delete-ask.ts";

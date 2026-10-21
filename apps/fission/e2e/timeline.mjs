@@ -777,12 +777,12 @@ try {
       }
 
       // 7. The browser's Timeline rows select their body (24f6): the box's row selects Body 1 (its row lit too) and only
-      // the box's faces; Sketch 1's row selects nothing (sketches are not selectable yet).
+      // the box's faces; Sketch 1's row is a button too (25c1: it selects the sketch's outline, checked in copy-svg.mjs).
       if ((await page.isVisible("#browser-toggle")) && (await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press(page, "#browser-toggle", dragTap);
       await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => (d.open = true)));
       const boxRow = '#browser [data-node="timeline"] .tree-row[data-node="feature-1"]';
       assert.equal(await page.$eval(boxRow, (r) => r.tagName), "BUTTON");
-      assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="sketch-2"]', (r) => r.tagName), "SPAN");
+      assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="sketch-2"]', (r) => r.tagName), "BUTTON");
       await press(page, boxRow, dragTap);
       await until(page, () => document.querySelector('#browser .tree-row[data-node="body-1"]')?.getAttribute("aria-current") === "true", null, "Body 1 lit");
       assert.equal(await page.getAttribute(boxRow, "aria-current"), "true");

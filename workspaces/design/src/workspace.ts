@@ -27,7 +27,8 @@ import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from ".
 import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
-import { addSketch, askOutline, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
+import { readProfileReference } from "./references.ts";
+import { addSketch, askOutline, outlineSourceOf, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, withLocks, type Locks } from "./typed-entry.ts";
 import { typedBoxes } from "./typed-boxes.ts";
@@ -36,7 +37,7 @@ import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawSt
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
-import { COPY_SVG, DOWNLOAD_STL, NO_BODY_STL, partBody, registerDesignActions, STL_OVERLAY, targetsOf } from "./actions.ts";
+import { COPY_SVG, DOWNLOAD_STL, NO_BODY_STL, registerDesignActions, shownBodyRefs, STL_OVERLAY, targetsOf, type DesignRun } from "./actions.ts";
 
 /**
  * What the user last entered (as typed), kept while other workspaces are
@@ -271,14 +272,26 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     else ctx.selection.set([ref]);
   }
 
+  /** The ids of the sketches whose outlines are selected, as the last showSelection found them. */
+  let selectedSketches: ReadonlySet<string> = new Set();
   /** Draws the selection: the viewport's colours, the lit browser rows, the properties' rows. */
   function showSelection() {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
     const items = ctx.selection.items;
+    // Which selected outlines are sketches', for the note when a rebuild drops one (25c1); one already
+    // gone from `doc` (shown again before the rebuild that drops it) keeps what it was.
+    selectedSketches = new Set(
+      items.flatMap((i) => {
+        const id = readProfileReference(i);
+        if (id === null) return [];
+        const source = outlineSourceOf(i, doc);
+        return (source ? source.kind === "sketch" : selectedSketches.has(id)) ? [id] : [];
+      }),
+    );
     viewport.showSelection(highlightOf(items, lastScene));
     lightRows(ctx.browser, doc, failedNow, items);
-    panel.showSelection(selectionRows(items, lastScene, doc.profiles));
+    panel.showSelection(selectionRows(items, lastScene, doc));
     // The Feature and Body sections describe the selected feature (else the part), with the browser's number for its body.
     const focus = panelFocus(items, lastScene, doc);
     panel.showFeature(focus?.feature ?? null);
@@ -287,7 +300,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     else if (focus && partShown?.feature === focus.feature.id && focus.feature === partFeature(doc)) panel.showBody(partShown.view, `Body ${partShown.place}`);
     else panel.showNoBody(); // a body that did not build, or a design with no body (24f4)
     // Verbs, not apps: whatever the registry offers for this selection, from any workspace.
-    const verbs = ctx.actions.actionsFor(targetsOf(items, doc));
+    const verbs = ctx.actions.actionsFor(targetsOf(items, doc, failedNow));
     panel.showActions(verbs, (id) => runAction(id, ctx.selection.items));
   }
 
@@ -295,7 +308,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   async function runAction(id: string, targets: readonly Selected[]) {
     const action = ctx.actions.get(id);
     if (!action) return panel.showActionNote(`No action ${id} is registered.`, true);
-    const outcome = await action.run(targets, ctx);
+    // Design's own runs know the bodies drawn (actions.ts, DesignRun: the precision overlay marks only those that warned);
+    // the shell's context stays the prototype, so its getters (the project, the graph) read live as ever.
+    const run: DesignRun = Object.assign(Object.create(ctx) as WorkspaceContext, { scene: lastScene });
+    const outcome = await action.run(targets, run);
     if (shown) panel.showActionNote(outcome.message, outcome.bad);
   }
 
@@ -381,12 +397,12 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * one shows its message, as when typed).
    */
   function run(command: Command) {
-    // The whole part's STL: the same verb a selected body offers, from the registry.
+    // The whole design's STL, every body shown in one file (25c1): the same verb selected bodies offer, from the registry.
     if (command.op === "export_stl") {
       const doc = ctx.project.workspaces.design as DesignDocument | undefined;
-      const body = doc && partBody(doc);
-      if (!body) return panel.showActionNote(NO_BODY_STL, true);
-      return runAction(DOWNLOAD_STL, [body]);
+      const bodies = doc ? shownBodyRefs(doc, failedNow) : [];
+      if (bodies.length === 0) return panel.showActionNote(NO_BODY_STL, true);
+      return runAction(DOWNLOAD_STL, bodies);
     }
     if (command.op !== "set_part") throw new Error(`Design has no command ${command.op}`);
     const kind = command.shape as ShapeKind;
@@ -600,11 +616,12 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // Faces and edges the edit took off the body leave the selection, with a
       // note (17e); so do ones whose name now names two (25a4: never a guess);
       // the rest follow their names, however the kernel numbers them now.
-      const { kept, dropped, shared } = survivors(ctx.selection.items, scene, doc.profiles.map((p) => p.id));
+      const outlines = [...doc.profiles.map((p) => p.id), ...doc.sketches.flatMap((s) => (s.curves.length > 0 ? [s.id] : []))];
+      const { kept, dropped, shared } = survivors(ctx.selection.items, scene, outlines);
       lastScene = scene;
       const part = partFeature(doc);
       partShown = scene.bodies.find((b) => b.feature === part?.id) ?? (failure === undefined ? null : partShown);
-      note = droppedNote(dropped, shared);
+      note = droppedNote(dropped, shared, selectedSketches);
       if (dropped.length > 0) {
         settling = true;
         ctx.selection.set(kept);

@@ -9,9 +9,13 @@
 // a warning (24d2), opened from a file until sketches can be edited after
 // an extrude; deleting the sketch from the browser (24e4) asks first, then
 // shows the same kept shape and warning, at 1280 px and at 375 px with taps.
+// With the box and an extrude both shown (25c1), the toolbar's STL holds
+// both bodies in one file, Body 1's row downloads the box alone (it is not
+// the part), and both rows selected download both, at 1280 and 375 px.
 // Screenshots go to E2E_SHOTS when set. Run with
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
@@ -396,6 +400,62 @@ try {
       await until(page, () => !document.querySelector("#kept-warning").hidden, null, "redone");
       await browserOpen();
       assert.deepEqual(await state(), after);
+      await page.context().close();
+    });
+  }
+
+  // Two bodies (25c1): the default box and an extrude over it. Every corner
+  // is a whole number of mm, exact in single precision, so the volumes are
+  // exact. At 1280 px a 40 × 30 rectangle by 10: 12 triangles (6 faces of
+  // 2), 12,000 mm³. At 375 px a right triangle 30 × 20 by 10 (on screen
+  // there, as above): 1 triangle per cap and 2 per side, 2 + 6 = 8;
+  // ½ · 30 · 20 · 10 = 3,000 mm³. The box: 12 triangles, 24,000 mm³.
+  for (const { width, tap, pts, tris, vol, volText } of [
+    { width: 1280, tap: false, pts: [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]], tris: 12, vol: 12000, volText: "12,000 mm³" },
+    { width: 375, tap: true, pts: [[0, 0], [30, 0], [30, 20], [0, 0]], tris: 8, vol: 3000, volText: "3,000 mm³" },
+  ]) {
+    await check(`two bodies: the toolbar's STL holds both in one file, Body 1 downloads alone, both selected download both (25c1, ${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      const press = (sel) => (tap ? page.tap(sel) : page.click(sel));
+      await drawn(page, pts, tap);
+      await statusStarts(page, `${pts.length - 1} lines, a closed outline`);
+      await press("#sketch-extrude");
+      await press("#extrude-ok");
+      await volume(page, volText);
+      /** Presses a button that saves an STL; its name, triangle count and volume (Σ a·(b×c)/6). */
+      const stl = async (sel) => {
+        const [dl] = await Promise.all([page.waitForEvent("download"), press(sel)]);
+        const bytes = readFileSync(await dl.path());
+        const n = bytes.readUInt32LE(80);
+        assert.equal(bytes.length, 84 + 50 * n, "84 bytes then 50 for each triangle");
+        let six = 0;
+        for (let t = 0; t < n; t++) {
+          const p = (k, i) => bytes.readFloatLE(84 + 50 * t + 12 + 12 * k + 4 * i);
+          six += p(0, 0) * (p(1, 1) * p(2, 2) - p(1, 2) * p(2, 1)) + p(0, 1) * (p(1, 2) * p(2, 0) - p(1, 0) * p(2, 2)) + p(0, 2) * (p(1, 0) * p(2, 1) - p(1, 1) * p(2, 0));
+        }
+        return [dl.suggestedFilename(), n, six / 6];
+      };
+      assert.deepEqual(await stl("#toolbar [data-op=export_stl]"), ["fission-2-bodies.stl", 12 + tris, 24000 + vol]);
+      // The browser (a drawer at phone width): Body 1's row, then Shift for Body 2 as well.
+      const openBrowser = async () => {
+        if (await page.isVisible("#browser-toggle")) {
+          if ((await page.getAttribute("#browser-toggle", "aria-expanded")) !== "true") await press("#browser-toggle");
+        }
+        await page.evaluate(() => document.querySelector('#browser [data-node="bodies"]')?.closest("details")?.setAttribute("open", ""));
+      };
+      await openBrowser();
+      await press('#browser [data-node="body-1"]');
+      await until(page, () => document.body.dataset.selection === "body:feature-1", null, "Body 1 selected");
+      const verb = "#selection-actions [data-action='design.download-stl']";
+      await openBrowser();
+      assert.deepEqual(await stl(verb), ["fission-box.stl", 12, 24000]);
+      await openBrowser();
+      await page.click('#browser [data-node="body-2"]', { modifiers: ["Shift"] });
+      await until(page, () => document.body.dataset.selection?.split(" ").length === 2, null, "both bodies selected");
+      assert.deepEqual(await stl(verb), ["fission-2-bodies.stl", 12 + tris, 24000 + vol]);
+      assert.equal(await page.textContent("#action-note"), "");
+      if (shots) await page.screenshot({ path: `${shots}/two-body-stl-${width}.png`, fullPage: true });
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();
     });
   }

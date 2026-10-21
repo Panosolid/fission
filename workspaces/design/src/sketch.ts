@@ -11,7 +11,8 @@
 
 import type { Feature, KernelCalls, Outline, Plane, SketchArc, SketchCircle, SketchLine } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
-import { curvePoints, insertItem, isSketchItem, shown, type DesignDocument, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
+import { curvePoints, insertItem, isSketchItem, profileLabel, shown, type DesignDocument, type ReadyProfile, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
+import { readProfileReference } from "./references.ts";
 
 /** The undo step each sketch edit is recorded as. */
 export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", centre: "Draw centre arc", tangent: "Draw tangent arc", delete: "Delete line", move: "Move point" } as const;
@@ -42,6 +43,21 @@ function sketchIn(doc: DesignDocument, id: string): Sketch {
 }
 
 const withSketch = (doc: DesignDocument, sketch: Sketch): DesignDocument => ({ ...doc, sketches: doc.sketches.map((s) => (s.id === sketch.id ? sketch : s)) });
+
+/**
+ * What an outline reference names in `doc` (25c1): a ready-made profile,
+ * or a sketch with at least one curve (an empty one has nothing to hand
+ * over); null for anything else.
+ */
+export function outlineSourceOf(ref: { kind: string; id: string }, doc: DesignDocument): { kind: "profile"; profile: ReadyProfile; label: string } | { kind: "sketch"; sketch: Sketch; label: string } | null {
+  const id = readProfileReference(ref);
+  if (id === null) return null;
+  const profile = doc.profiles.find((p) => p.id === id);
+  if (profile) return { kind: "profile", profile, label: profileLabel(profile) };
+  const sketch = doc.sketches.find((s) => s.id === id);
+  if (!sketch || sketch.curves.length === 0) return null;
+  return { kind: "sketch", sketch, label: sketchItem(doc, sketch.id).provenance.self.label };
+}
 
 /** The sketch's timeline item. */
 export function sketchItem(doc: DesignDocument, id: string): Feature {

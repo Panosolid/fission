@@ -3,9 +3,10 @@
 // are unit-tested; workspace.ts applies them on every selection change.
 
 import type { Feature, GeometryReference, ViewportHighlight } from "@fission/core";
-import { partFeature, profileLabel, type DesignDocument, type ReadyProfile } from "./document.ts";
+import { partFeature, type DesignDocument } from "./document.ts";
 import { readDesignReference, readProfileReference, resolveReference, sharedBy } from "./references.ts";
 import { bodyOf, findInScene, resolveInScene, type Scene, type ShownBody } from "./scene.ts";
+import { outlineSourceOf } from "./sketch.ts";
 
 /**
  * The viewport highlight for these items on the bodies shown (`scene`,
@@ -85,15 +86,15 @@ export function referenceLabel(ref: GeometryReference): string {
  * One row per selected item, in selection order, from the bodies shown
  * (`scene`, null before the first build): a body is "Body n", its
  * browser row's number; a face or edge no shown body has, or a body not shown,
- * says so instead of a type. A profile is named from `profiles` (the
- * document's), as the browser names it, of type "outline"; one the
- * document no longer has says so.
+ * says so instead of a type. A profile or a sketch (25c1) is named from
+ * `doc` as the browser names it, of type "outline"; one the document no
+ * longer has (or a sketch with no curve left) says so.
  */
-export function selectionRows(items: readonly GeometryReference[], scene: Scene | null, profiles: readonly ReadyProfile[] = []): SelectionRow[] {
+export function selectionRows(items: readonly GeometryReference[], scene: Scene | null, doc?: DesignDocument): SelectionRow[] {
   return items.map((item) => {
     if (item.kind === "outline") {
-      const profile = profiles.find((p) => p.id === readProfileReference(item));
-      return profile ? { name: profileLabel(profile), type: "outline", id: item.id } : { name: "Outline", type: NOT_IN_DESIGN, id: item.id };
+      const source = doc ? outlineSourceOf(item, doc) : null;
+      return source ? { name: source.label, type: "outline", id: item.id } : { name: "Outline", type: NOT_IN_DESIGN, id: item.id };
     }
     const r = readDesignReference(item);
     if (!r) return { name: referenceLabel(item), type: NOT_ON_BODY, id: item.id };
@@ -146,12 +147,13 @@ export function panelFocus(items: readonly GeometryReference[], scene: Scene | n
  * of them. Body references stay; references this function cannot read, or
  * to a feature with no body shown, are left alone (not Design's to judge
  * here). A profile (an outline reference Design built) is kept while
- * `profileIds` has it: a change to a shape with no profile, a box, drops it.
+ * `outlineIds` has it: a change to a shape with no profile (a box), or a
+ * sketch deleted or emptied (25c1), drops it.
  */
 export function survivors(
   items: readonly GeometryReference[],
   scene: Scene,
-  profileIds: readonly string[] = [],
+  outlineIds: readonly string[] = [],
 ): { kept: GeometryReference[]; dropped: GeometryReference[]; shared: GeometryReference[] } {
   const kept: GeometryReference[] = [];
   const dropped: GeometryReference[] = [];
@@ -160,7 +162,7 @@ export function survivors(
     const r = readDesignReference(item);
     let keep = true;
     const profile = readProfileReference(item);
-    if (profile !== null) keep = profileIds.includes(profile);
+    if (profile !== null) keep = outlineIds.includes(profile);
     else if (r && r.kind !== "body" && bodyOf(scene, item) >= 0) {
       const found = findInScene(item, scene);
       keep = found.status === "found";
@@ -179,12 +181,18 @@ function listed(names: readonly string[]): string {
 /**
  * The visible note for references a rebuild dropped ("" when none were);
  * `shared`, the ones among them whose name the edit gave to more than one
- * face or edge, are said apart, so the user knows to pick again.
+ * face or edge, are said apart, so the user knows to pick again. A
+ * dropped outline is a profile's unless `sketches` (the ids of the sketches
+ * whose outlines were selected, 25c1) says it was a sketch's.
  */
-export function droppedNote(dropped: readonly GeometryReference[], shared: readonly GeometryReference[] = []): string {
+export function droppedNote(dropped: readonly GeometryReference[], shared: readonly GeometryReference[] = [], sketches: ReadonlySet<string> = new Set()): string {
   if (dropped.length === 0) return "";
   const isShared = (d: GeometryReference) => shared.some((s) => s.kind === d.kind && s.id === d.id);
-  const names = dropped.map((d) => (readProfileReference(d) !== null ? "the profile" : referenceLabel(d)));
+  const outlineOf = (d: GeometryReference) => {
+    const id = readProfileReference(d);
+    return id === null ? null : sketches.has(id) ? "sketch" : "profile";
+  };
+  const names = dropped.map((d) => (outlineOf(d) !== null ? `the ${outlineOf(d)}` : referenceLabel(d)));
   const gone = dropped.filter((d) => d.kind !== "outline" && !isShared(d));
   const twice = dropped.filter(isShared);
   const one = (n: number, it: string, they: string) => (n === 1 ? it : they);
@@ -196,7 +204,8 @@ export function droppedNote(dropped: readonly GeometryReference[], shared: reado
           `${listed(twice.map(referenceLabel))} now ${one(twice.length, "matches", "match")} more than one ${twice.every((d) => d.kind === "face") ? "face" : twice.every((d) => d.kind === "edge") ? "edge" : "face or edge"}, so ${one(twice.length, "it was", "they were")} not moved to any of them: pick again.`,
         ]
       : []),
-    ...(dropped.some((d) => d.kind === "outline") ? ["The part has no profile now."] : []),
+    ...(dropped.some((d) => d.kind === "outline" && outlineOf(d) !== "sketch") ? ["The part has no profile now."] : []),
+    ...(dropped.some((d) => outlineOf(d) === "sketch") ? ["The sketch is gone or has no curves now."] : []),
   ];
   return `Taken out of the selection: ${names.join(", ")}. ${why.join(" ")}`;
 }

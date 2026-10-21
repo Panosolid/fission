@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { XY_PLANE, type BodyView, type GeometryReference, type StableId } from "@fission/core";
-import type { ReadyProfile } from "../src/document.ts";
+import { partDocument, type ReadyProfile } from "../src/document.ts";
 import { nameBody } from "../src/naming.ts";
 import { bodyReference, designReference, profileReference, readDesignReference, readProfileReference } from "../src/references.ts";
 import { droppedNote, highlightOf, NOT_IN_DESIGN, NOT_ON_BODY, selectionRows, survivors } from "../src/selection.ts";
@@ -86,12 +86,12 @@ test("profileReference names a profile by its own id, and readProfileReference u
 });
 
 test("a selected profile: named as the browser names it, of type outline, drawn on no face", () => {
-  assert.deepEqual(selectionRows([profile, body], boxScene, [slotProfile]), [
+  assert.deepEqual(selectionRows([profile, body], boxScene, { ...partDocument("box", 40, 30, 20), profiles: [slotProfile] }), [
     { name: "Slot with round ends profile", type: "outline", id: "outline:profile-1" },
     { name: "Body 1", type: "solid", id: "body:feature-1" },
   ]);
   // A profile the document no longer has says so.
-  assert.deepEqual(selectionRows([profile], boxScene, []), [{ name: "Outline", type: NOT_IN_DESIGN, id: "outline:profile-1" }]);
+  assert.deepEqual(selectionRows([profile], boxScene, partDocument("box", 40, 30, 20)), [{ name: "Outline", type: NOT_IN_DESIGN, id: "outline:profile-1" }]);
   // The profile is not part of the body: selecting it lights nothing in the viewport.
   assert.deepEqual(highlightOf([profile], boxScene), { body: false, faces: [], edges: [] });
 });
