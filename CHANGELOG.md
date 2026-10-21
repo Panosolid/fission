@@ -12,7 +12,8 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.25.12 (2026-10-20)
 
-- Step 25b1: the saved-file fuzzer now opens timelines made by real edits (kept shapes, suppressed, rolled-back and failing items, reorders, edited early items) and checks what builds against a model written apart from Design.
+- Step 25b2: the undo/redo fuzzer now edits any earlier item's sizes (Edit feature) and draws into earlier sketches (Edit Sketch), with several sketches, checked step by step against its model.
+- Step 25b1: the saved-file fuzzer now opens timelines made by real edits (kept shapes, suppressed, rolled-back and failing items, reorders, edited early items) and checks what builds against a model written apart from Design. #216
 - Docs: the roadmap and CAD progress notes match what has merged (step 24 ticked, 25a done); Render now starts after step 33; step 29 is noted as getting extra-heavy testing.
 - Fix: the camera stops when an orbit, pan or zoom is let go, so a sketch's grid no longer keeps changing after a fast orbit. #213
 
