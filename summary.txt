@@ -1,12 +1,12 @@
-Panosolid random testing, all runs so far (updated 2026-10-21 22:37 UTC)
+Panosolid random testing, all runs so far (updated 2026-10-21 22:55 UTC)
 
-hours of testing:                 852.0
-rounds:                           14657
-random operation chains:          29314000
-rounds where the harness failed:  579
-bodies compared with OpenCascade: 59308569
+hours of testing:                 856.1
+rounds:                           14729
+random operation chains:          29458000
+rounds where the harness failed:  580
+bodies compared with OpenCascade: 59626917
 OpenCascade disagreements:        346
-last problem found:               2026-10-19 21:40:59 (seed 219387905932970, commit ad542f5 on main)
+last problem found:               2026-10-21 22:45:19 (seed 273281235421512, commit 8a7fbf6 on claude/project-thread-opcjz0)
 
 Every round is a line in log.csv. Each round that found a problem has a
 folder in failures/ named after its seed: report.txt says what went wrong,
@@ -22,9 +22,9 @@ Latest mutation run (whole kernel, lib tests), 2026-10-21 22:37 UTC, commit 9bf1
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 9bf185e on main, 2026-10-21 22:37 UTC (https://github.com/Panosolid/fission/actions/runs/39625740672)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.13 s (baseline 1.23 s)
-  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 4.13 s (baseline 9.70 s)
+  tested commit 8a7fbf6 on claude/project-thread-opcjz0, 2026-10-21 22:55 UTC (https://github.com/Panosolid/fission/actions/runs/39682102760)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.40 s (baseline 1.23 s)
+  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 5.18 s (baseline 9.70 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
