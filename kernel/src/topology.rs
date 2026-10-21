@@ -67,12 +67,13 @@ impl Edge {
     pub fn bounds(&self) -> (DVec3, DVec3) {
         let (a, b) = (self.curve.eval(self.t0), self.curve.eval(self.t1));
         let (mut lo, mut hi) = (a.min(b), a.max(b));
-        self.widen_by_curve(&mut lo, &mut hi);
+        self.widen_by_curve(a, &mut lo, &mut hi);
         (lo, hi)
     }
 
-    /// Widens a box that already holds the edge's ends to hold all of it.
-    fn widen_by_curve(&self, lo: &mut DVec3, hi: &mut DVec3) {
+    /// Widens a box that already holds the edge's ends (`start` is where
+    /// it begins, at t0) to hold all of it.
+    fn widen_by_curve(&self, start: DVec3, lo: &mut DVec3, hi: &mut DVec3) {
         if let Curve::Circle { center, axis, x_dir, radius } = self.curve {
             if self.t1 - self.t0 >= std::f64::consts::TAU - crate::tolerance::ANGULAR {
                 // A circle's extent along a world axis k is
@@ -93,14 +94,26 @@ impl Edge {
             // widens the box along axis k only (the point's other
             // coordinates are inside the box already: they lie between the
             // arc's ends' or are covered by another axis's extreme).
+            //
+            // The extreme is measured from the arc's start, not its centre:
+            // it lies A_k(1 − cos d) = 2·A_k·sin²(d/2) past the start along
+            // k (times r), d = t − t0 the turn from there. c_k ± r·A_k
+            // rounds at the scale of the centre and radius, which for a
+            // nearly flat arc are far bigger than the arc: a 15 mm arc of
+            // radius 4167 mm, its centre 4185 mm away, came out 2.6e-12 mm
+            // short of its top, past the rounding at the box's own scale
+            // (stateful seedc7883a337eaa). From the start, the rounding is
+            // the start's own plus a few ulps of the arc's rise.
             let y_dir = axis.cross(x_dir);
             for k in 0..3 {
                 let (xk, yk) = (x_dir[k], y_dir[k]);
                 let reach = radius * fmath::hypot(xk, yk);
                 let peak = fmath::atan2(yk, xk);
                 for (t, sign) in [(peak, 1.0), (peak + std::f64::consts::PI, -1.0)] {
-                    if (t - self.t0).rem_euclid(std::f64::consts::TAU) <= self.t1 - self.t0 {
-                        let extreme = center[k] + sign * reach;
+                    let d = (t - self.t0).rem_euclid(std::f64::consts::TAU);
+                    if d <= self.t1 - self.t0 {
+                        let half = fmath::sin(0.5 * d);
+                        let extreme = start[k] + sign * 2.0 * reach * half * half;
                         lo[k] = lo[k].min(extreme);
                         hi[k] = hi[k].max(extreme);
                     }
@@ -307,7 +320,7 @@ impl Body {
             add(&mut lo, &mut hi, v.point, DVec3::ZERO);
         }
         for e in &self.edges {
-            e.widen_by_curve(&mut lo, &mut hi);
+            e.widen_by_curve(self.vertices[e.start].point, &mut lo, &mut hi);
         }
         for f in &self.faces {
             if let Surface::Sphere { center, radius, .. } = f.surface {
@@ -432,6 +445,99 @@ mod tests {
         b.add_edge(c, v0, v1, 0.0, PI - 2.0 * start);
         let (lo, hi) = b.bounds();
         assert!(points_eq(lo, DVec3::new(-1.0, 10.0, 0.0)) && points_eq(hi, DVec3::new(1.0, r, 0.0)), "{lo} {hi}");
+    }
+
+    #[test]
+    fn bounds_of_a_nearly_flat_arc_far_from_its_centre() {
+        // Regression (stateful seedc7883a337eaa, issue #210): an extruded
+        // profile's 15 mm arc of radius r = 4166.670041666666, centred at
+        // (0, 4165.541666666666, 14) in the body's own frame, from
+        // (−7.5, y₀, 14) to (7.5, y₀, 14), turned by the placement q below
+        // and moved by s. Its top in world y, worked out apart from this
+        // code in 60-digit decimals: q normalised, its matrix's y row R_y,
+        // then max over the circle of s_y + R_y·(c + r(x cos t + y sin t))
+        // = s_y + R_y·c + r·√((R_y·x)² + (R_y·y)²) (y = axis × x; the top
+        // lies inside the arc's 0.0036 rad turn), which comes to
+        // −37.6015414382083019138. Measured from the centre 4185 mm away,
+        // the box stopped 2.6e-12 short of it, while every mesh point is
+        // within 3e-13; the box must be right to the rounding at its own
+        // scale (~43 mm): 64 ulps there is 6.0e-13.
+        let mut b = Body::default();
+        let y0 = -1.121625000000634;
+        let v0 = b.add_vertex(DVec3::new(-7.5, y0, 14.0));
+        let v1 = b.add_vertex(DVec3::new(7.5, y0, 14.0));
+        let x_dir = DVec3::new(-0.0017999985420011813, -0.9999983800013124, 0.0);
+        let c = Curve::Circle { center: DVec3::new(0.0, 4165.541666666666, 14.0), axis: DVec3::Z, x_dir, radius: 4166.670041666666 };
+        b.add_edge(c, v0, v1, 0.0, 0.0035999990280004726);
+        let q = glam::DQuat::from_xyzw(0.9988320211604264, -1.4813230859726304e-11, -3.062221592888568e-10, -0.04831763140488155);
+        let s = DVec3::new(3.999999988992513, -40.075961372464704, -17.952049245861208);
+        let (lo, hi) = b.transformed(&Transform::rigid(q, s)).bounds();
+        let top = -37.6015414382083;
+        assert!((hi.y - top).abs() <= crate::tolerance::rounding_slack(lo.y), "hi.y = {:?}, {:e} from the top", hi.y, hi.y - top);
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig { cases: 256, failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::Direct("tests/regressions/flat-arc-bounds.txt"))), ..Default::default() })]
+
+        /// Arcs from nearly flat (radius up to ~2.5e6 over a chord of up
+        /// to 100) to semicircles, turned any way and moved: along each
+        /// axis the box ends where the arc does, to the rounding at the
+        /// box's own scale. The arc's least and most along an axis are
+        /// found by ternary search over t (an arc of at most half a turn
+        /// rises then falls along any axis at most once), each point
+        /// measured from the start, p = start + r((cos t − 1)x + sin t·y)
+        /// with cos t − 1 = −2 sin²(t/2), so it rounds at the arc's scale,
+        /// not its centre's.
+        #[test]
+        fn a_turned_arc_is_boxed_to_its_own_scale(
+            w in 0.5..50.0f64, rise in proptest::prelude::prop_oneof![1e-5..1e-2f64, 1e-2..1.0f64],
+            axis in proptest::array::uniform3(-1.0..1.0f64), angle in -3.2..3.2f64, shift in proptest::array::uniform3(-100.0..100.0f64),
+            aligned in proptest::prelude::any::<bool>(), tilt in -1.0..1.0f64,
+        ) {
+            let axis = DVec3::from(axis);
+            proptest::prop_assume!(axis.length() > 0.1);
+            // A chord 2w with the arc rising `rise`·w over its middle: the
+            // radius is (w² + h²)/2h, the centre r − h below the middle.
+            let h = rise * w;
+            let r = (w * w + h * h) / (2.0 * h);
+            let mut b = Body::default();
+            let v0 = b.add_vertex(DVec3::new(w, 0.0, 0.0));
+            let v1 = b.add_vertex(DVec3::new(-w, 0.0, 0.0));
+            let x_dir = DVec3::new(w, r - h, 0.0) / r;
+            let sweep = 2.0 * fmath::atan2(w, r - h);
+            b.add_edge(Curve::Circle { center: DVec3::new(0.0, h - r, 0.0), axis: DVec3::Z, x_dir, radius: r }, v0, v1, 0.0, sweep);
+            // Turned at random, a nearly flat arc's extremes are nearly
+            // always its ends. Turned about its chord (x) and then tipped by
+            // less than its own turn, it peaks inside along y and z, as in
+            // the regression above.
+            let q = if aligned {
+                glam::DQuat::from_axis_angle(axis.normalize(), tilt * 0.5 * sweep) * glam::DQuat::from_rotation_x(angle)
+            } else {
+                glam::DQuat::from_axis_angle(axis.normalize(), angle)
+            };
+            let tf = Transform::rigid(q, DVec3::from(shift));
+            let world = b.transformed(&tf);
+            let (lo, hi) = world.bounds();
+            let Curve::Circle { axis: n, x_dir: x, .. } = world.edges[0].curve else { unreachable!() };
+            let (start, y) = (world.vertices[v0].point, n.cross(x));
+            let at = |t: f64| {
+                let half = fmath::sin(0.5 * t);
+                start + (x * (-2.0 * half * half) + y * fmath::sin(t)) * r
+            };
+            let reach = |k: usize, sign: f64| {
+                let f = |t: f64| sign * at(t)[k];
+                let (mut a, mut b) = (0.0, sweep);
+                for _ in 0..200 {
+                    let (m1, m2) = (a + (b - a) / 3.0, b - (b - a) / 3.0);
+                    if f(m1) < f(m2) { a = m1 } else { b = m2 }
+                }
+                sign * f(0.0).max(f(sweep)).max(f(0.5 * (a + b)))
+            };
+            let slo = DVec3::new(reach(0, -1.0), reach(1, -1.0), reach(2, -1.0));
+            let shi = DVec3::new(reach(0, 1.0), reach(1, 1.0), reach(2, 1.0));
+            let slack = crate::tolerance::rounding_slack(lo.abs().max(hi.abs()).max_element()) * 4.0;
+            proptest::prop_assert!((slo - lo).abs().max_element() <= slack && (hi - shi).abs().max_element() <= slack, "box {lo}..{hi}, arc {slo}..{shi} (r = {r:e}, slack {slack:e})");
+        }
     }
 
     #[test]
