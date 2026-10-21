@@ -105,6 +105,33 @@ async function lineNear(page, img, p) {
   return false;
 }
 /**
+ * Clears what the pointer leaves drawn (a tap leaves the snap marker and
+ * its guides where it landed): the mouse onto the canvas's corner and off
+ * the page's corner, then no snap or preview shown, and two frames so the
+ * canvas shows it (as sketch-pixels.mjs waits).
+ */
+async function pointerAway(page) {
+  const box = await canvasBox(page);
+  await page.mouse.move(box.x + 2, box.y + box.height - 2);
+  await page.mouse.move(0, 0);
+  await shown(page, "sketchSnap", "");
+  await shown(page, "sketchPreview", "");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+}
+/** The canvas colours in the 3 × 3 square round the world point `p`, for a failure's message. */
+async function colours(page, img, p) {
+  const box = await canvasBox(page);
+  const s = toScreen(await camera(page), box, p);
+  const [cx, cy] = [Math.round(s.x - box.x), Math.round(s.y - box.y)];
+  const out = [];
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++) {
+      const i = 4 * ((cy + dy) * img.width + cx + dx);
+      out.push(`${img.data[i]},${img.data[i + 1]},${img.data[i + 2]}`);
+    }
+  return `canvas (${cx}, ${cy}) of ${img.width} × ${img.height}: ${out.join(" ")}`;
+}
+/**
  * The circle of radius 5 round (cx, cy) on the top (z = 20), by pixel
  * probes: its rim's blue at the four diagonal points c + 5 · (±0.6, ±0.8)
  * (off the box's edges, which run through the corner it is centred on),
@@ -116,7 +143,7 @@ async function circleDrawn(page, [cx, cy], what) {
   for (const [sx, sy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
     const rim = [cx + 5 * 0.6 * sx, cy + 5 * 0.8 * sy, 20];
     const inside = [cx + 4 * 0.6 * sx, cy + 4 * 0.8 * sy, 20];
-    assert.ok(await lineNear(page, img, rim), `${what}: the rim's blue at [${rim}]`);
+    if (!(await lineNear(page, img, rim))) assert.fail(`${what}: the rim's blue at [${rim}]; ${await colours(page, img, rim)}`);
     assert.equal(await lineNear(page, img, inside), false, `${what}: no blue 1 mm inside the rim, at [${inside}]`);
   }
 }
@@ -180,8 +207,7 @@ try {
       await shown(page, "sketchPoints", "40,30");
       await at(page, [35, 30, 20], tap);
       await until(page, () => document.querySelector("#undo").title.startsWith("Undo Draw circle"), null, "Draw circle recorded");
-      await page.mouse.move(0, 0);
-      await page.waitForTimeout(200);
+      await pointerAway(page);
       await circleDrawn(page, [40, 30], "drawn round the corner");
       await shot(page, `face-edges-circle-${width}`);
       await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
@@ -200,8 +226,7 @@ try {
       await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "Sketch 1 open again");
       await settle(page);
       assert.equal(await data(page, "sketchPoints"), "60,30", "the centre followed the corner");
-      await page.mouse.move(0, 0);
-      await page.waitForTimeout(200);
+      await pointerAway(page);
       await circleDrawn(page, [60, 30], "drawn round the moved corner");
       // Not round where it was: the old rim's points are on the top's face now, no blue there.
       const img = await canvasImage(page);
