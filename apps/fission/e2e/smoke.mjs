@@ -1819,6 +1819,42 @@ try {
     }
   });
 
+  await check("change notes on the timeline (25c2): the marker moved past the box puts its plate out of date, the note naming the marker move", async () => {
+    const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("console", (m) => {
+      if (m.type() === "error") consoleErrors.push(m.text());
+    });
+    try {
+      await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
+      await wide.goto(url + "?test-hooks#design");
+      await wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+      const notesIn = (pane) => wide.$$eval(`${pane} .notes-strip .change-note`, (els) => els.map((e) => e.querySelector(".note-text").textContent));
+      // Slice's print plate stands in reading the box (feature-1); Slice beside Design shows its notes.
+      await wide.evaluate(() => window.fissionTest.graph.set({ id: "e2e.plate", label: "Print plate", workspace: "slice", cost: "expensive" }, ["feature-1"]));
+      await wide.evaluate(() => window.fissionTest.graph.markFresh("e2e.plate"));
+      await wide.click("#split-toggle");
+      await wide.selectOption("#split-choice", "slice");
+      await wide.waitForFunction(() => document.body.dataset.split === "slice");
+      // The marker to the start: the box's own data is unchanged, but it builds nothing now, so its plate is out of date.
+      const text = "Print plate out of date: you moved the timeline marker in Design. Rerun it in Slice.";
+      await wide.click('#timeline [data-button="start"]');
+      await wide.waitForSelector("#split-viewport .change-note");
+      assert.deepEqual(await notesIn("#split-viewport"), [text]);
+      assert.equal(await wide.evaluate(() => window.fissionTest.graph.isStale("e2e.plate")), true);
+      // Rebuilt, dismissed; the marker back to the end puts it out of date again, a new note.
+      await wide.evaluate(() => window.fissionTest.graph.markFresh("e2e.plate"));
+      await wide.click("#split-viewport .note-dismiss");
+      await wide.waitForFunction(() => !document.querySelector(".change-note"));
+      await wide.click('#timeline [data-button="end"]');
+      await wide.waitForSelector("#split-viewport .change-note");
+      assert.deepEqual(await notesIn("#split-viewport"), [text]);
+      await wide.screenshot({ path: "e2e/change-note-marker.png" });
+    } finally {
+      await wide.close();
+    }
+  });
+
   await check("no errors in the browser console", async () => {
     assert.deepEqual(consoleErrors, []);
   });

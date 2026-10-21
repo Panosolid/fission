@@ -12,7 +12,8 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.25.13 (2026-10-21)
 
-- Step 25c1: Download STL works on any body shown, not only the last one, and on several at once (one file); the toolbar's STL and the AI's export take every body shown; a too-big warning marks only the bodies it is about. A sketch can be selected from its rows and copied as SVG (an open one says why), and other workspaces can link to any body shown.
+- Step 25c2: on a timeline, results in other workspaces go out of date when the marker moves, an item is suppressed or reordered, or an extrude keeps its shape for a deleted sketch, and their notes name the item ("you changed Sketch 2", "you suppressed Extrude 1", "you moved the timeline marker"). Before, moving the marker back left a result built from a rolled-back extrude marked current.
+- Step 25c1: Download STL works on any body shown, not only the last one, and on several at once (one file); the toolbar's STL and the AI's export take every body shown; a too-big warning marks only the bodies it is about. A sketch can be selected from its rows and copied as SVG (an open one says why), and other workspaces can link to any body shown. #221
 - Step 25b4: the baseline now measures the naming success rate: 8 seeded timeline sessions of Design on the real kernel check every held face and edge reference against the model (100% over 4,466 references today), and any miss fails the comparison. Step 25b is done.
 - Step 25b3: the nightly fuzzing runs long timeline sessions (5 × 500 steps a round) of Design on the real kernel against the model, checks no body is left behind, shrinks any failure to the fewest steps and files an issue for it. #219
 - Step 25b2: the undo/redo fuzzer now edits any earlier item's sizes (Edit feature) and draws into earlier sketches (Edit Sketch), with several sketches, checked step by step against its model. #218

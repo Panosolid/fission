@@ -177,7 +177,7 @@ test("drawing a line changes the sketch in the graph, not the part", () => {
   syncGraph(g, drawLine(s.doc, s.id, [0, 0], [1, 0]).doc, s.doc, notes);
   assert.deepEqual(g.stale(), ["laser.cut"]);
   assert.equal(g.isStale(PART_VIEW), false);
-  assert.match(notes.current(g)[0].text, /you changed the sketch/);
+  assert.match(notes.current(g)[0].text, /you changed Sketch 1 in Design/);
 });
 
 // ---- Saving and opening (docs/project-format.md, Design's data version 2) ----
