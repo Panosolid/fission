@@ -627,6 +627,8 @@ const GROUND_ORDER = -2;
 /** The origin planes offered for a sketch: over the ground grid, under everything else (showPlanes). */
 const PLANE_ORDER = -1.5;
 const FINISHED_SKETCH_ORDER = -1;
+/** A finished sketch whose plane is lost (26e): after the body, so its red shows on the edges it lies on. */
+const LOST_SKETCH_ORDER = 0.5;
 
 /** Empties a group, freeing its geometry and materials. */
 function clearGroup(group: THREE.Group) {
@@ -801,7 +803,7 @@ export class Viewer implements SharedViewport {
   }
 
   /**
-   * Draws the sketches: lines (a finished one whose plane is lost red, 26e), and for the one being edited its grid, its
+   * Draws the sketches: lines, and for the one being edited its grid, its
    * points, the rubber-band line and the snap's marks. The edited one is
    * drawn over everything (no depth test; the body is see-through meanwhile).
    * A finished one is depth-tested like the body's edges, so the body hides
@@ -809,7 +811,10 @@ export class Viewer implements SharedViewport {
    * polygon offset keeps a line lying on a face in front of it; drawn after
    * the ground grid and axes but before the body (FINISHED_SKETCH_ORDER), so
    * where it lies on a body edge the edge, with its selection or hover
-   * colour, is drawn over it. Replaces what was drawn.
+   * colour, is drawn over it. A finished one whose plane is lost (26e) is
+   * red and drawn after the body (LOST_SKETCH_ORDER): it most often lies on
+   * the edges of the extrude built from it, and the warning must show
+   * there. Replaces what was drawn.
    */
   showSketches(drawings: readonly SketchDrawing[]) {
     clearGroup(this.sketches);
@@ -825,7 +830,7 @@ export class Viewer implements SharedViewport {
         if (pairs.length === 0) return;
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(pairs.flatMap(([a, b]) => [...at(a), ...at(b)]), 3));
-        const finished = order === FINISHED_SKETCH_ORDER;
+        const finished = order === FINISHED_SKETCH_ORDER || order === LOST_SKETCH_ORDER;
         const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial(finished ? { color: colour } : { color: colour, depthTest: false, transparent: true }));
         l.renderOrder = order;
         this.sketches.add(l);
@@ -833,7 +838,8 @@ export class Viewer implements SharedViewport {
       lines += d.lines.length;
       if (!d.editing) {
         // 26e: a sketch whose plane is lost red, where it stays.
-        segments(d.lines, d.lost ? SKETCH_COLOURS.lost : SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
+        if (d.lost) segments(d.lines, SKETCH_COLOURS.lost, LOST_SKETCH_ORDER);
+        else segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
         if (d.lost) lost += d.lines.length;
         continue;
       }

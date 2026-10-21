@@ -11,7 +11,10 @@
 // from its button. Points on screen come from the app's own camera (the
 // ?test-hooks camera) through the pinhole sums worked here, so a click
 // lands on the model point it names. 1280 px with a mouse and 375 px with
-// taps. Screenshots go to E2E_SHOTS when set. Run with `npm run e2e`
+// taps. Then the timeline's rules on a face sketch (26e): suppressing the
+// box greys what is on it, a drag across the face's link is refused in
+// words, deleting the box asks and leaves the sketch and its extrude
+// warned, the sketch's lines red. Screenshots go to E2E_SHOTS when set. Run with `npm run e2e`
 // (after `npm run build`).
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -318,6 +321,141 @@ try {
     await until(page, () => document.querySelector("#volume")?.textContent === "1,000 mm³", null, "1,000 mm³");
     await page.context().close();
   });
+  for (const [width, tap] of [[1280, false], [375, true]]) {
+    await check(`${width} px${tap ? ", taps" : ""}: the timeline's rules on a face sketch (26e): the box suppressed greys the sketch and its extrude, no warning; the sketch dragged before the box refused in words; the box deleted asks, then both stay warned red, the sketch's lines red (pixel probed), one undo step`, async () => {
+      const page = await fresh(width, tap);
+      await settle(page);
+      await press(page, '[data-view="top"]', tap);
+      await settle(page);
+      await createSketch(page, tap);
+      await at(page, [20, 15, 20], tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+      await settle(page);
+      await rectangle(page, [[30, 20, 20], [10, 20, 20], [10, 10, 20], [30, 10, 20]], tap);
+      await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "closed");
+      await extrude(page, 10, tap);
+      await until(page, () => document.querySelector("#volume")?.textContent === "2,000 mm³", null, "2,000 mm³");
+      const ids = await page.$$eval("#timeline [data-item]", (lis) => lis.map((li) => li.dataset.item));
+      assert.equal(ids.length, 3);
+      const [box, sketch, ext] = ids;
+      /** Each bar item's flags: s suppressed, g greyed, w warned, f failed. */
+      const flags = () => page.$$eval("#timeline [data-item]", (lis) => lis.map((li) => [li.dataset.item, (li.dataset.suppressed ? "s" : "") + (li.dataset.greyed ? "g" : "") + (li.dataset.warned ? "w" : "") + (li.dataset.failed ? "f" : "")]));
+      const titleOf = (id) => page.getAttribute(`#timeline [data-item="${id}"]`, "title");
+      const rowClasses = (id) => page.$eval(`#browser [data-node="timeline"] .tree-row[data-node="${id}"]`, (r) => [...r.classList].filter((c) => c === "kept" || c.startsWith("timeline-menu")).join(" "));
+      const menu = async (id) => {
+        const item = page.locator(`#timeline [data-item="${id}"]`);
+        await item.scrollIntoViewIfNeeded();
+        if (tap) {
+          await item.tap();
+          await page.tap(`#timeline [data-more="${id}"]`);
+        } else await item.click({ button: "right" });
+        await until(page, () => document.getElementById("row-menu").open, null, `${id}'s menu`);
+      };
+      const choose = async (action) => {
+        await press(page, `#row-menu-${action}`, tap);
+        await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed");
+      };
+      const lostLines = () => data(page, "sketchLost");
+      /** The canvas's pixels within 6 of the lost red, (255, 107, 107): the X axis (229, 83, 75) and the box's greys and blues are well clear. */
+      const lostRed = async () => {
+        const img = await canvasImage(page);
+        let n = 0;
+        for (let i = 0; i < img.data.length; i += 4) if (img.data[i] >= 249 && Math.abs(img.data[i + 1] - 107) <= 6 && Math.abs(img.data[i + 2] - 107) <= 6) n++;
+        return n;
+      };
+      const all = [[box, ""], [sketch, ""], [ext, ""]];
+      assert.deepEqual(await flags(), all);
+      assert.equal(await lostLines(), "0");
+      assert.equal(await lostRed(), 0, "no lost red yet");
+
+      // 1. The box suppressed: the sketch and its extrude greyed (faded, dashed), saying the box is why, no warning (Q3); the sketch not drawn.
+      await menu(box);
+      await choose("suppress");
+      await until(page, () => document.querySelector("#timeline [data-item][data-greyed]"), null, "greyed");
+      assert.deepEqual(await flags(), [[box, "s"], [sketch, "g"], [ext, "g"]]);
+      assert.match(await titleOf(sketch), /\(greyed: Feature 1 \(box\) is suppressed\)$/);
+      assert.match(await titleOf(ext), /\(greyed: Feature 1 \(box\) is suppressed\)$/);
+      assert.equal(await page.$eval(`#timeline [data-item="${sketch}"]`, (li) => getComputedStyle(li).opacity), "0.6", "faded");
+      assert.equal(await page.$eval(`#timeline [data-item="${sketch}"]`, (li) => getComputedStyle(li).borderTopStyle), "dashed");
+      assert.equal(await rowClasses(sketch), "timeline-menu timeline-menu-greyed");
+      assert.equal(await rowClasses(ext), "timeline-menu timeline-menu-greyed");
+      assert.equal(await page.isVisible("#kept-warning"), false, "no warning");
+      assert.equal(await data(page, "sketchLines"), "0", "the greyed sketch isn't drawn");
+      // Edit Sketch is off for the greyed sketch, with why.
+      await menu(sketch);
+      assert.equal(await page.isDisabled("#row-menu-edit-sketch"), true);
+      assert.equal(await page.textContent("#row-menu-edit-sketch .delete-ask-off"), "Sketch 1 is greyed: Feature 1 (box) is suppressed, unsuppress it first");
+      await shot(page, `face-greyed-${width}`);
+      await page.keyboard.press("Escape");
+      await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed");
+      await press(page, "#undo", tap);
+      await until(page, () => !document.querySelector("#timeline [data-item][data-greyed]"), null, "greyed no more");
+      assert.deepEqual(await flags(), all);
+      await until(page, () => document.querySelector("#volume")?.textContent === "2,000 mm³", null, "built again");
+
+      // 2. The sketch dragged before the box: refused while held and let go, in the face's words; nothing recorded.
+      const undoBefore = await page.evaluate(() => document.getElementById("undo").title);
+      const WORDS = "Sketch 1 can't go before Feature 1 (box): it is drawn on a face of Feature 1 (box)";
+      const b = await page.locator(`#timeline [data-item="${sketch}"]`).boundingBox();
+      const to = await page.locator(`#timeline [data-item="${box}"]`).boundingBox();
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(to.x + to.width * 0.25, b.y + b.height / 2, { steps: 8 });
+      assert.equal(await page.$eval("#timeline .timeline-reorder-note", (n) => n.textContent), WORDS);
+      await shot(page, `face-drag-refused-${width}`);
+      await page.mouse.up();
+      await until(page, (w) => document.querySelector("#error")?.textContent === w, WORDS, "the refusal shown");
+      assert.equal(await page.evaluate(() => document.getElementById("undo").title), undoBefore, "nothing recorded");
+      assert.deepEqual(await page.$$eval("#timeline [data-item]", (lis) => lis.map((li) => li.dataset.item)), ids, "nothing moved");
+
+      // 3. The box deleted: asked first, naming what stays; then the block stays at z 20 to 30, the sketch and the extrude warned red.
+      await menu(box);
+      await choose("delete");
+      await until(page, () => document.getElementById("delete-ask").open, null, "the box asks");
+      assert.equal(await page.textContent("#delete-ask-heading"), "Delete Feature 1 (box)?");
+      assert.equal(await page.textContent("#delete-ask-words"), "Sketch 1 is drawn on a face of Feature 1 (box). If you delete it, Sketch 1 stays where it is and shows its plane is lost, and what is built from it, Extrude 1, stays where it is and shows its source is lost. Undo brings Feature 1 (box) back.");
+      const ask = await page.locator("#delete-ask").boundingBox();
+      assert.ok(ask.x >= 0 && ask.x + ask.width <= width, `the box fits the screen: ${JSON.stringify(ask)}`);
+      await shot(page, `face-delete-ask-${width}`);
+      await press(page, "#delete-ask-confirm", tap);
+      await until(page, () => document.querySelectorAll("#timeline [data-item]").length === 2, null, "the box gone");
+      await until(page, () => document.querySelector("#volume")?.textContent === "2,000 mm³", null, "the block stays");
+      const LOST = "Sketch 1's face is gone, so its plane is lost: it stays where it was.";
+      const SOURCE = "Extrude 1's source is lost: Sketch 1's plane is lost, so it stays where it was.";
+      const deleted = async () => {
+        assert.deepEqual(await flags(), [[sketch, "w"], [ext, "w"]]);
+        assert.match(await titleOf(sketch), new RegExp(`\\(warning: ${LOST.replace(/[()'.]/g, "\\$&")}\\)$`));
+        assert.equal(await page.textContent("#kept-warning"), `${LOST} ${SOURCE}`);
+        assert.equal(await page.isVisible("#kept-warning"), true);
+        assert.equal(await rowClasses(sketch), "kept");
+        assert.equal(await rowClasses(ext), "kept");
+        const red = await page.$eval(`#timeline [data-item="${sketch}"]`, (li) => getComputedStyle(li).color);
+        const [r, g, bl] = red.match(/\d+/g).map(Number);
+        assert.ok(r - bl >= 80 && r - g >= 80, `the bar item's words red: ${red}`);
+        assert.equal(await lostLines(), "4", "the sketch's lines drawn as lost");
+      };
+      await deleted();
+      // Pixel probe: the lost red (0xff6b6b, drawn unlit) on screen now, and none of it once undone.
+      // From the home view (in front, above), where the block's front and right bottom edges, on the sketch, show.
+      await press(page, '[data-view="home"]', tap);
+      await settle(page);
+      assert.ok((await lostRed()) >= 20, `the sketch's lines drawn red: ${await lostRed()} pixels`);
+      await shot(page, `face-deleted-${width}`);
+      // One undo step brings the box back, nothing warned or red; redo deletes it again.
+      assert.equal(await page.evaluate(() => document.getElementById("undo").title), "Undo Delete Feature 1 (box) (Ctrl+Z)");
+      await press(page, "#undo", tap);
+      await until(page, () => document.querySelectorAll("#timeline [data-item]").length === 3, null, "the box back");
+      await until(page, () => !document.querySelector("#timeline [data-item][data-warned]"), null, "no warnings");
+      assert.deepEqual(await flags(), all);
+      assert.equal(await page.isVisible("#kept-warning"), false);
+      assert.equal(await lostLines(), "0");
+      assert.equal(await lostRed(), 0, "no red once the box is back");
+      await press(page, "#redo", tap);
+      await until(page, () => document.querySelectorAll("#timeline [data-item][data-warned]").length === 2, null, "deleted again");
+      await deleted();
+      await page.context().close();
+    });
+  }
 } finally {
   await browser.close();
   server.httpServer.close();
