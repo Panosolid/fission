@@ -191,6 +191,10 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
       viewport.onSketchPointer?.(pointer);
       await settle();
     },
+    /** The pointer moved or clicked over the view at sketch point (x, y), or moved off it (null), not waited for: the kernel's rounding is still out when it returns. */
+    pointer(kind: SketchPointer["kind"], at: [number, number] | null) {
+      viewport.onSketchPointer?.({ kind, at, pixel: 0.1 });
+    },
     async key(id: string) {
       view.shortcut?.(id);
       await settle();

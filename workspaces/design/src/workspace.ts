@@ -1045,13 +1045,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const r = rounding(at, grid, gridSnap, pixel);
     return r.op === "snap_to_grid" ? kernel.call("snap_to_grid", ...r.args) : kernel.call("place_freely", ...r.args);
   };
-  const snapMove = latestOnly(roundPointer);
+  /** The pointer's moves counted, the pointer leaving the view among them: a move's rounding answered after a later move is dropped, so it never shows a snap where the pointer was. */
+  let moves = 0;
   /** Clicks are handled one after another, each on the document the last one left. */
   let clicks = Promise.resolve();
   const onSketchPointer = (pointer: SketchPointer) => {
     if (mode.kind !== "edit") return;
     const at = pointer.at;
     if (pointer.kind === "move") {
+      const move = ++moves;
       if (!at) {
         mode.pointer = mode.snap = null;
         return drawSketches();
@@ -1059,8 +1061,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // The centre arc follows which way the pointer goes round its centre, from every move (a reply the kernel drops as stale must not lose a turn).
       mode.tool = hoverTool(mode.tool, at);
       // A hover off the modelling range just doesn't move the preview.
-      void snapMove(at, mode.grid, pointer.pixel).then(({ current, value }) => {
-        if (!current || mode.kind !== "edit") return;
+      void roundPointer(at, mode.grid, pointer.pixel).then((value) => {
+        if (move !== moves || mode.kind !== "edit") return;
         mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel);
         mode.pointer = mode.snap.at;
         mode.pixel = pointer.pixel;
@@ -1101,7 +1103,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       sketchBox.showError(done.note ?? "");
       if (done.tool !== mode.tool) unlock();
       mode.tool = done.tool;
-      // The pointer is still there: what it snaps to now, with the new point and the tool's next step.
+      // The pointer is still there: what it snaps to now, with the new point and the tool's next step. (A finger has
+      // left the view by now, and this keeps the hint and the boxes by the tap; sketch-hover.journey.ts.)
       mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel);
       mode.pointer = mode.snap.at;
       mode.pixel = pointer.pixel;
