@@ -257,3 +257,36 @@ test("seeded: Look At on 500 slanted planes looks straight at the plane, its x a
     assert.ok(centreDistance >= fitDistance(framing.radius, 45, 1) * (1 - 1e-12), `plane ${i}: the sphere doesn't fit`);
   }
 });
+
+test("hand-worked (26d): Look At on a box's bottom face, side −1, looks up from below", () => {
+  // The bottom face of the box (0..40, 0..30, 0..20) gets the ground plane's frame (normal +Z, into the box) with
+  // side −1. Toward the camera is −Z. fov 60, radius 10: fits from 20. The centre (20, 15, 10) is 10 above the plane,
+  // so on the far side from the camera (d = −10, not added): the camera looks at (20, 15, 0) from 20 below,
+  // (20, 15, −20), outside the box. Up is still the frame's y, Z × X = Y, so X runs to the left on screen.
+  const b = planeViewBasis({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, { centre: [20, 15, 10], radius: 10 }, 60, 1, -1);
+  const near = (a: number[], e: number[], what: string) => assert.ok(a.every((v, i) => Math.abs(v - e[i]) < 1e-12), `${what}: ${a} not ${e}`);
+  near(b.position, [20, 15, -20], "position");
+  near(b.target, [20, 15, 0], "target");
+  near(b.up, [0, 1, 0], "up");
+});
+
+test("hand-worked (26d): Look At on a box's back face, side −1, looks from behind", () => {
+  // The back face y = 30 gets the front plane's frame (normal −Y, into the box) at origin (0, 30, 0), side −1, so
+  // toward the camera is +Y. The centre (20, 15, 10) is 15 in front of the face (d = (15 − 30)·1 = −15, not
+  // added): the camera looks at (20, 30, 10) from 20 along +Y, (20, 50, 10). Up is (−Y) × X = Z.
+  const b = planeViewBasis({ origin: [0, 30, 0], xAxis: [1, 0, 0], normal: [0, -1, 0] }, { centre: [20, 15, 10], radius: 10 }, 60, 1, -1);
+  const near = (a: number[], e: number[], what: string) => assert.ok(a.every((v, i) => Math.abs(v - e[i]) < 1e-12), `${what}: ${a} not ${e}`);
+  near(b.position, [20, 50, 10], "position");
+  near(b.target, [20, 30, 10], "target");
+  near(b.up, [0, 0, 1], "up");
+});
+
+test("Look At from side −1 on a plane is side +1 on the plane with its normal and x turned round (same up)", () => {
+  // Two code paths agreeing: flipping both the normal and x keeps y = n × x, and the camera goes to −n.
+  const framing = { centre: [3, -2, 7] as [number, number, number], radius: 6 };
+  const p = { origin: [1, 2, 3] as [number, number, number], xAxis: [0.6, 0.8, 0] as [number, number, number], normal: [0.8, -0.6, 0] as [number, number, number] };
+  const a = planeViewBasis(p, framing, 45, 1.3, -1);
+  const b = planeViewBasis({ origin: p.origin, xAxis: [-0.6, -0.8, 0], normal: [-0.8, 0.6, 0] }, framing, 45, 1.3, 1);
+  const near = (u: number[], v: number[]) => u.every((x, i) => Math.abs(x - v[i]) < 1e-12);
+  assert.ok(near(a.position, b.position) && near(a.target, b.target) && near(a.up, b.up), JSON.stringify({ a, b }));
+});

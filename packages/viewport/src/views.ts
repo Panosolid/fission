@@ -73,14 +73,17 @@ export function viewBasis(name: ViewName, framing: Framing, fovDeg = 45, aspect 
 
 /**
  * Look At: the camera square onto a plane, on the side its normal points
- * to, with the plane's y axis (normal × xAxis) up on screen, so its x axis
- * runs to the right. It looks at the framed sphere's centre moved onto the
- * plane along the normal (the sphere stays centred on screen), from
- * fitDistance plus the centre's height d above the plane when it is in
- * front, so the sphere's centre is at least fitDistance from the camera
- * and the sphere just fits (exactly when d ≥ 0).
+ * to (`side` +1) or the other (−1: a sketch on a back or bottom face, whose
+ * frame keeps the world's axes so its normal points into the body; step
+ * 26d), with the plane's y axis (normal × xAxis) up on screen either way.
+ * Its x axis runs to the right from the normal's side and to the left from
+ * the other. It looks at the framed sphere's centre moved onto the plane
+ * square on (the sphere stays centred on screen), from fitDistance plus
+ * the centre's height d above the plane on the camera's side when it is
+ * on that side, so the sphere's centre is at least fitDistance from the
+ * camera and the sphere just fits (exactly when d ≥ 0).
  */
-export function planeViewBasis(plane: Plane, framing: Framing, fovDeg = 45, aspect = 1): ViewBasis {
+export function planeViewBasis(plane: Plane, framing: Framing, fovDeg = 45, aspect = 1, side: 1 | -1 = 1): ViewBasis {
   const unit = (v: readonly number[]) => {
     const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     return [v[0] / len, v[1] / len, v[2] / len] as Vec3;
@@ -88,12 +91,14 @@ export function planeViewBasis(plane: Plane, framing: Framing, fovDeg = 45, aspe
   const n = unit(plane.normal);
   const x = unit(plane.xAxis);
   const up: Vec3 = [n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2], n[0] * x[1] - n[1] * x[0]];
+  // Toward the camera: the normal, or against it.
+  const t = side === -1 ? ([-n[0], -n[1], -n[2]] as Vec3) : n;
   const c = framing.centre;
   const o = plane.origin;
-  const d = (c[0] - o[0]) * n[0] + (c[1] - o[1]) * n[1] + (c[2] - o[2]) * n[2];
-  const target = c.map((v, i) => v - d * n[i]) as Vec3;
+  const d = (c[0] - o[0]) * t[0] + (c[1] - o[1]) * t[1] + (c[2] - o[2]) * t[2];
+  const target = c.map((v, i) => v - d * t[i]) as Vec3;
   const dist = fitDistance(framing.radius, fovDeg, aspect) + Math.max(0, d);
-  const position = target.map((v, i) => v + dist * n[i]) as Vec3;
+  const position = target.map((v, i) => v + dist * t[i]) as Vec3;
   return { position, target, up };
 }
 

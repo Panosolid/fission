@@ -101,3 +101,25 @@ export function edgeOfSegment(segmentEdges: ArrayLike<number>, segment: number):
 export function unhidden(pointDistance: number, firstHit: number | null): boolean {
   return firstHit === null || firstHit >= pointDistance * (1 - EDGE_DEPTH_SLACK);
 }
+
+/**
+ * How much further than an offered plane a face under the pointer may be
+ * and still count as lying in it (a fraction of the plane's distance,
+ * step 26d): the display mesh's points are single precision, so a face in
+ * an origin plane (a box's bottom on the ground plane) is hit a hair off
+ * the plane. 1e-5 is a micrometre at 100 mm, far above float rounding
+ * (about 1e-7 of a coordinate) and below any face the kernel builds apart.
+ */
+export const PLANE_FACE_SLACK = 1e-5;
+
+/**
+ * What a click picks while origin planes are offered for a sketch (step
+ * 26d), from how far along the pointer's ray each was hit (null: missed):
+ * the nearer one, a face winning when it lies in the plane (within
+ * PLANE_FACE_SLACK), since the face is what is drawn there (the planes
+ * give way to faces in depth, viewer.ts); null when both missed.
+ */
+export function planeOrFace(plane: number | null, face: number | null): "plane" | "face" | null {
+  if (face !== null && (plane === null || face <= plane * (1 + PLANE_FACE_SLACK))) return "face";
+  return plane === null ? null : "plane";
+}
