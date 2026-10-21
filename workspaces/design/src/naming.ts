@@ -20,8 +20,8 @@
 // holding ":", "/", "+" or ">" can never make two names read the same;
 // the counter's ids ("line-4") are unchanged by it.
 
-import type { BodySpec, BodyView, Feature, Outline } from "@fission/core";
-import { isSketchExtrude, type DesignDocument } from "./document.ts";
+import type { BodySpec, BodyView, Outline } from "@fission/core";
+import type { CurveIds } from "./rebuild.ts";
 
 /** Each face's and edge's name on one body, by kernel index; null where none can be given. */
 export interface BodyNames {
@@ -116,20 +116,15 @@ export function indexOf(names: BodyNames, kind: "face" | "edge", part: string): 
 }
 
 /**
- * The names of the body `feature` built from `spec` (the spec it was built
- * from, so the outline's pieces are the ones the kernel extruded): an
- * extrude of a sketch names its sides by the sketch's curve ids, in the
- * order sketchCurves lists each kind (sketch.ts); a ready-made profile's by
- * piece number; a box, cylinder or sphere needs no curves.
+ * The names of the body feature `featureId` built: from `spec`, the spec it
+ * was built from (so the outline's pieces are the ones the kernel
+ * extruded), and `curves`, the ids of the sketch curves that outline was
+ * found from (the rebuild's `curves`: the sketch's now, or its kept
+ * shape's while the sketch is lost; hunt 2026-10-21, never the sketch's
+ * now for a kept shape). A ready-made profile's sides are named by piece
+ * number; a box, cylinder or sphere needs no curves. The one way Design
+ * names a body it built (scene.ts `shownBodies`).
  */
-export function featureNames(doc: DesignDocument, feature: Feature, spec: BodySpec, view: BodyView): BodyNames {
-  if (!("extrude" in spec)) return nameBody(feature.id, view, () => null);
-  const sketchId = isSketchExtrude(feature) ? feature.intent.parameters.sketch : undefined;
-  const sketch = doc.sketches.find((s) => s.id === sketchId);
-  const curves = sketch && {
-    line: sketch.curves.filter((c) => c.kind === "line").map((c) => c.id),
-    arc: sketch.curves.filter((c) => c.kind === "arc").map((c) => c.id),
-    circle: sketch.curves.filter((c) => c.kind === "circle").map((c) => c.id),
-  };
-  return nameBody(feature.id, view, outlineCurves(spec.extrude.profile, curves));
+export function featureNames(featureId: string, built: { spec: BodySpec; curves?: CurveIds }, view: BodyView): BodyNames {
+  return nameBody(featureId, view, "extrude" in built.spec ? outlineCurves(built.spec.extrude.profile, built.curves) : () => null);
 }

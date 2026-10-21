@@ -8,7 +8,7 @@
 import type { BodyView, DisplayMesh, GeometryReference } from "@fission/core";
 import { bodyFeatures } from "./browser.ts";
 import type { DesignDocument } from "./document.ts";
-import { nameBody, outlineCurves, type BodyNames } from "./naming.ts";
+import { featureNames, type BodyNames } from "./naming.ts";
 import type { BodyCache, TimelineBuild } from "./rebuild.ts";
 import { designReference, readDesignReference, resolveReference, sharedBy } from "./references.ts";
 
@@ -54,7 +54,7 @@ export async function shownBodies(doc: DesignDocument, build: TimelineBuild, cac
     if (r?.status !== "built" || r.body === undefined || r.spec === undefined) continue;
     const spec = r.spec;
     const view = await cache.view(r.body);
-    shown.push({ feature: f.id, place: i + 1, view, names: nameBody(f.id, view, "extrude" in spec ? outlineCurves(spec.extrude.profile, r.curves) : () => null) });
+    shown.push({ feature: f.id, place: i + 1, view, names: featureNames(f.id, { spec, curves: r.curves }, view) });
   }
   return shown;
 }

@@ -81,7 +81,7 @@ export function extrudePanel(slot: HTMLElement, on: ExtrudePanelEvents): Extrude
         distanceRow,
         status,
         error,
-        el("p", "", "extrude-note", "The extrude replaces the part: one body until the timeline arrives (step 24)."),
+        el("p", "", "extrude-note", "The extrude is a new body, put in the timeline at the marker."),
         buttons,
       );
       if (sketches.length === 0) this.showStatus("There is no sketch to extrude yet: draw one with Create sketch.", false);

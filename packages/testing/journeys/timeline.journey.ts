@@ -22,7 +22,7 @@ import {
   droppedNote,
   extrudeSketch,
   featureNames,
-  featureSpec,
+  featureBuild,
   highlightOf,
   joinBodies,
   lastFeature,
@@ -360,9 +360,9 @@ const sceneOf = (b: { view: BodyView; names: ReturnType<typeof nameBody> }) => j
 
 async function builtNames(kernel: KernelCalls, doc: DesignDocument) {
   const feature = lastFeature(doc);
-  const spec = await featureSpec(kernel, doc, feature);
-  const view = await buildSpec(kernel, spec);
-  return { view, names: featureNames(doc, feature, spec, view) };
+  const built = await featureBuild(kernel, doc, feature);
+  const view = await buildSpec(kernel, built.spec);
+  return { view, names: featureNames(feature.id, built, view) };
 }
 
 test("a selected face keeps its name through an edit that renumbers the kernel's faces (a side deleted and redrawn, a corner moved), and a face that is gone is dropped with a note", async () => {

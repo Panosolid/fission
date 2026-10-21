@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { BodySpec, BodyView, Outline } from "@fission/core";
-import { lastFeature, partDocument } from "../src/document.ts";
-import { extrudeSketch } from "../src/extrude.ts";
+import type { BodySpec, BodyView, KernelCalls, Outline } from "@fission/core";
+import { lastFeature, partDocument, type DesignDocument } from "../src/document.ts";
+import { extrudeSketch, featureBuild } from "../src/extrude.ts";
 import { featureNames, nameBody, outlineCurves } from "../src/naming.ts";
-import { addSketch, drawRectangle } from "../src/sketch.ts";
+import { addSketch, deleteCurve, drawRectangle } from "../src/sketch.ts";
 import { BOX_VIEW, CYLINDER_VIEW } from "./views.ts";
 
 const side = (piece: number, boundary = 0) => ({ role: "side" as const, boundary, piece });
@@ -108,7 +108,7 @@ test("outlineCurves: a sketch's pieces by the curve ids of each kind, a ready-ma
 
 test("featureNames: a box by role alone; a sketch's extrude by the sketch's own curve ids", () => {
   const box = partDocument("box", 40, 30, 20);
-  assert.deepEqual(featureNames(box, lastFeature(box), { box: { width: 40, depth: 30, height: 20 } }, BOX_VIEW).faces[1], "top");
+  assert.deepEqual(featureNames(lastFeature(box).id, { spec: { box: { width: 40, depth: 30, height: 20 } } }, BOX_VIEW).faces[1], "top");
   // A rectangle: drawRectangle's four lines, (0, 0) → (40, 0) first, then on round.
   let doc = partDocument("box", 40, 30, 20);
   const sketch = addSketch(doc);
@@ -120,7 +120,25 @@ test("featureNames: a box by role alone; a sketch's extrude by the sketch's own 
   // The kernel walked it from the third line: pieces are lines 2, 3, 0, 1.
   const profile: Outline = { outer: { path: { corners: [], bulges: [] } }, holes: [], pieces: [2, 3, 0, 1].map((index) => ({ curve: "line" as const, index, reversed: false })) };
   const spec: BodySpec = { extrude: { profile, distance: 10 } };
-  const n = featureNames(doc, lastFeature(doc), spec, extrudeView(4));
+  const n = featureNames(lastFeature(doc).id, { spec, curves: { line: lines, arc: [], circle: [] } }, extrudeView(4));
   assert.equal(n.feature, extruded.id);
   assert.deepEqual(n.faces.slice(2), [2, 3, 0, 1].map((k) => `side:${lines[k]}`));
+});
+
+test("regression (hunt 2026-10-21): an extrude built from its kept shape names its sides by the kept curves, not by what its sketch holds now", async () => {
+  const sketch = addSketch(partDocument("box", 40, 30, 20));
+  const rect = drawRectangle(sketch.doc, sketch.id, [0, 0], [40, 30]);
+  const extruded = extrudeSketch(rect.doc, sketch.id, 10);
+  const lines = extruded.doc.sketches[0].curves.map((c) => c.id);
+  // The first side deleted: the sketch makes no outline, so the extrude builds from its kept shape, the four lines it had.
+  const old = extruded.doc.sketches[0];
+  const doc: DesignDocument = { ...deleteCurve(extruded.doc, sketch.id, lines[0]), kept: { [extruded.id]: { points: old.points, curves: old.curves } } };
+  const profile: Outline = { outer: { path: { corners: [], bulges: [] } }, holes: [], pieces: [0, 1, 2, 3].map((index) => ({ curve: "line" as const, index, reversed: false })) };
+  // A stand-in kernel: the sketch's three lines now make no outline; the kept four make the rectangle.
+  const kernel = { call: async (op: string, l: unknown[]) => (op === "sketch_outline" ? (l.length === 4 ? { closed: profile } : { open: "2 ends meet nothing" }) : null) } as unknown as KernelCalls;
+  const built = await featureBuild(kernel, doc, lastFeature(doc));
+  assert.deepEqual(built.curves?.line, lines, "the build names the kept shape's curves");
+  const n = featureNames(lastFeature(doc).id, built, extrudeView(4));
+  // Piece k is the kept shape's line k, so the sides are lines 0..3 as drawn; the sketch's three lines now would name piece 0 by line 1.
+  assert.deepEqual(n.faces.slice(2), lines.map((id) => `side:${id}`));
 });
