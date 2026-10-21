@@ -29,8 +29,25 @@ const PLANES: Record<SketchPlane, Plane> = {
   YZ: { origin: [0, 0, 0], xAxis: [0, 1, 0], normal: [1, 0, 0] },
 };
 
-/** Where a sketch plane reference is; a face id joins these at step 24. */
+/** Where an origin plane is. */
 export const planeOf = (ref: SketchPlane): Plane => PLANES[ref];
+
+/**
+ * Where sketch `id` is drawn: its origin plane's frame, or for a sketch on
+ * a face (26c) the frame the last rebuild placed it in (`placed`, by
+ * sketch id), else the placement it holds, else the frame it was drawn
+ * with (a design not rebuilt yet: a file just opened, another workspace).
+ */
+export function sketchPlane(doc: DesignDocument, id: string, placed?: ReadonlyMap<string, Plane>): Plane {
+  return planeFor(doc.timeline.features.find((f) => f.id === id), doc.sketches.find((s) => s.id === id), placed);
+}
+
+/** `sketchPlane` from the sketch's item and content, found already (sketch-tool.ts finds every sketch's at once). */
+export function planeFor(item: Feature | undefined, content: Sketch | undefined, placed?: ReadonlyMap<string, Plane>): Plane {
+  const plane = item?.intent.parameters.plane;
+  if (!isFacePlane(plane)) return planeOf((plane as SketchPlane | undefined) ?? "XY");
+  return (item && placed?.get(item.id)) ?? content?.face?.held ?? content?.face?.frame ?? planeOf("XY");
+}
 
 /** The document with the next id taken: "line-4" and the counter moved on. */
 function take(doc: DesignDocument, prefix: string): [string, DesignDocument] {

@@ -23,7 +23,7 @@
 import type { Feature, Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import type { DesignDocument, Sketch, SketchArcCurve, SketchLineCurve, SketchPlane } from "./document.ts";
 import { centreClick, centreHover, centrePreview, type CentreArcTool } from "./centre-arc.ts";
-import { drawArc, drawCircle, drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
+import { drawArc, drawCircle, drawLine, drawRectangle, planeFor, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
 
 export { pointAt };
 
@@ -522,14 +522,15 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
  * Every sketch as the viewport draws it, lines, then circles (each as
  * `circleSegments`), then arcs (`arcSegments`): the one being edited (if
  * any) with its grid, its points (and a first click not yet a point) and
- * the preview.
+ * the preview. A sketch on a face is drawn where the last rebuild placed
+ * it (`placed`, by sketch id; sketch.ts `planeFor`).
  */
-export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null): SketchDrawing[] {
+export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null, placed?: ReadonlyMap<string, Plane>): SketchDrawing[] {
   // Each sketch's plane from its item, found by id once (security audit S2: a search per sketch took the timeline's length squared).
   const items = new Map<string, Feature>();
   for (const f of doc.timeline.features) if (!items.has(f.id)) items.set(f.id, f);
   return doc.sketches.map((s) => {
-    const plane: Plane = planeOf(planeOfItem(items.get(s.id)));
+    const plane: Plane = planeFor(items.get(s.id), s, placed);
     const curves = sketchCurves(s);
     const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
     if (editing?.tool.sketch !== s.id) return { plane, lines };
@@ -540,12 +541,6 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
   });
 }
 
-/** The plane a sketch is on, from its timeline item. */
-export function sketchPlaneOf(doc: DesignDocument, id: string): SketchPlane {
-  return planeOfItem(doc.timeline.features.find((f) => f.id === id));
-}
-
-const planeOfItem = (item: Feature | undefined): SketchPlane => (item?.intent.parameters.plane as SketchPlane | undefined) ?? "XY";
 
 /** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", "2 lines, 1 arc and 1 circle", or "Nothing drawn yet" when empty. */
 export function curveCount(sketch: Sketch): string {

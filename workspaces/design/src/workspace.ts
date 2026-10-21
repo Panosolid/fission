@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–33) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type Plane, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import type { ShapeKind } from "./profiles.ts";
 import { insertAt, isSketchItem, partFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
@@ -28,12 +28,12 @@ import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebu
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
-import { addSketch, askOutline, outlineSourceOf, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
+import { addSketch, askOutline, outlineSourceOf, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane } from "./sketch.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, withLocks, type Locks } from "./typed-entry.ts";
 import { typedBoxes } from "./typed-boxes.ts";
 import { hintOf, pointerHint } from "./pointer-hint.ts";
-import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
@@ -323,6 +323,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   // bodies no feature holds are freed. Rebuilds run one after another, so
   // one never frees a body another is about to show.
   const bodies = new BodyCache(kernel);
+  // Its own bodies for settling a sketch edit's held placements (26c), kept between clicks so each settles without building the timeline again; clicks settle one after another.
+  const settleBodies = new BodyCache(kernel);
   let rebuilds: Promise<unknown> = Promise.resolve();
   const build = latestOnly((doc: DesignDocument) => {
     const next = rebuilds.then(() => buildPart(doc));
@@ -342,6 +344,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const feature = partFeature(doc);
     const build = await rebuildTimeline(doc, bodies, kernel);
     failedNow = new Set(Object.keys(build.results).filter((id) => build.results[id].status === "failed"));
+    // Where each sketch on a face was placed (26c), so it is drawn there.
+    placedNow = new Map(Object.entries(build.results).flatMap(([id, r]) => (r.status === "built" && r.placement ? [[id, r.placement.plane] as const] : [])));
     const result = feature && build.results[feature.id];
     let failure: string | undefined;
     if (result?.status === "failed") failure = result.message;
@@ -458,6 +462,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
 
   /** The items the last rebuild failed (24f3: red in the bar and the browser's Timeline rows); the data's own failures are added by `timelineBarItems`. */
   let failedNow: ReadonlySet<string> = new Set();
+  /** Where the last rebuild placed each sketch on a face (26c), by sketch id: drawn and looked at there. */
+  let placedNow: ReadonlyMap<string, Plane> = new Map();
   /** The bar's item whose ⋯ shows (a click or tap picked it). */
   let picked: string | null = null;
   /** The sketch being edited, whose own Suppress and Delete are off. */
@@ -598,6 +604,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       markStale(failure !== undefined);
       viewport.showBody(scene.mesh);
+      // A sketch on a face is drawn where this rebuild placed it (26c).
+      drawSketches();
       const empty = scene.bodies.length === 0;
       // A different shape is a new part: frame it (not when Undo or Redo put
       // it back: the camera stays unless the body no longer fits). With no
@@ -690,7 +698,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const locked = Object.keys(locks).length > 0;
     const aim = editing && aimOf(doc, editing.tool, editing.pointer, locks);
     // A typed arc angle goes the pointer's way round however little it went (typed-entry.ts withLocks): the preview from the tool the click will use.
-    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, tool: withLocks(editing.tool, locks, editing.pointer), pointer: aim, gridSnap }), locked ? null : (editing?.snap ?? null), editing?.pixel));
+    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, tool: withLocks(editing.tool, locks, editing.pointer), pointer: aim, gridSnap }, placedNow), locked ? null : (editing?.snap ?? null), editing?.pixel));
     const anchor = editing && anchorOf(doc, editing.tool);
     if (!editing) return (typed.hide(), hint.hide());
     const width = viewport.element.clientWidth;
@@ -763,7 +771,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Look At (SF2): the camera square onto the edited sketch's plane, framing the body and what is drawn. */
   function lookAtSketch() {
     if (mode.kind !== "edit" || !editingSketch) return;
-    viewport.lookAt(planeOf(sketchPlaneOf(designDoc(), editingSketch.id)));
+    viewport.lookAt(sketchPlane(designDoc(), editingSketch.id, placedNow));
   }
 
   /** Edits the sketch named in editingSketch with its tool, nothing clicked yet. */
@@ -1058,7 +1066,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       let next = done.doc;
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, done.doc);
+          next = await settleKept(kernel, before, done.doc, settleBodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }
@@ -1091,7 +1099,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       let next = done.doc;
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, done.doc);
+          next = await settleKept(kernel, before, done.doc, settleBodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }
@@ -1151,7 +1159,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Asleep, the sketches stay drawn as finished ones: no grid, no planes to pick.
     viewport.showPlanes([]);
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
-    viewport.showSketches(doc ? sketchDrawings(doc, null) : []);
+    viewport.showSketches(doc ? sketchDrawings(doc, null, placedNow) : []);
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
   }
@@ -1222,6 +1230,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!putAwayByRestore) editingSketch = null;
       sleep();
       void bodies.close();
+      void settleBodies.close();
       viewport.showSketches([]);
       typed.element.remove();
       hint.element.remove();

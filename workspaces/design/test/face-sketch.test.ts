@@ -9,7 +9,8 @@ import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson, type BodyView, type Plane } from "@fission/core";
 import { buildingItems, builds, partDocument, readDesignDocument, type DesignDocument } from "../src/document.ts";
 import { drawnFrame, drawnOnFace, faceFeature, frameNow, squared, turned, type SketchPlacement } from "../src/face-sketch.ts";
-import { addFaceSketch, addSketch, drawCircle } from "../src/sketch.ts";
+import { addFaceSketch, addSketch, drawCircle, sketchPlane } from "../src/sketch.ts";
+import { sketchDrawings } from "../src/sketch-tool.ts";
 import { extrudeSketch, isFlipped, setExtrudeFlip } from "../src/extrude.ts";
 import { moveMarker, suppressItem } from "../src/timeline-edits.ts";
 
@@ -284,4 +285,21 @@ test("a file's sketch on a face is checked when it is opened: each way it can be
     ["a kept placement with side 2", (d) => (d.kept = { "feature-5": { points: [], curves: [], placement: { plane: { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, side: 2 } } }), /kept shape's placement's side must be 1 or -1, not 2/],
   ];
   for (const [what, edit, error] of cases) assert.throws(opened(edit), error, what);
+});
+
+test("a sketch on a face is drawn where the last rebuild placed it, else where it is held, else where it was drawn", () => {
+  const { doc, sketch } = onTop();
+  const drawn = plane([0, 0, 20], [1, 0, 0], [0, 0, 1]);
+  const held = plane([0, 0, 35], [1, 0, 0], [0, 0, 1]);
+  const placed = plane([0, 0, 50], [0, 1, 0], [0, 0, 1]);
+  assert.deepEqual(sketchPlane(doc, sketch), drawn);
+  assert.deepEqual(sketchDrawings(doc, null)[0].plane, drawn);
+  const holding: DesignDocument = { ...doc, sketches: doc.sketches.map((s) => ({ ...s, face: { ...s.face!, held } })) };
+  assert.deepEqual(sketchPlane(holding, sketch), held);
+  const at = new Map([[sketch, placed]]);
+  assert.deepEqual(sketchPlane(holding, sketch, at), placed);
+  assert.deepEqual(sketchDrawings(holding, null, at)[0].plane, placed);
+  // An origin plane's sketch is on that plane whatever a rebuild said.
+  const xz = addSketch(doc, "XZ");
+  assert.deepEqual(sketchPlane(xz.doc, xz.id, new Map([[xz.id, placed]])), { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, -1, 0] });
 });
