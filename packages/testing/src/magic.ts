@@ -37,6 +37,17 @@ export const MAGIC_JOURNEYS: MagicJourney[] = [
     status: "ready",
   },
   {
+    // Step 25c4: a part from a sketch, on the timeline the default box starts.
+    name: "Design: sketch to STL",
+    steps: ["start a sketch on the ground", "draw a rectangle", "extrude it", "Download STL"],
+    // Create Sketch and the plane, the rectangle tool and its two corners, Extrude and OK, the STL button.
+    clickLimit: 8,
+    // 2.7 s in this project's sandbox and about 3.6 times that on GitHub's runners (as the shape journey is):
+    // a limit with room, the baseline's 15% catching any slowdown nightly.
+    secondsLimit: 20,
+    status: "ready",
+  },
+  {
     name: "Box to laser panels",
     steps: ["draw a box", "click Cut on laser", "change the thickness to 6 mm", "the panels update"],
     clickLimit: 5,

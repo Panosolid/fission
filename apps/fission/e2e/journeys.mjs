@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { launch } from "./browser.mjs";
+import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 import { MAGIC_JOURNEYS, baselineLine, compareToBaseline, judge, parseBaselines, reportLine } from "../../../packages/testing/src/magic.ts";
 
@@ -88,7 +89,59 @@ async function designShapeToStl(page, { extraClick = false } = {}) {
   return { clicks: await clicks(page), ms, name: download.suggestedFilename(), bytes: readFileSync(path) };
 }
 
-const WALKERS = { "Design: shape to STL": designShapeToStl };
+/**
+ * "Design: sketch to STL" (step 25c4), from the default box: Create Sketch,
+ * the ground plane, the rectangle tool, its corners (0, 0) and (40, 30),
+ * Extrude, OK at its 10 mm, and STL, which saves every body shown: the box
+ * and the extrude. Set-up, not counted: a fresh page (the one passed in is
+ * left alone), and Snap to grid ticked in a sketch that Undo then takes
+ * back, so the corners are exact.
+ */
+async function designSketchToStl() {
+  // Set-up: a page of its own, as a reload would bring back the autosaved design.
+  const page = await fresh();
+  try {
+    // Snap to grid lives in the sketch panel and lasts for the page: tick it in a sketch, then Undo that sketch.
+    await page.click("#create-sketch");
+    await page.click("#sketch-plane-XY");
+    await page.check("#sketch-grid-snap");
+    await page.keyboard.press("ControlOrMeta+z");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching !== "true" && document.getElementById("undo").title === "Nothing to undo");
+    await page.evaluate(() => (window.journeyClicks = 0));
+
+    const t0 = performance.now();
+    await page.click("#create-sketch"); // start a sketch on the ground
+    await page.click("#sketch-plane-XY");
+    await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true");
+    await page.click("#sketch-tool-rectangle"); // draw a rectangle
+    for (const corner of [[0, 0], [40, 30]]) await clickPlane(page, corner, TOP);
+    await page.waitForFunction(() => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.");
+    await page.click("#sketch-extrude"); // extrude it
+    await page.waitForFunction(() => document.querySelector("#extrude-status")?.textContent.startsWith("Sketch 1 makes a closed outline."));
+    await page.click("#extrude-ok");
+    await volume(page, "12,000 mm³"); // 40 × 30 × 10
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click("#toolbar [data-op=export_stl]")]); // Download STL
+    const path = await download.path();
+    const ms = performance.now() - t0;
+    return { clicks: await clicks(page), ms, name: download.suggestedFilename(), bytes: readFileSync(path) };
+  } finally {
+    await page.context().close();
+  }
+}
+
+const WALKERS = { "Design: shape to STL": designShapeToStl, "Design: sketch to STL": designSketchToStl };
+
+/**
+ * The file each journey makes, worked by hand; every corner is a whole
+ * number of mm, exact in single precision. A 50 × 30 × 20 box is 12
+ * triangles, 84 + 50 · 12 = 684 bytes, 30,000 mm³. The box and the
+ * extruded 40 × 30 rectangle are 12 + 12 triangles, 84 + 50 · 24 = 1284
+ * bytes, 24,000 + 12,000 = 36,000 mm³ (overlapping volumes add).
+ */
+const FILES = {
+  "Design: shape to STL": { name: "fission-box.stl", length: 684, volume: 30000 },
+  "Design: sketch to STL": { name: "fission-2-bodies.stl", length: 1284, volume: 36000 },
+};
 
 let failed = false;
 async function check(name, fn) {
@@ -117,10 +170,11 @@ try {
         const runs = [];
         for (let i = 0; i < WALKS; i++) {
           const run = await walk(page);
-          // The result is the right file: a 50 × 30 × 20 box, corners exact in single precision.
-          assert.equal(run.name, "fission-box.stl");
-          assert.equal(run.bytes.length, 684); // 84 + 12 triangles × 50
-          assert.equal(stlVolume(run.bytes), 30000);
+          // The result is the right file (FILES).
+          const want = FILES[journey.name];
+          assert.equal(run.name, want.name);
+          assert.equal(run.bytes.length, want.length);
+          assert.equal(stlVolume(run.bytes), want.volume);
           runs.push(run);
         }
         const ms = runs.map((r) => r.ms).sort((a, b) => a - b);
@@ -136,7 +190,7 @@ try {
     });
   }
 
-  await check("the counter counts every click and only clicks a person makes: Design's walk is exactly 3", async () => {
+  await check("the counter counts every click and only clicks a person makes: Design's walks are exactly 3 and 8", async () => {
     const page = await fresh();
     try {
       // Box, the width field, STL: 3 clicks worked out from the steps. The app's
@@ -144,6 +198,8 @@ try {
       assert.equal((await designShapeToStl(page)).clicks, 3);
       await page.evaluate(() => document.querySelector("#toolbar [data-shape=cylinder]").click()); // a script's click
       assert.equal(await clicks(page), 3);
+      // The sketch's walk: Create Sketch, the plane, the rectangle tool, two corners, Extrude, OK, STL: 8.
+      assert.equal((await designSketchToStl()).clicks, 8);
     } finally {
       await page.close();
     }

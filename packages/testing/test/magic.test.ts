@@ -71,8 +71,8 @@ test("seeded random runs agree with a simple model (5 seeds × 500 runs)", () =>
   }
 });
 
-test("the list: exactly the Design-only journey is ready; every other one says what it waits for", () => {
-  assert.deepEqual(MAGIC_JOURNEYS.filter((j) => j.status === "ready").map((j) => j.name), ["Design: shape to STL"]);
+test("the list: exactly the two Design-only journeys are ready; every other one says what it waits for", () => {
+  assert.deepEqual(MAGIC_JOURNEYS.filter((j) => j.status === "ready").map((j) => j.name), ["Design: shape to STL", "Design: sketch to STL"]);
   const names = MAGIC_JOURNEYS.map((j) => j.name);
   assert.equal(new Set(names).size, names.length, "names are unique");
   for (const j of MAGIC_JOURNEYS) {
