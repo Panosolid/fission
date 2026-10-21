@@ -12,6 +12,7 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.26.2 (2026-10-21)
 
+- A privacy and terms page, linked from the guide beside Licences: what Panosolid keeps (everything stays in your browser), what leaves your device (only AI requests to a provider you choose, with your key), the AI providers' own age rules, how to delete everything, and plain terms of use (free, your designs are yours, no warranty so check every size before making anything). Security and legal audit 2026-10-22.
 - Fix (security audit 2026-10-22): every GitHub Action the workflows use is pinned to a fixed commit instead of a tag like v4 that its owner could move. The site's build runs these actions and Pages publishes what they build, so a hijacked tag could have changed the app every visitor runs. A new check fails on any action that isn't pinned. Also, .env files can't be committed.
 
 ## 0.26.1 (2026-10-21)
