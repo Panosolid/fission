@@ -1,5 +1,5 @@
 // The naming harness (src/naming-session.ts) on the model as a subject:
-// Ben's Fusion answers pass, every planted bug is caught (by a hand-worked
+// Ben's Fusion answers (25a's 1 to 7, step 26's Q1 to Q3) pass, every planted bug is caught (by a hand-worked
 // case and by the random sessions), the comparer sits on MATCH_REL, and
 // failures shrink to a minimal list. Step 26 runs the same cases on Design's
 // sketch on a face (no cuts), booleans' 44/48 on Design's cut.
@@ -39,36 +39,44 @@ async function caseFailure(make: () => NamingSubject, c: (typeof FUSION_CASES)[n
   }
 }
 
-test("Ben's Fusion answers 1 to 7 hold on the model, with the cut and with a new body", async () => {
+test("Ben's Fusion answers (1 to 7, and Q1 to Q3 of step 26) hold on the model, with the cut and with a new body", async () => {
   for (const c of FUSION_CASES) {
     const f = await caseFailure(() => namingModelSubject([], c.cuts), c);
     assert.equal(f, null, `answer ${c.answer} (${c.title}): ${f?.message}`);
   }
   // Every answer has a case, and every case a cut or a new-body subject runs.
-  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => c.cuts).map((c) => c.answer))].sort(), [1, 2, 3, 4, 5, 6, 7]);
-  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => !c.cuts).map((c) => c.answer))].sort(), [1, 2, 4, 5, 7]);
+  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => c.cuts).map((c) => c.answer))].sort(), ["1", "2", "3", "4", "5", "6", "7", "Q3"]);
+  // Q1 is answer 4 with a new body; Q2 (sides) has no cut until booleans.
+  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => !c.cuts).map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3"]);
 });
 
 /** For each planted bug, the answers whose cases must catch it (none for the guess between two faces, which this part never makes: test/naming-model.test.ts catches it). */
-const CAUGHT_BY: Record<NamingFault, number[]> = {
-  "frame-follows-face": [1, 3],
-  "plane-stays-put": [2, 5],
-  "normal-follows-face": [2],
-  "bite-fails": [3],
-  "empty-cut-builds": [2, 6],
-  "delete-keeps-dependents": [4],
-  "delete-takes-sketch": [4],
-  "delete-no-ask": [4],
-  "lost-plane-silent": [4],
-  "lost-plane-moves": [4],
+const CAUGHT_BY: Record<NamingFault, string[]> = {
+  "frame-follows-face": ["1", "3"],
+  "plane-stays-put": ["2", "5"],
+  "normal-follows-face": ["2"],
+  "bite-fails": ["3"],
+  "empty-cut-builds": ["2", "6"],
+  "delete-keeps-dependents": ["4"],
+  "delete-takes-sketch": ["4", "Q1"],
+  "delete-no-ask": ["4", "Q1"],
+  "lost-plane-silent": ["4", "Q1"],
+  "lost-plane-moves": ["4", "Q1"],
   "ambiguous-picks-first": [],
-  "reorder-ignores-plane": [7],
+  "reorder-ignores-plane": ["7"],
+  "frame-not-turned": ["Q2"],
+  "origin-at-corner": ["Q2"],
+  "source-lost-silent": ["Q1", "Q2"],
+  "extrude-ignores-side": ["Q2"],
+  "side-by-index": ["Q2"],
+  "suppress-keeps-dependents": ["Q3"],
+  "suppress-greys-all-after": ["Q3"],
 };
 
 test("each planted bug breaks the Fusion answers it should, and no other bug goes unnoticed by them", async () => {
   assert.deepEqual(Object.keys(CAUGHT_BY).sort(), [...NAMING_FAULTS].sort());
   for (const fault of NAMING_FAULTS) {
-    const broken = new Set<number>();
+    const broken = new Set<string>();
     for (const c of FUSION_CASES) if ((await caseFailure(() => namingModelSubject([fault], c.cuts), c)) !== null) broken.add(c.answer);
     for (const a of CAUGHT_BY[fault]) assert.ok(broken.has(a), `${fault}: answer ${a} still passes (broken: ${[...broken]})`);
     if (CAUGHT_BY[fault].length === 0) assert.equal(broken.size, 0, `${fault} breaks answers ${[...broken]}`);
@@ -79,7 +87,7 @@ test(`${SEEDS.length} seeds × ${STEPS} random steps pass on the model and reach
   const total: NamingCounts = {};
   for (const cuts of [true, false])
     for (const seed of SEEDS) {
-      const s = randomNamingSession(seed, STEPS);
+      const s = randomNamingSession(seed, STEPS, cuts);
       let counts: NamingCounts;
       try {
         counts = await runNamingSession(namingModelSubject([], cuts), s);
@@ -93,6 +101,13 @@ test(`${SEEDS.length} seeds × ${STEPS} random steps pass on the model and reach
   const reached = [
     "sketch:followed",
     "sketch:plane-lost",
+    "sketch:side",
+    "sketch:turned",
+    "sketch:facing-in",
+    "solid:source-lost",
+    "off:suppressed",
+    "off:greyed",
+    "op:suppress:done",
     "cut:whole",
     "cut:bite",
     "cut:no-target-height",
@@ -125,24 +140,25 @@ test(`${SEEDS.length} seeds × ${STEPS} random steps pass on the model and reach
 test("each planted bug a session can reach is caught by the random sessions, and shrinks to a short list", async () => {
   for (const fault of NAMING_FAULTS) {
     if (fault === "ambiguous-picks-first") continue; // this part never names two faces alike (see above)
-    let found: { seed: bigint; s: NamingSession; f: NamingFailure } | null = null;
-    for (const seed of SEEDS) {
-      const s = randomNamingSession(seed, STEPS);
-      const f = await namingFailureOf(() => namingModelSubject([fault]), s);
-      if (f) {
-        found = { seed, s, f };
-        break;
+    let found: { cuts: boolean; s: NamingSession; f: NamingFailure } | null = null;
+    // With the cut first; the side faces' bugs only show without it, where setups go on sides too.
+    for (const cuts of [true, false])
+      for (const seed of SEEDS) {
+        if (found) break;
+        const s = randomNamingSession(seed, STEPS, cuts);
+        const f = await namingFailureOf(() => namingModelSubject([fault], cuts), s);
+        if (f) found = { cuts, s, f };
       }
-    }
     assert.ok(found, `${fault} was never caught`);
-    const shrunk = await shrinkNaming(() => namingModelSubject([fault]), found.s);
-    const again = await namingFailureOf(() => namingModelSubject([fault]), shrunk);
+    const make = () => namingModelSubject([fault], found.cuts);
+    const shrunk = await shrinkNaming(make, found.s);
+    const again = await namingFailureOf(make, shrunk);
     assert.equal(again?.check, found.f.check, `${fault}: the shrunk session fails differently`);
     assert.ok(shrunk.steps.length <= 6, `${fault}: shrunk to ${shrunk.steps.length} steps`);
     // 1-minimal: dropping any one step makes it pass, or fail some other way.
     for (let k = 0; k < shrunk.steps.length; k++) {
       const fewer = { setup: shrunk.setup, steps: shrunk.steps.filter((_, j) => j !== k) };
-      assert.notEqual((await namingFailureOf(() => namingModelSubject([fault]), fewer))?.check, found.f.check, `${fault}: step ${k} isn't needed`);
+      assert.notEqual((await namingFailureOf(make, fewer))?.check, found.f.check, `${fault}: step ${k} isn't needed`);
     }
   }
 });
@@ -151,9 +167,9 @@ test("the comparer matches the kernel's promised accuracy: 0.9 × MATCH_REL pass
   const base: NamingRebuild = {
     order: ["sketch-1", "extrude-2", "sketch-3", "cut-4"],
     results: {
-      "sketch-1": { kind: "sketch", placement: { origin: [0, 0, 0], normal: 1 } },
-      "extrude-2": { kind: "solid", volume: 24000 },
-      "sketch-3": { kind: "sketch", placement: { origin: [0, 0, 20], normal: 1 } },
+      "sketch-1": { kind: "sketch", placement: { origin: [0, 0, 0], x: [1, 0, 0], normal: [0, 0, 1], side: 1 } },
+      "extrude-2": { kind: "solid", volume: 24000, centroid: [20, 15, 10] },
+      "sketch-3": { kind: "sketch", placement: { origin: [0, 0, 20], x: [1, 0, 0], normal: [0, 0, 1], side: 1 } },
       "cut-4": { kind: "cut", status: "built", removed: 250 * Math.PI },
     },
     bodies: { "extrude-2": 24000 - 250 * Math.PI },
@@ -172,6 +188,21 @@ test("the comparer matches the kernel's promised accuracy: 0.9 × MATCH_REL pass
   const cut = JSON.parse(JSON.stringify(base)) as NamingRebuild;
   (cut.results["cut-4"] as { removed: number }).removed *= 1 + 1.1 * MATCH_REL;
   assert.match(namingDiff(base, cut) ?? "", /cut-4: removed/);
+  // A frame's axis or a centroid off by 1.1 × MATCH_REL (of the 1 mm floor) fails; 0.9 × passes.
+  const tilt = (f: number) => {
+    const r = JSON.parse(JSON.stringify(base)) as NamingRebuild;
+    (r.results["sketch-3"] as { placement: { x: number[] } }).placement.x[1] = f * MATCH_REL;
+    return r;
+  };
+  assert.equal(namingDiff(base, tilt(0.9)), null);
+  assert.match(namingDiff(base, tilt(1.1)) ?? "", /sketch-3: x axis/);
+  const moved = (f: number) => {
+    const r = JSON.parse(JSON.stringify(base)) as NamingRebuild;
+    (r.results["extrude-2"] as { centroid: number[] }).centroid[0] = 20 * (1 + f * MATCH_REL);
+    return r;
+  };
+  assert.equal(namingDiff(base, moved(0.9)), null);
+  assert.match(namingDiff(base, moved(1.1)) ?? "", /extrude-2: centroid/);
 });
 
 test("a subject that answers differently when read twice, or loses its sketch's warning on save and open, is caught", async () => {
@@ -197,7 +228,7 @@ test("a subject that answers differently when read twice, or loses its sketch's 
       },
     };
   };
-  const c = FUSION_CASES.find((x) => x.answer === 4 && x.cuts)!;
+  const c = FUSION_CASES.find((x) => x.answer === "4" && x.cuts)!;
   const f = await caseFailure(forgetful, { ...c, steps: [...c.steps, { kind: "save-open" }] });
   assert.equal(f?.check, "save and open");
 });

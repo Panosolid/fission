@@ -1,26 +1,29 @@
 // A model of what a sketch on a face does when the features before it are
 // edited (step 25a, topological naming; the face sketch itself is step 26 and
 // the cut is booleans' 44/48), written apart from Design so it can be the
-// oracle for both. docs/progress/cad.md, "Naming test plan (25a)".
+// oracle for both. docs/progress/cad.md, "Naming test plan (25a)" and "Sketch
+// on a face test plan (26a)".
 //
 // Its world is the owner's Fusion test (2026-10-18, answers 1 to 7 in
 // docs/progress/cad.md): a polygon sketched on XY, extruded into a body; a
-// circle sketched on one of that body's caps; and a feature built from the
-// circle: a cut into the body (Fusion's answers) or a new body (what step 26
-// can build before booleans). Any number of these items can be in the
-// document, but every face sketch is on a cap of an extrude of an XY sketch.
+// circle sketched on one of that body's faces (a cap, or from step 26 a side);
+// and a feature built from the circle: a cut into the body (Fusion's answers)
+// or a new body (what step 26 can build before booleans). Any number of these
+// items can be in the document, but every face sketch is on a face of an
+// extrude of an XY sketch.
 //
 // The rules, each from one of Ben's answers:
-// 1. A sketch on a face holds the face by its name (feature and cap). Its
-//    height follows the face; its own frame stays the world's XY frame seen
-//    on that plane, so editing the outline under it never moves the circle
+// 1. A sketch on a face holds the face by its name (feature and cap, or
+//    feature and the outline line a side was swept from). It lies on the
+//    face's plane; on a cap its own frame stays the world's XY frame seen on
+//    that plane, so editing the outline under it never moves the circle
 //    across the face (answer 1: the 40 × 30 rectangle becomes 60 × 30 and
 //    the hole stays put; answer 5: a longer extrude carries the sketch up).
-// 2. A face sketch keeps the side it was drawn from: its normal is the face's
-//    outward normal when it was drawn and never flips after. A cut goes
-//    against that normal by its depth, so flipping the extrude under it
-//    leaves the cut pointing away from the body (answer 2: "No target
-//    body"; the body stays).
+// 2. A face sketch keeps the side it was drawn from: it faces the face's
+//    outward normal when drawn and never flips after. A cut goes against
+//    that way by its depth, so flipping the extrude under it leaves the cut
+//    pointing away from the body (answer 2: "No target body"; the body
+//    stays).
 // 3. A cut builds when its circle and its body overlap with some area and
 //    some height, however little (answer 3: the hypotenuse through the hole
 //    cuts the hole in half, no error), and fails "no target body" when they
@@ -40,12 +43,36 @@
 // 6. A name that matches no face is "plane lost"; one that matches two is
 //    "plane ambiguous". Both keep the last placement with the warning: the
 //    model never guesses (the owner's rule for 25a).
+// Step 26 (Ben's answers of 2026-10-19, Q1 to Q3):
+// 7. A feature built from a face sketch whose plane is lost or ambiguous
+//    keeps its body, built at the sketch's held placement, and says its
+//    source is lost (Q1: the new-body cylinder stays when Extrude 1 is
+//    deleted, with "plane lost" on the sketch and "source lost" on it).
+// 8. A face sketch's coordinates are the world's (Q2). Its frame is the
+//    origin plane (XY, then XZ, then YZ) most nearly parallel to the face
+//    when it was drawn, turned onto the face the shortest way, with its
+//    origin where the world's origin meets the face's plane square on; so on
+//    a face parallel to an origin plane, sketch (x, y) reads as world (x, y),
+//    (x, z) or (y, z), whichever way the face looks. When a later edit turns
+//    the face (a side whose corner moved), the frame turns with it the
+//    shortest way, keeping the face side its normal was on (the normal of
+//    the plane nearer the one drawn; a face turned exactly a right angle
+//    takes its outward side); the sketch's own side against that normal
+//    (rule 2) never changes. A side's frame is then (along the side, up).
+// 9. Suppressing a feature greys every item built on it, all the way down,
+//    with no warning (Q3); nothing else changes, and unsuppressing brings
+//    them back as they were.
+// Not here: curved faces (refused by Design, Q5), snapping to a face's
+// edges (26e adds it, Q4), a sketch on a cut's floor (Q6) and a split face
+// (the piece holding the sketch's origin, else the largest, always warned),
+// which need booleans' cut.
 //
 // Everything is exact or closed form: corners, circle centres, radii,
 // distances and depths are whole mm, every yes-or-no question (does the
 // circle meet the outline, do the heights overlap, is the circle wholly
-// inside) is decided in integers, and an area is the disc-polygon formula
-// below, checked against inscribed and circumscribed polygons in the tests.
+// inside, which origin plane is nearest, which side a turned face keeps) is
+// decided in integers, and an area is the disc-polygon formula below,
+// checked against inscribed and circumscribed polygons in the tests.
 //
 // `faults` plants the bugs the tests use to prove each check can fail;
 // real code never passes any.
@@ -54,18 +81,21 @@ import { polygonValid, shoelace, type Point } from "./timeline-model.ts";
 
 export type Cap = "start" | "end";
 
-/** A face a sketch can be on: an extrude's cap, by name. */
-export interface CapName {
-  feature: string;
-  role: Cap;
-}
+/** A face a sketch can be on, by name: an extrude's cap, or the side swept from one line of its outline (step 26). */
+export type FaceName = { feature: string; role: Cap } | { feature: string; role: "side"; line: string };
 
 export type Vec3 = readonly [number, number, number];
 
-/** Where a sketch lies: the world point its (0, 0) lands on, and which way (±Z) it faces. */
+/**
+ * Where a sketch lies: its frame (the world point its (0, 0) lands on, its
+ * x axis and its normal, unit vectors; its y is normal × x) and which way it
+ * faces against that normal (rule 2): +1 along it, −1 against.
+ */
 export interface Placement {
   origin: Vec3;
-  normal: 1 | -1;
+  x: Vec3;
+  normal: Vec3;
+  side: 1 | -1;
 }
 
 /** A face sketch's circle, as a feature kept it when its sketch was deleted. */
@@ -75,36 +105,49 @@ export interface Tool {
   placement: Placement;
 }
 
-/** Where the face was when the sketch was drawn on it; only the planted bugs read it. */
+/**
+ * The face as the sketch was drawn on it: its outward normal as whole
+ * numbers (so the side a turned face keeps is decided exactly), the frame's
+ * x axis and normal then, and, for the planted bugs only, where its
+ * origin was and the face's middle.
+ */
 export interface Drawn {
-  z: number;
+  outward: Vec3;
+  x: Vec3;
+  normal: Vec3;
+  origin: Vec3;
   centroid: readonly [number, number];
 }
 
 export type NamingItem =
-  | { id: string; kind: "sketch"; corners: Point[] }
+  /** `lines`: each side's line id, the k-th from corner k to corner k + 1. */
+  | { id: string; kind: "sketch"; corners: Point[]; lines: string[] }
   /** `kept`: the last placement, while the face is lost or ambiguous. */
-  | { id: string; kind: "face-sketch"; face: CapName; normal: 1 | -1; centre: Point; radius: number; drawn: Drawn; kept?: Placement }
-  /** `kept`: the sketch's corners just before it was deleted. */
-  | { id: string; kind: "extrude"; sketch: string; distance: number; kept?: Point[] }
-  | { id: string; kind: "face-extrude"; sketch: string; distance: number; kept?: Tool }
-  | { id: string; kind: "cut"; sketch: string; target: string; depth: number; kept?: Tool };
+  | { id: string; kind: "face-sketch"; face: FaceName; side: 1 | -1; centre: Point; radius: number; drawn: Drawn; kept?: Placement }
+  /** `kept`, `keptLines`: the sketch's corners and line ids just before it was deleted, so its sides keep their names. */
+  | { id: string; kind: "extrude"; sketch: string; distance: number; suppressed?: true; kept?: Point[]; keptLines?: string[] }
+  | { id: string; kind: "face-extrude"; sketch: string; distance: number; suppressed?: true; kept?: Tool }
+  | { id: string; kind: "cut"; sketch: string; target: string; depth: number; suppressed?: true; kept?: Tool };
 
 export interface NamingDoc {
   nextId: number;
+  /** The next outline line's number: lines are counted apart from items, so items keep the ids of 25a. */
+  nextLine: number;
   items: NamingItem[];
 }
 
 export type NamingWarning =
-  | { cause: "plane-lost" | "plane-ambiguous"; face: CapName }
-  | { cause: "deleted-input"; input: string };
+  | { cause: "plane-lost" | "plane-ambiguous"; face: FaceName }
+  | { cause: "deleted-input" | "source-lost"; input: string };
 
 export type NamingResult =
   | { kind: "sketch"; placement: Placement; warning?: NamingWarning }
-  /** An extrude or a face extrude: the volume of the body it made, before any cut. */
-  | { kind: "solid"; volume: number; warning?: NamingWarning }
+  /** An extrude or a face extrude: the volume and centroid of the body it made, before any cut. */
+  | { kind: "solid"; volume: number; centroid: Vec3; warning?: NamingWarning }
   | { kind: "cut"; status: "built"; removed: number; warning?: NamingWarning }
-  | { kind: "cut"; status: "failed"; cause: "no-target-body"; warning?: never };
+  | { kind: "cut"; status: "failed"; cause: "no-target-body"; warning?: never }
+  /** Suppressed itself, or greyed because something it is built on is (rule 9); never a warning. */
+  | { kind: "suppressed" | "greyed"; warning?: never };
 
 /** A rebuild: the items in order, each one's result, and each body's volume after every cut into it, by the feature that made it. */
 export interface NamingRebuild {
@@ -118,19 +161,22 @@ export type RefuseCause = "before-dependency" | "after-dependent";
 export type NamingOp =
   | { op: "add-sketch"; corners: Point[] }
   | { op: "add-extrude"; sketch: string; distance: number }
-  | { op: "add-face-sketch"; face: CapName; centre: Point; radius: number }
+  | { op: "add-face-sketch"; face: FaceName; centre: Point; radius: number }
   | { op: "add-cut"; sketch: string; depth: number }
   | { op: "add-face-extrude"; sketch: string; distance: number }
+  /** Same number of corners: each corner moved, every line kept; another number: the outline redrawn with new lines. */
   | { op: "set-corners"; sketch: string; corners: Point[] }
   | { op: "move-corner"; sketch: string; corner: number; to: Point }
   | { op: "set-distance"; item: string; value: number }
   | { op: "set-circle"; sketch: string; centre: Point; radius: number }
   | { op: "set-depth"; item: string; value: number }
+  | { op: "suppress"; item: string; on: boolean }
   | { op: "delete"; item: string }
   | { op: "reorder"; item: string; to: number }
   | { op: "undo" }
   | { op: "redo" };
 
+/** `ids`: what an edit made, in order: an item's id, then (for an outline) its line ids; a redrawn outline's new line ids. */
 export type NamingApplied = { kind: "done"; ids: string[] } | { kind: "unchanged" } | { kind: "refused"; cause: RefuseCause };
 
 /** What deleting an item will do: ask first or not, and every item it removes, in timeline order. */
@@ -152,7 +198,15 @@ export type NamingFault =
   | "lost-plane-silent"
   | "lost-plane-moves"
   | "ambiguous-picks-first"
-  | "reorder-ignores-plane";
+  | "reorder-ignores-plane"
+  // Step 26:
+  | "frame-not-turned"
+  | "origin-at-corner"
+  | "source-lost-silent"
+  | "extrude-ignores-side"
+  | "side-by-index"
+  | "suppress-keeps-dependents"
+  | "suppress-greys-all-after";
 
 export const NAMING_FAULTS: readonly NamingFault[] = [
   "frame-follows-face",
@@ -167,11 +221,83 @@ export const NAMING_FAULTS: readonly NamingFault[] = [
   "lost-plane-moves",
   "ambiguous-picks-first",
   "reorder-ignores-plane",
+  "frame-not-turned",
+  "origin-at-corner",
+  "source-lost-silent",
+  "extrude-ignores-side",
+  "side-by-index",
+  "suppress-keeps-dependents",
+  "suppress-greys-all-after",
 ];
 
-export const capKey = (c: CapName): string => `${c.feature}/${c.role}`;
+export const faceKeyOf = (f: FaceName): string => (f.role === "side" ? `${f.feature}/side:${f.line}` : `${f.feature}/${f.role}`);
 
-const XY: Placement = { origin: [0, 0, 0], normal: 1 };
+/** The ground plane's frame, facing up. */
+export const XY_PLACEMENT: Placement = { origin: [0, 0, 0], x: [1, 0, 0], normal: [0, 0, 1], side: 1 };
+
+/** The origin planes' frames (Design's sketch.ts PLANES), in the order a tie between them is broken: x along `x`, y along normal × x. */
+export const ORIGIN_FRAMES: readonly { name: "XY" | "XZ" | "YZ"; x: Vec3; normal: Vec3 }[] = [
+  { name: "XY", x: [1, 0, 0], normal: [0, 0, 1] },
+  { name: "XZ", x: [1, 0, 0], normal: [0, -1, 0] },
+  { name: "YZ", x: [0, 1, 0], normal: [1, 0, 0] },
+];
+
+const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+// `+ 0` turns −0 into 0, so a frame read back from a file (or written by hand) compares equal.
+const scale3 = (a: Vec3, k: number): Vec3 => [a[0] * k + 0, a[1] * k + 0, a[2] * k + 0];
+const add3 = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const unit3 = (a: Vec3): Vec3 => scale3(a, 1 / Math.sqrt(dot3(a, a)));
+const sign = (x: number): 1 | -1 => (x < 0 ? -1 : 1);
+
+/** A sketch point's place in the world: origin + u x + v y, with y = normal × x. */
+export function worldOf(p: Placement, u: number, v: number): Vec3 {
+  return add3(p.origin, add3(scale3(p.x, u), scale3(cross3(p.normal, p.x), v)));
+}
+
+/**
+ * The vector `v` turned by the shortest rotation taking unit `from` to unit
+ * `to` (Rodrigues, written without the angle: with c = from · to and
+ * w = from × to, R v = c v + w × v + (w · v) w / (1 + c)); only used with
+ * c ≥ 0, where 1 + c ≥ 1 keeps it well away from dividing by nothing.
+ */
+export function turned(v: Vec3, from: Vec3, to: Vec3): Vec3 {
+  const c = dot3(from, to);
+  const w = cross3(from, to);
+  return add3(add3(scale3(v, c), cross3(w, v)), scale3(w, dot3(w, v) / (1 + c)));
+}
+
+/**
+ * The frame a sketch drawn on a face with outward normal `outward` (whole
+ * numbers) gets (rule 8): the origin plane whose normal is most nearly along
+ * it (the largest |outward · normal|, whole numbers so a tie is exact, and
+ * broken in ORIGIN_FRAMES' order), turned onto the face the shortest way,
+ * the normal on the origin plane's side; `side` is +1 when the face looks
+ * along that normal, −1 when against it.
+ */
+export function drawnFrame(outward: Vec3): { x: Vec3; normal: Vec3; side: 1 | -1 } {
+  let best = ORIGIN_FRAMES[0];
+  for (const f of ORIGIN_FRAMES) if (Math.abs(dot3(outward, f.normal)) > Math.abs(dot3(outward, best.normal))) best = f;
+  const side = sign(dot3(outward, best.normal));
+  const normal = scale3(unit3(outward), side);
+  return { x: turned(best.x, best.normal, normal), normal, side };
+}
+
+/**
+ * Where the frame drawn on a face lies now that the face's outward normal is
+ * `outward` (whole numbers) and a point of its plane is `point` (rule 8):
+ * the normal is ±outward, the one on the drawn normal's side (decided in
+ * whole numbers from the drawn face's outward normal; exactly square to it,
+ * the outward one), the x axis turned the shortest way with it, and the
+ * origin the plane's nearest point to the world's origin, (point · n) n.
+ */
+export function frameNow(drawn: Drawn, drawnSide: 1 | -1, outward: Vec3, point: Vec3, faults: ReadonlySet<NamingFault> = new Set()): Omit<Placement, "side"> {
+  // The drawn normal is drawnSide × (the drawn outward normal), so its side of the new face is the sign of drawnSide (drawn.outward · outward).
+  const keep = sign(drawnSide * dot3(drawn.outward, outward) === 0 ? 1 : drawnSide * dot3(drawn.outward, outward));
+  const n = scale3(unit3(outward), keep);
+  const x = faults.has("frame-not-turned") ? drawn.x : turned(drawn.x, drawn.normal, n);
+  return { origin: scale3(n, dot3(point, n)), x, normal: faults.has("frame-not-turned") ? drawn.normal : n };
+}
 
 // ------------------------------------------------------------ disc and polygon
 
@@ -342,78 +468,121 @@ function centroid(corners: readonly Point[]): [number, number] {
 
 // ------------------------------------------------------------ rebuild
 
-/** A cap built so far in a rebuild: its name, height, outward normal and outline. */
-export interface CapFace {
-  name: CapName;
-  z: number;
-  outward: 1 | -1;
+/**
+ * A face built so far in a rebuild: its name; a point of its plane (a cap's
+ * first corner at its height, a side's first end at z = 0); its outward
+ * normal as whole numbers; its outline (a cap's corners, a side's two ends)
+ * and its middle, seen from above.
+ */
+export interface ModelFace {
+  name: FaceName;
+  point: Vec3;
+  outward: Vec3;
   corners: readonly Point[];
+  centroid: readonly [number, number];
 }
 
 type FaceSketch = Extract<NamingItem, { kind: "face-sketch" }>;
 
 /**
- * Where a face sketch lies, given the caps built before it: on the one cap
- * with its name (rules 1 and 2), or at its last placement with a warning
- * when no cap or two caps have that name (rule 6).
+ * Where a face sketch lies, given the faces built before it: on the one face
+ * with its name (rules 1, 2 and 8), or at its last placement with a warning
+ * when no face or two faces have that name (rule 6).
  */
-export function placeOn(faces: readonly CapFace[], s: FaceSketch, faults: ReadonlySet<NamingFault> = new Set()): { placement: Placement; warning?: NamingWarning; matches: number } {
-  const key = capKey(s.face);
-  const matches = faces.filter((f) => capKey(f.name) === key);
+export function placeOn(faces: readonly ModelFace[], s: FaceSketch, faults: ReadonlySet<NamingFault> = new Set()): { placement: Placement; warning?: NamingWarning; matches: number } {
+  const key = faceKeyOf(s.face);
+  const matches = faces.filter((f) => faceKeyOf(f.name) === key);
   if (matches.length === 1 || (matches.length > 1 && faults.has("ambiguous-picks-first"))) {
     const f = matches[0];
-    const z = faults.has("plane-stays-put") ? s.drawn.z : f.z;
-    const normal = faults.has("normal-follows-face") ? f.outward : s.normal;
-    let ox = 0;
-    let oy = 0;
-    if (faults.has("frame-follows-face")) {
-      const c = centroid(f.corners);
-      [ox, oy] = [c[0] - s.drawn.centroid[0], c[1] - s.drawn.centroid[1]];
-    }
-    return { placement: { origin: [ox, oy, z], normal }, matches: 1 };
+    const frame = frameNow(s.drawn, s.side, f.outward, f.point, faults);
+    let origin = frame.origin;
+    if (faults.has("plane-stays-put")) origin = s.drawn.origin;
+    if (faults.has("origin-at-corner")) origin = f.point;
+    if (faults.has("frame-follows-face")) origin = [origin[0] + f.centroid[0] - s.drawn.centroid[0], origin[1] + f.centroid[1] - s.drawn.centroid[1], origin[2]];
+    const side = faults.has("normal-follows-face") ? sign(dot3(frame.normal, f.outward)) : s.side;
+    return { placement: { ...frame, origin, side }, matches: 1 };
   }
-  const placement = faults.has("lost-plane-moves") ? XY : (s.kept ?? XY);
+  const placement = faults.has("lost-plane-moves") ? XY_PLACEMENT : (s.kept ?? XY_PLACEMENT);
   const cause = matches.length === 0 ? "plane-lost" : "plane-ambiguous";
   return { placement, matches: matches.length, ...(faults.has("lost-plane-silent") ? {} : { warning: { cause, face: { ...s.face } } }) };
 }
 
 interface Evaluated {
   rebuild: NamingRebuild;
-  /** How many caps each face sketch's name matched. */
+  /** How many faces each face sketch's name matched (absent while it is greyed). */
   matches: Record<string, number>;
-  faces: CapFace[];
+  faces: ModelFace[];
 }
+
+/** Twice a polygon's signed area, positive counter-clockwise: whole numbers, so its sign is exact. */
+const twiceArea = (corners: readonly Point[]) => 2 * shoelace(corners);
+
+/** An extrude's faces: its caps at 0 and d, and a side for each named line, each facing out. */
+function extrudeFaces(feature: string, corners: readonly Point[], lines: readonly string[] | undefined, d: number): ModelFace[] {
+  const up: 1 | -1 = d > 0 ? 1 : -1;
+  const mid = centroid(corners);
+  const faces: ModelFace[] = [
+    { name: { feature, role: "start" }, point: [corners[0][0], corners[0][1], 0], outward: [0, 0, -up], corners, centroid: mid },
+    { name: { feature, role: "end" }, point: [corners[0][0], corners[0][1], d], outward: [0, 0, up], corners, centroid: mid },
+  ];
+  // The side from a to b faces (dy, −dx) when the outline goes counter-clockwise, (−dy, dx) when clockwise.
+  const ccw = twiceArea(corners) > 0 ? 1 : -1;
+  corners.forEach((a, k) => {
+    const b = corners[(k + 1) % corners.length];
+    const line = lines?.[k];
+    if (line === undefined) return;
+    const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+    faces.push({ name: { feature, role: "side", line }, point: [a[0], a[1], 0], outward: [ccw * dy, -ccw * dx, 0], corners: [a, b], centroid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] });
+  });
+  return faces;
+}
+
+const isFeature = (i: NamingItem): i is Extract<NamingItem, { kind: "extrude" | "face-extrude" | "cut" }> => i.kind === "extrude" || i.kind === "face-extrude" || i.kind === "cut";
 
 function evaluate(doc: NamingDoc, faults: ReadonlySet<NamingFault>): Evaluated {
   const byId = new Map(doc.items.map((i) => [i.id, i]));
   const results: Record<string, NamingResult> = {};
   const bodies: Record<string, number> = {};
   const solids = new Map<string, { corners: readonly Point[]; lo: number; hi: number }>();
-  const faces: CapFace[] = [];
+  const faces: ModelFace[] = [];
   const matches: Record<string, number> = {};
+  const off = new Set<string>();
   const toolOf = (item: Extract<NamingItem, { kind: "cut" | "face-extrude" }>): { tool: Tool; warning?: NamingWarning } => {
     const s = byId.get(item.sketch);
     const placed = results[item.sketch];
-    if (s?.kind === "face-sketch" && placed?.kind === "sketch") return { tool: { centre: s.centre, radius: s.radius, placement: placed.placement } };
+    if (s?.kind === "face-sketch" && placed?.kind === "sketch") {
+      // Rule 7: built where its sketch is held, saying its source is lost.
+      const lost = placed.warning !== undefined && !faults.has("source-lost-silent");
+      return { tool: { centre: s.centre, radius: s.radius, placement: placed.placement }, ...(lost ? { warning: { cause: "source-lost" as const, input: item.sketch } } : {}) };
+    }
     if (item.kept === undefined) throw new Error(`${item.id}: its sketch ${item.sketch} is gone and nothing was kept`);
     return { tool: item.kept, warning: { cause: "deleted-input", input: item.sketch } };
   };
   for (const item of doc.items) {
+    // Rule 9: greyed when anything it is built on is suppressed or greyed.
+    const greyed = faults.has("suppress-keeps-dependents") ? false : faults.has("suppress-greys-all-after") ? off.size > 0 : namingDeps(doc, item).some((d) => off.has(d));
+    const suppressed = isFeature(item) && item.suppressed === true;
+    if (suppressed || greyed) {
+      off.add(item.id);
+      results[item.id] = { kind: suppressed ? "suppressed" : "greyed" };
+      continue;
+    }
     switch (item.kind) {
       case "sketch":
-        results[item.id] = { kind: "sketch", placement: XY };
+        results[item.id] = { kind: "sketch", placement: XY_PLACEMENT };
         break;
       case "extrude": {
         const s = byId.get(item.sketch);
         const corners = s?.kind === "sketch" ? s.corners : item.kept;
         if (corners === undefined) throw new Error(`${item.id}: its sketch ${item.sketch} is gone and nothing was kept`);
         const d = item.distance;
-        const out: 1 | -1 = d > 0 ? 1 : -1;
-        const volume = shoelace(corners) * Math.abs(d);
-        faces.push({ name: { feature: item.id, role: "start" }, z: 0, outward: out === 1 ? -1 : 1, corners }, { name: { feature: item.id, role: "end" }, z: d, outward: out, corners });
+        // |area|: a clockwise outline is no smaller a body.
+        const volume = Math.abs(shoelace(corners)) * Math.abs(d);
+        faces.push(...extrudeFaces(item.id, corners, s?.kind === "sketch" ? s.lines : item.keptLines, d));
         solids.set(item.id, { corners, lo: Math.min(0, d), hi: Math.max(0, d) });
         bodies[item.id] = volume;
-        results[item.id] = { kind: "solid", volume, ...(s?.kind === "sketch" ? {} : { warning: { cause: "deleted-input" as const, input: item.sketch } }) };
+        const c = centroid(corners);
+        results[item.id] = { kind: "solid", volume, centroid: [c[0], c[1], d / 2], ...(s?.kind === "sketch" ? {} : { warning: { cause: "deleted-input" as const, input: item.sketch } }) };
         break;
       }
       case "face-sketch": {
@@ -425,17 +594,22 @@ function evaluate(doc: NamingDoc, faults: ReadonlySet<NamingFault>): Evaluated {
       case "face-extrude": {
         const { tool, warning } = toolOf(item);
         const volume = Math.PI * tool.radius * tool.radius * Math.abs(item.distance);
+        // The cylinder goes the way the sketch faces (rule 2), its middle half the distance along.
+        const p = tool.placement;
+        const way = faults.has("extrude-ignores-side") ? p.normal : scale3(p.normal, p.side);
+        const centroidAt = add3(worldOf(p, tool.centre[0], tool.centre[1]), scale3(way, item.distance / 2));
         bodies[item.id] = volume;
-        results[item.id] = { kind: "solid", volume, ...(warning ? { warning } : {}) };
+        results[item.id] = { kind: "solid", volume, centroid: centroidAt, ...(warning ? { warning } : {}) };
         break;
       }
       case "cut": {
         const { tool, warning } = toolOf(item);
         const body = solids.get(item.target);
-        const { origin, normal } = tool.placement;
-        // The circle's centre on the world grid: whole mm unless a planted bug moved the frame.
-        const centre: Point = [origin[0] + tool.centre[0], origin[1] + tool.centre[1]];
-        const ends = [origin[2], origin[2] - normal * item.depth];
+        const p = tool.placement;
+        // The circle's centre on the world grid (caps only: rule 8 makes a cap's frame the world's XY, so whole mm unless a planted bug moved it).
+        const at = worldOf(p, tool.centre[0], tool.centre[1]);
+        const centre: Point = [at[0], at[1]];
+        const ends = [p.origin[2], p.origin[2] - p.side * p.normal[2] * item.depth];
         const height = body ? Math.min(body.hi, Math.max(...ends)) - Math.max(body.lo, Math.min(...ends)) : 0;
         const meets = body !== undefined && height > 0 && discMeetsPolygon(centre, tool.radius, body.corners);
         const whole = body !== undefined && discInsidePolygon(centre, tool.radius, body.corners);
@@ -455,6 +629,9 @@ function evaluate(doc: NamingDoc, faults: ReadonlySet<NamingFault>): Evaluated {
 
 /** Rebuilds the document: every item's result and every body's volume. */
 export const rebuildNaming = (doc: NamingDoc, faults: ReadonlySet<NamingFault> = new Set()): NamingRebuild => evaluate(doc, faults).rebuild;
+
+/** Every face the document builds, in order (no faults): what a sketch can be put on. */
+export const namingFaces = (doc: NamingDoc): ModelFace[] => evaluate(doc, new Set()).faces;
 
 // ------------------------------------------------------------ edits
 
@@ -491,7 +668,7 @@ export interface NamingModel {
   faults: ReadonlySet<NamingFault>;
 }
 
-export const createNamingModel = (faults: Iterable<NamingFault> = []): NamingModel => ({ doc: { nextId: 1, items: [] }, undo: [], redo: [], faults: new Set(faults) });
+export const createNamingModel = (faults: Iterable<NamingFault> = []): NamingModel => ({ doc: { nextId: 1, nextLine: 1, items: [] }, undo: [], redo: [], faults: new Set(faults) });
 
 const snapshot = (d: NamingDoc) => JSON.stringify(d);
 
@@ -517,25 +694,38 @@ export function applyNaming(m: NamingModel, op: NamingOp): NamingApplied {
   return r;
 }
 
+/** The document with nothing suppressed: what every item would be, which is what a greyed item keeps when its input goes. */
+function unsuppressed(doc: NamingDoc): NamingDoc {
+  const d: NamingDoc = JSON.parse(snapshot(doc));
+  for (const i of d.items) if (isFeature(i)) delete i.suppressed;
+  return d;
+}
+
 /**
  * After an edit, every face sketch whose face is gone or ambiguous keeps the
  * placement it had just before (and forgets it once its face is back), and
- * every feature whose sketch was deleted keeps that sketch's last shape.
+ * every feature whose sketch was deleted keeps that sketch's last shape. A
+ * greyed sketch's face is not gone, only off, so it keeps nothing and
+ * forgets nothing; what it had "just before" is where it would have been
+ * with nothing suppressed, the same for every item that was built.
  */
 function settle(before: NamingDoc, doc: NamingDoc, faults: ReadonlySet<NamingFault>) {
-  const was = evaluate(before, faults);
+  const was = evaluate(unsuppressed(before), faults);
   const old = new Map(before.items.map((i) => [i.id, i]));
   const live = new Set(doc.items.map((i) => i.id));
   for (const item of doc.items) {
     if (item.kind === "sketch" || item.kind === "face-sketch" || live.has(item.sketch) || item.kept !== undefined) continue;
     const s = old.get(item.sketch);
     const r = was.rebuild.results[item.sketch];
-    if (item.kind === "extrude" && s?.kind === "sketch") item.kept = s.corners;
+    if (item.kind === "extrude" && s?.kind === "sketch") {
+      item.kept = s.corners;
+      item.keptLines = s.lines;
+    }
     if (item.kind !== "extrude" && s?.kind === "face-sketch" && r?.kind === "sketch") item.kept = { centre: s.centre, radius: s.radius, placement: r.placement };
   }
   const now = evaluate(doc, faults);
   for (const item of doc.items) {
-    if (item.kind !== "face-sketch") continue;
+    if (item.kind !== "face-sketch" || now.rebuild.results[item.id]?.kind !== "sketch") continue;
     if (now.matches[item.id] === 1) delete item.kept;
     else if (item.kept === undefined) {
       const r = was.rebuild.results[item.id];
@@ -552,30 +742,35 @@ function find(doc: NamingDoc, id: string): NamingItem {
 
 function edit(doc: NamingDoc, op: Exclude<NamingOp, { op: "undo" | "redo" }>, faults: ReadonlySet<NamingFault>): NamingApplied {
   const newId = (prefix: string) => `${prefix}-${doc.nextId++}`;
-  const add = (item: NamingItem): NamingApplied => {
+  const newLines = (n: number) => Array.from({ length: n }, () => `line-${doc.nextLine++}`);
+  const add = (item: NamingItem, more: string[] = []): NamingApplied => {
     doc.items.push(item);
-    return { kind: "done", ids: [item.id] };
+    return { kind: "done", ids: [item.id, ...more] };
   };
   switch (op.op) {
-    case "add-sketch":
+    case "add-sketch": {
       if (!polygonValid(op.corners)) throw new Error("not a valid outline");
-      return add({ id: newId("sketch"), kind: "sketch", corners: op.corners.map((p) => [p[0], p[1]]) });
+      const lines = newLines(op.corners.length);
+      return add({ id: newId("sketch"), kind: "sketch", corners: op.corners.map((p) => [p[0], p[1]]), lines }, lines);
+    }
     case "add-extrude":
       if (find(doc, op.sketch).kind !== "sketch" || op.distance === 0) throw new Error("an extrude needs an XY sketch and a distance");
       return add({ id: newId("extrude"), kind: "extrude", sketch: op.sketch, distance: op.distance });
     case "add-face-sketch": {
-      const face = evaluate(doc, new Set()).faces.filter((f) => capKey(f.name) === capKey(op.face));
-      if (face.length !== 1) throw new Error(`no single face ${capKey(op.face)} to sketch on`);
+      const face = namingFaces(doc).filter((f) => faceKeyOf(f.name) === faceKeyOf(op.face));
+      if (face.length !== 1) throw new Error(`no single face ${faceKeyOf(op.face)} to sketch on`);
       const [f] = face;
-      const drawn = { z: f.z, centroid: centroid(f.corners) };
-      return add({ id: newId("sketch"), kind: "face-sketch", face: { ...op.face }, normal: f.outward, centre: [op.centre[0], op.centre[1]], radius: op.radius, drawn });
+      const frame = drawnFrame(f.outward);
+      const drawn: Drawn = { outward: f.outward, x: frame.x, normal: frame.normal, origin: scale3(frame.normal, dot3(f.point, frame.normal)), centroid: f.centroid };
+      return add({ id: newId("sketch"), kind: "face-sketch", face: { ...op.face }, side: frame.side, centre: [op.centre[0], op.centre[1]], radius: op.radius, drawn });
     }
     case "add-cut":
     case "add-face-extrude": {
       const s = find(doc, op.sketch);
       if (s.kind !== "face-sketch") throw new Error(`${op.sketch} is not on a face`);
-      if (op.op === "add-cut") return add({ id: newId("cut"), kind: "cut", sketch: s.id, target: s.face.feature, depth: op.depth });
-      return add({ id: newId("extrude"), kind: "face-extrude", sketch: s.id, distance: op.distance });
+      if (op.op === "add-face-extrude") return add({ id: newId("extrude"), kind: "face-extrude", sketch: s.id, distance: op.distance });
+      if (s.face.role === "side") throw new Error(`${op.sketch}: a cut from a side face is not modelled until booleans' cut`);
+      return add({ id: newId("cut"), kind: "cut", sketch: s.id, target: s.face.feature, depth: op.depth });
     }
     case "set-corners":
     case "move-corner": {
@@ -583,8 +778,13 @@ function edit(doc: NamingDoc, op: Exclude<NamingOp, { op: "undo" | "redo" }>, fa
       if (s.kind !== "sketch") throw new Error(`${op.sketch} has no corners`);
       const corners = op.op === "set-corners" ? op.corners.map((p): Point => [p[0], p[1]]) : s.corners.map((p, k): Point => (k === op.corner ? [op.to[0], op.to[1]] : p));
       if (!polygonValid(corners)) throw new Error("not a valid outline");
+      const redrawn = corners.length !== s.corners.length;
       s.corners = corners;
-      return { kind: "done", ids: [] };
+      if (!redrawn) return { kind: "done", ids: [] };
+      // A different number of corners is a new outline: new lines, so the old sides' names are gone (planted: kept by place).
+      const fresh = newLines(corners.length);
+      s.lines = faults.has("side-by-index") ? fresh.map((id, k) => s.lines[k] ?? id) : fresh;
+      return { kind: "done", ids: [...s.lines] };
     }
     case "set-distance": {
       const item = find(doc, op.item);
@@ -603,6 +803,13 @@ function edit(doc: NamingDoc, op: Exclude<NamingOp, { op: "undo" | "redo" }>, fa
       const item = find(doc, op.item);
       if (item.kind !== "cut" || op.value <= 0) throw new Error(`${op.item}: no depth ${op.value}`);
       item.depth = op.value;
+      return { kind: "done", ids: [] };
+    }
+    case "suppress": {
+      const item = find(doc, op.item);
+      if (!isFeature(item)) throw new Error(`${op.item}: only a feature is suppressed here`);
+      if (op.on) item.suppressed = true;
+      else delete item.suppressed;
       return { kind: "done", ids: [] };
     }
     case "delete": {

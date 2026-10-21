@@ -10,9 +10,13 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
-## 0.25.15 (2026-10-21)
+## 0.26.1 (2026-10-21)
 
 - Fix (timeline code bug hunt): switching to another workspace while the design was still rebuilding no longer adds a box when you come back to a design with no body (its only body suppressed or deleted), nor an undo step "Edit" you never made. The Extrude panel offers only sketches it can use (before the rollback marker, not suppressed) and says why when there are none; before, it offered them, said "makes a closed outline", and OK did nothing. Its note no longer says an extrude replaces the part. The test helper that names a body built from a kept shape now names it as the app does.
+
+## 0.26.0 (2026-10-21)
+
+- Step 26a: the test plan and harness for sketching on a face, no app change yet. The model the app will be checked against now knows Ben's Fusion answers for step 26: sketches on an extrude's sides as well as its top and bottom, reading in world coordinates and turning with the face when a corner moves; a body built from a sketch whose face is gone stays where it was and says its source is lost; suppressing a feature greys everything built on it with no warning. 14 new hand-worked cases and 7 deliberately planted bugs, each caught. Fixed in the model while doing it: an outline drawn clockwise gave a negative volume.
 
 ## 0.25.14 (2026-10-21)
 
