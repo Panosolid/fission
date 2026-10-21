@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.25.13 (2026-10-21)
+
+- Fix: a body's bounding box reaches the top of a long, nearly flat arc (one with a huge radius), which it missed by a hair after a turn. #217
+
 ## 0.25.12 (2026-10-20)
 
 - Step 25b2: the undo/redo fuzzer now edits any earlier item's sizes (Edit feature) and draws into earlier sketches (Edit Sketch), with several sketches, checked step by step against its model.
