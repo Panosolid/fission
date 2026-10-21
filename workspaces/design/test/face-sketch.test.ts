@@ -7,12 +7,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson, type BodyView, type Plane } from "@fission/core";
-import { buildingItems, builds, partDocument, readDesignDocument, type DesignDocument } from "../src/document.ts";
+import { buildingItems, builds, greyedBy, greyedItems, partDocument, readDesignDocument, type DesignDocument } from "../src/document.ts";
 import { drawnFrame, drawnOnFace, faceFeature, frameNow, squared, turned, type SketchPlacement } from "../src/face-sketch.ts";
 import { addFaceSketch, addSketch, drawCircle, sketchPlane } from "../src/sketch.ts";
 import { sketchDrawings } from "../src/sketch-tool.ts";
 import { extrudeSketch, isFlipped, setExtrudeFlip } from "../src/extrude.ts";
-import { moveMarker, suppressItem } from "../src/timeline-edits.ts";
+import { deleteItem, moveMarker, reorderItem, suppressItem } from "../src/timeline-edits.ts";
+import { itemMenu, timelineBarItems } from "../src/timeline-bar.ts";
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
 const S = Math.SQRT1_2;
@@ -302,4 +303,57 @@ test("a sketch on a face is drawn where the last rebuild placed it, else where i
   // An origin plane's sketch is on that plane whatever a rebuild said.
   const xz = addSketch(doc, "XZ");
   assert.deepEqual(sketchPlane(xz.doc, xz.id, new Map([[xz.id, placed]])), { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, -1, 0] });
+});
+
+test("26e: suppressing the box greys a chain built on its face, each naming the box; the bar, Edit Sketch and the drawings follow (Q3)", () => {
+  // Box (feature-1), Sketch 1 on its top (sketch-2), Extrude 2 of it (feature-5),
+  // Sketch on Extrude 2's end (sketch-6), Extrude of that (feature-9).
+  const one = onTop();
+  const end = addFaceSketch(one.doc, { plane: `face:${one.extrude}/end`, feature: one.extrude }, drawnFrame([0, 0, 1], [20, 15, 30]));
+  const two = extrudeSketch(drawCircle(end.doc, end.id, [20, 15], 2).doc, end.id, 4);
+  const doc = two.doc;
+  const item = (d: DesignDocument, id: string) => d.timeline.features.find((f) => f.id === id)!;
+  const chain = [one.sketch, one.extrude, end.id, two.id];
+  for (const id of chain) assert.equal(greyedBy(doc, item(doc, id)), null, `${id} with nothing off`);
+  const off = suppressItem(doc, "feature-1", true);
+  // Every link names the root, the box, not the item just below it.
+  for (const id of chain) assert.equal(greyedBy(off, item(off, id)), "feature-1", id);
+  assert.deepEqual([...greyedItems(off)].map(([f, by]) => [f.id, by]), chain.map((id) => [id, "feature-1"]));
+  for (const id of chain) assert.equal(builds(off, item(off, id)), false, id);
+  // The bar greys them (the box's name on each), with no warning (Q3).
+  const bar = timelineBarItems(off).items;
+  assert.deepEqual(bar.map((b) => [b.greyed, b.warning]), [[null, null], ...chain.map(() => ["Feature 1 (box)", null])]);
+  // A greyed sketch can't be opened, and says why.
+  const edit = (d: DesignDocument, id: string) => itemMenu(d, id).find((e) => e.action === "edit-sketch")!.off;
+  assert.equal(edit(off, end.id), `${itemName(item(off, end.id))} is greyed: Feature 1 (box) is suppressed, unsuppress it first`);
+  assert.equal(edit(doc, end.id), null);
+  // Off sketches are not drawn: both are, until the box is off; the one being edited always is.
+  assert.equal(sketchDrawings(doc, null).length, 2);
+  assert.equal(sketchDrawings(off, null).length, 0);
+  // Suppressing the middle extrude greys only what is above it, by it.
+  const mid = suppressItem(doc, one.extrude, true);
+  assert.deepEqual([...greyedItems(mid)].map(([f, by]) => [f.id, by]), [[end.id, one.extrude], [two.id, one.extrude]]);
+  assert.equal(sketchDrawings(mid, null).length, 1);
+  // The box gone instead: the face sketch is held (built), nothing greyed.
+  const gone = deleteItem(doc, "feature-1");
+  assert.equal(greyedItems(gone).size, 0);
+  for (const id of chain) assert.equal(builds(gone, item(gone, id)), true, id);
+});
+
+const itemName = (f: { provenance: { self: { label: string } } }) => f.provenance.self.label;
+
+test("26e: a sketch lost its plane is drawn red; one not lost, or being edited, is not", () => {
+  const { doc, sketch } = onTop();
+  assert.equal(sketchDrawings(doc, null)[0].lost, undefined);
+  assert.equal(sketchDrawings(doc, null, undefined, new Set([sketch]))[0].lost, true);
+  assert.equal(sketchDrawings(doc, null, undefined, new Set(["sketch-99"]))[0].lost, undefined);
+});
+
+test("26e: a sketch can't go before the feature whose face it is drawn on, nor that feature after it, in words (answer 7)", () => {
+  const { doc, sketch } = onTop();
+  // Box (feature-1) first, Sketch 1 (sketch-2) second, Extrude (feature-5) third.
+  assert.deepEqual(reorderItem(doc, sketch, 0), { refused: "before-dependency", message: "Sketch 1 can't go before Feature 1 (box): it is drawn on a face of Feature 1 (box)" });
+  assert.deepEqual(reorderItem(doc, "feature-1", 1), { refused: "after-dependent", message: "Feature 1 (box) can't go after Sketch 1: Sketch 1 is drawn on a face of it" });
+  // An extrude's words stay "built from".
+  assert.deepEqual(reorderItem(doc, "feature-5", 1), { refused: "before-dependency", message: "Extrude 1 can't go before Sketch 1: it is built from Sketch 1" });
 });

@@ -125,7 +125,7 @@ function session(seed: number, steps: number, faults: { model?: ModelFault[]; de
       }
       if (a.kind === "refused") {
         if (res.kind !== "refused") fail(s, `the model refuses ${f.id} at place ${p} (${a.cause}), the bar gives ${res.kind}`);
-        const cause = res.message.includes("is built from it") ? "after-dependent" : "before-dependency";
+        const cause = res.message.endsWith(" it") ? "after-dependent" : "before-dependency";
         if (cause !== a.cause) fail(s, `the model refuses with ${a.cause}, the bar says "${res.message}"`);
         count(`refused:${a.cause}`);
       } else if (rolledBack) {
