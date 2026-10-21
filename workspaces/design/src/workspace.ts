@@ -5,8 +5,8 @@
 import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import type { ShapeKind } from "./profiles.ts";
-import { isSketchItem, partFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
-import { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
+import { insertAt, isSketchItem, partFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
+import { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, NO_USABLE_SKETCH, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
 import { extrudePanel } from "./extrude-panel.ts";
 import { CHANGED_WHILE_CHECKING, editableFeature, editFeature, editStep, readTyped, refusedSizes } from "./feature-edit.ts";
 import { featureEditPanel } from "./feature-edit-panel.ts";
@@ -85,7 +85,7 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
   extrude.type = "button";
   extrude.id = "extrude";
   extrude.textContent = "Extrude";
-  extrude.title = "Make a solid from a closed sketch, by a distance you type. It replaces the part until the timeline (step 24).";
+  extrude.title = "Make a solid from a closed sketch, by a distance you type: a new body in the timeline, at the marker.";
   extrude.addEventListener("click", onExtrude);
   sketch.append(sketchName, create, extrude);
   slot.append(sketch);
@@ -890,10 +890,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     const editing = mode.kind === "edit" ? mode.tool.sketch : null;
     if (mode.kind !== "none") leaveSketch();
-    const items = doc ? doc.timeline.features.filter(isSketchItem) : [];
-    const chosen = editing ?? items.at(-1)?.id ?? null;
+    // Only sketches an extrude put in at the marker can use: before it, and not suppressed (hunt 2026-10-21).
+    const sketches = doc ? doc.timeline.features.filter(isSketchItem) : [];
+    const items = doc ? sketches.filter((f) => !f.suppressed && doc.timeline.features.indexOf(f) < insertAt(doc)) : [];
+    const chosen = items.find((f) => f.id === editing)?.id ?? items.at(-1)?.id ?? null;
     extruding = { sketch: chosen };
     extrudeBox.show(items.map((f) => ({ id: f.id, label: f.provenance.self.label })), chosen, String(DEFAULT_DISTANCE));
+    if (items.length === 0 && sketches.length > 0) extrudeBox.showStatus(NO_USABLE_SKETCH, false);
     if (chosen) void checkExtrude(chosen);
   }
 
@@ -932,8 +935,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const distance = Number(typed);
     if (typed.trim() === "" || !Number.isFinite(distance)) return extrudeBox.showError("Type the distance in mm.");
     const before = designDoc();
-    const made = extrudeSketch(before, id, distance);
+    let made: ReturnType<typeof extrudeSketch>;
     try {
+      made = extrudeSketch(before, id, distance);
       await buildSpec(kernel, await featureSpec(kernel, made.doc, made.doc.timeline.features.find((f) => f.id === made.id)!));
     } catch (e) {
       if (extruding?.sketch === id) extrudeBox.showError(e instanceof Error ? e.message : String(e));
@@ -1205,9 +1209,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (shown) return;
       shown = true;
       listen();
-      // A build that finished while asleep was not drawn: build again. Otherwise
-      // the body is still in the viewport; redraw what others may have changed.
-      if (missed) return void update();
+      // A build that finished while asleep was not drawn: show the document again
+      // (never rebuilt from the size boxes, which would add a box to a design with
+      // no body; hunt 2026-10-21). Otherwise the body is still in the viewport;
+      // redraw what others may have changed.
+      if (missed) return void show(designDoc(), shape);
       showSelection();
       markStale();
     },
