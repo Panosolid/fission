@@ -395,6 +395,35 @@ mod tests {
     }
 
     #[test]
+    fn axes_off_unit_length_within_tolerance_are_normalised() {
+        // The 3-4-5 slanted frame (x = X, normal (0, −0.6, 0.8), so y =
+        // (0, 0.8, 0.6)) with both axes 0.9·FRAME_SQUARE off unit length,
+        // one long and one short: the rotation is the unit frame's, its
+        // matrix's columns within a few ulps of X, y and the unit normal.
+        // Left unnormalised, the columns given to the quaternion would be
+        // scaled unevenly and its rotation off by ~FRAME_SQUARE (~60 ulps).
+        // The same for a frame turned about no world axis: x = (0.8, −0.6, 0),
+        // normal (0.36, 0.48, −0.8) (0.1296 + 0.2304 + 0.64 = 1, dot 0.288 −
+        // 0.288 = 0), y = n × x = (0.48·0 − (−0.8)(−0.6), (−0.8)(0.8) −
+        // 0.36·0, 0.36·(−0.6) − 0.48·0.8) = (−0.48, −0.64, −0.6).
+        let k = 0.9 * FRAME_SQUARE;
+        let frames = [
+            (DVec3::X, DVec3::new(0.0, 0.8, 0.6), DVec3::new(0.0, -0.6, 0.8)),
+            (DVec3::new(0.8, -0.6, 0.0), DVec3::new(-0.48, -0.64, -0.6), DVec3::new(0.36, 0.48, -0.8)),
+        ];
+        for (x, y, n) in frames {
+            for (sx, sn) in [(1.0 + k, 1.0 - k), (1.0 - k, 1.0 + k)] {
+                let frame = Frame { origin: DVec3::ZERO, x: x * sx, normal: n * sn };
+                let m = DMat3::from_quat(frame_placement(&frame).unwrap().rotation);
+                let ulps = 8.0 * f64::EPSILON;
+                for (got, want) in [(m.x_axis, x), (m.y_axis, y), (m.z_axis, n)] {
+                    assert!(got.distance(want) <= ulps, "{got} vs {want}: {:e}", got.distance(want));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn a_far_profile_is_kept_at_home_with_its_mesh() {
         // A 2 × 2 square drawn 50 km out in a slanted frame: re-centred
         // (`Placed::with_mesh`), so the rotation multiplies small numbers;
