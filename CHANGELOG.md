@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.25.14 (2026-10-21)
+
+- Fix: random testing no longer reports a far-out curved extrusion as wrongly refused (issue #205). The kernel was right to refuse it: the test's own prediction worked out a nearly whole circle from the size it asked for, but 100 km out the short flat closing it rounds, which made the circle 1.1 mm bigger and pushed it past the modelling range. The prediction now measures the shape as built and checks every arc's reach itself.
+
 ## 0.25.13 (2026-10-21)
 
 - Step 25c3: the AI assistant is told the whole timeline (each item, what it builds, the marker), names an extruded-sketch part instead of treating the design as empty, and its preview says when Accept adds a new body and where ("AI: new box …"). A size the answer leaves out now shows the value the panel keeps, so a sphere turned into a box no longer previews as "box 40 × undefined × undefined mm".
