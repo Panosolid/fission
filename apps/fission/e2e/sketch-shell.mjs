@@ -9,7 +9,7 @@
 // run build`); CI's browsers job runs it in Firefox and WebKit too.
 import assert from "node:assert/strict";
 import { crc32, deflateSync } from "node:zlib";
-import { launch } from "./browser.mjs";
+import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 
@@ -61,7 +61,14 @@ const drop = (page, files) =>
     },
     files.map((f) => ({ name: f.name, bytes: [...f.bytes] })),
   );
-/** Pastes `files` with nothing focused, as Ctrl+V with files on the clipboard would. */
+/**
+ * Pastes `files` with nothing focused, as Ctrl+V with files on the
+ * clipboard would. Returns whether the app took it, and how many files the
+ * event carried: Firefox hands a paste made by a script an empty clipboard
+ * (CI's browsers job, 25c4), so there the check says so instead of waiting
+ * for an answer to a paste of nothing. Chromium carries them, so the paste
+ * is checked there.
+ */
 const paste = (page, files) =>
   page.evaluate(
     (files) => {
@@ -70,10 +77,17 @@ const paste = (page, files) =>
       document.activeElement?.blur();
       const e = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt });
       document.body.dispatchEvent(e);
-      return e.defaultPrevented;
+      return { taken: e.defaultPrevented, carried: e.clipboardData?.files.length ?? 0 };
     },
     files.map((f) => ({ name: f.name, bytes: [...f.bytes] })),
   );
+/** A paste the engine emptied: said once in the output, so it is never mistaken for a pass of that part. */
+function emptied(what, result) {
+  if (result.carried > 0) return false;
+  console.log(`# ${browserName} gives a scripted paste no files, so "${what}" is checked in Chromium only`);
+  if (browserName === "chromium") assert.fail(`Chromium's scripted paste carried no files (${what})`);
+  return true;
+}
 
 /** What the shell and the sketch show: the workspace on screen, whether a sketch is edited and its points, its status, the undo step, the timeline. */
 const state = (page) =>
@@ -147,19 +161,23 @@ try {
       // A refused file (a drop and a paste): said in the top bar; the sketch, its chain and the undo step are as they were.
       for (const how of [drop, paste]) {
         await page.evaluate(() => (document.querySelector("#file-status").textContent = ""));
-        await how(page, [{ name: "part.stl", bytes: Buffer.from("solid x\n") }]);
-        await until(page, () => /^Couldn't open “part\.stl”: /.test(document.querySelector("#file-status").textContent), null, "refused");
+        const sent = await how(page, [{ name: "part.stl", bytes: Buffer.from("solid x\n") }]);
+        if (how === paste && emptied("a refused paste", sent)) continue;
+        await until(page, () => /^Couldn't open “part\.stl”: /.test(document.querySelector("#file-status").textContent), null, `${how.name} refused`);
         assert.deepEqual(await state(page), three, `${how.name}: nothing changed`);
       }
       await clickPlane(page, [0, 0], TOP); // closes the rectangle: the chain survived both
       await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "closed");
       // A pasted PNG opens Image too, and the closed sketch is still open on return.
       const closed = await state(page);
-      assert.equal(await paste(page, [{ name: "pasted.png", bytes: png }]), true);
-      await onScreen(page, "image");
-      await page.click("[data-workspace=design]");
-      await onScreen(page, "design");
-      assert.deepEqual(await state(page), closed);
+      const pasted = await paste(page, [{ name: "pasted.png", bytes: png }]);
+      if (!emptied("a pasted image", pasted)) {
+        assert.equal(pasted.taken, true);
+        await onScreen(page, "image");
+        await page.click("[data-workspace=design]");
+        await onScreen(page, "design");
+        assert.deepEqual(await state(page), closed);
+      }
       // A dropped project replaces the design as Open does: the sketch is left (it is not in that project), the toolbar is Design's own again.
       assert.equal(await drop(page, [{ name: "wide.fission.json", bytes: project }]), "taken");
       await until(page, () => document.querySelector("#volume")?.textContent === "30,000 mm³", null, "the project's part");
