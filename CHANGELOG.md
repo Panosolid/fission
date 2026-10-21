@@ -12,6 +12,7 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.25.12 (2026-10-20)
 
+- Docs: the roadmap and CAD progress notes match what has merged (step 24 ticked, 25a done); Render now starts after step 33; step 29 is noted as getting extra-heavy testing.
 - Fix: the camera stops when an orbit, pan or zoom is let go, so a sketch's grid no longer keeps changing after a fast orbit. #213
 
 ## 0.25.11 (2026-10-20)
