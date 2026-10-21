@@ -8,7 +8,7 @@
 // after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { KernelError, type BodyHandle, type BodySpec, type KernelCalls, type KernelInput } from "@fission/core";
+import { KernelError, type BodyHandle, type BodySpec, type BodyView, type Frame, type KernelCalls, type KernelInput } from "@fission/core";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { seeded, type SeededRandom } from "../src/index.ts";
 
@@ -178,4 +178,55 @@ test("each bug planted in the kernel's answers is caught by the session check", 
     for (let seed = 1n; seed <= 5n && !caught; seed++) caught = (await session(faulty, seed, 60).catch((e) => String(e))) !== null;
     assert.ok(caught, `${name} went unnoticed`);
   }
+});
+
+test("an extrude on the front plane (step 26b), through the real kernel: hand-worked faces, flipped, refused frames, and no frame as before", async () => {
+  const kernel = nodeKernel();
+  const before = await kernel.call("body_count");
+  const profile = { outer: { path: { corners: [0, 0, 40, 0, 40, 30, 0, 30], bulges: [] } }, holes: [], pieces: [] };
+  const front: Frame = { origin: [0, 0, 0], x: [1, 0, 0], normal: [0, -1, 0] };
+  const near = (a: readonly number[], b: readonly number[]) => a.every((v, k) => Math.abs(v - b[k]) <= 1e-9);
+  const face = (view: BodyView, role: string, piece?: number) => view.face_roles.findIndex((r) => r?.role === role && (piece === undefined || (r.role === "side" && r.piece === piece)));
+  // Front plane: sketch (u, v) is world (u, 0, v), the normal −Y, so local
+  // (u, v, w) → (u, −w, v). The 40 × 30 rectangle extruded 20 spans x 0..40,
+  // y −20..0, z 0..30: 24000 mm³. Its start cap is on the sketch plane
+  // (y = 0) facing +Y, centroid (20, 0, 15); its end cap y = −20 facing −Y;
+  // the side from (0, 0) → (40, 0) is the bottom, z = 0, facing −Z, centroid
+  // (20, −10, 0).
+  const h = await kernel.call("body_build", { extrude: { profile, distance: 20, frame: front } });
+  const v = await kernel.call("body_view", h);
+  assert.ok(close(v.volume, 24000) && close(v.area, 5200), `${v.volume} ${v.area}`);
+  for (const [role, piece, centroid, normal] of [
+    ["start", undefined, [20, 0, 15], [0, 1, 0]],
+    ["end", undefined, [20, -20, 15], [0, -1, 0]],
+    ["side", 0, [20, -10, 0], [0, 0, -1]],
+  ] as const) {
+    const f = face(v, role, piece);
+    assert.ok(near(v.face_centroids[f], centroid), `${role} ${piece}: ${v.face_centroids[f]}`);
+    assert.ok(near(v.face_normals[f]!, normal), `${role} ${piece}: ${v.face_normals[f]}`);
+  }
+  // The stored body and the one-shot export agree on the STL, which is placed.
+  const spec: BodySpec = { extrude: { profile, distance: 20, frame: front } };
+  assert.deepEqual(await kernel.call("body_stl", h, "front"), await kernel.call("export_stl", spec, "front"));
+  // Flipped, it goes away from the viewer (y 0..20), the start cap still on the plane, now facing −Y.
+  const down = await kernel.call("body_build", { extrude: { profile, distance: 20, frame: front, flip: true } });
+  const flipped = await kernel.call("body_view", down);
+  const start = face(flipped, "start");
+  assert.ok(near(flipped.face_centroids[start], [20, 0, 15]) && near(flipped.face_normals[start]!, [0, -1, 0]), `${flipped.face_normals[start]}`);
+  assert.ok(near(flipped.face_centroids[face(flipped, "end")], [20, 20, 15]));
+  // No frame is the XY plane going up, exactly as before frames: make_extrude's view, bit for bit.
+  const plain = await kernel.call("body_build", { extrude: { profile, distance: 20 } });
+  assert.deepEqual(await kernel.call("body_view", plain), await kernel.call("make_extrude", profile, 20));
+  // A bad frame is the app's to fix, refused with the parts at fault named.
+  const parallel = await refusal(kernel.call("body_build", { extrude: { profile, distance: 20, frame: { origin: [0, 0, 0], x: [1, 0, 0], normal: [1, 0, 0] } } }));
+  assert.equal(parallel.kind, "invalid-input");
+  assert.deepEqual(parallel.inputs, [{ input: "param", name: "x" }, { input: "param", name: "normal" }]);
+  const long = await refusal(kernel.call("body_build", { extrude: { profile, distance: 20, frame: { ...front, normal: [0, -2, 0] } } }));
+  assert.deepEqual(long.inputs, [{ input: "param", name: "normal" }]);
+  // Anything not a frame at all is a bad request, as a malformed spec always was.
+  const malformed = await refusal(kernel.call("body_build", { extrude: { profile, distance: 20, frame: { origin: [0, 0] } } } as unknown as BodySpec));
+  assert.equal(malformed.kind, "bad-request");
+  assert.equal(await kernel.call("body_count"), before + 3, "only the three good builds are kept");
+  for (const body of [h, down, plain]) await kernel.call("body_free", body);
+  assert.equal(await kernel.call("body_count"), before);
 });

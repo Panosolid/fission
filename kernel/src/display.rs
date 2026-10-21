@@ -2,8 +2,10 @@
 //! face gets its own normals, plus edge lines, each segment labelled with its
 //! B-rep edge so the viewer can pick edges (step 17c).
 
+use crate::geom::Placement;
 use crate::mesh::Mesh;
 use crate::topology::Body;
+use glam::{DMat3, DVec3};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -22,6 +24,19 @@ pub struct DisplayMesh {
 }
 
 pub fn display_mesh(body: &Body, mesh: &Mesh) -> DisplayMesh {
+    display_mesh_placed(body, mesh, &Placement::IDENTITY)
+}
+
+/// `display_mesh` of a body's local geometry and mesh, carried into the
+/// world by `placement`: each normal is taken from the local surface at the
+/// local point, then turned; each point is placed in double precision and
+/// only then rounded to single (`Placement::point`, `dir`). The identity
+/// gives `display_mesh`'s numbers bit for bit.
+pub fn display_mesh_placed(body: &Body, mesh: &Mesh, placement: &Placement) -> DisplayMesh {
+    let moved = !placement.is_identity();
+    let r = DMat3::from_quat(placement.rotation);
+    let world = |p: DVec3| if moved { r * p + placement.shift } else { p };
+    let turned = |n: DVec3| if moved { r * n } else { n };
     let mut out = DisplayMesh {
         positions: Vec::new(),
         normals: Vec::new(),
@@ -45,7 +60,8 @@ pub fn display_mesh(body: &Body, mesh: &Mesh) -> DisplayMesh {
                 let next = (out.positions.len() / 3) as u32;
                 let id = *remap.entry(i).or_insert_with(|| {
                     let p = mesh.positions[i as usize];
-                    let n = body.face_normal_at(face, p);
+                    let n = turned(body.face_normal_at(face, p));
+                    let p = world(p);
                     out.positions.extend([p.x as f32, p.y as f32, p.z as f32]);
                     out.normals.extend([n.x as f32, n.y as f32, n.z as f32]);
                     next
@@ -60,7 +76,7 @@ pub fn display_mesh(body: &Body, mesh: &Mesh) -> DisplayMesh {
         for pair in poly.windows(2) {
             out.edge_line_edges.push(edge as u32);
             for &i in pair {
-                let p = mesh.positions[i as usize];
+                let p = world(mesh.positions[i as usize]);
                 out.edge_lines.extend([p.x as f32, p.y as f32, p.z as f32]);
             }
         }

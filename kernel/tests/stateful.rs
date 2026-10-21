@@ -2,7 +2,8 @@
 //!
 //! Random chains of 1–10 operations (add a placed primitive or extrusion,
 //! some extrusions drawn as shuffled sketch lines and arcs or one sketch
-//! circle first, move, rotate)
+//! circle first; build an extrusion in a frame, either way, step 26b;
+//! move, rotate)
 //! are run against the kernel. After every step:
 //! - nothing panics;
 //! - the operation either returns a body that passes `validate()`, or a
@@ -35,8 +36,8 @@
 //! replayed by `saved_regressions_still_pass` forever after), and a failure
 //! dump (STL + HTML viewer) is written to target/failure-dumps/.
 //!
-//! When a new kernel operation lands, add it to `Op`, `Scene::transitions`
-//! and `apply_op`.
+//! When a new kernel operation lands, add it to `Op`, `Scene::transitions`,
+//! `apply_op` and `replay_op`.
 // Expected values may use the f64 maths methods (clippy.toml, src/fmath.rs).
 #![allow(clippy::disallowed_methods)]
 
@@ -44,9 +45,10 @@ use fission_kernel::debug_dump;
 use fission_kernel::mass::MassProps;
 use fission_kernel::mesh::Mesh;
 use fission_kernel::ops::extrude::{self, Boundary, Profile};
+use fission_kernel::ops::place::{self, Frame};
 use fission_kernel::ops::{primitives, transform, KernelError};
 use fission_kernel::tessellate::TessOptions;
-use fission_kernel::tolerance::{self, ANGULAR, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
+use fission_kernel::tolerance::{self, ANGULAR, FRAME_SQUARE, LINEAR, MAX_COORD, MAX_SIZE, MIN_FEATURE};
 use fission_kernel::placed::Placed;
 use fission_kernel::sketch;
 use fission_kernel::stl;
@@ -491,6 +493,10 @@ enum Op {
     Add { shape: Shape, axis: V3, angle: Num, at: V3 },
     Move { target: usize, by: V3 },
     Rotate { target: usize, pivot: V3, axis: V3, angle: Num },
+    /// Build an extrusion in a frame (`ops::place::extrude_in_frame`, step
+    /// 26b): its profile in the frame's own coordinates, along the normal,
+    /// or against it from the same plane when `flip`.
+    Place { shape: Shape, origin: V3, x: V3, normal: V3, flip: bool },
 }
 
 impl Op {
@@ -507,6 +513,8 @@ impl Op {
             Op::Add { shape: Shape::Extrude { .. }, .. } => "add extrude",
             Op::Move { .. } => "move",
             Op::Rotate { .. } => "rotate",
+            Op::Place { flip: false, .. } => "place extrude",
+            Op::Place { flip: true, .. } => "place flipped extrude",
         }
     }
 }
@@ -639,7 +647,42 @@ fn in_range_op(s: &Scene) -> BoxedStrategy<Op> {
     let mv = (target.clone(), vec3(coord(s))).prop_map(|(target, by)| Op::Move { target, by });
     let rot = (target, vec3(coord(s)), axis(), angle())
         .prop_map(|(target, pivot, axis, angle)| Op::Rotate { target, pivot, axis, angle });
-    prop_oneof![3 => add, 3 => mv, 3 => rot].boxed()
+    prop_oneof![3 => add, 2 => placed(s), 3 => mv, 3 => rot].boxed()
+}
+
+/// An extrusion built in a frame (step 26b): the frame one of the origin
+/// planes either way up (exact), any frame from angles, or an origin plane
+/// with an axis stretched, shrunk or tilted to 0.9× or 1.1× FRAME_SQUARE
+/// (the boundary, accepted and refused); the origin anywhere in range;
+/// either way.
+fn placed(scene: &Scene) -> BoxedStrategy<Op> {
+    let planes = vec![
+        ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+        ([1.0, 0.0, 0.0], [0.0, -1.0, 0.0]),
+        ([0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
+        ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0]),
+        ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+        ([-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    ];
+    let plane = prop::sample::select(planes.clone()).prop_map(|(x, n)| (DVec3::from(x), DVec3::from(n)));
+    let turned = (0.0..PI, 0.0..TAU, 0.0..TAU).prop_map(|(theta, phi, spin)| {
+        let n = DVec3::new(theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos()).normalize();
+        let p = fission_kernel::geom::any_perpendicular(n);
+        ((p * spin.cos() + n.cross(p) * spin.sin()).normalize(), n)
+    });
+    // (which part, how): 0 stretches x, 1 the normal, 2 tilts the normal towards x.
+    let boundary = (prop::sample::select(planes), 0..3u8, prop::sample::select(vec![0.9, -0.9, 1.1, -1.1])).prop_map(|((x, n), part, k)| {
+        let (x, n) = (DVec3::from(x), DVec3::from(n));
+        match part {
+            0 => (x * (1.0 + k * FRAME_SQUARE), n),
+            1 => (x, n * (1.0 + k * FRAME_SQUARE)),
+            _ => (x, n + x * (k * FRAME_SQUARE)),
+        }
+    });
+    let frame = prop_oneof![4 => plane, 4 => turned, 2 => boundary];
+    (extruded(scene), vec3(coord(scene)), frame, any::<bool>())
+        .prop_map(|(shape, origin, (x, n), flip)| Op::Place { shape, origin, x: x.to_array().map(Num), normal: n.to_array().map(Num), flip })
+        .boxed()
 }
 
 /// The same operation with one input pushed outside the supported range:
@@ -649,6 +692,10 @@ fn extreme(mut op: Op, pick: prop::sample::Index, number: f64, axis: [f64; 3], s
     if swap_axis {
         if let Op::Add { axis: a, .. } | Op::Rotate { axis: a, .. } = &mut op {
             *a = axis.map(Num);
+            return op;
+        }
+        if let Op::Place { x, normal, .. } = &mut op {
+            *(if pick.index(2) == 0 { x } else { normal }) = axis.map(Num);
             return op;
         }
     }
@@ -667,11 +714,18 @@ fn extreme(mut op: Op, pick: prop::sample::Index, number: f64, axis: [f64; 3], s
             v.push(angle);
             v
         }
+        Op::Place { shape, origin, x, normal, .. } => {
+            let mut v = shape.numbers();
+            v.extend(origin.iter_mut());
+            v.extend(x.iter_mut());
+            v.extend(normal.iter_mut());
+            v
+        }
     };
     let i = pick.index(nums.len());
     *nums[i] = Num(number);
     // A changed profile number makes the generator's verdict unknown.
-    if let Op::Add { shape: Shape::Extrude { expect, .. }, .. } = &mut op {
+    if let Op::Add { shape: Shape::Extrude { expect, .. }, .. } | Op::Place { shape: Shape::Extrude { expect, .. }, .. } = &mut op {
         *expect = None;
     }
     op
@@ -1004,7 +1058,7 @@ impl ReferenceStateMachine for Scene {
 
     fn apply(mut s: Scene, op: &Op) -> Scene {
         match op {
-            Op::Add { shape, at, .. } => {
+            Op::Add { shape, at, .. } | Op::Place { shape, origin: at, .. } => {
                 s.slots += 1;
                 let sizes: Vec<f64> = match shape {
                     Shape::Box { w, d, h } => vec![w.0, d.0, h.0],
@@ -1038,7 +1092,7 @@ impl ReferenceStateMachine for Scene {
 
     fn preconditions(s: &Scene, op: &Op) -> bool {
         match op {
-            Op::Add { .. } => s.slots < MAX_SLOTS,
+            Op::Add { .. } | Op::Place { .. } => s.slots < MAX_SLOTS,
             Op::Move { target, .. } | Op::Rotate { target, .. } => *target < s.slots,
         }
     }
@@ -2026,6 +2080,13 @@ fn is_extreme(op: &Op) -> bool {
         }
         Op::Move { by, .. } => by.iter().any(coord_bad),
         Op::Rotate { pivot, axis, angle, .. } => pivot.iter().any(coord_bad) || axis_bad(axis) || angle_bad(angle),
+        Op::Place { shape, origin, x, normal, .. } => {
+            let Shape::Extrude { outer, holes, dist, .. } = shape else { return true };
+            len_bad(dist)
+                || shape.clone().numbers().into_iter().any(|v| !v.0.is_finite())
+                || std::iter::once(outer).chain(holes).flat_map(Ring::coords).any(|v| coord_bad(&Num(v)))
+                || !frame_ok(v3(origin), v3(x), v3(normal))
+        }
     }
 }
 
@@ -2123,6 +2184,110 @@ fn check_sketch_loop(pts: &[DVec2], seed: u64) -> Result<(), String> {
     let backward = (0..n).all(|i| found.get(i) == Some(&pts[(start + n - i) % n]));
     if found.len() != n || !(forward || backward) {
         return Err(format!("sketch loop {found:?} is not the polygon drawn {pts:?}"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Building in a frame (step 26b)
+
+/// The harness's own rule for a frame the kernel must take: every part
+/// finite, the origin in model space, both axes unit and square to each
+/// other within FRAME_SQUARE (`ops::place::frame_placement`'s contract).
+fn frame_ok(origin: DVec3, x: DVec3, n: DVec3) -> bool {
+    origin.is_finite()
+        && x.is_finite()
+        && n.is_finite()
+        && origin.abs().max_element() <= MAX_COORD
+        && (x.length() - 1.0).abs() <= FRAME_SQUARE
+        && (n.length() - 1.0).abs() <= FRAME_SQUARE
+        && x.dot(n).abs() <= FRAME_SQUARE
+}
+
+/// The frame as the harness reads it: local (u, v, w) → origin + u·x̂ +
+/// v·(n̂ × x̂) + w·n̂, worked apart from the kernel's quaternion, squared up
+/// as the kernel's contract says (the normal's direction kept, x̂ the unit
+/// part of x in the plane). Read literally instead, an x axis 58 ulps long
+/// (inside FRAME_SQUARE) puts a corner 725 mm out 1.1e-11 mm further than
+/// the kernel, which squares it (seed30b, saved).
+fn frame_affine(origin: DVec3, x: DVec3, n: DVec3) -> glam::DAffine3 {
+    let n = n / n.length();
+    let x = x - n * x.dot(n);
+    let x = x / x.length();
+    glam::DAffine3::from_cols(x, n.cross(x), n, origin)
+}
+
+/// A half turn about local x: (u, v, w) → (u, −v, −w).
+fn half_turn_x() -> glam::DAffine3 {
+    glam::DAffine3::from_cols(DVec3::X, DVec3::NEG_Y, DVec3::NEG_Z, DVec3::ZERO)
+}
+
+/// The profile an extrusion shape makes: its rings, or the closed loop its
+/// sketch makes (`Err` when the drawing makes none).
+fn shape_profile(shape: &Shape) -> Result<Profile, KernelError> {
+    let Shape::Extrude { outer, holes, .. } = shape else { panic!("only extrusions are built in a frame") };
+    match sketched(shape) {
+        Some(drawn) => match drawn.outline()? {
+            sketch::SketchOutline::Closed(profile, _) => Ok(profile),
+            sketch::SketchOutline::Open(why) => Err(KernelError::InvalidInput { inputs: vec![], message: why.to_string() }),
+        },
+        None => Ok(Profile { outer: outer.boundary(), holes: holes.iter().map(Ring::boundary).collect() }),
+    }
+}
+
+/// The harness's own mirror of a plain extrusion across its x axis: each
+/// point (x, −y), each bulge negated (written here, not taken from the
+/// kernel's `mirrored`).
+fn mirror_shape(shape: &Shape) -> Shape {
+    let Shape::Extrude { outer, holes, dist, expect, .. } = shape else { panic!("only extrusions are mirrored") };
+    let flip = |p: &P2| [p[0], Num(-p[1].0)];
+    let ring = |r: &Ring| match r {
+        Ring::Path { pts, bulges } => Ring::Path { pts: pts.iter().map(flip).collect(), bulges: bulges.iter().map(|b| Num(-b.0)).collect() },
+        Ring::Circle { c, r } => Ring::Circle { c: flip(c), r: *r },
+    };
+    Shape::Extrude { outer: ring(outer), holes: holes.iter().map(ring).collect(), dist: *dist, expect: *expect, sketch: None }
+}
+
+/// Each face of a body built in a frame against the shape's own face model
+/// (`face_model`, worked from the shape, not from the kernel), read through
+/// the frame literally, with w → −w when flipped: the same role, area and
+/// (to rounding at the reach and MASS_PROPS_REL of the size) centroid. The
+/// caps face away from the solid: the start cap against the extrude's way
+/// (−n, or +n flipped), the end cap along it; a plane side lies along n.
+/// This is what says a flipped extrude is the extrude moved back with its
+/// start cap still on the sketch plane, without the kernel's mirroring.
+fn check_placed_model(shape: &Shape, p: &Placed, frame: glam::DAffine3, flip: bool, m: &Measure) -> Result<(), String> {
+    let model = face_model(shape)?;
+    let got = p.face_masses();
+    let size = (m.hi - m.lo).length().max(1.0);
+    let allowed = tolerance::MASS_PROPS_REL * size + 4.0 * tolerance::rounding_slack(reach(m) + frame.translation.abs().max_element());
+    let w = if flip { -1.0 } else { 1.0 };
+    let n = frame.matrix3.z_axis;
+    if p.body.faces.iter().filter(|f| f.role.is_some()).count() != model.len() {
+        return Err(format!("{} faces with roles, the model has {}", p.body.faces.len(), model.len()));
+    }
+    for (role, area, c) in model {
+        let Some(f) = p.body.faces.iter().position(|face| face.role == Some(role)) else { return Err(format!("no face is {role:?}")) };
+        let expected = frame.transform_point3(DVec3::new(c.x, c.y, w * c.z));
+        let off = got[f].centroid.distance(expected);
+        if off.is_nan() || off > allowed {
+            return Err(format!("{role:?}: placed centroid {} but the model through the frame says {expected} ({off:e} off, {allowed:e} allowed)", got[f].centroid));
+        }
+        if !tolerance::measure_eq(got[f].area, area, tolerance::MASS_PROPS_REL * area.abs().max(size)) {
+            return Err(format!("{role:?}: area {} but the model says {area}", got[f].area));
+        }
+        if !matches!(p.body.faces[f].surface, Surface::Plane { .. }) {
+            continue;
+        }
+        let normal = p.placement.dir(p.body.face_normal_at(f, DVec3::ZERO));
+        let ok = match role {
+            FaceRole::Start => normal.distance(-w * n) <= ANGULAR,
+            FaceRole::End => normal.distance(w * n) <= ANGULAR,
+            _ => normal.dot(n).abs() <= ANGULAR,
+        };
+        if !ok {
+            return Err(format!("{role:?}: faces {normal}, the frame's normal is {n}, flipped {flip}"));
+        }
     }
     Ok(())
 }
@@ -2279,6 +2444,73 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 check_faces(s).map_err(|e| fail(e, both()))?;
             }
         }
+        Op::Place { shape, origin, x, normal, flip } => {
+            let (o, xa, na, flip) = (v3(origin), v3(x), v3(normal), *flip);
+            let frame = Frame { origin: o, x: xa, normal: na };
+            // The unplaced extrude, as `Add` judges it: accepted exactly
+            // when the generator (or `profile_expect`) says.
+            let base = classify(guarded(|| shape.make())).map_err(|m| fail(m, vec![]))?;
+            let verdict = match extrude_expect(shape) {
+                Expect::Valid => true,
+                Expect::Invalid => false,
+                Expect::Either => base.is_some(),
+            };
+            if base.is_some() != verdict {
+                return Err(fail(format!("profile valid = {verdict} but the kernel {} it unplaced", if base.is_some() { "accepted" } else { "rejected" }), vec![]));
+            }
+            let built = match shape_profile(shape) {
+                Ok(profile) => guarded(|| place::extrude_in_frame(&profile, match shape { Shape::Extrude { dist, .. } => dist.0, _ => unreachable!() }, &frame, flip)).map_err(|m| fail(m, vec![]))?,
+                Err(e) => Err(e),
+            };
+            let placed = match built {
+                Ok((p, _)) => match validate(&p.body) {
+                    Ok(()) => Some(p),
+                    Err(errs) => return Err(fail(format!("returned an invalid body: {}", errs[0]), vec![("local".into(), p.body)])),
+                },
+                Err(KernelError::InvalidInput { .. }) => None,
+                Err(KernelError::InvalidResult(errs)) => return Err(fail(format!("InvalidResult: {}", errs[0]), vec![])),
+            };
+            let good_frame = frame_ok(o, xa, na);
+            if placed.is_some() && !good_frame {
+                return Err(fail(format!("a frame the harness refuses was accepted: origin {o}, x {xa}, normal {na}"), vec![]));
+            }
+            if placed.is_some() && base.is_none() {
+                return Err(fail("a profile refused unplaced was accepted in a frame".into(), vec![]));
+            }
+            record(op, placed.is_some());
+            let Some(base) = base else {
+                slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], start_faces: vec![], steps: 0, reach: 0.0 });
+                return Ok(());
+            };
+            let m0 = measure(&Placed::new(base.clone())).map_err(|m| fail(m, vec![("unplaced".into(), base.clone())]))?;
+            // Every world point is within |origin| + (the local point's
+            // distance from the frame's origin) of the world's.
+            let surely_inside = o.abs().max_element() + m0.lo.abs().max(m0.hi.abs()).length() < MAX_COORD * 0.5;
+            if placed.is_none() && good_frame && surely_inside {
+                return Err(fail(format!("a valid frame (origin {o}, x {xa}, normal {na}) and profile, well inside model space, were refused"), vec![("unplaced".into(), base)]));
+            }
+            let Some(p) = placed else {
+                slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], start_faces: vec![], steps: 0, reach: 0.0 });
+                return Ok(());
+            };
+            let world = || vec![("placed".to_string(), p.baked())];
+            let m1 = measure(&p).map_err(|m| fail(m, world()))?;
+            check_rigid(&m0, &m1, "placing in a frame").map_err(|m| fail(m, world()))?;
+            let affine = frame_affine(o, xa, na);
+            check_placed_model(shape, &p, affine, flip, &m1).map_err(|m| fail(m, world()))?;
+            // From here the slot is followed like any other: its local body
+            // is the extrude of the profile as built (mirrored by the
+            // harness's own rule when flipped), carried by the frame (turned
+            // a half turn about x first when flipped).
+            let (local_shape, affine) = if flip { (mirror_shape(&oracle_shape(shape)), affine * half_turn_x()) } else { (shape.clone(), affine) };
+            let local = classify(guarded(|| local_shape.make())).map_err(|m| fail(m, world()))?.ok_or_else(|| fail("the harness's mirror of an accepted profile was refused".into(), world()))?;
+            let start_faces = face_masses(&local).iter().map(|m| m.centroid).collect();
+            let mut slot = Slot { body: Some(p), shape: local_shape, affine, start: local.vertices.iter().map(|v| v.point).collect(), start_faces, steps: 1, reach: 0.0 };
+            slot.reach = slot.body.as_ref().map_or(0.0, body_reach).max(o.abs().max_element());
+            check_position(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.baked())).collect()))?;
+            check_faces(&slot).map_err(|m| fail(m, slot.body.iter().map(|b| ("placed".to_string(), b.baked())).collect()))?;
+            slots.push(slot);
+        }
     }
     Ok(())
 }
@@ -2308,6 +2540,12 @@ fn replay_op(slots: &mut Vec<Slot>, op: &Op) -> Result<(), Failure> {
                     slots[*target].body = Some(t);
                 }
             }
+        }
+        Op::Place { shape, origin, x, normal, flip } => {
+            let frame = Frame { origin: v3(origin), x: v3(x), normal: v3(normal) };
+            let Shape::Extrude { dist, .. } = shape else { unreachable!() };
+            let placed = shape_profile(shape).ok().and_then(|profile| guarded(|| place::extrude_in_frame(&profile, dist.0, &frame, *flip)).ok().and_then(Result::ok)).map(|(p, _)| p);
+            slots.push(Slot { body: placed, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], start_faces: vec![], steps: 0, reach: 0.0 });
         }
     }
     Ok(())

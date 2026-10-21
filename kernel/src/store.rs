@@ -28,8 +28,9 @@
 //!   `view_of` and `stl_of` give for the same spec.
 
 use crate::api_error::{ApiError, ErrorKind};
-use crate::ops::{Input, Meshed};
-use crate::{build_meshed, stl, view_parts, BodySpec, BodyView, StlFile};
+use crate::mesh::Mesh;
+use crate::ops::Input;
+use crate::{build_meshed, placed, stl, view_parts, BodySpec, Built, BodyView, StlFile};
 use std::collections::BTreeMap;
 
 /// A stored body's number. 0 is never one.
@@ -57,7 +58,7 @@ pub const MAX_HANDLE: Handle = (1 << 53) - 1;
 pub struct BodyStore {
     /// The handle the next stored body gets.
     next: Handle,
-    bodies: BTreeMap<Handle, Meshed>,
+    bodies: BTreeMap<Handle, Built>,
     /// The bodies' `held_bytes`, all together.
     held: usize,
 }
@@ -108,14 +109,20 @@ impl BodyStore {
 
     /// The view of a stored body, the same as `view_of` gives for its spec.
     pub fn view(&self, handle: Handle) -> Result<BodyView, ApiError> {
-        let (body, mesh) = self.get(handle)?;
-        Ok(view_parts(body, mesh, vec![]))
+        let (placed, mesh) = self.get(handle)?;
+        Ok(view_parts(&placed.body, &placed.placement, mesh, vec![]))
     }
 
     /// A stored body as binary STL, the same as `stl_of` gives for its spec.
     pub fn stl(&self, handle: Handle, name: &str) -> Result<StlFile, ApiError> {
-        let (_, mesh) = self.get(handle)?;
-        let out = stl::export(mesh, name);
+        let (placed, mesh) = self.get(handle)?;
+        let out = if placed.placement.is_identity() {
+            stl::export(mesh, name)
+        } else {
+            let mut world = mesh.clone();
+            placed::mesh_into_world(&mut world, &placed.placement);
+            stl::export(&world, name)
+        };
         Ok(StlFile { bytes: out.bytes, rounding: out.rounding, warning: out.warning })
     }
 
@@ -136,7 +143,7 @@ impl BodyStore {
         self.held
     }
 
-    fn get(&self, handle: Handle) -> Result<&Meshed, ApiError> {
+    fn get(&self, handle: Handle) -> Result<&Built, ApiError> {
         self.bodies.get(&handle).ok_or_else(|| unknown(handle))
     }
 }
@@ -151,7 +158,7 @@ impl BodyStore {
 /// beside 24,964 triangles), and so is the allocator's spare room; the
 /// browser build grew by 0.94 MB for each such sphere counted here as
 /// 0.70 MB.
-pub fn held_bytes((_, mesh): &Meshed) -> usize {
+pub fn held_bytes<B>((_, mesh): &(B, Mesh)) -> usize {
     let lines: usize = mesh.edge_polylines.iter().map(|l| 12 + 4 * l.len()).sum();
     24 * mesh.positions.len() + 12 * mesh.triangles.len() + 4 * mesh.triangle_face.len() + lines
 }
@@ -232,11 +239,21 @@ mod tests {
             outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 30.0, 0.0, 30.0, 10.0, 0.0, 10.0], bulges: vec![] },
             holes: vec![BoundaryIn::Circle { center: [15.0, 5.0], radius: 2.0 }],
         };
-        let specs: [fn() -> BodySpec; 4] = [
+        // Placed ones too (step 26b): on a slanted frame, far out, and
+        // flipped on the front plane.
+        fn slanted() -> Option<crate::FrameIn> {
+            Some(crate::FrameIn { origin: [1e5, -2e4, 3.5], x: [0.0, 0.8, 0.6], normal: [0.0, -0.6, 0.8] })
+        }
+        fn front() -> Option<crate::FrameIn> {
+            Some(crate::FrameIn { origin: [0.0, 0.0, 0.0], x: [1.0, 0.0, 0.0], normal: [0.0, -1.0, 0.0] })
+        }
+        let specs: [fn() -> BodySpec; 6] = [
             || BodySpec::Box { width: 40.0, depth: 30.0, height: 20.0 },
             || BodySpec::Cylinder { radius: 3.0, height: 7.0 },
             || BodySpec::Sphere { radius: 4.0 },
-            || BodySpec::Extrude { profile: ProfileIn { outer: BoundaryIn::Circle { center: [1.0, 2.0], radius: 3.0 }, holes: vec![] }, distance: 5.0 },
+            || BodySpec::Extrude { profile: ProfileIn { outer: BoundaryIn::Circle { center: [1.0, 2.0], radius: 3.0 }, holes: vec![] }, distance: 5.0, frame: None, flip: false },
+            || BodySpec::Extrude { profile: ProfileIn { outer: BoundaryIn::Circle { center: [1.0, 2.0], radius: 3.0 }, holes: vec![] }, distance: 5.0, frame: slanted(), flip: false },
+            || BodySpec::Extrude { profile: ProfileIn { outer: BoundaryIn::Circle { center: [1.0, 2.0], radius: 3.0 }, holes: vec![] }, distance: 5.0, frame: front(), flip: true },
         ];
         let mut store = BodyStore::new();
         for spec in specs {
@@ -245,7 +262,7 @@ mod tests {
             assert_eq!(json(store.view(h).unwrap()), json(view_of(spec()).unwrap()));
             assert_eq!(store.stl(h, "part").unwrap().bytes, stl_of(spec(), "part").unwrap().bytes);
         }
-        let h = store.build(BodySpec::Extrude { profile: rect(), distance: 2.0 }).unwrap();
+        let h = store.build(BodySpec::Extrude { profile: rect(), distance: 2.0, frame: None, flip: false }).unwrap();
         // 30·10 − π·2² = 300 − 4π, by 2: 600 − 8π.
         assert!(rel_eq(store.view(h).unwrap().volume, 600.0 - 8.0 * PI, FP_REL));
     }
@@ -375,6 +392,8 @@ mod tests {
                     holes: vec![BoundaryIn::Circle { center: [12.0, 5.0], radius: 2.0 }],
                 },
                 distance: 4.0,
+                frame: None,
+                flip: false,
             },
         ];
         let each: Vec<usize> = specs.iter().map(|s| held_bytes(&build_meshed(s()).unwrap())).collect();
@@ -481,7 +500,16 @@ mod tests {
                             let (w, d, h) = (size(&mut rng), size(&mut rng), size(&mut rng));
                             let corners = vec![0.0, 0.0, w, 0.0, w, d, 0.0, d];
                             let profile = ProfileIn { outer: BoundaryIn::Path { corners, bulges: vec![] }, holes: vec![] };
-                            (BodySpec::Extrude { profile, distance: if bad { -h } else { h } }, w * d * h)
+                            // Half of them on the XY, front or side plane, either way (26b): the same volume.
+                            let planes = [([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), ([1.0, 0.0, 0.0], [0.0, -1.0, 0.0]), ([0.0, 1.0, 0.0], [1.0, 0.0, 0.0])];
+                            let (frame, flip) = match rng.below(2) {
+                                0 => (None, false),
+                                _ => {
+                                    let (x, normal) = planes[rng.below(3) as usize];
+                                    (Some(crate::FrameIn { origin: [size(&mut rng), -size(&mut rng), 0.0], x, normal }), rng.below(2) == 1)
+                                }
+                            };
+                            (BodySpec::Extrude { profile, distance: if bad { -h } else { h }, frame, flip }, w * d * h)
                         }
                     };
                     let want_input = match &spec {

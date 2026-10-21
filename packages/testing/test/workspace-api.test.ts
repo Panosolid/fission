@@ -322,6 +322,7 @@ function boxKernel(): KernelCalls {
     face_roles: ["bottom", "top", "front", "back", "left", "right"].map((role) => ({ role })),
     face_areas: [1200, 1200, 800, 800, 600, 600],
     face_centroids: Array(6).fill([0, 0, 0]),
+    face_normals: [[0, 0, -1], [0, 0, 1], [0, -1, 0], [0, 1, 0], [-1, 0, 0], [1, 0, 0]],
     edge_faces: [[0, 4], [0, 3], [5, 0], [2, 0], [1, 2], [1, 5], [3, 1], [4, 1], [2, 5], [4, 2], [3, 4], [5, 3]],
     errors: [],
   };

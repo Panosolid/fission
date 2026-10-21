@@ -27,6 +27,13 @@ export interface BodyView {
   face_areas: number[];
   face_centroids: [number, number, number][];
   /**
+   * Each planar face's outward unit normal [x, y, z] in the world, by kernel
+   * face index; null for a curved face (step 26b). With the face's centroid,
+   * which lies on it, it is the face's plane, exact (the display mesh's
+   * normals are single precision).
+   */
+  face_normals: ([number, number, number] | null)[];
+  /**
    * The two faces each edge joins, by kernel edge index (step 24c): first
    * the face running the edge forwards, then the one running it backwards;
    * null for an edge not used exactly once each way (only in a body that
@@ -123,7 +130,22 @@ export type BodySpec =
   | { box: { width: number; depth: number; height: number } }
   | { cylinder: { radius: number; height: number } }
   | { sphere: { radius: number } }
-  | { extrude: { profile: Outline; distance: number } };
+  | { extrude: { profile: Outline; distance: number; frame?: Frame; flip?: boolean } };
+
+/**
+ * Where a sketch's plane is, for an extrude built on it (step 26b,
+ * kernel/src/ops/place.rs): world origin, x axis and normal, the axes unit
+ * and square to each other within 64 ulps (FRAME_SQUARE; anything else is
+ * refused, naming "origin", "x" or "normal"). Its y axis is normal × x, so
+ * sketch (u, v) is world origin + u·x + v·y and the extrude goes along the
+ * normal; with `flip` it goes the other way from the same plane, its start
+ * cap still on the plane. Without a frame an extrude is on XY, going up.
+ */
+export interface Frame {
+  origin: [number, number, number];
+  x: [number, number, number];
+  normal: [number, number, number];
+}
 
 /** A binary STL file from the kernel. */
 export interface StlFile {

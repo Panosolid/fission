@@ -2,6 +2,7 @@
 //! `validate::checked`, so nothing invalid leaves the kernel.
 
 pub mod extrude;
+pub mod place;
 pub mod profile;
 pub mod primitives;
 pub mod transform;
@@ -52,7 +53,7 @@ impl KernelError {
 pub enum Input {
     /// A number argument, by its name in the app's call (width, depth,
     /// height, radius, distance, spacing, pixel, point, offset, pivot,
-    /// axis, angle).
+    /// axis, angle, and a frame's origin, x and normal).
     Param { name: &'static str },
     /// A profile as a whole (too many corners).
     Profile,
