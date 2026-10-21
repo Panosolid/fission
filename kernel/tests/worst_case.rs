@@ -33,6 +33,8 @@ fn the_largest_legal_hole_pattern_extrudes_within_budget() {
             holes: circles,
         },
         distance: height,
+        frame: None,
+        flip: false,
     };
     let start = Instant::now();
     let view = view_of(spec).expect("a valid plate");

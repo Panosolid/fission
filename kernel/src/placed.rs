@@ -38,6 +38,18 @@ impl Placed {
         Placed::recentred(body)
     }
 
+    /// `new` for a body and the mesh its validation made: when the body is
+    /// re-centred the mesh moves with it, by the same arithmetic, so it
+    /// stays the mesh of the local geometry and needn't be made again.
+    pub fn with_mesh(body: Body, mut mesh: Mesh) -> (Placed, Mesh) {
+        let placed = Placed::recentred(body);
+        if !placed.placement.is_identity() {
+            let home = Transform::translation(-placed.placement.shift);
+            mesh.positions.iter_mut().for_each(|p| *p = home.point(*p));
+        }
+        (placed, mesh)
+    }
+
     /// `new`'s work, under a name `cargo mutants` mutates (it skips every
     /// function named `new`).
     fn recentred(body: Body) -> Placed {
@@ -91,22 +103,34 @@ impl Placed {
     /// its width: about 1 mm on a 1 km strip 1.1 µm wide (seed8043b8edca9);
     /// this way the only rounding the placement adds is its own, once.
     pub fn face_masses(&self) -> Vec<FaceMass> {
-        let mut faces = face_masses(&self.body);
-        if !self.placement.is_identity() {
-            faces.iter_mut().for_each(|f| f.centroid = self.placement.point(f.centroid));
-        }
-        faces
+        placed_face_masses(&self.body, &self.placement)
     }
 
     /// The local geometry's mesh, carried into the world. The same body
     /// always gets the same triangles, wherever it is.
     pub fn tessellate(&self, opts: &TessOptions) -> Result<Mesh, TessError> {
         let mut mesh = tessellate(&self.body, opts)?;
-        if !self.placement.is_identity() {
-            let r = glam::DMat3::from_quat(self.placement.rotation);
-            mesh.positions.iter_mut().for_each(|p| *p = r * *p + self.placement.shift);
-        }
+        mesh_into_world(&mut mesh, &self.placement);
         Ok(mesh)
+    }
+}
+
+/// `Placed::face_masses` for a body and placement held apart.
+pub fn placed_face_masses(body: &Body, placement: &Placement) -> Vec<FaceMass> {
+    let mut faces = face_masses(body);
+    if !placement.is_identity() {
+        faces.iter_mut().for_each(|f| f.centroid = placement.point(f.centroid));
+    }
+    faces
+}
+
+/// Carries a mesh of local geometry into the world (`Placement::point`'s
+/// arithmetic, the rotation's matrix made once); the identity leaves it
+/// untouched, bit for bit.
+pub fn mesh_into_world(mesh: &mut Mesh, placement: &Placement) {
+    if !placement.is_identity() {
+        let r = glam::DMat3::from_quat(placement.rotation);
+        mesh.positions.iter_mut().for_each(|p| *p = r * *p + placement.shift);
     }
 }
 

@@ -31,6 +31,19 @@ pub const LINEAR: f64 = 1e-5;
 /// Two directions whose angle is below this (radians) are parallel.
 pub const ANGULAR: f64 = 1e-9;
 
+/// How far a placement frame's axes may be from unit length and from
+/// square to each other (`ops::place`: |‖x‖ − 1|, |‖n‖ − 1| and |x·n|, the
+/// cosine of their angle, each at most this): 64 ulps of 1, ≈ 1.42e-14. Two
+/// points of model space are at most 2√3·MAX_COORD ≈ 3.5e8 mm apart, so an
+/// axis this far off moves a point at the far side of model space from the
+/// frame's origin by at most ~5e-6 mm (0.5 LINEAR) from where the frame
+/// read literally would put it. A frame worked out in doubles (normalised,
+/// crossed, turned) is off by a few ulps, so this leaves room for any
+/// honest one; a frame off by more is the caller's bug, refused rather than
+/// silently squared up. A whole number of ulps, so a vector exactly on the
+/// boundary (length 1 ± 64 ulps) exists and the boundary can be tested.
+pub const FRAME_SQUARE: f64 = 64.0 * f64::EPSILON;
+
 /// Faces with less area than this are degenerate.
 pub const AREA: f64 = LINEAR * LINEAR;
 
