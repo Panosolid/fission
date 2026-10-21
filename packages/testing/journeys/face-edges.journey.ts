@@ -14,6 +14,8 @@
 //   - a file whose pin names an edge the box hasn't got opens with the
 //     circle where it was and the sketch's row, bar item and the panel
 //     warning that its point has lost its edge;
+//   - a file saved with the circle's centre still at (40, 30) though the
+//     box is 60 wide opens with it taken to (60, 30), no undo step;
 //   - with only the box built, its width typed 6 then 60: the circle goes to
 //     (60, 30) within the typing's one undo step.
 // Then bugs planted in workspace.ts, each caught. Run with `npm run
@@ -152,6 +154,28 @@ async function lostPin(plugin: WorkspacePlugin, start: DesignDocument) {
 }
 
 /**
+ * A file saved with the circle's centre where it was snapped, (40, 30), but
+ * the box 60 wide (its points not followed: a file from before the edit
+ * settled, or written by hand): opened, the rebuild finds the corner at
+ * (60, 30), so the centre is taken there, drawn and built there (the
+ * cylinder round (60, 30)), with no warning, and opening is still no undo
+ * step (hunt 26g: edits settle before they are drawn, so this is the case
+ * the rebuild's taking in is left for).
+ */
+async function stale(plugin: WorkspacePlugin, end: DesignDocument) {
+  const point = end.sketches[0].curves.find((x) => x.kind === "circle")!;
+  const centre = (point as { centre: string }).centre;
+  const doc: DesignDocument = { ...end, sketches: end.sketches.map((s, i) => (i === 0 ? { ...s, points: s.points.map((p) => (p.id === centre ? { ...p, x: 40, y: 30 } : p)) } : s)) };
+  const a = await app(doc, plugin);
+  assert.deepEqual(circleOf(a).centre, [60, 30], "the centre taken to the corner");
+  const up = above(a);
+  assert.ok(roundAbout(up, [60, 30]), `the cylinder round (60, 30): ${JSON.stringify(up)}`);
+  assert.equal(a.warning(), null);
+  assert.equal(a.history.undoLabel(), null, "opening is no undo step");
+  assert.ok(await a.close(), "every body freed");
+}
+
+/**
  * The box's width typed, 6 then 60 (one step, as typing in a box is), with
  * a circle pinned to the top's back right corner and nothing extruded from
  * it (so the box is the part the panel edits): the circle follows to
@@ -209,11 +233,11 @@ const PLANTS: { name: string; find: string; replace: string }[] = [
   // The settle runs on the click's document, dropping the pin made from it.
   { name: "settle-drops-pin", find: "          next = await settleKept(kernel, before, next, settleBodies);\n        } catch (e) {\n          return sketchBox.showError(e instanceof Error ? e.message : String(e));\n        }\n        // Undo, Escape", replace: "          next = await settleKept(kernel, before, done.doc, settleBodies);\n        } catch (e) {\n          return sketchBox.showError(e instanceof Error ? e.message : String(e));\n        }\n        // Undo, Escape" },
   // The rebuild's followed points never taken into the document: drawn, saved and held where they were snapped.
-  { name: "followed-not-taken", find: "      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring()) {", replace: "      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring() && false) {" },
-  // Taken in as a step of their own: one undo takes back only the point.
-  { name: "followed-own-step", find: "        ctx.history.amend(true);", replace: "        ctx.projectChanged(\"Follow\");" },
+  { name: "followed-not-taken", find: "      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring()) takeIn(doc, value.followed);", replace: "      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring() && false) takeIn(doc, value.followed);" },
+  // Taken in as a step of their own: one undo takes back only the point (an opened file gets an undo step).
+  { name: "followed-own-step", find: "    ctx.history.amend(true);", replace: "    ctx.projectChanged(\"Follow\");" },
   // Taken in ending the merge: the typing in one box becomes a step per key.
-  { name: "followed-splits-typing", find: "        ctx.history.amend(true);", replace: "        ctx.history.amend();" },
+  { name: "followed-splits-typing", find: "    ctx.history.amend(true);", replace: "    ctx.history.amend();" },
   // A sketch whose pinned point is held says nothing.
   { name: "points-silent", find: "      if (r.points) out.push(", replace: "      if (r.points && false) out.push(" },
 ];
@@ -232,16 +256,21 @@ async function planted(plant: { name: string; find: string; replace: string }): 
   }
 }
 
+test("hand-worked: a file opened with a pinned point away from its corner takes it to the corner, drawn and built there, and opening is no undo step", async () => {
+  await stale(designWorkspace, await journey(designWorkspace));
+});
+
 test("each bug planted in workspace.ts is caught by the journeys", async () => {
   // The copy unplanted passes, so a catch is the plant's and not the copying's.
   const unplanted = await planted({ name: "none", find: "let fits = 0;", replace: "let fits = 0;" });
   const end = await journey(unplanted);
   await lostPin(unplanted, end);
+  await stale(unplanted, end);
   await typed(unplanted);
   for (const plant of PLANTS) {
     const design = await planted(plant);
     const caught = await journey(design)
-      .then((doc) => lostPin(design, doc))
+      .then(async (doc) => (await lostPin(design, doc), await stale(design, doc)))
       .then(() => typed(design))
       .then(
         () => null,

@@ -675,12 +675,19 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     }
     if (designDoc() !== doc || ctx.history.restoring()) return doc;
     unsettled = null;
-    if (next === doc) return doc;
+    if (next !== doc) takeIn(doc, next);
+    return next;
+  }
+  /**
+   * `next`, `doc` settled or with its pinned points followed, taken in as
+   * the design in `doc`'s own undo step: it follows from that step, so the
+   * typing in a box stays one step.
+   */
+  function takeIn(doc: DesignDocument, next: DesignDocument) {
     ctx.project.workspaces.design = next;
     if (saved?.doc === doc) saved = { ...saved, doc: next };
     if (shownDoc === doc) shownDoc = next;
     ctx.history.amend(true);
-    return next;
   }
   async function showBuilt(doc: DesignDocument, kind: PartKind) {
     // The item the Edit feature panel is open on was deleted (the bar, Undo in another way): the panel goes with it.
@@ -699,14 +706,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       missed = false;
       const { scene, failure } = value;
       // Points pinned to a face's edges (26f) where this rebuild found them, taken into the edit's own undo step (the
-      // typing in a box still one step): drawn there, and held there should their edge go. Not while an undo or redo is
-      // putting a snapshot back (it was taken in when that step was made), nor once the design has changed again.
-      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring()) {
-        ctx.project.workspaces.design = value.followed;
-        if (saved?.doc === doc) saved = { ...saved, doc: value.followed };
-        if (shownDoc === doc) shownDoc = value.followed;
-        ctx.history.amend(true);
-      }
+      // typing in a box still one step): drawn there, and held there should their edge go. An edit's settling has
+      // followed them already, so this takes in a file opened with its points elsewhere (or an edit whose settling
+      // failed). Not while an undo or redo is putting a snapshot back (it was taken in when that step was made), nor
+      // once the design has changed again.
+      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring()) takeIn(doc, value.followed);
       // The rows were drawn before the rebuild said what failed: a failed item has no Body row.
       if (!sameIds(rowsFailed, failedNow)) drawBrowser(doc);
       warningsNow = value.warnings;
