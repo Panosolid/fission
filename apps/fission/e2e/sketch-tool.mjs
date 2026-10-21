@@ -1,6 +1,6 @@
 // Browser check of the sketch tool (step 21c): Create sketch asks for a
-// plane with the origin planes drawn at the origin (only the ground plane
-// offered), a click on it makes Sketch 1 and looks straight down; clicks
+// plane with the origin planes drawn at the origin (all three offered from
+// step 26d), a click on it makes Sketch 1 and looks straight down; clicks
 // draw a chain of lines snapped to the grid, closing back on the first
 // point; Ctrl+Z undoes one drawn line and you stay in the sketch; the grid
 // size is typeable and a bad one is refused with the kernel's reason;
@@ -166,14 +166,12 @@ const HOVER_REDRAWS_AFTER_UNDO = {
 };
 
 try {
-  await check("Create sketch asks for a plane: the origin planes are drawn, only the ground plane is offered, Escape cancels", async () => {
+  await check("Create sketch asks for a plane: the origin planes are drawn, all three offered (26d), Escape cancels", async () => {
     const page = await fresh();
     await page.click("#create-sketch");
     assert.equal(await page.isVisible("#sketch-prompt"), true);
-    assert.equal(await data(page, "planes"), "XY, XZ (not offered), YZ (not offered)");
-    assert.equal(await page.isDisabled("#sketch-plane-XZ"), true);
-    assert.equal(await page.isDisabled("#sketch-plane-YZ"), true);
-    assert.equal(await page.isEnabled("#sketch-plane-XY"), true);
+    assert.equal(await data(page, "planes"), "XY, XZ, YZ");
+    for (const id of ["XY", "XZ", "YZ"]) assert.equal(await page.isEnabled(`#sketch-plane-${id}`), true, id);
     if (shots) await page.screenshot({ path: `${shots}/sketch-pick-1280.png` });
     // A click on the box picks nothing while choosing a plane.
     await page.mouse.move(0, 0);
@@ -187,8 +185,9 @@ try {
   await check("a click on the ground plane makes Sketch 1 (one undo step), looks straight down with a grid; clicks draw a closed rectangle", async () => {
     const page = await fresh();
     await page.click("#create-sketch");
-    // The ground plane's square runs from the origin to (1.6r, 1.6r), r ≈ 27 mm the framing radius: (10, 38) is on it, clear of the box.
-    await at(page, [10, 38], HOME);
+    // The ground plane's square runs from the origin to (1.6r, 1.6r), r ≈ 27 mm the framing radius: (41, 41) is on it, clear of the
+    // box, and the line from the home camera to it passes right of the front plane's square (so the ground plane is nearest there).
+    await at(page, [41, 41], HOME);
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
     assert.equal(await page.textContent("#sketch-name"), "Sketch 1");
     assert.equal(await undoTitle(page), "Undo Create sketch (Ctrl+Z)");

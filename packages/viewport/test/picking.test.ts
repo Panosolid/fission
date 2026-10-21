@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLICK_SLOP_PX, EDGE_DEPTH_SLACK, EDGE_PICK_PX, PLANE_FACE_SLACK, clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, planeOrFace, segmentsNear, unhidden } from "../src/picking.ts";
+import { CLICK_SLOP_PX, EDGE_DEPTH_SLACK, EDGE_PICK_PX, clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, planeOrFace, segmentsNear, unhidden } from "../src/picking.ts";
 
 test("a press and release under the slop is a click, over it is a camera drag", () => {
   const at = { x: 100, y: 200 };
@@ -120,21 +120,11 @@ test("device coordinates back to the screen undo clientToNdc (self-consistency)"
   assert.deepEqual(ndcToClient({ x: 0, y: 0 }, rect), { x: 357, y: 192 });
 });
 
-test("hand-worked (26d): picking a plane for a sketch takes the nearer of an offered plane and a face", () => {
-  // Looking down from z = 100 on a box 0..20 high standing on the ground plane: the ray meets the box's top at
-  // 100 − 20 = 80 and the ground plane at 100, so the top face is picked; beside the box only the plane is hit.
-  assert.equal(planeOrFace(100, 80), "face");
-  assert.equal(planeOrFace(100, null), "plane");
-  // From the front at y = −100, the front plane (y = 0) is hit at 100 and a box set back at y = 10 at 110: the plane.
-  assert.equal(planeOrFace(100, 110), "plane");
-  assert.equal(planeOrFace(null, 110), "face");
-  assert.equal(planeOrFace(null, null), null);
-});
-
-test("a face lying in an offered plane wins: within PLANE_FACE_SLACK of its distance at 0.9×, the plane at 1.1×", () => {
-  // The box's front face lies in the front plane: single-precision points put its hit a hair behind the plane's.
-  const plane = 250;
-  assert.equal(planeOrFace(plane, plane), "face", "exactly in the plane");
-  assert.equal(planeOrFace(plane, plane * (1 + 0.9 * PLANE_FACE_SLACK)), "face", "0.9× the slack behind: still in the plane");
-  assert.equal(planeOrFace(plane, plane * (1 + 1.1 * PLANE_FACE_SLACK)), "plane", "1.1× the slack behind: a face behind the plane");
+test("hand-worked (26d): picking a plane for a sketch takes a face under the pointer over any plane, else the plane", () => {
+  // From the home view (in front, above) the front plane's square rises in front of the box's top: the top, a
+  // face, is picked. Beside the box only the ground plane is hit: the plane. Nothing under the pointer: nothing.
+  assert.equal(planeOrFace(true, true), "face");
+  assert.equal(planeOrFace(false, true), "face");
+  assert.equal(planeOrFace(true, false), "plane");
+  assert.equal(planeOrFace(false, false), null);
 });

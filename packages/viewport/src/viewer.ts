@@ -345,21 +345,16 @@ export class ViewportView {
     return `${this.camera.matrixWorld.elements.join(",")}|${this.camera.projectionMatrix.elements.join(",")}|${size.x}x${size.y}`;
   }
 
-  /** The offered origin plane under a point on screen, by id, and how far along the ray it was hit; null for none. */
-  private planeAt(clientX: number, clientY: number): { id: string; distance: number } | null {
+  /** The offered origin plane under a point on screen, by id (the nearest), or null. */
+  private planeAt(clientX: number, clientY: number): string | null {
     const meshes = this.host.planeMeshes();
     if (meshes.length === 0 || this.image || !this.aim(clientX, clientY)) return null;
     const [hit] = this.raycaster.intersectObjects(meshes, false);
-    return hit ? { id: hit.object.userData.plane as string, distance: hit.distance } : null;
+    return hit ? (hit.object.userData.plane as string) : null;
   }
 
   /** The kernel face index under a point on screen (client pixels), or null for empty space. */
   private faceAt(clientX: number, clientY: number): number | null {
-    return this.faceHit(clientX, clientY)?.face ?? null;
-  }
-
-  /** The face under a point on screen and how far along the ray it was hit; null for empty space. */
-  private faceHit(clientX: number, clientY: number): { face: number; distance: number } | null {
     const mesh = this.host.mesh();
     const faceMesh = this.host.faceMesh();
     if (!mesh || !faceMesh || this.image) return null; // the body is not drawn under an image
@@ -368,16 +363,15 @@ export class ViewportView {
     this.raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), this.camera);
     // Nearest hit first; for indexed geometry faceIndex is the triangle number.
     const [hit] = this.raycaster.intersectObject(faceMesh, false);
-    const face = faceOfTriangle(mesh.triangle_faces, hit?.faceIndex);
-    return face === null ? null : { face, distance: hit.distance };
+    return faceOfTriangle(mesh.triangle_faces, hit?.faceIndex);
   }
 
   /** While planes are offered (26d): the plane or the face a click there picks (picking.ts planeOrFace), any face, offered or not, so a curved one can be refused in words. */
   private planeTarget(clientX: number, clientY: number): { plane: string | null; face: number | null } {
-    const plane = this.planeAt(clientX, clientY);
-    const face = this.faceHit(clientX, clientY);
-    const which = planeOrFace(plane?.distance ?? null, face?.distance ?? null);
-    return { plane: which === "plane" ? plane!.id : null, face: which === "face" ? face!.face : null };
+    const face = this.faceAt(clientX, clientY);
+    const plane = face === null ? this.planeAt(clientX, clientY) : null;
+    const which = planeOrFace(plane !== null, face !== null);
+    return { plane: which === "plane" ? plane : null, face: which === "face" ? face : null };
   }
 
   /**
@@ -630,6 +624,8 @@ export const BODY_FADE = { faces: 0.3, edges: 0.35 };
  * hover colour.
  */
 const GROUND_ORDER = -2;
+/** The origin planes offered for a sketch: over the ground grid, under everything else (showPlanes). */
+const PLANE_ORDER = -1.5;
 const FINISHED_SKETCH_ORDER = -1;
 
 /** Empties a group, freeing its geometry and materials. */
@@ -952,9 +948,10 @@ export class Viewer implements SharedViewport {
    * Draws the origin planes as squares from the origin, as wide as the
    * 1.6 times the body's framing radius (at least 20 mm), so each sticks
    * out past the body. An offered one can be clicked, with the body's
-   * `faces` (26d): the body hides it (depth tested, and pushed back further
-   * than the body's faces, so a face lying in a plane is drawn and picked
-   * rather than the plane), so what is seen is what a click picks.
+   * `faces` (26d). The planes are drawn behind the body wherever it is,
+   * even where a plane is nearer (drawn first, in the opaque pass with
+   * blending of their own, so the body then covers them), since a face
+   * under the pointer is what a click picks (picking.ts planeOrFace).
    */
   showPlanes(planes: readonly OriginPlane[], faces: readonly number[] = []) {
     clearGroup(this.planes);
@@ -963,20 +960,22 @@ export class Viewer implements SharedViewport {
     this.pickFaces = planes.length > 0 || faces.length > 0 ? new Set(faces) : null;
     if (!this.pickFaces) this.setHover(null, null);
     const half = Math.max(10, 0.8 * this.bodyFraming().radius);
+    // See-through, but drawn with the opaque objects (before the body, PLANE_ORDER): three.js keeps a material's
+    // own blending when it is not `transparent` only for CustomBlending, so the alpha is mixed by hand.
+    const behindBody = { transparent: false, blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor, depthTest: false, depthWrite: false };
     for (const p of planes) {
       const corners: SketchXY[] = [[0, 0], [2 * half, 0], [2 * half, 2 * half], [0, 2 * half]];
       const world = corners.map((c) => toWorld(p.plane, c));
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(world.flat(), 3));
       g.setIndex([0, 1, 2, 0, 2, 3]);
-      const behindFaces = { polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 };
-      const fill = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, transparent: true, opacity: p.offered ? PLANE_OPACITY.offered : PLANE_OPACITY.off, side: THREE.DoubleSide, depthWrite: false, ...behindFaces }));
-      fill.renderOrder = 6;
+      const fill = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, opacity: p.offered ? PLANE_OPACITY.offered : PLANE_OPACITY.off, side: THREE.DoubleSide, ...behindBody }));
+      fill.renderOrder = PLANE_ORDER;
       fill.userData.plane = p.id;
       const outline = new THREE.BufferGeometry();
       outline.setAttribute("position", new THREE.Float32BufferAttribute(world.flat(), 3));
-      const rim = new THREE.LineLoop(outline, new THREE.LineBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, transparent: true, opacity: p.offered ? 1 : 0.4 }));
-      rim.renderOrder = 6;
+      const rim = new THREE.LineLoop(outline, new THREE.LineBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, opacity: p.offered ? 1 : 0.4, ...behindBody }));
+      rim.renderOrder = PLANE_ORDER;
       this.planes.add(fill, rim);
       if (p.offered) this.planeHits.push(fill);
     }

@@ -26,10 +26,9 @@ export interface ViewportPick {
   edge?: number | null;
   /**
    * The offered origin plane clicked (showPlanes), by id; absent or null
-   * when none was. While planes are offered a click picks the nearer of
-   * the plane and the body's face under the pointer (never an edge): a
-   * plane wins over the body behind it, a face over the plane behind it
-   * and over a plane it lies in (step 26d).
+   * when none was. While planes are offered a click picks the body's face
+   * under the pointer whenever there is one (never an edge), else the
+   * nearest offered plane: the planes are drawn behind the body (step 26d).
    */
   plane?: string | null;
   shift: boolean;
@@ -119,7 +118,10 @@ export interface SharedViewport {
    * up on screen, framing the body and the edited sketch (or 50 mm round
    * the plane's origin when there is neither); returns what it framed. The
    * camera is on the side the normal points to, or the other side for
-   * `side` −1 (a sketch on a back or bottom face, step 26d).
+   * `side` −1 (a sketch on a back or bottom face, step 26d), with up on
+   * screen then the plane's y or −y, whichever the standard view looking
+   * that way has nearer its up (a bottom face is seen as the bottom view
+   * sees it, the front at the top).
    */
   lookAt(plane: Plane, side?: 1 | -1): Framing | null;
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
