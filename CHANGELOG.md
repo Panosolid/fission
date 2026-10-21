@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.25.15 (2026-10-21)
+
+- Fix (timeline code bug hunt): switching to another workspace while the design was still rebuilding no longer adds a box when you come back to a design with no body (its only body suppressed or deleted), nor an undo step "Edit" you never made. The Extrude panel offers only sketches it can use (before the rollback marker, not suppressed) and says why when there are none; before, it offered them, said "makes a closed outline", and OK did nothing. Its note no longer says an extrude replaces the part. The test helper that names a body built from a kept shape now names it as the app does.
+
 ## 0.25.14 (2026-10-21)
 
 - Step 25c4: browser checks of the app with a sketch open: an image dropped, pasted or opened goes to Image and Design comes back with the sketch as it was, a refused file changes nothing, a dropped project replaces the design, split view keeps the sketch drawing, and the shortcut list names the sketch keys (Chromium, Firefox and WebKit; 1280 and 375 px). A second magic-moment journey, sketch to STL in 8 clicks. Step 25 is done. #225
