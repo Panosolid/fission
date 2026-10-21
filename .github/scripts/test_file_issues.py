@@ -133,6 +133,12 @@ steps:
   0. draw 5 sides (2 arcs)
 """
 
+FUZZ_TIMELINE = """Timeline sessions, seed 3000003, 500 steps: 1 kind(s) of failure
+failure: the rebuild differs from the model | step 41 {"op":"reorder","item":"feature-12","to":0}: the rebuild differs from the model: feature-12 status built, model failed | replay: cd packages/testing && FISSION_SEED=3000003 FISSION_TIMELINE_STEPS=500 node --experimental-strip-types --no-warnings --test journeys/timeline.journey.ts
+shrunk to 3 step(s) (1-minimal):
+  0. {"op":"add-sketch"}
+"""
+
 
 class Fuzz(unittest.TestCase):
     def test_one_kind_per_failure_line_named_by_target(self):
@@ -147,6 +153,8 @@ class Fuzz(unittest.TestCase):
         self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_PROJECT)], ["fuzzing the project loader: saving lost or changed something the file had"])
         # A session's kind is its problem with the numbers out; the steps after it are not kinds.
         self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_SESSIONS)], ["fuzzing the sketch-extrude sessions: volume #, model #"])
+        # A timeline session's kind is its check (25b3); the step and the shrunk steps are not part of it.
+        self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_TIMELINE)], ["fuzzing the timeline sessions: the rebuild differs from the model"])
         # kernel/fuzz/run.sh's reports name the coverage-guided target.
         self.assertEqual([k for k, _ in fuzz_kinds(FUZZ_KERNEL)], ["fuzzing the kernel's extrude: volume # want # (slack #)"])
         # A report with no failure lines has no kinds; an unknown first line still files, as "?".

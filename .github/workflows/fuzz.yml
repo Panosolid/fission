@@ -9,7 +9,10 @@ name: Fuzzing
 # steps against the sessions' own model), then up to 20,000 of the extrudes
 # they built compared with exact values and OpenCascade
 # (prototypes/oracle/sketch_extrude.py; a disagreement is a failure folder
-# with oracle-disagreements.txt). And the kernel's entry points (extrude,
+# with oracle-disagreements.txt). Design's timeline on the real kernel in
+# long sessions (packages/testing/fuzz/timeline.ts, step 25b3: rounds of 5
+# sessions × 500 steps against the timeline model, failures shrunk to the
+# fewest steps). And the kernel's entry points (extrude,
 # sketch outline, moves and turns) with coverage-guided fuzzing
 # (kernel/fuzz/, cargo-fuzz on nightly Rust), every body their corpus builds
 # then compared with exact values and OpenCascade
@@ -211,8 +214,43 @@ jobs:
           path: ${{ runner.temp }}/fuzz/
           if-no-files-found: ignore
 
+  timeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run kernel -w @fission/app
+      - name: Long timeline sessions until the time is up
+        env:
+          MINUTES: ${{ inputs.minutes || '45' }}
+          FISSION_FUZZ_OUT: ${{ runner.temp }}/fuzz
+        run: |
+          case $MINUTES in ""|*[!0-9]*) echo "minutes must be a whole number"; exit 1;; esac
+          FISSION_FUZZ_SECONDS=$(( MINUTES * 60 )) npm run timeline-fuzz -w @fission/testing
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-timeline
+          path: ${{ runner.temp }}/fuzz/
+          if-no-files-found: ignore
+
   collect:
-    needs: [stl, project, sessions, kernel]
+    needs: [stl, project, sessions, timeline, kernel]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
