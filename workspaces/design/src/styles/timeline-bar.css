@@ -32,3 +32,9 @@
 @media (max-width: 640px) {
   .timeline-bar { gap: 12px; }
 }
+/* Step 26e: an item built on a suppressed one greyed, with no warning
+   (Q3): dimmed and dashed, never crossed out (it isn't suppressed itself).
+   An item built with a warning (a kept shape, a lost plane or source) red
+   as a failed one is; its title has the words. */
+.timeline-bar .timeline-bar-item[data-greyed="true"] { color: #8a919c; border-style: dashed; opacity: 0.6; }
+.timeline-bar .timeline-bar-item[data-warned="true"] { color: #ff6b6b; border-color: #e0656d; background: #3a2226; }

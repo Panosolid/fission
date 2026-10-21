@@ -5,7 +5,8 @@
 // then its ⋯) and from the browser's Timeline rows (a right-click, or the
 // row's ⋯): Suppress and Unsuppress, Move the marker here, Delete (at once
 // when nothing is built from the item, asking first when something is), a
-// failed item red in the bar and the browser, and (24f4) a design with no
+// failed item red in the bar and the browser (from 26e an extrude of a
+// suppressed sketch is greyed instead, as Fusion does), and (24f4) a design with no
 // body: both solids suppressed, or every item deleted, shown as an empty
 // view with the panel saying so, a width typed then adding a new box at the
 // marker. 24f5: the marker moved by the four playback buttons, dragged with
@@ -114,7 +115,7 @@ const bar = (page) =>
   page.$$eval("#timeline .timeline-bar > li", (lis) =>
     lis
       .filter((li) => !li.classList.contains("timeline-bar-more-slot"))
-      .map((li) => (li.classList.contains("timeline-bar-marker") ? "|" : [li.dataset.item, li.dataset.suppressed && "suppressed", li.dataset.rolledBack && "rolled back", li.dataset.failed && "failed"].filter(Boolean).join(" "))),
+      .map((li) => (li.classList.contains("timeline-bar-marker") ? "|" : [li.dataset.item, li.dataset.suppressed && "suppressed", li.dataset.rolledBack && "rolled back", li.dataset.greyed && "greyed", li.dataset.failed && "failed"].filter(Boolean).join(" "))),
   );
 /** The browser's Timeline rows marked red as failed. */
 const redRows = (page) => page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-failed', (rows) => rows.map((r) => r.dataset.node));
@@ -295,16 +296,19 @@ try {
       await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "everything built");
       assert.deepEqual(await state(), all);
 
-      // 3. Suppress Sketch 1: Extrude 1, built from it, fails: red on the bar and in the browser, its body gone.
+      // 3. Suppress Sketch 1: Extrude 1, built from it, is greyed (26e, the reference app's answer Q3): not red, no
+      // warning, its row greyed in the browser saying why, its body gone.
       await barMenu("sketch-2");
       await choose("suppress");
       await undoIs(page, "Suppress Sketch 1");
       await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "the box is the part");
       await browserOpen();
-      const failing = { bar: ["feature-1", "sketch-2 suppressed", "feature-11 failed", "|"], drawn: { box: true, square: false }, volume: "24,000 mm³", red: ["feature-11"] };
-      assert.deepEqual(await state(), failing);
-      assert.equal(await page.getAttribute('#timeline [data-item="feature-11"]', "title"), `3. Extrude Sketch 1 by ${layout.distance} mm (failed)`);
-      if (shots) await page.screenshot({ path: `${shots}/failed-red-${width}.png` });
+      const greying = { bar: ["feature-1", "sketch-2 suppressed", "feature-11 greyed", "|"], drawn: { box: true, square: false }, volume: "24,000 mm³", red: [] };
+      assert.deepEqual(await state(), greying);
+      assert.equal(await page.getAttribute('#timeline [data-item="feature-11"]', "title"), `3. Extrude Sketch 1 by ${layout.distance} mm (greyed: Sketch 1 is suppressed)`);
+      assert.equal(await page.getAttribute('#browser [data-node="timeline"] .tree-row[data-node="feature-11"]', "title"), "Greyed: Sketch 1 is suppressed");
+      assert.equal(await page.isVisible("#kept-warning"), false, "no warning");
+      if (shots) await page.screenshot({ path: `${shots}/greyed-${width}.png` });
       await browserClosed();
       await undo();
       await until(page, (v) => document.querySelector("#volume")?.textContent === v, V, "undone");

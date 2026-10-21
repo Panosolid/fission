@@ -52,15 +52,19 @@ test("seeded sessions on the model pass, and reach every kind of outcome", async
   for (const seed of SEEDS) for (const [k, v] of Object.entries(await session(() => modelSubject(), seed))) total[k] = (total[k] ?? 0) + v;
   if (process.env.FISSION_SEED) return; // one seed alone needn't reach everything
   const wanted = [
-    ...["add-sketch", "add-extrude", "add-preset", "set-size", "move-corner", "delete-curve", "redraw-curve", "delete-item", "reorder", "suppress", "marker", "undo", "redo", "save-open", "hold-ref"].map((o) => `op:${o}`),
+    ...["add-sketch", "add-face-sketch", "add-extrude", "add-preset", "set-size", "move-corner", "delete-curve", "redraw-curve", "delete-item", "reorder", "suppress", "marker", "undo", "redo", "save-open", "hold-ref"].map((o) => `op:${o}`),
     "unchanged:undo",
     "unchanged:redo",
     "refused:before-dependency",
     "refused:after-dependent",
-    ...["built", "suppressed", "rolled-back", "failed"].map((s) => `status:${s}`),
-    // The owner's rule: an extrude whose sketch is lost keeps its last shape with a warning, so a session (whose extrudes
-    // start from closed outlines) fails one only for a suppressed sketch; failing with no kept shape is hand-worked.
-    "cause:suppressed-input",
+    // 26e: an item built on a suppressed one is greyed (Q3), no longer failed; the owner's rule keeps every lost sketch's
+    // extrude built with a warning, so a session (whose extrudes start from closed outlines) never fails one: failing with
+    // no kept shape is hand-worked.
+    ...["built", "suppressed", "greyed", "rolled-back"].map((s) => `status:${s}`),
+    // 26e: sketches on a face following their face, held when it goes, and extrudes of held ones saying their source is lost.
+    "plane:followed",
+    "plane:plane-lost",
+    "source-lost",
     ...["deleted-input", "open-outline", "invalid-outline"].map((c) => `warning:${c}`),
     "ref:kept",
     "ref:missing",
@@ -98,10 +102,17 @@ const CAUGHT_BY: Record<ModelFault, string> = {
   "end-edges-named-start": "two edges share a name",
   "lost-sketch-fails": "the rebuild differs from the model",
   "kept-not-forgotten": "the rebuild differs from the model",
-  "save-drops-kept": "save and open changed the rebuild",
+  // From 26e the first session that catches it (seed 4) saves while the kept extrude is greyed under a suppressed sketch,
+  // so the save changes nothing shown and the model catches it once the extrude shows; the save check's own catch is
+  // the test after the loop.
+  "save-drops-kept": "the rebuild differs from the model",
   "warning-dropped": "the rebuild differs from the model",
   "full-replay": "an edit rebuilt bodies that didn't change",
   "body-kept-by-item": "an edit kept a body whose shape changed",
+  "suppress-fails-dependents": "the rebuild differs from the model",
+  "greyed-warns": "the rebuild differs from the model",
+  "lost-plane-not-held": "the rebuild differs from the model",
+  "face-sketch-unbound": "outcome differs from the model",
 };
 
 /** The first seed whose session the planted bug fails, and how. */
@@ -119,6 +130,10 @@ for (const fault of MODEL_FAULTS)
     assert.ok(found, `no session caught ${fault}`);
     assert.equal(found.failure.check, CAUGHT_BY[fault], found.failure.message);
   });
+
+test("dropped kept shapes are caught by the save check too, when one is shown as it saves (seed 6)", async () => {
+  assert.equal((await failureOf(() => modelSubject(["save-drops-kept"]), randomSession(6n, 150)))?.check, "save and open changed the rebuild");
+});
 
 test("without a rebuild from scratch, a stale cache is still caught by the model", async () => {
   const make = (): TimelineSubject => {

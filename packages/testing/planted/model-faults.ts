@@ -78,8 +78,8 @@ export const PLANTS: Record<ModelFault, Plant> = {
       },
     ],
     run: ["timeline", "history"],
-    caught: "history-fuzz",
-    why: "the timeline sessions only see a reused id when the newest id is deleted and then a new one taken; in Design points, extrudes and presets take ids too, so in 12 × 150 steps the newest is rarely a curve that gets deleted. history-fuzz deletes and draws on one sketch for 4,000 steps and catches it",
+    caught: "a new id is already in use",
+    why: "the timeline sessions only see a reused id when the newest id is deleted and then a new one taken; in Design points, extrudes and presets take ids too, so in 12 × 150 steps the newest is rarely a curve that gets deleted. history-fuzz deletes and draws on one sketch for 4,000 steps and catches it. From 26e (face sketches in the sessions' random steps) the timeline sessions reach a reused id first and their fresh-id check catches it",
   },
   "side-names-by-list": {
     what: "outlineCurves names a side by its place in the outline instead of the curve its piece came from",
@@ -91,8 +91,8 @@ export const PLANTS: Record<ModelFault, Plant> = {
     what: "BodyCache keys an extrude's body by its distance alone, so an edit to its sketch doesn't reach it",
     edits: [{ file: REBUILD, find: "    const key = JSON.stringify(spec);", replace: '    const key = JSON.stringify("extrude" in spec ? spec.extrude.distance : spec);' }],
     run: ["timeline"],
-    caught: "the rebuild differs from the model",
-    why: "the session compares with the model before it rebuilds from scratch, and the stale body is wrong against both",
+    caught: "the rebuild differs from a rebuild from scratch",
+    why: "the stale body is wrong against both the model and a rebuild from scratch; with 26e's random steps the first session to meet it fails the from-scratch check first (recorded from planted/run.ts, 2026-10-22)",
   },
   "cascade-delete": {
     what: "deleteItem also deletes the items built from it",
@@ -151,8 +151,8 @@ export const PLANTS: Record<ModelFault, Plant> = {
       },
     ],
     run: ["timeline"],
-    caught: "the rebuild differs from the model",
-    why: "the session compares the first rebuild with the model before it rebuilds a second time, and the drifted volume is already off",
+    caught: "the rebuild differs from a rebuild from scratch",
+    why: "the drifted volume is off against both the model and a rebuild from scratch; with 26e's random steps the first session to meet it fails the from-scratch check first (recorded from planted/run.ts, 2026-10-22)",
   },
   "resolve-last-body-only": {
     what: "bodyOf looks only at the last body shown, as while there was one body",
@@ -259,6 +259,34 @@ export const PLANTS: Record<ModelFault, Plant> = {
     run: ["timeline"],
     caught: "the rebuild differs from a rebuild from scratch",
     why: "the reused body is wrong, which the comparison with a rebuild from scratch sees before the build count is checked",
+  },
+  // 26e: the timeline's rules on a face sketch, and the greying unified.
+  "suppress-fails-dependents": {
+    what: "an extrude of a suppressed sketch fails, as before 26e, instead of being greyed (Q3)",
+    edits: [{ file: REBUILD, find: '    if (item !== undefined && input?.status === "suppressed") return { status: "greyed", by: sketchId };', replace: '    if (item !== undefined && input?.status === "suppressed") return { status: "failed", cause: "failed-input", input: sketchId, message: "suppressed" };' }],
+    run: ["timeline"],
+    caught: "the rebuild differs from the model",
+  },
+  "greyed-warns": {
+    what: "a sketch on a suppressed feature's face is held with its plane lost instead of greyed",
+    edits: [{ file: REBUILD, find: '  if (on?.status === "suppressed") return { status: "greyed", by: featureId };', replace: "" }],
+    run: ["timeline"],
+    caught: "the rebuild differs from the model",
+  },
+  "lost-plane-not-held": {
+    what: "settleKept never holds a lost face sketch's placement, so it goes back to where it was drawn",
+    edits: [{ file: REBUILD, find: "      else if (held === undefined) keep = (await wasAt(content.id))?.plane;", replace: "      else if (held === undefined) keep = undefined;" }],
+    run: ["timeline"],
+    caught: "the rebuild differs from the model",
+  },
+  "face-sketch-unbound": {
+    what: "reorderItem lets a sketch move before the feature whose face it is on (answer 7), and that feature after it",
+    edits: [
+      { file: EDITS, find: "  const from = features.find((f) => item.dependsOn.includes(f.id) && place(f.id) > to);", replace: "  const from = features.find((f) => !isSketchItem(item) && item.dependsOn.includes(f.id) && place(f.id) > to);" },
+      { file: EDITS, find: "  const user = features.find((f, j) => j < to && f.dependsOn.includes(id));", replace: "  const user = features.find((f, j) => j < to && !isSketchItem(f) && f.dependsOn.includes(id));" },
+    ],
+    run: ["timeline"],
+    caught: "outcome differs from the model",
   },
 };
 

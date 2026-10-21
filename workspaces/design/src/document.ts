@@ -594,27 +594,69 @@ export function readDesignDocument(data: unknown): DesignDocument {
   return d as DesignDocument;
 }
 
+/** What an item is built on: a sketch on a face, that face's feature (26c); an extrude of a sketch, the sketch; else nothing. */
+function inputOf(features: readonly Feature[], f: Feature): Feature | undefined {
+  if (isSketchItem(f)) return isFacePlane(f.intent.parameters.plane) ? features.find((x) => x.id === faceFeature(f.intent.parameters.plane as string)) : undefined;
+  return isSketchExtrude(f) ? features.find((x) => x.id === f.intent.parameters.sketch && isSketchItem(x)) : undefined;
+}
+
+/**
+ * The suppressed item that greys `f` (Q3; from 26e for every item built
+ * on another, an extrude of a suppressed sketch too): what it is built on,
+ * when that is suppressed, else whatever greys that; null when nothing
+ * does, `f` itself suppressed included.
+ */
+export function greyedBy(document: DesignDocument, f: Feature): string | null {
+  const input = inputOf(document.timeline.features, f);
+  if (input === undefined) return null;
+  return input.suppressed ? input.id : greyedBy(document, input);
+}
+
 /**
  * Whether a timeline item builds: it is at or before the marker, not
- * suppressed, and (an extrude of a sketch) its sketch builds too. The
- * kernel judges the rest (an outline that doesn't close) when it builds.
- * 24d2's rebuild replaces this with each item's real result.
+ * suppressed, not greyed (`greyedBy`), and (an extrude of a sketch) its
+ * sketch builds too, or it has a kept shape. A sketch on a face whose
+ * feature is gone or fails still builds, held where it was (26c, Q1). The
+ * kernel judges the rest (an outline that doesn't close) when it builds;
+ * the rebuild gives each item's real result.
  */
 export function builds(document: DesignDocument, f: Feature): boolean {
   const { features, marker } = document.timeline;
   const at = features.indexOf(f);
   if (at < 0 || f.suppressed) return false;
   if (marker === "start" || (marker !== undefined && at > features.findIndex((x) => x.id === marker))) return false;
-  // A sketch on a face is greyed while its face's feature is off (Q3); a deleted one leaves it held, built.
-  if (isSketchItem(f)) {
-    const on = isFacePlane(f.intent.parameters.plane) ? features.find((x) => x.id === faceFeature(f.intent.parameters.plane as string)) : undefined;
-    return on === undefined || builds(document, on);
-  }
-  if (!isSketchExtrude(f)) return true;
-  const sketch = features.find((x) => x.id === f.intent.parameters.sketch && isSketchItem(x));
+  if (greyedBy(document, f) !== null) return false;
+  if (isSketchItem(f) || !isSketchExtrude(f)) return true;
+  const sketch = inputOf(features, f);
   // A deleted sketch: the extrude builds from its kept shape, if it has one (24d2).
   if (sketch === undefined) return keptOf(document, f) !== undefined;
   return builds(document, sketch);
+}
+
+/** Each item's state from the data alone, the whole timeline at once (`buildingItems`, `greyedItems`). */
+function walk(document: DesignDocument): { building: Set<Feature>; greyed: Map<Feature, string> } {
+  const { features, marker } = document.timeline;
+  // Items before `end` are in range; a marker naming no item leaves none (as `builds` finds no index for it).
+  const end = marker === "start" ? 0 : marker === undefined ? features.length : features.findIndex((x) => x.id === marker) + 1;
+  const sketches = new Map<unknown, Feature>();
+  const byId = new Map<unknown, Feature>();
+  for (const f of features) {
+    if (isSketchItem(f) && !sketches.has(f.id)) sketches.set(f.id, f);
+    if (!byId.has(f.id)) byId.set(f.id, f);
+  }
+  const open = new Set(features.filter((f, i) => i < end && !f.suppressed));
+  const building = new Set<Feature>();
+  const greyed = new Map<Feature, string>();
+  // In timeline order, so what an item is built on (always before it; a file that puts it later is refused when opened) is decided first.
+  for (const f of open) {
+    const input = isSketchItem(f) ? (isFacePlane(f.intent.parameters.plane) ? byId.get(faceFeature(f.intent.parameters.plane as string)) : undefined) : isSketchExtrude(f) ? sketches.get(f.intent.parameters.sketch) : undefined;
+    const by = input === undefined ? null : input.suppressed ? input.id : (greyed.get(input) ?? null);
+    if (by !== null) greyed.set(f, by);
+    // A sketch builds, on a face followed or held (26c); an extrude when its sketch does (a sketch on an origin plane
+    // whenever it is in range and on, wherever it is), or from its kept shape when it is gone.
+    else if (!isSketchExtrude(f) || (input === undefined ? keptOf(document, f) !== undefined : building.has(input) || (!isFacePlane(input.intent.parameters.plane) && open.has(input)))) building.add(f);
+  }
+  return { building, greyed };
 }
 
 /**
@@ -624,32 +666,12 @@ export function builds(document: DesignDocument, f: Feature): boolean {
  * timeline's length squared, which froze the tab on a big file.
  */
 export function buildingItems(document: DesignDocument): Set<Feature> {
-  const { features, marker } = document.timeline;
-  // Items before `end` are in range; a marker naming no item leaves none (as `builds` finds no index for it).
-  const end = marker === "start" ? 0 : marker === undefined ? features.length : features.findIndex((x) => x.id === marker) + 1;
-  const open = new Set<Feature>();
-  const sketches = new Map<unknown, Feature>();
-  for (const [i, f] of features.entries()) {
-    if (i < end && !f.suppressed) open.add(f);
-    if (isSketchItem(f) && !sketches.has(f.id)) sketches.set(f.id, f);
-  }
-  const byId = new Map<unknown, Feature>();
-  for (const f of features) if (!byId.has(f.id)) byId.set(f.id, f);
-  // In timeline order, so what an item is built from (always before it) is decided first.
-  const out = new Set<Feature>();
-  for (const f of open) {
-    if (isSketchItem(f)) {
-      // A sketch on a face is greyed while its face's feature is off (Q3); a deleted one leaves it held, built.
-      const on = isFacePlane(f.intent.parameters.plane) ? byId.get(faceFeature(f.intent.parameters.plane as string)) : undefined;
-      if (on === undefined || out.has(on)) out.add(f);
-    } else if (!isSketchExtrude(f)) out.add(f);
-    else {
-      const sketch = sketches.get(f.intent.parameters.sketch);
-      // A face sketch's answer needs its face's feature's, decided before it (a file that puts it later is refused when opened).
-      if (sketch === undefined ? keptOf(document, f) !== undefined : isFacePlane(sketch.intent.parameters.plane) ? out.has(sketch) : open.has(sketch)) out.add(f);
-    }
-  }
-  return out;
+  return walk(document).building;
+}
+
+/** Every greyed item (`greyedBy`, 26e) in range and not suppressed itself, with what greys it, for the whole timeline at once. */
+export function greyedItems(document: DesignDocument): Map<Feature, string> {
+  return walk(document).greyed;
 }
 
 /**

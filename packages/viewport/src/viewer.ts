@@ -599,7 +599,7 @@ export class ViewportView {
 }
 
 /** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint, the axes red (x) and green (y). */
-const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, lost: 0xff6b6b, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
 /**
  * How opaque the sketch grid's major lines are (minor ones fade in up to
  * this as they spread apart, sketch-view's minorStrength): light and see-
@@ -627,6 +627,8 @@ const GROUND_ORDER = -2;
 /** The origin planes offered for a sketch: over the ground grid, under everything else (showPlanes). */
 const PLANE_ORDER = -1.5;
 const FINISHED_SKETCH_ORDER = -1;
+/** A finished sketch whose plane is lost (26e): after the body, so its red shows on the edges it lies on. */
+const LOST_SKETCH_ORDER = 0.5;
 
 /** Empties a group, freeing its geometry and materials. */
 function clearGroup(group: THREE.Group) {
@@ -809,7 +811,10 @@ export class Viewer implements SharedViewport {
    * polygon offset keeps a line lying on a face in front of it; drawn after
    * the ground grid and axes but before the body (FINISHED_SKETCH_ORDER), so
    * where it lies on a body edge the edge, with its selection or hover
-   * colour, is drawn over it. Replaces what was drawn.
+   * colour, is drawn over it. A finished one whose plane is lost (26e) is
+   * red and drawn after the body (LOST_SKETCH_ORDER): it most often lies on
+   * the edges of the extrude built from it, and the warning must show
+   * there. Replaces what was drawn.
    */
   showSketches(drawings: readonly SketchDrawing[]) {
     clearGroup(this.sketches);
@@ -818,20 +823,24 @@ export class Viewer implements SharedViewport {
     this.gridFor = null;
     this.editedWorld = [];
     let lines = 0;
+    let lost = 0;
     for (const d of drawings) {
       const at = (p: SketchXY) => toWorld(d.plane, p);
       const segments = (pairs: readonly (readonly [SketchXY, SketchXY])[], colour: number, order: number) => {
         if (pairs.length === 0) return;
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(pairs.flatMap(([a, b]) => [...at(a), ...at(b)]), 3));
-        const finished = order === FINISHED_SKETCH_ORDER;
+        const finished = order === FINISHED_SKETCH_ORDER || order === LOST_SKETCH_ORDER;
         const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial(finished ? { color: colour } : { color: colour, depthTest: false, transparent: true }));
         l.renderOrder = order;
         this.sketches.add(l);
       };
       lines += d.lines.length;
       if (!d.editing) {
-        segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
+        // 26e: a sketch whose plane is lost red, where it stays.
+        if (d.lost) segments(d.lines, SKETCH_COLOURS.lost, LOST_SKETCH_ORDER);
+        else segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
+        if (d.lost) lost += d.lines.length;
         continue;
       }
       this.editedPlane = d.plane;
@@ -857,6 +866,7 @@ export class Viewer implements SharedViewport {
     const edited = drawings.find((d) => d.editing)?.editing;
     const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
     this.element.dataset.sketchLines = String(lines);
+    this.element.dataset.sketchLost = String(lost);
     this.element.dataset.sketchPoints = edited ? edited.points.map(xy).join(" ") : "";
     this.element.dataset.sketchPreview = edited ? edited.preview.map((s) => s.map(xy).join(" ")).join(" | ") : "";
     this.element.dataset.sketchSnap = edited?.snap?.label ?? "";

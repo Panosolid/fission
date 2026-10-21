@@ -241,7 +241,8 @@ test("suppress, the marker, delete: what the extrude says, and its names coming 
   run(m, { op: "add-sketch", shape: { kind: "polygon", corners: RECT } }, { op: "add-extrude", sketch: "item-1", distance: 10 });
   const names = bodyOf(results(m)["item-6"]).faces.map((f) => faceKey(f.name));
   run(m, { op: "suppress", item: "item-1", on: true });
-  assert.deepEqual(results(m)["item-6"], { status: "failed", cause: "suppressed-input", input: "item-1" });
+  // 26e (Q3): built on a suppressed sketch, the extrude is greyed by it, with no warning; before 26e it failed.
+  assert.deepEqual(results(m)["item-6"], { status: "greyed", by: "item-1" });
   run(m, { op: "suppress", item: "item-1", on: false });
   assert.deepEqual(bodyOf(results(m)["item-6"]).faces.map((f) => faceKey(f.name)), names);
   // The marker on the sketch: the extrude is rolled back, not failed. A box added now goes in after the sketch, and the marker moves onto it.
@@ -368,9 +369,9 @@ test("the owner's rule: a lost sketch's extrude keeps the shape it had just befo
   // An edit to the still-open sketch doesn't reach the kept shape: corner 0 to (0, −10), still 18000.
   run(m, { op: "move-corner", sketch: "item-1", corner: 0, to: [0, -10] });
   assert.deepEqual([volume(), warning()], [18000, { cause: "open-outline", input: "item-1" }]);
-  // Suppressing the sketch fails the extrude, kept shape or not; unsuppressing brings the kept shape back.
+  // Suppressing the sketch greys the extrude (26e, Q3), kept shape or not; unsuppressing brings the kept shape back.
   run(m, { op: "suppress", item: "item-1", on: true });
-  assert.deepEqual(warning(), { status: "failed", cause: "suppressed-input", input: "item-1" });
+  assert.deepEqual(warning(), { status: "greyed", by: "item-1" });
   run(m, { op: "suppress", item: "item-1", on: false });
   assert.deepEqual([volume(), warning()], [18000, { cause: "open-outline", input: "item-1" }]);
   // Side 1 drawn again (curve-7): built from the sketch now, corners (0, −10), (40, 0), (40, 15), (0, 30): a trapezium
@@ -425,4 +426,70 @@ test("ids are never reused while undo or redo can reach them; undo, redo and no-
   run(m, { op: "undo" }, { op: "add-preset", kind: "sphere", sizes: [2] });
   assert.deepEqual(applyOp(m, { op: "redo" }), { kind: "unchanged" });
   assert.deepEqual(applyOp(createModel(), { op: "undo" }), { kind: "unchanged" });
+});
+
+test("a sketch on a face (26e): it follows its face, greys with it, can't move before it, and holds where it was when the face goes", () => {
+  const m = createModel();
+  // A 40 × 30 × 20 box (item-1); RECT on its top (item-2, curves 3 to 6), extruded 10 (item-7).
+  run(m, { op: "add-preset", kind: "box", sizes: [40, 30, 20] });
+  assert.deepEqual(applyOp(m, { op: "add-face-sketch", shape: { kind: "polygon", corners: RECT }, face: { feature: "item-1", role: "top" } }), { kind: "done", ids: ["item-2", "curve-3", "curve-4", "curve-5", "curve-6"] });
+  run(m, { op: "add-extrude", sketch: "item-2", distance: 10 });
+  // The top is flat at z = 20 facing +Z, so the sketch is XY lifted by 20 (rule 8: XY turned not at all), drawn there.
+  assert.deepEqual(results(m)["item-2"], { status: "built", lift: 20 });
+  // The extrude stands on the top: 40 × 30 × 10 = 12000 mm³, its start cap at z = 20 and its end at 30, centred over
+  // (20, 15); its right side, from (40, 0) to (40, 30), is 30 × 10 = 300 mm² centred at (40, 15, 20 + 10/2 = 25).
+  const body = () => bodyOf(results(m)["item-7"]);
+  assert.equal(body().volume, 12000);
+  assert.deepEqual([face(body(), "item-7/start").centroid, face(body(), "item-7/end").centroid], [[20, 15, 20], [20, 15, 30]]);
+  assert.deepEqual(face(body(), "item-7/side:curve-4"), { name: { feature: "item-7", role: "side", curve: "curve-4" }, area: 300, centroid: [40, 15, 25] });
+  // The box 35 high: the sketch follows its top to z = 35, the extrude's end to 45.
+  run(m, { op: "set-size", item: "item-1", key: "height", value: 35 });
+  assert.deepEqual([results(m)["item-2"], face(body(), "item-7/end").centroid], [{ status: "built", lift: 35 }, [20, 15, 45]]);
+  // Q3: the box suppressed greys the sketch and the extrude, naming the box, with no warning.
+  run(m, { op: "suppress", item: "item-1", on: true });
+  assert.deepEqual([results(m)["item-2"], results(m)["item-7"]], [{ status: "greyed", by: "item-1" }, { status: "greyed", by: "item-1" }]);
+  run(m, { op: "suppress", item: "item-1", on: false });
+  // Answer 7: the sketch can't go before the box it is drawn on, nor the box after it.
+  assert.deepEqual(applyOp(m, { op: "reorder", item: "item-2", to: 0 }), { kind: "refused", cause: "before-dependency" });
+  assert.deepEqual(applyOp(m, { op: "reorder", item: "item-1", to: 1 }), { kind: "refused", cause: "after-dependent" });
+  // Q1: the box deleted. The sketch holds z = 35, where it last was, not 20 where it was drawn, saying its plane is
+  // lost; the extrude is built there from it, saying its source is lost: still 12000 mm³, its end at 45.
+  run(m, { op: "delete-item", item: "item-1" });
+  assert.deepEqual(results(m)["item-2"], { status: "built", lift: 35, plane: "plane-lost" });
+  assert.deepEqual([body().volume, face(body(), "item-7/end").centroid, (results(m)["item-7"] as { source?: string }).source], [12000, [20, 15, 45], "item-2"]);
+  // Undo brings the box back and the sketch follows it again, holding nothing.
+  run(m, { op: "undo" });
+  assert.deepEqual(results(m)["item-2"], { status: "built", lift: 35 });
+  assert.equal((m.doc.items.find((i) => i.id === "item-2") as { on?: { held?: number } }).on?.held, undefined);
+  // A sketch on the extrude's end (item-8, curves 9 to 12) lies at z = 45; its extrude of 5 (item-13) ends at 50.
+  run(m, { op: "add-face-sketch", shape: { kind: "polygon", corners: RECT }, face: { feature: "item-7", role: "end" } }, { op: "add-extrude", sketch: "item-8", distance: 5 });
+  assert.deepEqual([results(m)["item-8"], face(bodyOf(results(m)["item-13"]), "item-13/end").centroid], [{ status: "built", lift: 45 }, [20, 15, 50]]);
+  // The box suppressed greys all four, every one by the box.
+  run(m, { op: "suppress", item: "item-1", on: true });
+  assert.deepEqual(["item-2", "item-7", "item-8", "item-13"].map((id) => results(m)[id]), Array(4).fill({ status: "greyed", by: "item-1" }));
+  // The lower sketch deleted while greyed: the extrude keeps its shape where the sketch lay with nothing suppressed (z 35),
+  // so once the box is back it is the 12000 mm³ block from 35 to 45 with the kept-shape warning, and the upper sketch still
+  // finds its end at 45.
+  run(m, { op: "delete-item", item: "item-2" }, { op: "suppress", item: "item-1", on: false });
+  assert.deepEqual(results(m)["item-7"].status === "built" && results(m)["item-7"].warning, { cause: "deleted-input", input: "item-2" });
+  assert.deepEqual([face(body(), "item-7/start").centroid, results(m)["item-8"]], [[20, 15, 35], { status: "built", lift: 45 }]);
+});
+
+test("a face sketch with nothing held stays where it was drawn; a sketch held then given its face back forgets the hold", () => {
+  const doc: ModelDoc = {
+    nextId: 9,
+    marker: null,
+    items: [{ id: "item-2", kind: "sketch", shape: { kind: "polygon", corners: RECT }, curves: ["a", "b", "c", "d"], suppressed: false, on: { feature: "item-1", role: "top", drawn: 20 } }],
+  };
+  // Its box is not in the timeline and it holds no height (a file written by hand): it stays at z = 20, as drawn.
+  assert.deepEqual(rebuild(doc).results["item-2"], { status: "built", lift: 20, plane: "plane-lost" });
+  // Held at 7, it stays at 7.
+  const held: ModelDoc = JSON.parse(JSON.stringify(doc));
+  (held.items[0] as { on: { held?: number } }).on.held = 7;
+  assert.deepEqual(rebuild(held).results["item-2"], { status: "built", lift: 7, plane: "plane-lost" });
+  // A box of height 12 put in before it (reordered there) gives it its face back: it follows to 12 and the hold is forgotten.
+  const m: TimelineModel = { ...createModel(), doc: { ...held, items: [{ id: "item-1", kind: "box", width: 5, depth: 5, height: 12, suppressed: false }, ...held.items] } };
+  run(m, { op: "marker", at: "item-1" }, { op: "marker", at: null });
+  assert.deepEqual(results(m)["item-2"], { status: "built", lift: 12 });
+  assert.equal((m.doc.items[1] as { on: { held?: number } }).on.held, undefined);
 });

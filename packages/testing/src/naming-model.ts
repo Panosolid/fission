@@ -63,7 +63,7 @@
 //    with no warning (Q3); nothing else changes, and unsuppressing brings
 //    them back as they were.
 // Not here: curved faces (refused by Design, Q5), snapping to a face's
-// edges (26e adds it, Q4), a sketch on a cut's floor (Q6) and a split face
+// edges (26f adds it, Q4), a sketch on a cut's floor (Q6) and a split face
 // (the piece holding the sketch's origin, else the largest, always warned),
 // which need booleans' cut.
 //

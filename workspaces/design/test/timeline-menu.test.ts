@@ -424,15 +424,26 @@ test("openAction (25a3): a double-click runs Edit Sketch on a sketch and Edit fe
   assert.throws(() => menu.openAction(part(), "feature-9"), /there is no item feature-9 in the timeline/);
 });
 
-test("the bar: an item the rebuild failed, and one built from a suppressed sketch, are marked failed and say so", () => {
-  // Hand-worked: with Sketch 1 suppressed, Extrude 1 can't build (`builds`); with the failed set naming the box, the box is red too.
+test("the bar: an item the rebuild failed is marked failed, one built from a suppressed sketch greyed (26e), one with a warning red, and each says so", () => {
+  // Hand-worked: with Sketch 1 suppressed, Extrude 1 is greyed by it (Q3; until 26e it was failed); with the failed set
+  // naming the box, the box is red.
   const { slot } = barIn(suppressItem(part(), "sketch-2", true), { failed: new Set(["feature-1"]) });
-  const flags = [...slot.querySelectorAll("[data-item]")].map((li) => [(li as HTMLElement).dataset.item, (li as HTMLElement).dataset.failed ?? "", (li as HTMLElement).title]);
-  assert.deepEqual(flags, [
-    ["feature-1", "true", "1. Box: 40 × 30 × 20 mm (failed)"],
-    ["sketch-2", "", "2. Sketch 1 on the XY plane (suppressed)"],
-    ["feature-11", "true", "3. Extrude Sketch 1 by 10 mm (failed)"],
+  const flags = () =>
+    [...slot.querySelectorAll("[data-item]")].map((li) => {
+      const d = (li as HTMLElement).dataset;
+      return [d.item, d.failed ?? "", d.greyed ?? "", d.warned ?? "", (li as HTMLElement).title];
+    });
+  assert.deepEqual(flags(), [
+    ["feature-1", "true", "", "", "1. Box: 40 × 30 × 20 mm (failed)"],
+    ["sketch-2", "", "", "", "2. Sketch 1 on the XY plane (suppressed)"],
+    ["feature-11", "", "true", "", "3. Extrude Sketch 1 by 10 mm (greyed: Sketch 1 is suppressed)"],
   ]);
+  // A warning from the rebuild (26e) makes a built item red with its words; one on a suppressed item shows nothing.
+  showTimelineBar(slot, part(), { warnings: new Map([["feature-11", "Extrude 1 keeps its last shape. Sketch 1 was deleted."]]) });
+  assert.deepEqual(flags()[2], ["feature-11", "", "", "true", "3. Extrude Sketch 1 by 10 mm (warning: Extrude 1 keeps its last shape. Sketch 1 was deleted.)"]);
+  showTimelineBar(slot, suppressItem(part(), "feature-11", true), { warnings: new Map([["feature-11", "words"]]) });
+  assert.deepEqual(flags()[2], ["feature-11", "", "", "", "3. Extrude Sketch 1 by 10 mm (suppressed)"]);
+  showTimelineBar(slot, suppressItem(part(), "sketch-2", true), {});
   // No picked item: no ⋯ anywhere.
   assert.equal(slot.querySelector("[data-more]"), null);
 });

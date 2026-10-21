@@ -21,7 +21,7 @@
 // with the sketch constraints (29).
 
 import type { Feature, Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
-import type { DesignDocument, Sketch, SketchArcCurve, SketchLineCurve, SketchPlane } from "./document.ts";
+import { greyedItems, type DesignDocument, type Sketch, type SketchArcCurve, type SketchLineCurve, type SketchPlane } from "./document.ts";
 import { centreClick, centreHover, centrePreview, type CentreArcTool } from "./centre-arc.ts";
 import { drawArc, drawCircle, drawLine, drawRectangle, planeFor, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
 
@@ -527,16 +527,23 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
  * bottom face says it faces against its frame's normal (`side` −1, 26d),
  * so Look At looks at it from outside the body.
  */
-export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null, placed?: ReadonlyMap<string, Plane>): SketchDrawing[] {
+export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null, placed?: ReadonlyMap<string, Plane>, lost: ReadonlySet<string> = new Set()): SketchDrawing[] {
   // Each sketch's plane from its item, found by id once (security audit S2: a search per sketch took the timeline's length squared).
   const items = new Map<string, Feature>();
   for (const f of doc.timeline.features) if (!items.has(f.id)) items.set(f.id, f);
-  return doc.sketches.map((s) => {
+  // 26e: a suppressed sketch, and one greyed by a suppressed item it is built on (Q3), isn't drawn, as the reference app hides them.
+  const greyed = greyedItems(doc);
+  const off = (s: Sketch) => {
+    const item = items.get(s.id);
+    return item !== undefined && editing?.tool.sketch !== s.id && (item.suppressed || greyed.has(item));
+  };
+  return doc.sketches.filter((s) => !off(s)).map((s) => {
     const plane: Plane = planeFor(items.get(s.id), s, placed);
     const side = s.face?.side === -1 ? ({ side: -1 } as const) : {};
     const curves = sketchCurves(s);
     const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
-    if (editing?.tool.sketch !== s.id) return { plane, ...side, lines };
+    // 26e: a sketch held with its plane lost is drawn red where it stays (the rebuild's plane warnings, `lost`).
+    if (editing?.tool.sketch !== s.id) return lost.has(s.id) ? { plane, ...side, lines, lost: true as const } : { plane, ...side, lines };
     const points: SketchXY[] = s.points.map((p) => [p.x, p.y]);
     const tool = editing.tool;
     for (const at of pendingClicks(tool)) if (!s.points.some((p) => p.x === at[0] && p.y === at[1])) points.push([at[0], at[1]]);

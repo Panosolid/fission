@@ -170,12 +170,12 @@ test("each item's menu: the marker here, suppress or unsuppress, delete, and why
 
 test("a menu choice, button or drag becomes the 24e edit with its undo step's name", () => {
   const doc = threeItems();
-  // Suppress Sketch 1: one edit, "Suppress Sketch 1"; the extrude built from it then fails (red).
+  // Suppress Sketch 1: one edit, "Suppress Sketch 1"; the extrude built from it is then greyed by it (26e, Q3), not red.
   const s = barEdit(doc, { kind: "menu", id: "sketch-2", action: "suppress" });
   assert.equal(s.kind, "edit");
   if (s.kind !== "edit") return;
   assert.equal(s.step, "Suppress Sketch 1");
-  assert.deepEqual(timelineBarItems(s.doc).items.map((i) => [i.suppressed, i.failed]), [[false, false], [true, false], [false, true]]);
+  assert.deepEqual(timelineBarItems(s.doc).items.map((i) => [i.suppressed, i.failed, i.greyed]), [[false, false, null], [true, false, null], [false, false, "Sketch 1"]]);
   const u = barEdit(s.doc, { kind: "menu", id: "sketch-2", action: "unsuppress" });
   assert.deepEqual(u.kind === "edit" && [u.step, timelineBarItems(u.doc).items[2].failed], ["Unsuppress Sketch 1", false]);
   // Move the marker onto the box: place 1, the marker names feature-1, the other two rolled back (greyed, not red).

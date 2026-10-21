@@ -4,3 +4,6 @@
 .timeline-menu.timeline-menu-failed { color: #ff6b6b; }
 /* Step 24f5: a row after the rollback marker greyed, as its item on the bar is. */
 .timeline-menu.timeline-menu-rolled-back { opacity: 0.45; }
+/* Step 26e: a row greyed by a suppressed item it is built on, as its item
+   on the bar is (rows with a warning are kept.css's). */
+.timeline-menu.timeline-menu-greyed { opacity: 0.45; font-style: italic; }
