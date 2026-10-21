@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.26.0 (2026-10-21)
+
+- Step 26a: the test plan and harness for sketching on a face, no app change yet. The model the app will be checked against now knows Ben's Fusion answers for step 26: sketches on an extrude's sides as well as its top and bottom, reading in world coordinates and turning with the face when a corner moves; a body built from a sketch whose face is gone stays where it was and says its source is lost; suppressing a feature greys everything built on it with no warning. 14 new hand-worked cases and 7 deliberately planted bugs, each caught. Fixed in the model while doing it: an outline drawn clockwise gave a negative volume.
+
 ## 0.25.14 (2026-10-21)
 
 - Step 25c4: browser checks of the app with a sketch open: an image dropped, pasted or opened goes to Image and Design comes back with the sketch as it was, a refused file changes nothing, a dropped project replaces the design, split view keeps the sketch drawing, and the shortcut list names the sketch keys (Chromium, Firefox and WebKit; 1280 and 375 px). A second magic-moment journey, sketch to STL in 8 clicks. Step 25 is done. #225
