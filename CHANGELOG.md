@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.25.14 (2026-10-21)
+
+- Fix: random testing no longer reports a far-out curved extrusion as wrongly refused (issue #205). The kernel was right to refuse it: the test's own prediction worked out a nearly whole circle from the size it asked for, but 100 km out the short flat closing it rounds, which made the circle 1.1 mm bigger and pushed it past the modelling range. The prediction now measures the shape as built and checks every arc's reach itself.
+
 ## 0.25.13 (2026-10-21)
 
 - Step 25c2: on a timeline, results in other workspaces go out of date when the marker moves, an item is suppressed or reordered, or an extrude keeps its shape for a deleted sketch, and their notes name the item ("you changed Sketch 2", "you suppressed Extrude 1", "you moved the timeline marker"). Before, moving the marker back left a result built from a rolled-back extrude marked current.
