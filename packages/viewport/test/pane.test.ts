@@ -20,7 +20,7 @@ function fakeScene() {
     showImage: () => void calls.push("scene.showImage"),
     clearImage: () => void calls.push("scene.clearImage"),
     showSketches: (d) => void calls.push(`showSketches ${d.length}`),
-    showPlanes: (p) => void calls.push(`showPlanes ${p.map((x) => x.id).join(",")}`),
+    showPlanes: (p, faces) => void calls.push(`showPlanes ${p.map((x) => x.id).join(",")}${faces ? ` faces ${faces.join(",")}` : ""}`),
     onPick: null,
     onSketchPointer: null,
   };
@@ -35,7 +35,7 @@ function fakeView(name: string, calls: string[]): PaneCamera {
     fit: () => (calls.push(`${name}.fit`), framed),
     setView: (v) => (calls.push(`${name}.setView ${v}`), framed),
     fitSelection: () => (calls.push(`${name}.fitSelection`), null),
-    lookAt: (p) => (calls.push(`${name}.lookAt ${p.normal.join(",")}`), framed),
+    lookAt: (p, side) => (calls.push(`${name}.lookAt ${p.normal.join(",")}${side === undefined ? "" : ` side ${side}`}`), framed),
     showImage: (image) => void calls.push(`${name}.showImage ${image.width}x${image.height}`),
     clearImage: () => void calls.push(`${name}.clearImage`),
   };
@@ -53,6 +53,7 @@ test("camera calls reach the pane's own view; scene calls reach the one viewer",
   left.fit();
   right.fitSelection();
   assert.equal(left.lookAt({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] })?.radius, 4);
+  right.lookAt({ origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, -1); // a bottom face's side (26d) reaches the view
   // The body's framing is the scene's, the same seen from either pane.
   assert.deepEqual(left.bodyFraming(), { centre: [1, 2, 3], radius: 4 });
   assert.deepEqual(right.bodyFraming(), left.bodyFraming());
@@ -61,7 +62,7 @@ test("camera calls reach the pane's own view; scene calls reach the one viewer",
   right.showSelection({ body: false, faces: [2, 5], edges: [] });
   left.showBody({} as never);
   // Never the scene's own camera: a pane must not turn another pane's view.
-  assert.deepEqual(calls, ["right.setView top", "left.fit", "right.fitSelection", "left.lookAt 0,0,1", "setOverlay stl", "clearOverlay stl", "showSelection faces 2,5", "showBody"]);
+  assert.deepEqual(calls, ["right.setView top", "left.fit", "right.fitSelection", "left.lookAt 0,0,1", "right.lookAt 0,0,1 side -1", "setOverlay stl", "clearOverlay stl", "showSelection faces 2,5", "showBody"]);
   assert.ok(!calls.some((c) => c.startsWith("scene.")));
 });
 
@@ -129,7 +130,8 @@ test("sketches and planes reach the one viewer; the sketch pointer follows the s
   const b = pane(fakeView("b", []));
   a.showSketches([]);
   b.showPlanes([{ id: "XY", plane: { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, offered: true }]);
-  assert.deepEqual(calls, ["showSketches 0", "showPlanes XY"]);
+  a.showPlanes([{ id: "XY", plane: { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, 0, 1] }, offered: true }], [0, 4]); // the faces offered with them (26d)
+  assert.deepEqual(calls, ["showSketches 0", "showPlanes XY", "showPlanes XY faces 0,4"]);
   const handlerA = () => {};
   const handlerB = () => {};
   a.onSketchPointer = handlerA;

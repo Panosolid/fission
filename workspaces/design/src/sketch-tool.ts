@@ -107,16 +107,16 @@ export const DEFAULT_GRID = 10;
 /** Whether points snap to the grid until you tick it (sketch feel SF1): off, so points go where you click, as in other CAD sketchers. */
 export const DEFAULT_GRID_SNAP = false;
 
-/** The origin planes the Create sketch prompt draws; only the ground plane until step 26 brings the other two and flat faces. */
-export const ORIGIN_PLANES: readonly { id: SketchPlane; offered: boolean; label: string }[] = [
-  { id: "XY", offered: true, label: "Ground plane (XY)" },
-  { id: "XZ", offered: false, label: "Front plane (XZ)" },
-  { id: "YZ", offered: false, label: "Side plane (YZ)" },
+/** The origin planes the Create sketch prompt draws, every one offered (step 26d), with the flat faces of the bodies on screen (face-pick.ts). */
+export const ORIGIN_PLANES: readonly { id: SketchPlane; label: string }[] = [
+  { id: "XY", label: "Ground plane (XY)" },
+  { id: "XZ", label: "Front plane (XZ)" },
+  { id: "YZ", label: "Side plane (YZ)" },
 ];
 
 /** The origin planes as the viewport draws them for picking. */
 export function originPlanes(): OriginPlane[] {
-  return ORIGIN_PLANES.map((p) => ({ id: p.id, plane: planeOf(p.id), offered: p.offered }));
+  return ORIGIN_PLANES.map((p) => ({ id: p.id, plane: planeOf(p.id), offered: true }));
 }
 
 /** The standard view that looks straight down on a plane: the camera on the side its normal points to. */
@@ -523,7 +523,9 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
  * `circleSegments`), then arcs (`arcSegments`): the one being edited (if
  * any) with its grid, its points (and a first click not yet a point) and
  * the preview. A sketch on a face is drawn where the last rebuild placed
- * it (`placed`, by sketch id; sketch.ts `planeFor`).
+ * it (`placed`, by sketch id; sketch.ts `planeFor`); one on a back or
+ * bottom face says it faces against its frame's normal (`side` −1, 26d),
+ * so Look At looks at it from outside the body.
  */
 export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null, placed?: ReadonlyMap<string, Plane>): SketchDrawing[] {
   // Each sketch's plane from its item, found by id once (security audit S2: a search per sketch took the timeline's length squared).
@@ -531,13 +533,14 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
   for (const f of doc.timeline.features) if (!items.has(f.id)) items.set(f.id, f);
   return doc.sketches.map((s) => {
     const plane: Plane = planeFor(items.get(s.id), s, placed);
+    const side = s.face?.side === -1 ? ({ side: -1 } as const) : {};
     const curves = sketchCurves(s);
     const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
-    if (editing?.tool.sketch !== s.id) return { plane, lines };
+    if (editing?.tool.sketch !== s.id) return { plane, ...side, lines };
     const points: SketchXY[] = s.points.map((p) => [p.x, p.y]);
     const tool = editing.tool;
     for (const at of pendingClicks(tool)) if (!s.points.some((p) => p.x === at[0] && p.y === at[1])) points.push([at[0], at[1]]);
-    return { plane, lines, editing: { grid: editing.grid, gridSnap: editing.gridSnap ?? false, points, preview: previewSegments(doc, tool, editing.pointer) } };
+    return { plane, ...side, lines, editing: { grid: editing.grid, gridSnap: editing.gridSnap ?? false, points, preview: previewSegments(doc, tool, editing.pointer) } };
   });
 }
 

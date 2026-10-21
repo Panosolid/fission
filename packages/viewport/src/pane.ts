@@ -11,7 +11,7 @@ export interface PaneCamera {
   fit(): Framing | null;
   setView(name: ViewName): Framing | null;
   fitSelection(): Framing | null;
-  lookAt(plane: Plane): Framing | null;
+  lookAt(plane: Plane, side?: 1 | -1): Framing | null;
   showImage(image: ImageRep | null): void;
   clearImage(): void;
 }
@@ -42,14 +42,14 @@ export function paneViewports(scene: SharedViewport): (view: PaneCamera) => Shar
       fit: () => view.fit(),
       setView: (name: ViewName) => view.setView(name),
       fitSelection: () => view.fitSelection(),
-      lookAt: (plane: Plane) => view.lookAt(plane),
+      lookAt: (plane: Plane, side?: 1 | -1) => view.lookAt(plane, side),
       showImage: (image: ImageRep | null) => view.showImage(image),
       clearImage: () => view.clearImage(),
       setOverlay: (overlay: AnalysisOverlay) => scene.setOverlay(overlay),
       clearOverlay: (id: string) => scene.clearOverlay(id),
       showSelection: (highlight: ViewportHighlight) => scene.showSelection(highlight),
       showSketches: (drawings: readonly SketchDrawing[]) => scene.showSketches(drawings),
-      showPlanes: (planes: readonly OriginPlane[]) => scene.showPlanes(planes),
+      showPlanes: (planes: readonly OriginPlane[], faces?: readonly number[]) => scene.showPlanes(planes, faces),
       get onSketchPointer() {
         return sketchers.get(key) ?? null;
       },

@@ -28,7 +28,8 @@ import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebu
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
-import { addSketch, askOutline, outlineSourceOf, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane } from "./sketch.ts";
+import { addFaceSketch, addSketch, askOutline, outlineSourceOf, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane, sketchSide } from "./sketch.ts";
+import { sketchableFaces, sketchSpot, type SketchSpot } from "./face-pick.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, withLocks, type Locks } from "./typed-entry.ts";
 import { typedBoxes } from "./typed-boxes.ts";
@@ -628,6 +629,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const outlines = [...doc.profiles.map((p) => p.id), ...doc.sketches.flatMap((s) => (s.curves.length > 0 ? [s.id] : []))];
       const { kept, dropped, shared } = survivors(ctx.selection.items, scene, outlines);
       lastScene = scene;
+      if (mode.kind === "pick") viewport.showPlanes(originPlanes(), sketchableFaces(scene)); // the faces offered are this scene's
       const part = partFeature(doc);
       partShown = scene.bodies.find((b) => b.feature === part?.id) ?? (failure === undefined ? null : partShown);
       note = droppedNote(dropped, shared, selectedSketches);
@@ -729,20 +731,42 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     markStale();
   }
 
-  /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
+  /** Create sketch: the origin planes appear at the origin, the flat faces of the bodies on screen light under the pointer (26d), and the panel asks for one. */
   function startSketch() {
     leaveExtrude();
     leaveEdit();
     if (mode.kind === "edit") leaveSketch();
     mode = { kind: "pick" };
-    viewport.showPlanes(originPlanes());
+    viewport.showPlanes(originPlanes(), sketchableFaces(lastScene));
     sketchBox.showPick();
   }
 
   /** A plane picked: the new sketch (one undo step), looked at straight down, ready to draw on. */
   function pickPlane(plane: SketchPlane) {
-    if (mode.kind !== "pick" || !ORIGIN_PLANES.some((p) => p.id === plane && p.offered)) return;
-    const made = addSketch(designDoc(), plane);
+    if (mode.kind !== "pick" || !ORIGIN_PLANES.some((p) => p.id === plane)) return;
+    startNewSketch(addSketch(designDoc(), plane));
+  }
+
+  /**
+   * A face picked (26d, face-pick.ts): a flat one gets the new sketch on it,
+   * drawn with the frame its face gives it (rule 8) and looked at from
+   * outside the body; a curved one, or one with no name of its own, is
+   * refused in the panel's words and the planes stay offered.
+   */
+  function pickFace(spot: SketchSpot & { kind: "face" | "refused" }) {
+    if (mode.kind !== "pick") return;
+    if (spot.kind === "refused") return sketchBox.showError(spot.message);
+    let made: ReturnType<typeof addFaceSketch>;
+    try {
+      made = addFaceSketch(designDoc(), spot.face, spot.drawn);
+    } catch (e) {
+      return sketchBox.showError(e instanceof Error ? e.message : String(e));
+    }
+    startNewSketch(made);
+  }
+
+  /** A new sketch made on a plane or a face: recorded (one undo step), opened with the line tool, looked at square on. */
+  function startNewSketch(made: { doc: DesignDocument; id: string }) {
     viewport.showPlanes([]);
     applySketchEdit(made.doc, SKETCH_STEPS.create, made.id);
     editingSketch = { id: made.id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID), tool: "line" };
@@ -768,10 +792,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     lookAtSketch();
   }
 
-  /** Look At (SF2): the camera square onto the edited sketch's plane, framing the body and what is drawn. */
+  /** Look At (SF2): the camera square onto the edited sketch's plane, framing the body and what is drawn; from outside the body on a back or bottom face (26d). */
   function lookAtSketch() {
     if (mode.kind !== "edit" || !editingSketch) return;
-    viewport.lookAt(sketchPlane(designDoc(), editingSketch.id, placedNow));
+    const doc = designDoc();
+    viewport.lookAt(sketchPlane(doc, editingSketch.id, placedNow), sketchSide(doc, editingSketch.id));
   }
 
   /** Edits the sketch named in editingSketch with its tool, nothing clicked yet. */
@@ -1020,13 +1045,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const r = rounding(at, grid, gridSnap, pixel);
     return r.op === "snap_to_grid" ? kernel.call("snap_to_grid", ...r.args) : kernel.call("place_freely", ...r.args);
   };
-  const snapMove = latestOnly(roundPointer);
+  /** The pointer's moves counted, the pointer leaving the view among them: a move's rounding answered after a later move is dropped, so it never shows a snap where the pointer was. */
+  let moves = 0;
   /** Clicks are handled one after another, each on the document the last one left. */
   let clicks = Promise.resolve();
   const onSketchPointer = (pointer: SketchPointer) => {
     if (mode.kind !== "edit") return;
     const at = pointer.at;
     if (pointer.kind === "move") {
+      const move = ++moves;
       if (!at) {
         mode.pointer = mode.snap = null;
         return drawSketches();
@@ -1034,8 +1061,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // The centre arc follows which way the pointer goes round its centre, from every move (a reply the kernel drops as stale must not lose a turn).
       mode.tool = hoverTool(mode.tool, at);
       // A hover off the modelling range just doesn't move the preview.
-      void snapMove(at, mode.grid, pointer.pixel).then(({ current, value }) => {
-        if (!current || mode.kind !== "edit") return;
+      void roundPointer(at, mode.grid, pointer.pixel).then((value) => {
+        if (move !== moves || mode.kind !== "edit") return;
         mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel);
         mode.pointer = mode.snap.at;
         mode.pixel = pointer.pixel;
@@ -1076,7 +1103,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       sketchBox.showError(done.note ?? "");
       if (done.tool !== mode.tool) unlock();
       mode.tool = done.tool;
-      // The pointer is still there: what it snaps to now, with the new point and the tool's next step.
+      // The pointer is still there: what it snaps to now, with the new point and the tool's next step. (A finger has
+      // left the view by now, and this keeps the hint and the boxes by the tap; sketch-hover.journey.ts.)
       mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel);
       mode.pointer = mode.snap.at;
       mode.pixel = pointer.pixel;
@@ -1124,8 +1152,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   const onPick: SharedViewport["onPick"] = (pick) => {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
-    // Choosing a plane for Create sketch: only an offered plane counts.
-    if (mode.kind === "pick") return void (pick.plane && pickPlane(pick.plane as SketchPlane));
+    // Choosing where Create sketch puts the sketch: an origin plane, or a flat face of a body on screen (26d).
+    if (mode.kind === "pick") {
+      const spot = sketchSpot(pick, lastScene);
+      if (spot?.kind === "plane") pickPlane(spot.plane);
+      else if (spot) pickFace(spot);
+      return;
+    }
     const c = pickChange(pick, lastScene);
     if (c.change === "set") ctx.selection.set([c.item]);
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
@@ -1138,7 +1171,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.onSketchPointer = onSketchPointer;
     viewport.element.addEventListener("pointermove", onViewportMove);
     viewport.element.addEventListener("pointerdown", onViewportMove); // a tap moves no pointer first
-    if (mode.kind === "pick") viewport.showPlanes(originPlanes());
+    if (mode.kind === "pick") viewport.showPlanes(originPlanes(), sketchableFaces(lastScene));
     drawSketches();
     stopWatching = ctx.selection.onChange(() => {
       // The user's next change of selection retires the note about dropped items.

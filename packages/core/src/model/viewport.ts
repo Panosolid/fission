@@ -24,7 +24,12 @@ export interface ViewportPick {
   face: number | null;
   /** Absent or null when no edge was picked. */
   edge?: number | null;
-  /** The offered origin plane clicked (showPlanes), by id; absent or null when none was. A plane wins over the body behind it. */
+  /**
+   * The offered origin plane clicked (showPlanes), by id; absent or null
+   * when none was. While planes are offered a click picks the body's face
+   * under the pointer whenever there is one (never an edge), else the
+   * nearest offered plane: the planes are drawn behind the body (step 26d).
+   */
   plane?: string | null;
   shift: boolean;
 }
@@ -46,6 +51,13 @@ export type SketchXY = readonly [number, number];
  */
 export interface SketchDrawing {
   plane: Plane;
+  /**
+   * Which way the sketch faces against its plane's normal (step 26d): −1
+   * for a sketch on a back or bottom face, whose frame keeps the world's
+   * axes (so its normal points into the body) and which is looked at from
+   * the other side; absent means +1.
+   */
+  side?: 1 | -1;
   lines: readonly (readonly [SketchXY, SketchXY])[];
   editing?: { grid: number; gridSnap?: boolean; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[]; snap?: { label: string; marks: readonly (readonly [SketchXY, SketchXY])[] } };
 }
@@ -101,8 +113,17 @@ export interface SharedViewport {
   setView(name: ViewName): Framing | null;
   /** Frames the selection (as last shown) from the current direction; null, camera untouched, when nothing is selected. */
   fitSelection(): Framing | null;
-  /** Look At (sketch feel SF2): the camera square onto the plane, its y axis up on screen, framing the body and the edited sketch (or 50 mm round the plane's origin when there is neither); returns what it framed. */
-  lookAt(plane: Plane): Framing | null;
+  /**
+   * Look At (sketch feel SF2): the camera square onto the plane, its y axis
+   * up on screen, framing the body and the edited sketch (or 50 mm round
+   * the plane's origin when there is neither); returns what it framed. The
+   * camera is on the side the normal points to, or the other side for
+   * `side` −1 (a sketch on a back or bottom face, step 26d), with up on
+   * screen then the plane's y or −y, whichever the standard view looking
+   * that way has nearer its up (a bottom face is seen as the bottom view
+   * sees it, the front at the top).
+   */
+  lookAt(plane: Plane, side?: 1 | -1): Framing | null;
   /** Paints an analysis overlay on the current body (replaces one with the same id). */
   setOverlay(overlay: AnalysisOverlay): void;
   clearOverlay(id: string): void;
@@ -116,8 +137,14 @@ export interface SharedViewport {
   onPick: ((pick: ViewportPick) => void) | null;
   /** Draws these sketches (replacing the ones drawn before); an empty list draws none. While one is being edited the ground grid gives way to its own. */
   showSketches(drawings: readonly SketchDrawing[]): void;
-  /** Draws the origin planes small at the origin for picking (a click on an offered one picks it); an empty list takes them away. */
-  showPlanes(planes: readonly OriginPlane[]): void;
+  /**
+   * Draws the origin planes small at the origin for picking (a click on an
+   * offered one picks it); an empty list takes them away. `faces` (step
+   * 26d) are the body's faces that can be picked as well (by index, as
+   * picks give them): while planes are shown, the pointer lights only an
+   * offered plane or one of these faces, never an edge.
+   */
+  showPlanes(planes: readonly OriginPlane[], faces?: readonly number[]): void;
   /**
    * While set and a sketch is being edited (showSketches), clicks and
    * hovers over the viewport come here instead of onPick, with where they

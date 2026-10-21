@@ -42,6 +42,11 @@ export function sketchPlane(doc: DesignDocument, id: string, placed?: ReadonlyMa
   return planeFor(doc.timeline.features.find((f) => f.id === id), doc.sketches.find((s) => s.id === id), placed);
 }
 
+/** Which way sketch `id` faces against its plane's normal: −1 on a back or bottom face (face-sketch.ts; it never changes after it is drawn), else +1. */
+export function sketchSide(doc: DesignDocument, id: string): 1 | -1 {
+  return doc.sketches.find((s) => s.id === id)?.face?.side === -1 ? -1 : 1;
+}
+
 /** `sketchPlane` from the sketch's item and content, found already (sketch-tool.ts finds every sketch's at once). */
 export function planeFor(item: Feature | undefined, content: Sketch | undefined, placed?: ReadonlyMap<string, Plane>): Plane {
   const plane = item?.intent.parameters.plane;
