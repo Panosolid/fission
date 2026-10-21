@@ -423,11 +423,23 @@ const editedItem = (op: ConcreteOp): string | null =>
 const MAX_REFS = 8;
 
 /**
+ * Held references checked against the model, for the naming success rate
+ * (25b4, packages/testing/baseline/naming.ts): with a tally, a reference
+ * resolved otherwise than the model says (lost, moved, or found on two
+ * faces) is counted as missed instead of failing the session.
+ */
+export interface RefTally {
+  checked: number;
+  missed: number;
+}
+
+/**
  * Runs the steps on a fresh model and the subject, checking every step;
  * throws a TimelineFailure at the first check that fails. `edgeClose`
- * compares edges with the model's (exact by default).
+ * compares edges with the model's (exact by default); `tally` counts the
+ * reference checks instead of failing on them (RefTally).
  */
-export async function runSession(subject: TimelineSubject, steps: readonly SessionOp[], edgeClose?: EdgeClose): Promise<SessionCounts> {
+export async function runSession(subject: TimelineSubject, steps: readonly SessionOp[], edgeClose?: EdgeClose, tally?: RefTally): Promise<SessionCounts> {
   const model: TimelineModel = createModel();
   const ids = new Map<string, string>(); // model id → subject id
   for (const { op, ids: made } of subject.initial ?? []) {
@@ -538,7 +550,10 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
       const name = nameTo(ref, to);
       const found = await subject.resolve(name);
       // The model's names are unique (checked above), so a name the subject finds on two faces is always wrong here.
-      if (found === "shared") fail("a reference resolved to more than one face", `${faceKey(name)} matched two or more faces, model ${there ? "one" : "none"}`);
+      if (tally) {
+        tally.checked++;
+        if (found === "shared" || (there ? found === null || !sameName(found, name) : found !== null)) tally.missed++;
+      } else if (found === "shared") fail("a reference resolved to more than one face", `${faceKey(name)} matched two or more faces, model ${there ? "one" : "none"}`);
       else if (there && (found === null || !sameName(found, name))) fail("a reference was lost", `${faceKey(name)} resolved to ${found ? faceKey(found) : "nothing"}`);
       else if (!there && found !== null) fail("a broken reference resolved to another face", `${faceKey(name)} resolved to ${faceKey(found)}`);
       const owner = expected.results[ref.feature];

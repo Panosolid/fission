@@ -128,5 +128,25 @@ class TheRealBaseline(unittest.TestCase):
         self.assertEqual(judged(51, 1)[f"{op}.kernel_calls"], "fail")
 
 
+    def test_the_naming_success_rate_fails_on_any_miss(self):
+        # Step 25b4: the naming sessions check 4,466 held references and miss
+        # none, so miss_percent is 0 (a 100% success rate). One miss is
+        # 1 / 4466 = 0.0224%, the smallest rise there can be: it fails, as
+        # does losing every fifth reference (FISSION_BASELINE_FAULT=lose-refs
+        # measured 14.8%). The count checked is shown, never judged.
+        with open(baseline.BASELINE) as f:
+            b = json.load(f)
+        m = "app.naming_sessions.miss_percent"
+        self.assertEqual(b["metrics"][m], 0)
+        self.assertEqual(b["margins"]["miss_percent"]["fail"], 0)
+
+        def judged(new):
+            return {k: v for k, _, _, _, v in compare({"margins": b["margins"], "metrics": {m: 0}}, {m: new, "app.naming_sessions.references": 4466})}
+
+        self.assertEqual(judged(0), {m: "ok", "app.naming_sessions.references": "info"})
+        self.assertEqual(judged(round(1 / 4466 * 100, 4))[m], "fail")
+        self.assertEqual(judged(14.8007)[m], "fail")
+
+
 if __name__ == "__main__":
     unittest.main()
