@@ -63,6 +63,8 @@ import {
 /** One random step. `pick` and `to` are fractions in [0, 1), resolved against the document when the step runs. */
 export type SessionOp =
   | { op: "add-sketch"; shape: ModelShape }
+  /** 26e: a sketch on the `pick`th face a sketch can go on (a box's or cylinder's top, an extrude's end, of a body built before where it goes in). */
+  | { op: "add-face-sketch"; pick: number; shape: ModelShape }
   | { op: "add-extrude"; pick: number; distance: number }
   | { op: "add-preset"; kind: PresetKind; sizes: number[] }
   | { op: "set-size"; pick: number; value: number }
@@ -176,6 +178,7 @@ const WEIGHTS: [SessionOp["op"], number][] = [
   ["redo", 6],
   ["save-open", 2],
   ["hold-ref", 8],
+  ["add-face-sketch", 8],
 ];
 const TOTAL = WEIGHTS.reduce((s, [, w]) => s + w, 0);
 
@@ -186,6 +189,8 @@ export function randomOp(r: SeededRandom): SessionOp {
   switch (kind) {
     case "add-sketch":
       return { op: kind, shape: randomShape(r) };
+    case "add-face-sketch":
+      return { op: kind, pick: r.next(), shape: randomShape(r) };
     case "add-extrude":
       return { op: kind, pick: r.next(), distance: int(r, 1, 50) };
     case "add-preset": {
@@ -226,6 +231,17 @@ export function resolveStep(doc: ModelDoc, step: SessionOp): Resolved {
   switch (step.op) {
     case "add-sketch":
       return edit({ op: "add-sketch", shape: step.shape });
+    case "add-face-sketch": {
+      // As in the app: a flat face of a body shown, before where the new item goes (26e: the faces facing +Z).
+      const built = rebuild(doc);
+      const before = new Set(doc.items.slice(0, insertAt(doc)).map((i) => i.id));
+      const faces = built.order.flatMap((id) => {
+        const res = built.results[id];
+        return before.has(id) && res.status === "built" && res.body ? res.body.faces.filter((f) => f.name.role === "top" || f.name.role === "end").map((f) => f.name) : [];
+      });
+      const face = choose(faces, step.pick);
+      return edit(face && { op: "add-face-sketch", shape: step.shape, face });
+    }
     case "add-preset":
       return edit({ op: "add-preset", kind: step.kind, sizes: step.sizes });
     case "add-extrude": {
@@ -316,9 +332,14 @@ const exactEdges: EdgeClose = (a, b) => close(a.length, b.length) && a.centroid.
 function resultDiff(a: ItemResult, b: ItemResult, edgeClose: EdgeClose = exactEdges): string | null {
   if (a.status !== b.status) return `${a.status} vs ${b.status}`;
   if (a.status === "failed" && b.status === "failed" && (a.cause !== b.cause || a.input !== b.input)) return `failed (${a.cause} ${a.input}) vs (${b.cause} ${b.input})`;
+  if (a.status === "greyed" && b.status === "greyed" && a.by !== b.by) return `greyed by ${a.by} vs ${b.by}`;
   if (a.status !== "built" || b.status !== "built") return null;
   const warned = (r: typeof a) => (r.warning ? `kept, warning ${r.warning.cause} ${r.warning.input}` : "no warning");
   if (warned(a) !== warned(b)) return `${warned(a)} vs ${warned(b)}`;
+  // 26e: where a face sketch lies, whether it is held, and an extrude's lost source.
+  const placed = (r: typeof a) => (r.lift === undefined ? "on XY" : `at z ${r.lift}${r.plane ? `, ${r.plane}` : ""}`);
+  if ((a.lift === undefined) !== (b.lift === undefined) || a.plane !== b.plane || (a.lift !== undefined && !close(a.lift, b.lift!))) return `${placed(a)} vs ${placed(b)}`;
+  if (a.source !== b.source) return `source lost ${a.source ?? "no"} vs ${b.source ?? "no"}`;
   if (!a.body || !b.body) return a.body || b.body ? `a body vs ${a.body ? "none" : "a body"}` : null;
   if (!close(a.body.volume, b.body.volume)) return `volume ${a.body.volume} vs ${b.body.volume}`;
   const keysA = a.body.faces.map((f) => faceKey(f.name)).sort();
@@ -355,30 +376,35 @@ const nameTo = (n: FaceName, to: (id: string) => string): FaceName =>
 
 function translateRebuild(r: Rebuild, to: (id: string) => string): Rebuild {
   const results: Record<string, ItemResult> = {};
-  for (const id of r.order) {
-    const res = r.results[id];
-    results[to(id)] =
-      res.status === "failed"
-        ? { ...res, input: res.input === undefined ? undefined : to(res.input) }
-        : res.status === "built" && res.body
-          ? {
-              status: "built",
-              ...(res.warning && { warning: { cause: res.warning.cause, input: to(res.warning.input) } }),
-              body: {
-                volume: res.body.volume,
-                faces: res.body.faces.map((f) => ({ ...f, name: nameTo(f.name, to) })),
-                edges: res.body.edges.map((e) => ({ ...e, name: edgeName(nameTo(e.name.faces[0], to), nameTo(e.name.faces[1], to), e.name.ordered) })),
-              },
-            }
-          : res;
-  }
+  for (const id of r.order) results[to(id)] = translateResult(r.results[id], to);
   return { order: r.order.map(to), results };
+}
+
+function translateResult(res: ItemResult, to: (id: string) => string): ItemResult {
+  if (res.status === "failed") return { ...res, input: res.input === undefined ? undefined : to(res.input) };
+  if (res.status === "greyed") return { status: "greyed", by: to(res.by) };
+  if (res.status !== "built") return res;
+  const { warning, source, body, ...rest } = res;
+  return {
+    ...rest,
+    ...(warning && { warning: { cause: warning.cause, input: to(warning.input) } }),
+    ...(source !== undefined && { source: to(source) }),
+    ...(body && {
+      body: {
+        volume: body.volume,
+        faces: body.faces.map((f) => ({ ...f, name: nameTo(f.name, to) })),
+        edges: body.edges.map((e) => ({ ...e, name: edgeName(nameTo(e.name.faces[0], to), nameTo(e.name.faces[1], to), e.name.ordered) })),
+      },
+    }),
+  };
 }
 
 function translateOp(op: ConcreteOp, to: (id: string) => string): ConcreteOp {
   switch (op.op) {
     case "add-extrude":
       return { ...op, sketch: to(op.sketch) };
+    case "add-face-sketch":
+      return { ...op, face: nameTo(op.face, to) };
     case "set-size":
     case "delete-item":
     case "reorder":
@@ -575,6 +601,9 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
       count(`status:${r.status}`);
       if (r.status === "failed") count(`cause:${r.cause}`);
       if (r.status === "built" && r.warning) count(`warning:${r.warning.cause}`);
+      // 26e: sketches on a face followed, held, and what is built from a held one.
+      if (r.status === "built" && r.lift !== undefined) count(r.plane ? `plane:${r.plane}` : "plane:followed");
+      if (r.status === "built" && r.source !== undefined) count("source-lost");
     }
     prev = now;
   }

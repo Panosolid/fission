@@ -13,6 +13,10 @@
 // the curves at fault come from the kernel's `kind` and `inputs` (and
 // sketch_outline's `invalid`), never from its words.
 //
+// Step 26e: suppressing an item greys everything built on it, all the way
+// down, with no warning (Q3): an extrude of a suppressed sketch is greyed
+// too, where until 26e it failed.
+//
 // Step 26c: a sketch item's result says where it lies (`placement`); a
 // sketch on a face is placed on its face as built just before it (rule 8,
 // face-sketch.ts), or held at its last placement with a plane warning when
@@ -57,16 +61,16 @@ export type FeatureResult =
    */
   | { status: "built"; body?: BodyHandle; spec?: BodySpec; curves?: CurveIds; warning?: KeptWarning; placement?: SketchPlacement; plane?: PlaneWarning; source?: PlaneWarning & { sketch: string } }
   | { status: "suppressed" }
-  /** Built on a suppressed feature (`by`), through a sketch on its face (Q3): off, with no warning, until it is unsuppressed. */
+  /** Built on a suppressed item (`by`), directly or through others (Q3; from 26e an extrude of a suppressed sketch too): off, with no warning, until it is unsuppressed. */
   | { status: "greyed"; by: string }
   | { status: "rolled-back" }
   /**
-   * `cause` the model's (an input lost, suppressed or failed) or "error":
+   * `cause` the model's (an input lost or failed) or "error":
    * the kernel refused something that isn't the sketch (a distance) or
    * isn't built yet (a sketch on another plane). `curves`: the sketch
    * curves at fault, when the kernel named them.
    */
-  | { status: "failed"; cause: LostCause | "suppressed-input" | "failed-input" | "error"; input?: string; message: string; curves?: string[] };
+  | { status: "failed"; cause: LostCause | "failed-input" | "error"; input?: string; message: string; curves?: string[] };
 
 export interface TimelineBuild {
   order: string[];
@@ -433,7 +437,8 @@ async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string
     const sketchId = f.intent.parameters.sketch as string;
     const item = index.items.get(sketchId);
     const input = done[sketchId];
-    if (item !== undefined && input?.status === "suppressed") return { status: "failed", cause: "suppressed-input", input: sketchId, message: `${item.provenance.self.label} is suppressed` };
+    // Q3, unified in 26e: built on a suppressed sketch, or on one greyed, it is greyed too, with no warning.
+    if (item !== undefined && input?.status === "suppressed") return { status: "greyed", by: sketchId };
     if (item !== undefined && input?.status === "greyed") return { status: "greyed", by: input.by };
     if (item !== undefined && input?.status !== "built") return { status: "failed", cause: "failed-input", input: sketchId, message: `${item.provenance.self.label} is not built` };
     // A face sketch's placement is the rebuild's; an origin plane's, extrudeSpec's own.
