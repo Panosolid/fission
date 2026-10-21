@@ -2,6 +2,7 @@
 export { outline, type ProfileKind, type ShapeKind, type Loop, type Outline } from "./profiles.ts";
 export { designWorkspace } from "./workspace.ts";
 export { DESIGN_COMMANDS, documentFor, SHAPES } from "./commands.ts";
+export { AI_TIMELINE_ITEMS, designAIView, type PanelSizes } from "./ai-view.ts";
 export { bodyFeatures, bodyRows, browserTree, rowReference, rowReferences, type BrowserNode } from "./browser.ts";
 export { parameterRows, propertiesPanel, SIZE_KEYS, type ParameterRow, type Verb, type PropertiesPanel, type SizeKey } from "./properties.ts";
 export { toolbarGroups, type ToolButton, type ToolGroup } from "./toolbar.ts";

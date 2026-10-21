@@ -22,13 +22,19 @@ function describe(name: string, p: ParamSpec): string {
   return `  ${name}: ${p.description}${notes ? ` (${notes})` : ""}`;
 }
 
-/** The instructions for one request about a project made by `setup` (empty: a new project), offering `specs`. */
-export function systemPrompt(setup: readonly Command[], specs: readonly CommandSpec[]): string {
+/**
+ * The instructions for one request about a project made by `setup` (empty:
+ * a new project), offering `specs`. `notes` are the workspace's own lines
+ * about what is open (`AIView.notes`: Design's timeline, 25c3); with notes
+ * and no setup, no command makes what is open (an extruded sketch).
+ */
+export function systemPrompt(setup: readonly Command[], specs: readonly CommandSpec[], notes: readonly string[] = []): string {
   return [
     "You edit a CAD part in Panosolid by answering with commands.",
     "The commands you can use:",
     ...specs.flatMap((s) => [`- ${s.op}: ${s.summary}`, ...Object.entries(s.params).map(([name, p]) => describe(name, p))]),
-    `The part now is made by these commands: ${JSON.stringify(setup)}`,
+    setup.length === 0 && notes.length > 0 ? "No command you can use makes the part as it is now." : `The part now is made by these commands: ${JSON.stringify(setup)}`,
+    ...notes,
     UNIT_RULE,
     RADIUS_RULE,
     CUBE_RULE,

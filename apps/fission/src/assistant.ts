@@ -40,7 +40,7 @@ import {
   type Preview,
   type ProviderSettings,
 } from "@fission/ai";
-import { projectToJson, type Command, type History, type MountedWorkspace, type Project, type WorkspaceId } from "@fission/core";
+import { projectToJson, type AIView, type Command, type History, type MountedWorkspace, type Project, type WorkspaceId } from "@fission/core";
 import { DESIGN_COMMANDS, partOf, type DesignDocument } from "@fission/design";
 
 export interface AssistantHost {
@@ -107,9 +107,33 @@ export function partCommand(project: Project): Command[] {
   }
 }
 
+/** What Design tells the assistant (25c3), or, with no aiView, the part as its command and nothing else. */
+export function viewOf(host: Pick<AssistantHost, "project" | "design">): AIView {
+  return host.design()?.aiView?.() ?? { setup: partCommand(host.project()), keeps: {}, notes: [], adds: null };
+}
+
 /** The sizes a shape uses: a sphere's depth and height, and a cylinder's depth, are ignored. */
 const USED: Record<string, string[]> = { sphere: ["shape", "width"], cylinder: ["shape", "width", "height"] };
-const used = (shape: unknown, key: string) => (USED[String(shape)] ?? ["shape", "width", "depth", "height"]).includes(key);
+const usedBy = (shape: unknown) => USED[String(shape)] ?? ["shape", "width", "depth", "height"];
+
+/**
+ * The part before and after accepted `commands`, as Design's run makes it:
+ * each command's sizes over the part's, and a size none names keeps the
+ * panel's (`keeps`). When Accept adds a body there is no part before it.
+ */
+export function partAfter(view: AIView, commands: readonly Command[]): { before: Record<string, unknown>; after: Record<string, unknown> } {
+  const before: Record<string, unknown> = view.adds === null ? { ...(view.setup[0] ?? {}) } : {};
+  const after: Record<string, unknown> = { ...view.keeps, ...(view.setup[0] ?? {}) };
+  for (const c of commands) Object.assign(after, c);
+  delete before.op;
+  delete after.op;
+  return { before, after };
+}
+
+/** The preview's rows: each size the shape after uses that differs from before ("—" when there was none), in the panel's order. */
+export function previewRows(before: Record<string, unknown>, after: Record<string, unknown>): { parameter: string; before: unknown; after: unknown }[] {
+  return usedBy(after.shape).flatMap((parameter) => (before[parameter] === after[parameter] ? [] : [{ parameter, before: before[parameter], after: after[parameter] }]));
+}
 
 /** "box 50 × 30 × 20 mm", "cylinder ⌀25 × 60 mm", "sphere ⌀30 mm": the undo step's name. */
 export function describePart(c: Record<string, unknown>): string {
@@ -521,23 +545,22 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
     say("Asking…");
     try {
       if (s.kind === "in-browser" && !(await confirmDownload(s))) return say("Nothing was downloaded or sent.");
-      const setup = partCommand(host.project());
-      const answer = await askForCommands(provider(s), { system: systemPrompt(setup, AI_COMMANDS), messages: [{ role: "user", content: words }] }, AI_COMMANDS);
+      // What Design says about itself (25c3): its timeline, the sizes a set_part keeps, and whether Accept changes the part or adds a body.
+      const view = viewOf(host);
+      const answer = await askForCommands(provider(s), { system: systemPrompt(view.setup, AI_COMMANDS, view.notes), messages: [{ role: "user", content: words }] }, AI_COMMANDS);
       if (!answer.ok) return say(answer.error, true);
       const design = host.design();
       if (!design?.run) return say("Design isn't open, so nothing was changed.", true);
-      // The part the commands would make: the current one with each command's sizes over it.
-      const after: Record<string, unknown> = { ...(setup[0] ?? {}) };
-      for (const c of answer.commands) Object.assign(after, c);
+      const { before, after } = partAfter(view, answer.commands);
       const action = proposeAction(answer.commands, {
-        label: describePart(after),
+        label: `${view.adds === null ? "" : "new "}${describePart(after)}`,
         history: host.history,
         run: (c) => void design.run!(c),
-        current: () => ({ ...(setup[0] ?? {}) }),
+        current: () => ({ ...before }),
         state: () => projectToJson(host.project()),
       });
       pending = action;
-      showPreview(action, await action.preview(), after, answer.attempts);
+      showPreview(action, await action.preview(), before, after, view.adds, answer.attempts);
     } catch (e) {
       say((e as Error).message, true);
     } finally {
@@ -545,18 +568,19 @@ export function createAssistant(el: HTMLElement, host: AssistantHost, status: HT
     }
   });
 
-  function showPreview(action: AIAction, preview: Preview, after: Record<string, unknown>, attempts: 1 | 2) {
+  function showPreview(action: AIAction, preview: Preview, before: Record<string, unknown>, after: Record<string, unknown>, adds: string | null, attempts: 1 | 2) {
     const box = document.createElement("div");
     box.id = "ai-preview";
     box.className = "ai-preview";
-    const rows = preview.parameterChanges.filter((c) => used(after.shape, c.parameter));
+    const rows = previewRows(before, after);
     box.innerHTML = `<p class="ai-label"></p>
       <table>${rows.map((c) => `<tr data-param="${escape(c.parameter)}"><th>${escape(c.parameter)}</th><td>${escape(String(c.before ?? "—"))}</td><td>→</td><td>${escape(String(c.after))}</td></tr>`).join("")}</table>
       <p class="ai-note"></p>
       <details><summary>Commands</summary><pre></pre></details>
       <button id="ai-accept" type="button">Accept</button> <button id="ai-reject" type="button">Reject</button>`;
     box.querySelector(".ai-label")!.textContent = rows.length ? `${preview.label}` : "No change: the part is already like that.";
-    box.querySelector(".ai-note")!.textContent = `Nothing has changed yet.${attempts === 2 ? " The first answer couldn't be used; this is the second." : ""}`;
+    const added = adds === null ? "" : ` Accept adds ${adds}; nothing already in the timeline changes.`;
+    box.querySelector(".ai-note")!.textContent = `Nothing has changed yet.${added}${attempts === 2 ? " The first answer couldn't be used; this is the second." : ""}`;
     box.querySelector("pre")!.textContent = JSON.stringify(action.commands, null, 2);
     (box.querySelector("#ai-accept") as HTMLButtonElement).disabled = rows.length === 0;
     result.replaceChildren(box);
