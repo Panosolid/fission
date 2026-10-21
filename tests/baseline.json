@@ -5,6 +5,10 @@
     "Design: shape to STL": {
       "clicks": 3,
       "slowestMs": 1230
+    },
+    "Design: sketch to STL": {
+      "clicks": 8,
+      "slowestMs": 9700
     }
   },
   "margins": {
