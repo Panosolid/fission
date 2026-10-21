@@ -106,13 +106,19 @@ async function lineNear(page, img, p) {
 }
 /**
  * Clears what the pointer leaves drawn (a tap leaves the snap marker and
- * its guides where it landed): the mouse onto the canvas's corner and off
- * the page's corner, then no snap or preview shown, and two frames so the
- * canvas shows it (as sketch-pixels.mjs waits).
+ * its guides where it landed): the mouse onto the canvas and off it to
+ * the page's corner (the canvas hears it leave), then no snap or preview
+ * shown, and two frames so the canvas shows it (as sketch-pixels.mjs
+ * waits).
  */
 async function pointerAway(page) {
+  // The canvas's middle (its corners are under the View buttons and the view cube at 375 px), checked to be the canvas.
   const box = await canvasBox(page);
-  await page.mouse.move(box.x + 2, box.y + box.height - 2);
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  const on = await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.tagName ?? "nothing", [x, y]);
+  if (on !== "CANVAS") throw new Error(`the canvas's middle is under ${on}`);
+  await page.mouse.move(x, y);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   await page.mouse.move(0, 0);
   await shown(page, "sketchSnap", "");
   await shown(page, "sketchPreview", "");
