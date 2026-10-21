@@ -78,8 +78,8 @@ export const PLANTS: Record<ModelFault, Plant> = {
       },
     ],
     run: ["timeline", "history"],
-    caught: "history-fuzz",
-    why: "the timeline sessions only see a reused id when the newest id is deleted and then a new one taken; in Design points, extrudes and presets take ids too, so in 12 × 150 steps the newest is rarely a curve that gets deleted. history-fuzz deletes and draws on one sketch for 4,000 steps and catches it",
+    caught: "a new id is already in use",
+    why: "the timeline sessions only see a reused id when the newest id is deleted and then a new one taken; in Design points, extrudes and presets take ids too, so in 12 × 150 steps the newest is rarely a curve that gets deleted. history-fuzz deletes and draws on one sketch for 4,000 steps and catches it. From 26e (face sketches in the sessions' random steps) the timeline sessions reach a reused id first and their fresh-id check catches it",
   },
   "side-names-by-list": {
     what: "outlineCurves names a side by its place in the outline instead of the curve its piece came from",
@@ -91,8 +91,8 @@ export const PLANTS: Record<ModelFault, Plant> = {
     what: "BodyCache keys an extrude's body by its distance alone, so an edit to its sketch doesn't reach it",
     edits: [{ file: REBUILD, find: "    const key = JSON.stringify(spec);", replace: '    const key = JSON.stringify("extrude" in spec ? spec.extrude.distance : spec);' }],
     run: ["timeline"],
-    caught: "the rebuild differs from the model",
-    why: "the session compares with the model before it rebuilds from scratch, and the stale body is wrong against both",
+    caught: "the rebuild differs from a rebuild from scratch",
+    why: "the stale body is wrong against both the model and a rebuild from scratch; with 26e's random steps the first session to meet it fails the from-scratch check first (recorded from planted/run.ts, 2026-10-22)",
   },
   "cascade-delete": {
     what: "deleteItem also deletes the items built from it",
@@ -151,8 +151,8 @@ export const PLANTS: Record<ModelFault, Plant> = {
       },
     ],
     run: ["timeline"],
-    caught: "the rebuild differs from the model",
-    why: "the session compares the first rebuild with the model before it rebuilds a second time, and the drifted volume is already off",
+    caught: "the rebuild differs from a rebuild from scratch",
+    why: "the drifted volume is off against both the model and a rebuild from scratch; with 26e's random steps the first session to meet it fails the from-scratch check first (recorded from planted/run.ts, 2026-10-22)",
   },
   "resolve-last-body-only": {
     what: "bodyOf looks only at the last body shown, as while there was one body",
