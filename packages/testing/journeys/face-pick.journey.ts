@@ -249,3 +249,29 @@ test("a second body's faces are offered after the first's, and a face of it is s
   near(a.looks().at(-1)!.plane.origin, [0, 0, 30], "on the block's top");
   assert.ok(await a.close(), "every body freed");
 });
+
+test("every tool draws on a face as on the ground plane: on the back (side −1) a rectangle, a circle centred on its corner by a snap, a 3-point arc and a tangent arc from its end", async () => {
+  const a = await app(partDocument("box", 40, 30, 20));
+  await createSketch(a);
+  await a.pick({ face: faceWhere(a, (p) => p[1] === 30) });
+  await a.key("sketch-rectangle");
+  for (const [x, y] of [[5, 5], [35, 15]]) await a.click(x, y);
+  await a.key("sketch-circle");
+  // 0.36 mm off the corner (35, 15): within the 1 mm snap, so the circle's centre is that corner, shared.
+  for (const [x, y] of [[35.3, 15.2], [40, 15]]) await a.click(x, y);
+  await a.key("sketch-arc");
+  // From the corner (5, 15) to (15, 15) through (10, 18): a free end at (15, 15).
+  for (const [x, y] of [[5, 15], [15, 15], [10, 18]]) await a.click(x, y);
+  await a.key("sketch-tangent");
+  for (const [x, y] of [[15, 15], [25, 25]]) await a.click(x, y);
+  const s = a.doc().sketches.at(-1)!;
+  const kinds = s.curves.map((c) => c.kind).sort();
+  assert.deepEqual(kinds, ["arc", "arc", "circle", "line", "line", "line", "line"]);
+  const corner = s.points.find((p) => p.x === 35 && p.y === 15)!;
+  const circle = s.curves.find((c) => c.kind === "circle")!;
+  assert.equal(circle.kind === "circle" && circle.centre, corner.id, "the circle's centre is the rectangle's corner");
+  assert.equal(circle.kind === "circle" && circle.radius, 5);
+  // The sketch is on the back face, and every one of those clicks was in its own (world X, Z) coordinates.
+  assert.equal(a.doc().timeline.features.at(-1)!.intent.parameters.plane, "face:feature-1/back");
+  assert.ok(await a.close(), "every body freed");
+});

@@ -130,7 +130,7 @@ export class ViewportView {
       // Sketching: a click places a point on the sketch's plane, it picks nothing.
       const plane = this.host.sketchPlane();
       if (plane) return this.host.sketchPointer({ kind: "click", ...this.pointerOn(e.clientX, e.clientY, plane) });
-      // Picking a plane for a sketch: the nearer of an offered plane and a face, never an edge (26d).
+      // Picking where a sketch goes: the face under the pointer, else the nearest offered plane, never an edge (26d).
       if (this.host.offeredFaces()) return this.host.pick({ ...this.planeTarget(e.clientX, e.clientY), edge: null, shift: e.shiftKey });
       const edge = this.edgeAt(e.clientX, e.clientY);
       this.host.pick({ face: edge === null ? this.faceAt(e.clientX, e.clientY) : null, edge, shift: e.shiftKey });
@@ -422,7 +422,7 @@ export class ViewportView {
     return framing;
   }
 
-  /** Look At (SF2): square onto the plane from `side` of it (26d), its y axis up, framing the body and the edited sketch (planeViewBasis); null while this view shows an image. */
+  /** Look At (SF2): square onto the plane from `side` of it (26d), its y axis (or −y from below) up, framing the body and the edited sketch (planeViewBasis); null while this view shows an image. */
   lookAt(plane: Plane, side: 1 | -1 = 1): Framing | null {
     if (this.image) return null;
     const framing = this.host.lookAtFraming(plane);
