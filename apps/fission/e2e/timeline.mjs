@@ -922,7 +922,7 @@ try {
         await browserClosed();
         await until(page, (w) => document.getElementById("feature-edit")?.hidden === false && document.getElementById("feature-edit-title")?.textContent === w, `Edit ${id}`, "the Edit feature panel");
       };
-      const boxes = () => page.$$eval("#feature-edit input", (is) => is.map((i) => [i.id, i.value]));
+      const boxes = () => page.$$eval("#feature-edit input[type=number]", (is) => is.map((i) => [i.id, i.value]));
       const panelClosed = () => until(page, () => document.getElementById("feature-edit")?.hidden === true, null, "the panel closed");
       /** Body `n`'s numbers, selected from its Bodies row, then the selection cleared. */
       const bodyPanel = async (n) => {
@@ -985,6 +985,7 @@ try {
       await rowMenu("feature-11");
       await openEdit("Extrude 1");
       assert.deepEqual(await boxes(), [["edit-height", String(layout.distance)]]);
+      assert.equal(await page.isChecked("#edit-flip"), false, "an extrude's Flip (26c), unticked");
       await page.fill("#edit-height", String(2 * layout.distance));
       await press(page, "#feature-edit-ok", tap);
       await panelClosed();
