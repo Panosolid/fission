@@ -519,7 +519,8 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
 }
 
 /**
- * Every sketch as the viewport draws it, lines, then circles (each as
+ * Every sketch as the viewport draws it (not one suppressed, greyed or
+ * after the rollback marker), lines, then circles (each as
  * `circleSegments`), then arcs (`arcSegments`): the one being edited (if
  * any) with its grid, its points (and a first click not yet a point) and
  * the preview. A sketch on a face is drawn where the last rebuild placed
@@ -531,11 +532,16 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
   // Each sketch's plane from its item, found by id once (security audit S2: a search per sketch took the timeline's length squared).
   const items = new Map<string, Feature>();
   for (const f of doc.timeline.features) if (!items.has(f.id)) items.set(f.id, f);
-  // 26e: a suppressed sketch, and one greyed by a suppressed item it is built on (Q3), isn't drawn, as the reference app hides them.
+  // 26e: a suppressed sketch, and one greyed by a suppressed item it is built on (Q3), isn't drawn, as the reference app hides them;
+  // nor (26g) is one after the rollback marker, which the reference app hides too: a sketch on a face would be drawn where its
+  // face no longer is, since only a rebuild up to it says where it lies.
   const greyed = greyedItems(doc);
+  const { features, marker } = doc.timeline;
+  const end = marker === "start" ? 0 : marker === undefined ? features.length : features.findIndex((f) => f.id === marker) + 1;
+  const rolled = new Set(features.slice(end).map((f) => f.id));
   const off = (s: Sketch) => {
     const item = items.get(s.id);
-    return item !== undefined && editing?.tool.sketch !== s.id && (item.suppressed || greyed.has(item));
+    return item !== undefined && editing?.tool.sketch !== s.id && (item.suppressed || greyed.has(item) || rolled.has(item.id));
   };
   return doc.sketches.filter((s) => !off(s)).map((s) => {
     const plane: Plane = planeFor(items.get(s.id), s, placed);

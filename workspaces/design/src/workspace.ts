@@ -25,6 +25,7 @@ import { chooseBarAction, chooseEntry, menuEntries, openAction, type MenuHost } 
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
 import { BodyCache, followedDoc, rebuildTimeline, settleKept, type TimelineBuild } from "./rebuild.ts";
+import { isFaceSketch } from "./face-sketch.ts";
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
@@ -471,6 +472,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     saved = { doc, shape, sizes: inputs.map((i) => i.value) };
     syncGraph(ctx.graph, doc, before, ctx.changeNotes);
     const changed = ctx.project.workspaces.design !== doc;
+    // A user's edit is settled once recorded (`settled`), from the design before the first edit not yet settled.
+    if (changed && label !== undefined && current) unsettled ??= current;
     ctx.project.workspaces.design = doc;
     if (changed) ctx.projectChanged(label, mergeKey); // the shell autosaves (19c) and records the undo step (20b)
     await show(doc, kind);
@@ -601,12 +604,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       leaveEdit();
       if (mode.kind !== "none") leaveSketch(false); // update() below shows the new design
       // The part the panel shows may now be another feature (the last body that still builds), or none (24f4):
-      // then the boxes stay, and a size typed adds a preset of the shape shown (a box when it was an extrude).
+      // then the boxes stay, and a size typed adds a preset of the shape shown. After an extrude of a sketch, that is a
+      // new box at a fresh design's sizes: the boxes held its distance as a height and older numbers (hunt 26g).
       const part = partOf(next);
       if (part) {
         shape = part.shape;
         for (const [i, key] of SIZE_KEYS.entries()) if (part.sizes[key] !== undefined) inputs[i].value = String(part.sizes[key]);
-      } else if (shape === "sketch-extrude") shape = "box";
+      } else if (shape === "sketch-extrude") {
+        shape = "box";
+        inputs.forEach((input, i) => (input.value = DEFAULT_SIZES[SIZE_KEYS[i]]));
+      }
       void update(step, undefined, next);
     },
     ask: (q, go) => deleting.ask(q, go),
@@ -624,10 +631,56 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     shownDoc = doc;
     viewport.element.dataset.rebuilding = String(++rebuilding > 0);
     try {
-      await showBuilt(doc, kind);
+      await showBuilt(await settled(doc), kind);
     } finally {
       viewport.element.dataset.rebuilding = String(--rebuilding > 0);
     }
+  }
+  /**
+   * The design before the first edit recorded since the last settle (26g),
+   * or null: an edit made outside a sketch (Edit feature, a shape or size
+   * from the panel or the assistant, the timeline's verbs) can lose a face
+   * sketch's face, find it again or move it, so the edit is settled as the
+   * naming harness settles Design after every edit (`settleKept`): a sketch
+   * whose face goes holds where it last was (Fusion's last place, not where
+   * it was first drawn), one found again holds nothing, pinned points follow.
+   * Sketch clicks and deletes settle themselves before they are recorded.
+   */
+  let unsettled: DesignDocument | null = null;
+  /** Its own bodies for settling those edits, one after another (never with the clicks' `settleBodies`: each frees what it didn't use). */
+  const editBodies = new BodyCache(kernel);
+  let editSettles: Promise<unknown> = Promise.resolve();
+  /**
+   * `doc`, the design just recorded, settled against `unsettled` and taken
+   * into the edit's own undo step (the typing in a box still one step), or
+   * `doc` itself: when nothing is unsettled, when it has no sketch on a face
+   * (nothing else a non-sketch edit changes is settled), or when the design
+   * changed again while the kernel looked (the next edit settles from the
+   * same `unsettled`).
+   */
+  async function settled(doc: DesignDocument): Promise<DesignDocument> {
+    const from = unsettled;
+    if (from === null || ctx.history.restoring()) return doc;
+    if (!doc.timeline.features.some(isFaceSketch)) {
+      unsettled = null;
+      return doc;
+    }
+    const run = editSettles.then(() => settleKept(kernel, from, doc, editBodies));
+    editSettles = run.catch(() => {});
+    let next: DesignDocument;
+    try {
+      next = await run;
+    } catch {
+      return doc; // the rebuild says what failed
+    }
+    if (designDoc() !== doc || ctx.history.restoring()) return doc;
+    unsettled = null;
+    if (next === doc) return doc;
+    ctx.project.workspaces.design = next;
+    if (saved?.doc === doc) saved = { ...saved, doc: next };
+    if (shownDoc === doc) shownDoc = next;
+    ctx.history.amend(true);
+    return next;
   }
   async function showBuilt(doc: DesignDocument, kind: PartKind) {
     // The item the Edit feature panel is open on was deleted (the bar, Undo in another way): the panel goes with it.
@@ -1327,6 +1380,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       sleep();
       void bodies.close();
       void settleBodies.close();
+      void editBodies.close();
       viewport.showSketches([]);
       typed.element.remove();
       hint.element.remove();
