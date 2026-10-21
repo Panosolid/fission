@@ -1,5 +1,5 @@
 // The naming harness (src/naming-session.ts) on the model as a subject:
-// Ben's Fusion answers (25a's 1 to 7, step 26's Q1 to Q3) pass, every planted bug is caught (by a hand-worked
+// Ben's Fusion answers (25a's 1 to 7, step 26's Q1 to Q4) pass, every planted bug is caught (by a hand-worked
 // case and by the random sessions), the comparer sits on MATCH_REL, and
 // failures shrink to a minimal list. Step 26 runs the same cases on Design's
 // sketch on a face (no cuts), booleans' 44/48 on Design's cut.
@@ -41,15 +41,15 @@ async function caseFailure(make: () => NamingSubject, c: (typeof FUSION_CASES)[n
   }
 }
 
-test("Ben's Fusion answers (1 to 7, and Q1 to Q3 of step 26) hold on the model, with the cut and with a new body", async () => {
+test("Ben's Fusion answers (1 to 7, and Q1 to Q4 of step 26) hold on the model, with the cut and with a new body", async () => {
   for (const c of FUSION_CASES) {
     const f = await caseFailure(() => namingModelSubject([], c.cuts), c);
     assert.equal(f, null, `answer ${c.answer} (${c.title}): ${f?.message}`);
   }
   // Every answer has a case, and every case a cut or a new-body subject runs.
-  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => c.cuts).map((c) => c.answer))].sort(), ["1", "2", "3", "4", "5", "6", "7", "Q3"]);
+  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => c.cuts).map((c) => c.answer))].sort(), ["1", "2", "3", "4", "5", "6", "7", "Q3", "Q4"]);
   // Q1 is answer 4 with a new body; Q2 (sides) has no cut until booleans.
-  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => !c.cuts).map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3"]);
+  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => !c.cuts).map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3", "Q4"]);
 });
 
 /** For each planted bug, the answers whose cases must catch it (none for the guess between two faces, which this part never makes: test/naming-model.test.ts catches it). */
@@ -74,6 +74,11 @@ const CAUGHT_BY: Record<NamingFault, string[]> = {
   "suppress-keeps-dependents": ["Q3"],
   "suppress-greys-all-after": ["Q3"],
   "greyed-loses-hold": ["Q3"],
+  "pin-stays-put": ["Q4"],
+  "lost-pin-silent": ["Q4"],
+  "lost-pin-moves": ["Q4"],
+  "pin-wrong-end": ["Q4"],
+  "pin-survives-move": ["Q4"],
 };
 
 test("each planted bug breaks the Fusion answers it should, and no other bug goes unnoticed by them", async () => {
@@ -134,6 +139,10 @@ test(`${SEEDS.length} seeds × ${STEPS} random steps pass on the model and reach
     "op:undo:done",
     "op:redo:done",
     "save-open",
+    "pin:corner",
+    "pin:middle",
+    "pin:moved",
+    "sketch:point-lost",
   ];
   for (const k of reached) assert.ok((total[k] ?? 0) >= 3, `${k} reached ${total[k] ?? 0} times: ${JSON.stringify(total)}`);
   // Most steps are used, not skipped for lack of a target or a clear cut.
