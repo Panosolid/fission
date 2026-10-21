@@ -102,6 +102,7 @@ const state = (page) =>
 const until = (page, fn, arg, what) => page.waitForFunction(fn, arg, { timeout: 8000 }).catch(async () => assert.fail(`${what}: timed out (${JSON.stringify(await state(page))})`));
 const points = (page, want) => until(page, (w) => document.querySelector("#viewport").dataset.sketchPoints === w, want, `points ${want}`);
 const onScreen = (page, id) => until(page, (w) => document.body.dataset.activeWorkspace === w, id, `${id} on screen`);
+const status = (page, re) => until(page, (r) => new RegExp(r).test(document.querySelector("#sketch-status")?.textContent ?? ""), re.source, `status ${re}`);
 const press = (page, sel, tap) => (tap ? page.tap(sel) : page.click(sel));
 
 /** Sketch 1 on the ground plane with an open chain (0, 0) → (40, 0) → (40, 30), on the grid, seen from above. */
@@ -113,6 +114,8 @@ async function chain(page, tap = false) {
   await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
   for (const p of [[0, 0], [40, 0], [40, 30]]) await clickPlane(page, p, TOP, tap);
   await points(page, "0,0 40,0 40,30");
+  // The status comes from the kernel's answer, after the points: WebKit in CI still showed the first line's.
+  await status(page, /^2 lines, not closed/);
   return state(page);
 }
 
@@ -156,8 +159,8 @@ try {
       // The chain is still going: the next click is its third line, (40, 30) → (0, 30).
       await clickPlane(page, [0, 30], TOP);
       await points(page, "0,0 40,0 40,30 0,30");
+      await status(page, /^3 lines, not closed/);
       const three = await state(page);
-      assert.match(three.status, /^3 lines, not closed/);
       // A refused file (a drop and a paste): said in the top bar; the sketch, its chain and the undo step are as they were.
       for (const how of [drop, paste]) {
         await page.evaluate(() => (document.querySelector("#file-status").textContent = ""));
