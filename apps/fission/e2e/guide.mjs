@@ -310,7 +310,7 @@ try {
     const tab = await context.newPage();
     const requests = [];
     const problems = [];
-    tab.on("request", (r) => requests.push(new URL(r.url()).pathname));
+    tab.on("request", (r) => requests.push(r.url()));
     tab.on("console", (m) => m.type() === "error" && problems.push(m.text()));
     tab.on("pageerror", (e) => problems.push(e.message));
     await tab.goto(`${url}privacy.html`);
@@ -328,7 +328,11 @@ try {
     const width = await tab.evaluate(() => document.documentElement.scrollWidth);
     assert.ok(width <= 375, `scrollWidth ${width}`);
     await context.close();
-    assert.deepEqual([...new Set(requests)].sort(), ["/favicon.svg", "/privacy.html"]);
+    // The page itself, and at most its icon: the browser asks for the icon in its own time, sometimes
+    // after the tab has closed (it was missing in a merge-queue run), so it may or may not be in the list.
+    const unexpected = requests.filter((r) => ![`${url}privacy.html`, `${url}favicon.svg`].includes(r));
+    assert.deepEqual(unexpected, []);
+    assert.ok(requests.includes(`${url}privacy.html`), requests.join("\n"));
     assert.ok(problems.every((p) => /Content Security Policy|Content-Security-Policy/.test(p)), problems.join("\n")); // only the refused test script
   });
 
