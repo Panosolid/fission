@@ -111,11 +111,11 @@ test("hand-worked: the marker at the end with the last solid an extruded sketch 
   assert.equal(v.notes.at(-3), "The timeline marker is at the end: every item is built.");
 });
 
-test("hand-worked: a suppressed sketch fails its extrude from the data, and a lost sketch's extrude builds from its kept shape", () => {
-  // Sketch 1 suppressed: Extrude 1 can't build (builds() is false), with no kernel failure, so the note says why.
+test("hand-worked: a suppressed sketch greys its extrude from the data (26e), and a lost sketch's extrude builds from its kept shape", () => {
+  // Sketch 1 suppressed: Extrude 1 is greyed (Q3; until 26e it failed), with no kernel failure, so the note says why.
   const suppressed = designAIView(suppressItem(doc, "sketch-2", true), NONE, sizes);
   assert.equal(suppressed.notes[2], `${SKETCH1} Suppressed: builds nothing.`);
-  assert.equal(suppressed.notes[3], `${EXTRUDE1} Failed: builds no body (its sketch is suppressed or gone).`);
+  assert.equal(suppressed.notes[3], `${EXTRUDE1} Greyed: builds nothing while Sketch 1, which it is built on, is suppressed.`);
   // Bodies keep counting only what builds: the slot is Body 2 now.
   assert.equal(suppressed.notes[6], `${SLOT} Builds Body 2. This is the part set_part changes.`);
   // Sketch 1 deleted with its shape kept (24d2): Extrude 1 still builds, from the kept shape. Items renumber.

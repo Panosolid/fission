@@ -15,7 +15,7 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { bodyFeatures, browserTree, rowReferences, type BrowserNode } from "./browser.ts";
+import { browserTree, rowReferences, type BrowserNode } from "./browser.ts";
 import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
@@ -24,7 +24,7 @@ import { itemName } from "./timeline-edits.ts";
 import { chooseBarAction, chooseEntry, menuEntries, openAction, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
-import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
+import { BodyCache, rebuildTimeline, settleKept, type TimelineBuild } from "./rebuild.ts";
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
@@ -222,6 +222,15 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
   slot.replaceChildren(fold);
 }
 
+/** A warning from the rebuild (24d2's kept shape; 26e's lost plane and lost source): its item, the Timeline rows it marks, the sketch it is about, its words, and whether it is a lost plane. */
+interface Warned {
+  item: string;
+  rows: string[];
+  sketch: string;
+  words: string;
+  lost?: true;
+}
+
 function mount(ctx: WorkspaceContext): MountedWorkspace {
   const panel = propertiesPanel(ctx.properties);
   const { inputs } = panel;
@@ -352,25 +361,45 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (result?.status === "failed") failure = result.message;
     else if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) failure = `${feature.provenance.self.label} is ${result.status}`;
     const drawn = await shownBodies(doc, build, bodies);
-    let kept: { feature: string; label: string; warning: KeptWarning } | undefined;
-    for (const f of bodyFeatures(doc)) {
-      const r = build.results[f.id];
-      if (r.status === "built" && r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
-    }
-    return { scene: joinBodies(drawn), kept, failure };
+    return { scene: joinBodies(drawn), warnings: warningsOf(doc, build), failure };
   }
-  /** The part built from a kept shape (the owner's rule): shown on its timeline row and, once the sketch is finished, in the panel. */
-  let keptNow: { feature: string; label: string; warning: KeptWarning } | undefined;
+  /**
+   * The rebuild's warnings in timeline order: an extrude built from its kept
+   * shape (the owner's rule: on its row and its sketch's), and from 26e a
+   * sketch whose plane is lost (Q1, Q6: it stays where it was, drawn red)
+   * and an extrude built from one (its source is lost).
+   */
+  function warningsOf(doc: DesignDocument, build: TimelineBuild): Warned[] {
+    const out: Warned[] = [];
+    for (const f of doc.timeline.features) {
+      const r = build.results[f.id];
+      if (r?.status !== "built") continue;
+      const label = f.provenance.self.label;
+      if (r.plane) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.plane.message}.`, lost: true });
+      if (r.warning) out.push({ item: f.id, rows: [f.id, r.warning.sketch], sketch: r.warning.sketch, words: `${label} keeps its last shape. ${r.warning.message}.` });
+      if (r.source) out.push({ item: f.id, rows: [f.id], sketch: r.source.sketch, words: `${r.source.message}.` });
+    }
+    return out;
+  }
+  /** The last rebuild's warnings: shown on their timeline rows and items and, once the sketch each is about is finished, in the panel. */
+  let warningsNow: Warned[] = [];
+  /** The warnings to show now: while a sketch is being edited, none about it (the outline status says what is open; the owner's rule: a warning after Finish Sketch). */
+  const shownWarnings = () => warningsNow.filter((w) => !(mode.kind === "edit" && editingSketch?.id === w.sketch));
+  /** Each row's warning words, by row (a row with two warnings has both). */
+  function warnedRows(): Map<string, string> {
+    const rows = new Map<string, string>();
+    for (const w of shownWarnings()) for (const row of w.rows) rows.set(row, rows.has(row) ? `${rows.get(row)} ${w.words}` : w.words);
+    return rows;
+  }
   function showKept() {
-    const words = keptNow && `${keptNow.label} keeps its last shape. ${keptNow.warning.message}.`;
-    // While its sketch is being edited, no warning: the outline status says what is open (the owner's rule: a warning after Finish Sketch).
-    const drawing = mode.kind === "edit" && editingSketch?.id === keptNow?.warning.sketch;
-    panel.showWarning(drawing ? "" : (words ?? ""));
+    const shown = shownWarnings();
+    panel.showWarning(shown.map((w) => w.words).join(" "));
+    const rows = warnedRows();
     for (const row of ctx.browser.querySelectorAll<HTMLElement>(".tree-row")) {
-      const marked = keptNow !== undefined && (row.dataset.node === keptNow.feature || row.dataset.node === keptNow.warning.sketch);
-      if (marked) row.title = words!;
+      const words = rows.get(row.dataset.node!);
+      if (words !== undefined) row.title = words;
       else if (row.classList.contains("kept")) row.removeAttribute("title");
-      row.classList.toggle("kept", marked);
+      row.classList.toggle("kept", words !== undefined);
     }
   }
 
@@ -461,6 +490,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(START_FRESH_STEP, undefined, freshDesign());
   }
 
+  /** The sketches whose plane the last rebuild found lost (26e): drawn red where they stay. */
+  const lostSketches = () => new Set(warningsNow.flatMap((w) => (w.lost ? [w.item] : [])));
   /** The items the last rebuild failed (24f3: red in the bar and the browser's Timeline rows); the data's own failures are added by `timelineBarItems`. */
   let failedNow: ReadonlySet<string> = new Set();
   /** Where the last rebuild placed each sketch on a face (26c), by sketch id: drawn and looked at there. */
@@ -475,6 +506,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!ctx.timeline) return;
     showTimelineBar(ctx.timeline, doc, {
       failed: failedNow,
+      warnings: warnedRows(),
       picked,
       onPick: (id) => {
         picked = picked === id ? null : id;
@@ -496,18 +528,29 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     });
   }
 
-  /** The bar's items and the browser's Timeline rows red for every failed item (24f3), and greyed for every item after the marker (24f5). */
+  /**
+   * The bar's items and the browser's Timeline rows red for every failed
+   * item (24f3), greyed for every item after the marker (24f5), and from 26e
+   * greyed for every item built on a suppressed one (Q3), its title saying
+   * which. Rows with a warning are `showKept`'s.
+   */
   function showFailed(doc: DesignDocument) {
     showBar(doc);
     const { items } = timelineBarItems(doc, failedNow);
     const failed = new Set(items.filter((i) => i.failed).map((i) => i.id));
     const rolledBack = new Set(items.filter((i) => i.rolledBack).map((i) => i.id));
+    const greyed = new Map(items.flatMap((i) => (i.greyed === null ? [] : [[i.id, i.greyed] as const])));
     for (const row of ctx.browser.querySelectorAll<HTMLElement>('[data-node="timeline"] .tree-row')) {
-      const red = failed.has(row.dataset.node!);
-      const grey = rolledBack.has(row.dataset.node!);
-      row.classList.toggle("timeline-menu", red || grey);
+      const id = row.dataset.node!;
+      const red = failed.has(id);
+      const grey = rolledBack.has(id);
+      const by = greyed.get(id);
+      row.classList.toggle("timeline-menu", red || grey || by !== undefined);
       row.classList.toggle("timeline-menu-failed", red);
       row.classList.toggle("timeline-menu-rolled-back", grey);
+      row.classList.toggle("timeline-menu-greyed", by !== undefined);
+      if (by !== undefined) row.title = `Greyed: ${by} is suppressed`;
+      else if (row.title.startsWith("Greyed: ")) row.removeAttribute("title");
     }
   }
 
@@ -595,7 +638,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const { scene, failure } = value;
       // The rows were drawn before the rebuild said what failed: a failed item has no Body row.
       if (!sameIds(rowsFailed, failedNow)) drawBrowser(doc);
-      keptNow = value.kept;
+      warningsNow = value.warnings;
       showKept();
       showFailed(doc);
       // Built from the current inputs: the feature and the numbers are fresh. A failed part is not (its numbers stay, marked).
@@ -644,7 +687,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     } catch (e) {
       if (!shown) return void (missed = true);
       missed = false;
-      keptNow = undefined;
+      warningsNow = [];
       if (designDoc() === doc && !sameIds(rowsFailed, failedNow)) drawBrowser(doc);
       showKept();
       if (designDoc() === doc) showFailed(doc);
@@ -700,7 +743,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const locked = Object.keys(locks).length > 0;
     const aim = editing && aimOf(doc, editing.tool, editing.pointer, locks);
     // A typed arc angle goes the pointer's way round however little it went (typed-entry.ts withLocks): the preview from the tool the click will use.
-    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, tool: withLocks(editing.tool, locks, editing.pointer), pointer: aim, gridSnap }, placedNow), locked ? null : (editing?.snap ?? null), editing?.pixel));
+    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, tool: withLocks(editing.tool, locks, editing.pointer), pointer: aim, gridSnap }, placedNow, lostSketches()), locked ? null : (editing?.snap ?? null), editing?.pixel));
     const anchor = editing && anchorOf(doc, editing.tool);
     if (!editing) return (typed.hide(), hint.hide());
     const width = viewport.element.clientWidth;
@@ -1192,7 +1235,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Asleep, the sketches stay drawn as finished ones: no grid, no planes to pick.
     viewport.showPlanes([]);
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
-    viewport.showSketches(doc ? sketchDrawings(doc, null, placedNow) : []);
+    viewport.showSketches(doc ? sketchDrawings(doc, null, placedNow, lostSketches()) : []);
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
   }

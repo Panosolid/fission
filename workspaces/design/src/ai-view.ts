@@ -44,8 +44,10 @@ function timelineNotes(doc: DesignDocument, failed: ReadonlySet<string>, sizes: 
     const label = `${i + 1}. ${f.intent.summary}.`;
     if (item.suppressed) return `${label} Suppressed: builds nothing.`;
     if (item.rolledBack) return `${label} After the timeline marker: not built.`;
+    // 26e (Q3): built on a suppressed item, it is greyed with it.
+    if (item.greyed !== null) return `${label} Greyed: builds nothing while ${item.greyed}, which it is built on, is suppressed.`;
     if (isSketchItem(f)) return `${label} A sketch: builds no body.`;
-    if (item.failed) return `${label} Failed: builds no body${failed.has(f.id) ? "" : " (its sketch is suppressed or gone)"}.`;
+    if (item.failed) return `${label} Failed: builds no body${failed.has(f.id) ? "" : " (its sketch is gone)"}.`;
     const kept = keptOf(doc, f) ? " Its sketch is lost (deleted, or no longer a closed outline), so it builds from the shape it kept." : "";
     return `${label} Builds Body ${bodies.indexOf(f) + 1}.${kept}${f === part && adds === null ? " This is the part set_part changes." : ""}`;
   });

@@ -9,7 +9,7 @@
 // 24e edit with its undo step's name, or refused with the message shown
 // (`barEdit`). Behaviour copied from the reference app's timeline.
 
-import { buildingItems, isSketchItem, type DesignDocument } from "./document.ts";
+import { buildingItems, greyedBy, greyedItems, isSketchItem, type DesignDocument } from "./document.ts";
 import { deleteItem, itemName, moveMarker, reorderItem, suppressItem, TIMELINE_STEPS } from "./timeline-edits.ts";
 import { dragItem } from "./timeline-reorder.ts";
 
@@ -23,8 +23,16 @@ export interface TimelineBarItem {
   suppressed: boolean;
   /** After the rollback marker: not built until the marker moves past it. */
   rolledBack: boolean;
-  /** Built from something that is gone or suppressed, or failed in the rebuild (`failed`): drawn red. Never when rolled back or suppressed. */
+  /**
+   * Built on a suppressed item, directly or through others (26e, Q3): the
+   * name of the suppressed item that greys it, drawn greyed with no
+   * warning; null when it isn't. Never when rolled back or suppressed.
+   */
+  greyed: string | null;
+  /** Built from something that is gone, or failed in the rebuild (`failed`): drawn red. Never when rolled back, suppressed or greyed. */
   failed: boolean;
+  /** Built with a warning (26e: a kept shape, a lost plane or a lost source; the rebuild's words): drawn red with the words. */
+  warning: string | null;
 }
 
 const ICON_OF: Record<string, TimelineIcon> = { sketch: "sketch", extrude: "extrude", box: "box", cylinder: "cylinder", sphere: "sphere" };
@@ -34,10 +42,12 @@ const ICON_OF: Record<string, TimelineIcon> = { sketch: "sketch", extrude: "extr
  * it (0 for "start", every item when there is no marker). A marker naming
  * no item is refused (readDesignDocument never lets one in). `failed`
  * holds the items the rebuild failed (an outline the kernel refused); one
- * that can't build from the data alone (`builds`: its sketch suppressed,
- * or deleted with no kept shape) is failed without it.
+ * that can't build from the data alone (`builds`: its sketch deleted with
+ * no kept shape) is failed without it. One built on a suppressed item is
+ * greyed instead (26e, Q3), from the data alone. `warnings` are the
+ * rebuild's words for the items built with a warning.
  */
-export function timelineBarItems(document: DesignDocument, failed: ReadonlySet<string> = new Set()): { items: TimelineBarItem[]; marker: number } {
+export function timelineBarItems(document: DesignDocument, failed: ReadonlySet<string> = new Set(), warnings: ReadonlyMap<string, string> = new Map()): { items: TimelineBarItem[]; marker: number } {
   const { features, marker } = document.timeline;
   let at = features.length;
   if (marker === "start") at = 0;
@@ -47,14 +57,23 @@ export function timelineBarItems(document: DesignDocument, failed: ReadonlySet<s
     at = i + 1;
   }
   const building = buildingItems(document);
-  const items = features.map((f, i) => ({
-    id: f.id,
-    label: `${i + 1}. ${f.intent.summary}`,
-    icon: Object.hasOwn(ICON_OF, f.intent.type) ? ICON_OF[f.intent.type] : "feature",
-    suppressed: f.suppressed,
-    rolledBack: i >= at,
-    failed: i < at && !f.suppressed && (!building.has(f) || failed.has(f.id)),
-  }));
+  const greyed = greyedItems(document);
+  const label = new Map(features.map((f) => [f.id, itemName(f)]));
+  const items = features.map((f, i) => {
+    const on = i < at && !f.suppressed;
+    const by = on ? greyed.get(f) : undefined;
+    const ok = on && by === undefined;
+    return {
+      id: f.id,
+      label: `${i + 1}. ${f.intent.summary}`,
+      icon: Object.hasOwn(ICON_OF, f.intent.type) ? ICON_OF[f.intent.type] : "feature",
+      suppressed: f.suppressed,
+      rolledBack: i >= at,
+      greyed: by === undefined ? null : (label.get(by) ?? by),
+      failed: ok && (!building.has(f) || failed.has(f.id)),
+      warning: (ok && warnings.get(f.id)) || null,
+    };
+  });
   return { items, marker: at };
 }
 
@@ -178,6 +197,9 @@ function sketchOff(doc: DesignDocument, at: number, editing: string | null): str
   const name = itemName(item);
   if (editing === item.id) return `${name} is open: you are editing it`;
   if (item.suppressed) return `${name} is suppressed: unsuppress it first`;
+  // 26e: a sketch greyed by a suppressed item it is built on has no place to be drawn until that is back.
+  const by = greyedBy(doc, item);
+  if (by !== null) return `${name} is greyed: ${itemName(doc.timeline.features.find((f) => f.id === by)!)} is suppressed, unsuppress it first`;
   if (at >= timelineBarItems(doc).marker) return `${name} is after the marker: move the marker past it first`;
   return null;
 }
@@ -404,6 +426,8 @@ const lastClicks = new WeakMap<HTMLElement, { id: string; at: number }>();
 /** What the bar's items do (step 24f3): `failed` are the rebuild's failed items (drawn red); `picked` is the item whose ⋯ shows. */
 export interface BarWiring {
   failed?: ReadonlySet<string>;
+  /** 26e: the rebuild's warnings by item (a kept shape, a lost plane, a lost source): the item red, the words in its title. */
+  warnings?: ReadonlyMap<string, string>;
   picked?: string | null;
   /** The sketch being edited (24f5): a playback button that would put it after the marker is off and says why. */
   editing?: string | null;
@@ -425,7 +449,7 @@ export interface BarWiring {
  */
 export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: BarWiring = {}) {
   const document = slot.ownerDocument;
-  const { items, marker } = timelineBarItems(doc, wiring.failed);
+  const { items, marker } = timelineBarItems(doc, wiring.failed, wiring.warnings);
   const list = document.createElement("ol");
   list.className = "timeline-bar";
   // The row of the playback buttons and this list, made here so an item's drag can show where it would drop above both (24f6).
@@ -455,7 +479,15 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
     if (item.suppressed) li.dataset.suppressed = "true";
     if (item.rolledBack) li.dataset.rolledBack = "true";
     if (item.failed) li.dataset.failed = "true";
-    const words = item.label + (item.suppressed ? " (suppressed)" : "") + (item.rolledBack ? " (after the marker)" : "") + (item.failed ? " (failed)" : "");
+    if (item.greyed !== null) li.dataset.greyed = "true";
+    if (item.warning !== null) li.dataset.warned = "true";
+    const words =
+      item.label +
+      (item.suppressed ? " (suppressed)" : "") +
+      (item.greyed !== null ? ` (greyed: ${item.greyed} is suppressed)` : "") +
+      (item.rolledBack ? " (after the marker)" : "") +
+      (item.failed ? " (failed)" : "") +
+      (item.warning !== null ? ` (warning: ${item.warning})` : "");
     li.title = words;
     li.tabIndex = 0;
     li.addEventListener("contextmenu", (e) => {

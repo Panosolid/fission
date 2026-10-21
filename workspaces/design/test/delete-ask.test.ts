@@ -93,11 +93,17 @@ test("a box with sketches on its faces: the box says each stays where it is with
   const one = extrudeSketch(drawCircle(top.doc, top.id, [20, 15], 5).doc, top.id, 10).doc;
   assert.deepEqual(deleteWords(one, deleteItem(one, "feature-1"), "feature-1"), {
     heading: "Delete Feature 1 (box)?",
-    words: "Sketch 1 is drawn on a face of Feature 1 (box). If you delete it, Sketch 1 stays where it is and shows its plane is lost. Undo brings Feature 1 (box) back.",
+    // 26e (Q1): Extrude 1, built from the sketch, is named too: it stays, its source lost.
+    words: "Sketch 1 is drawn on a face of Feature 1 (box). If you delete it, Sketch 1 stays where it is and shows its plane is lost, and what is built from it, Extrude 1, stays where it is and shows its source is lost. Undo brings Feature 1 (box) back.",
   });
+  // With nothing built from the sketch, only the sketch is named.
+  assert.equal(deleteWords(top.doc, deleteItem(top.doc, "feature-1"), "feature-1")!.words, "Sketch 1 is drawn on a face of Feature 1 (box). If you delete it, Sketch 1 stays where it is and shows its plane is lost. Undo brings Feature 1 (box) back.");
   // A second, on its front (sketch-6): plural words.
   const two = addFaceSketch(one, { plane: "face:feature-1/front", feature: "feature-1" }, drawnFrame([0, -1, 0], [20, 0, 10])).doc;
-  assert.deepEqual(deleteWords(two, deleteItem(two, "feature-1"), "feature-1")!.words, "Sketch 1 and Sketch 2 are drawn on faces of Feature 1 (box). If you delete it, Sketch 1 and Sketch 2 stay where they are and show their planes are lost. Undo brings Feature 1 (box) back.");
+  assert.deepEqual(deleteWords(two, deleteItem(two, "feature-1"), "feature-1")!.words, "Sketch 1 and Sketch 2 are drawn on faces of Feature 1 (box). If you delete it, Sketch 1 and Sketch 2 stay where they are and show their planes are lost, and what is built from them, Extrude 1, stays where it is and shows its source is lost. Undo brings Feature 1 (box) back.");
+  // Sketch 2 extruded too (feature-7): two extrudes stay.
+  const both = extrudeSketch(drawCircle(two, "sketch-6", [20, 10], 3).doc, "sketch-6", 4).doc;
+  assert.match(deleteWords(both, deleteItem(both, "feature-1"), "feature-1")!.words, /what is built from them, Extrude 1 and Extrude 2, stay where they are and show their sources are lost\./);
 });
 
 test("an item that isn't there is refused by name", () => {

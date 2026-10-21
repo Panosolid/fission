@@ -446,7 +446,7 @@ async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string
     const made = await extrudeSpec(kernel, doc, f, index, placed);
     if ("status" in made) return made;
     const lost = input?.status === "built" ? input.plane : undefined;
-    const source = lost && { ...lost, sketch: sketchId, message: `${f.provenance.self.label}'s source is lost: ${lost.message}, so it is built there` };
+    const source = lost && { ...lost, sketch: sketchId, message: `${f.provenance.self.label}'s source is lost: ${item!.provenance.self.label}'s plane is ${lost.cause === "plane-lost" ? "lost" : "ambiguous"}, so it stays where it was` };
     return { status: "built", body: await cache.body(made.spec), ...made, ...(source ? { source } : {}) };
   } catch (e) {
     return { status: "failed", cause: "error", message: words(e) };

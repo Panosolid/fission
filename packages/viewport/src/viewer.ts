@@ -599,7 +599,7 @@ export class ViewportView {
 }
 
 /** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint, the axes red (x) and green (y). */
-const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, lost: 0xff6b6b, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
 /**
  * How opaque the sketch grid's major lines are (minor ones fade in up to
  * this as they spread apart, sketch-view's minorStrength): light and see-
@@ -801,7 +801,7 @@ export class Viewer implements SharedViewport {
   }
 
   /**
-   * Draws the sketches: lines, and for the one being edited its grid, its
+   * Draws the sketches: lines (a finished one whose plane is lost red, 26e), and for the one being edited its grid, its
    * points, the rubber-band line and the snap's marks. The edited one is
    * drawn over everything (no depth test; the body is see-through meanwhile).
    * A finished one is depth-tested like the body's edges, so the body hides
@@ -818,6 +818,7 @@ export class Viewer implements SharedViewport {
     this.gridFor = null;
     this.editedWorld = [];
     let lines = 0;
+    let lost = 0;
     for (const d of drawings) {
       const at = (p: SketchXY) => toWorld(d.plane, p);
       const segments = (pairs: readonly (readonly [SketchXY, SketchXY])[], colour: number, order: number) => {
@@ -831,7 +832,9 @@ export class Viewer implements SharedViewport {
       };
       lines += d.lines.length;
       if (!d.editing) {
-        segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
+        // 26e: a sketch whose plane is lost red, where it stays.
+        segments(d.lines, d.lost ? SKETCH_COLOURS.lost : SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
+        if (d.lost) lost += d.lines.length;
         continue;
       }
       this.editedPlane = d.plane;
@@ -857,6 +860,7 @@ export class Viewer implements SharedViewport {
     const edited = drawings.find((d) => d.editing)?.editing;
     const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
     this.element.dataset.sketchLines = String(lines);
+    this.element.dataset.sketchLost = String(lost);
     this.element.dataset.sketchPoints = edited ? edited.points.map(xy).join(" ") : "";
     this.element.dataset.sketchPreview = edited ? edited.preview.map((s) => s.map(xy).join(" ")).join(" | ") : "";
     this.element.dataset.sketchSnap = edited?.snap?.label ?? "";
