@@ -12,6 +12,7 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.26.1 (2026-10-21)
 
+- Step 26b: the kernel can build an extrude on any plane, not only flat on the ground: given where a sketch's plane is (an origin, an x direction and which way it faces), the body, its picture, its STL and its faces' positions all come out there, and Flip extrudes the other way from the same plane with its starting face still on the plane. The kernel now also tells the app exactly which way each flat face points, which sketching on a face (next) needs. A plane given slightly wrong (axes not unit length or not square to each other by more than a hair) is refused with the part named. No change in the app yet. Checked by hand-worked boxes on the front, side and a sloping plane, 19 deliberately planted bugs (each caught), random testing with 6,000 seeded cases and OpenCascade agreeing on 13,510 bodies.
 - Fix (timeline code bug hunt): switching to another workspace while the design was still rebuilding no longer adds a box when you come back to a design with no body (its only body suppressed or deleted), nor an undo step "Edit" you never made. The Extrude panel offers only sketches it can use (before the rollback marker, not suppressed) and says why when there are none; before, it offered them, said "makes a closed outline", and OK did nothing. Its note no longer says an extrude replaces the part. The test helper that names a body built from a kept shape now names it as the app does.
 
 ## 0.26.0 (2026-10-21)
