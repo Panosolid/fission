@@ -42,6 +42,18 @@ export interface BodyView {
    * (counter-clockwise round the outline seen from the end cap).
    */
   edge_faces: ([number, number] | null)[];
+  /**
+   * Each vertex's point [x, y, z] in the world, exact (step 26f): what a
+   * sketch point snapped to a face's corner lands on and follows (the
+   * display mesh's edge lines are single precision, micrometres off).
+   */
+  vertex_points: [number, number, number][];
+  /** Each edge's start and end vertex, by kernel edge index; the same vertex twice for a closed edge (a whole circle). */
+  edge_vertices: [number, number][];
+  /** The point halfway along each edge's parameter in the world: a line's midpoint, an arc's middle. Meaningless for a closed edge. */
+  edge_middles: [number, number, number][];
+  /** Each circular edge's centre in the world; null for a line. */
+  edge_centres: ([number, number, number] | null)[];
   errors: string[];
 }
 

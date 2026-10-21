@@ -42,6 +42,7 @@ import {
   findInScene,
   joinBodies,
   movePoint,
+  pinNewPoints,
   planDelete,
   readDesignDocument,
   readDesignReference,
@@ -52,13 +53,15 @@ import {
   setExtrudeFlip,
   settleKept,
   shownBodies,
+  sketchEdgeTargets,
   suppressItem,
   type DesignDocument,
+  type EdgeTarget,
   type LineEnd,
   type TimelineBuild,
 } from "@fission/design";
 import type { Point } from "./timeline-model.ts";
-import type { FaceName, NamingApplied, NamingOp, NamingRebuild, NamingResult, NamingWarning, Vec3 } from "./naming-model.ts";
+import type { FaceName, NamingApplied, NamingOp, NamingRebuild, NamingResult, NamingWarning, PinName, Vec3 } from "./naming-model.ts";
 import type { NamingSubject } from "./naming-session.ts";
 
 /** Bugs planted in the subject's side, each caught by a check (journeys/naming.journey.ts). */
@@ -112,6 +115,21 @@ export function faceNameOf(plane: string): FaceName {
 
 /** The plane a model face name is, as Design writes it. */
 const planeOfFace = (f: FaceName) => facePlane(encodeURIComponent(f.feature), f.role === "side" ? `side:${encodeURIComponent(f.line)}` : f.role);
+
+/**
+ * Whether target `t` is the model's pin on cap `face` (rule 10): a corner's
+ * vertex is named by the edges meeting there, among them the cap's edges
+ * along both lines; a side's middle by the cap's edge along its line
+ * (face-edges.ts; an edge between a cap and a side is "<cap>+side:<line>"
+ * or "side:<line>+<cap>", sorted).
+ */
+function pinMatches(t: EdgeTarget, face: FaceName, pin: PinName): boolean {
+  if (face.role === "side") return false;
+  const capEdge = (line: string) => [face.role, `side:${encodeURIComponent(line)}`].sort().join("+");
+  if (pin.at === "middle") return t.kind === "midpoint" && t.name === capEdge(pin.line);
+  const parts = t.name.split("&");
+  return t.kind === "endpoint" && parts.includes(capEdge(pin.before)) && parts.includes(capEdge(pin.after));
+}
 
 /** Design on `kernel` as a subject without cuts (the circle extruded as a new body), with bugs planted. */
 export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<NamingDesignFault> = []): NamingDesignSubject {
@@ -172,11 +190,15 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
         const drawn = drawnOnFace(scene.bodies[hit.body].view, hit.index);
         if (drawn === null) throw new Error(`harness: ${plane} is curved`);
         const made = addFaceSketch(doc, { plane, feature: op.face.feature }, drawn);
-        const c = drawCircle(made.doc, made.id, [op.centre[0], op.centre[1]], op.radius);
+        // Step 26f: a pinned centre lands where the snap would put it, on the target the app offers, and is pinned as a click there is.
+        const targets = op.pin ? await edgeTargetsOf(made.doc, made.id) : [];
+        const target = op.pin ? targets.find((t) => pinMatches(t, op.face, op.pin!)) : undefined;
+        if (op.pin && target === undefined) throw new Error(`harness: Design offers no ${JSON.stringify(op.pin)} on ${plane}`);
+        const c = drawCircle(made.doc, made.id, target ? target.at : [op.centre[0], op.centre[1]], op.radius);
         const circle = c.doc.sketches.find((x) => x.id === made.id)!.curves.find((x) => x.id === c.id)!;
         if (circle.kind !== "circle") throw new Error("harness: drawCircle drew no circle");
         meta[made.id] = { circle: c.id, centre: circle.centre };
-        return { state: { doc: c.doc, meta }, made: [made.id] };
+        return { state: { doc: pinNewPoints(made.doc, c.doc, made.id, targets), meta }, made: [made.id] };
       }
       case "add-cut":
       case "set-depth":
@@ -223,6 +245,14 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
     }
   }
 
+  /** What a pointer on sketch `id` may snap to on its face's edges, as the app works it out: on the scene drawn, where the rebuild placed the sketch. */
+  async function edgeTargetsOf(doc: DesignDocument, id: string): Promise<EdgeTarget[]> {
+    const b = await build(doc);
+    const scene = joinBodies(await shownBodies(doc, b, cache));
+    const r = b.results[id];
+    return sketchEdgeTargets(doc, id, scene, r?.status === "built" ? r.placement?.plane : undefined);
+  }
+
   /** The rebuild in the model's terms, bodies read from the scene the app draws. */
   async function read(): Promise<NamingRebuild> {
     const doc = state.doc;
@@ -237,7 +267,8 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
       else if (r.status === "failed") results[id] = { kind: "solid", volume: Number.NaN, centroid: [Number.NaN, Number.NaN, Number.NaN], warning: { cause: "deleted-input", input: `failed: ${r.message}` } };
       else if (r.placement !== undefined) {
         const p = r.placement.plane;
-        const warning: NamingWarning | undefined = r.plane && { cause: r.plane.cause, face: faceNameOf(r.plane.face) };
+        // A pin's warning in the model's terms by its cause (the harness compares no more); "point-ambiguous" never matches the model, which has none.
+        const warning: NamingWarning | undefined = r.plane ? { cause: r.plane.cause, face: faceNameOf(r.plane.face) } : r.points ? ({ cause: r.points.cause, pin: { at: "middle", line: "" } } as NamingWarning) : undefined;
         results[id] = { kind: "sketch", placement: { origin: p.origin, x: p.xAxis, normal: p.normal, side: r.placement.side }, ...(warning ? { warning } : {}) };
       } else {
         const view = views.get(id);

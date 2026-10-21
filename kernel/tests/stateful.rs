@@ -2289,6 +2289,48 @@ fn check_placed_model(shape: &Shape, p: &Placed, frame: glam::DAffine3, flip: bo
             return Err(format!("{role:?}: faces {normal}, the frame's normal is {n}, flipped {flip}"));
         }
     }
+    check_placed_corners(shape, p, frame, w, allowed)
+}
+
+/// Step 26f: the view's exact corners and circle centres (what a sketch
+/// point snapped to a face's edge lands on) are the model's, through the
+/// frame: every corner of every path ring at both ends of the extrude, and
+/// every circle ring's centre at both ends, has a view point within
+/// `allowed`; a path ring's straight side's middle is its two corners'
+/// average. The view is the app's (`view_placed`), so this checks what
+/// the app is handed, not the kernel's own placement of it.
+fn check_placed_corners(shape: &Shape, p: &Placed, frame: glam::DAffine3, w: f64, allowed: f64) -> Result<(), String> {
+    let Shape::Extrude { outer, holes, dist, .. } = shape else { return Ok(()) };
+    let v = fission_kernel::view_placed(p).map_err(|e| format!("view_placed refused a placed body: {}", e.message))?;
+    let near = |pts: &[[f64; 3]], q: DVec3| pts.iter().any(|x| DVec3::from(*x).distance(q) <= allowed);
+    let centres: Vec<[f64; 3]> = v.edge_centres.iter().flatten().copied().collect();
+    for ring in std::iter::once(outer).chain(holes) {
+        for z in [0.0, w * dist.0] {
+            let at = |x: f64, y: f64| frame.transform_point3(DVec3::new(x, y, z));
+            match ring {
+                Ring::Path { pts, bulges } => {
+                    for (i, c) in pts.iter().enumerate() {
+                        let q = at(c[0].0, c[1].0);
+                        if !near(&v.vertex_points, q) {
+                            return Err(format!("corner {i} at z {z} should be at {q}, and no view corner is ({allowed:e} allowed)"));
+                        }
+                        let straight = bulges.get(i).is_none_or(|b| b.0 == 0.0);
+                        let d = &pts[(i + 1) % pts.len()];
+                        let mid = at((c[0].0 + d[0].0) / 2.0, (c[1].0 + d[1].0) / 2.0);
+                        if straight && !near(&v.edge_middles, mid) {
+                            return Err(format!("side {i} at z {z}: its middle should be at {mid}, and no view edge's is"));
+                        }
+                    }
+                }
+                Ring::Circle { c, .. } => {
+                    let q = at(c[0].0, c[1].0);
+                    if !near(&centres, q) {
+                        return Err(format!("circle at z {z}: its centre should be at {q}, and no view edge's is"));
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 

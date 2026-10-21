@@ -15,6 +15,7 @@
 import type { BodySpec, Feature, Plane } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
 import { faceFeature, isFacePlane, squared, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
+import type { SketchPin } from "./face-edges.ts";
 import { outline, type ProfileKind, type ShapeKind } from "./profiles.ts";
 
 /** A ready-made outline on a plane (until the sketcher, step 21, adds sketches next to these). */
@@ -84,6 +85,11 @@ export interface Sketch {
   constraints: never[];
   /** Only for a sketch on a face (step 26c). */
   face?: SketchFace;
+  /**
+   * Only for a sketch on a face (step 26f): its points pinned to the face's
+   * edges (face-edges.ts), each point once; left out when none are.
+   */
+  pins?: SketchPin[];
 }
 
 /**
@@ -469,9 +475,30 @@ function checkFaceSketch(f: Feature, content: Sketch, byId: ReadonlyMap<string, 
   checkPlane(face.frame, `${at}'s frame`);
   if (face.side !== 1 && face.side !== -1) throw new Error(`${at}'s side must be 1 or -1, not ${shown(face.side)}`);
   if (Object.hasOwn(face, "held")) checkPlane(face.held, `${at}'s held plane`);
+  if (Object.hasOwn(content, "pins")) checkPins(content, at);
   const there = byId.get(feature);
   if (there !== undefined && (there.at > byId.get(f.id)!.at || isSketchItem(there.item))) throw new Error(`${at} is on a face of ${shown(feature)}, which is not a solid item before it in the timeline`);
   if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(feature)) throw new Error(`${at} is on a face of ${feature} but does not depend on it`);
+}
+
+/**
+ * A face sketch's pins, checked (step 26f): a list of at least one, each
+ * one of the sketch's points (each point once), what on the edge (an
+ * endpoint, a middle or a centre) and a name: a vertex's for an endpoint
+ * (edge names joined by "&"), an edge's for the others (face-edges.ts).
+ */
+function checkPins(content: Sketch, at: string): void {
+  const pins = content.pins as unknown;
+  if (!Array.isArray(pins) || pins.length === 0) throw new Error(`${at}'s pins must be a list of at least one pin, or left out`);
+  const points = new Set(content.points.map((p) => p.id));
+  const seen = new Set<string>();
+  for (const [j, pin] of pins.entries()) {
+    if (!isRecord(pin) || typeof pin.point !== "string" || !points.has(pin.point)) throw new Error(`${at}'s pin ${j + 1} is not on one of the sketch's points`);
+    if (seen.has(pin.point)) throw new Error(`${at} pins point ${pin.point} twice`);
+    seen.add(pin.point);
+    if (pin.kind !== "endpoint" && pin.kind !== "midpoint" && pin.kind !== "centre") throw new Error(`${at}'s pin on ${pin.point} must be an endpoint, a midpoint or a centre, not ${shown(pin.kind)}`);
+    if (typeof pin.name !== "string" || pin.name.length === 0 || pin.name.includes("/") || (pin.kind !== "endpoint" && pin.name.includes("&"))) throw new Error(`${at}'s pin on ${pin.point} has no ${pin.kind === "endpoint" ? "vertex" : "edge"} name`);
+  }
 }
 
 /** An extrude's kept shape, checked: a sketch's points and curves (checkContent), each id once, and where it lay if not on XY. */
@@ -538,6 +565,7 @@ export function readDesignDocument(data: unknown): DesignDocument {
     if (content === undefined) throw new Error(`Design timeline item ${f.id} is a sketch with no content in the sketches list`);
     if (isFacePlane(f.intent.parameters.plane)) checkFaceSketch(f, content, byId);
     else if (Object.hasOwn(content, "face")) throw new Error(`Design sketch ${f.id} is on the ${shown(f.intent.parameters.plane)} plane but keeps a face's frame`);
+    else if (Object.hasOwn(content, "pins")) throw new Error(`Design sketch ${f.id} is on the ${shown(f.intent.parameters.plane)} plane but pins points to a face's edges`);
     else if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Panosolid knows (XY, XZ, YZ or a face)`);
   }
   const itemIds = new Set(items.map((f) => f.id));

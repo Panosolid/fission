@@ -43,6 +43,7 @@ import {
   type NamingRebuild,
   type NamingResult,
   type NamingWarning,
+  type PinName,
   type Placement,
   type RefuseCause,
   type Vec3,
@@ -70,6 +71,8 @@ export interface Setup {
   radius: number;
   /** The cut's depth, or the new body's distance when the subject can't cut. */
   depth: number;
+  /** On a cap, the circle's centre snapped onto a corner or a side's middle and pinned there (rule 10, step 26f); `centre` is then that point. */
+  pin?: PinName;
 }
 
 /** The face a setup's circle is on, in the model's ids. */
@@ -80,7 +83,7 @@ export function setupOps(s: Setup, cuts: boolean): NamingOp[] {
   return [
     { op: "add-sketch", corners: s.corners },
     { op: "add-extrude", sketch: "sketch-1", distance: s.distance },
-    { op: "add-face-sketch", face: setupFace(s.cap), centre: s.centre, radius: s.radius },
+    { op: "add-face-sketch", face: setupFace(s.cap), centre: s.centre, radius: s.radius, ...(s.pin ? { pin: s.pin } : {}) },
     cuts ? { op: "add-cut", sketch: "sketch-3", depth: s.depth } : { op: "add-face-extrude", sketch: "sketch-3", distance: s.depth },
   ];
 }
@@ -106,7 +109,8 @@ export type NamingCounts = Record<string, number>;
 // ------------------------------------------------------------ comparing
 
 const vecClose = (a: Vec3, b: Vec3) => a.every((x, k) => close(x, b[k]));
-const warnKey = (w: NamingWarning | undefined) => (w === undefined ? "none" : "input" in w ? `${w.cause}:${w.input}` : `${w.cause}:${faceKeyOf(w.face)}`);
+// A pin's warning by its cause alone: a sketch has at most one pin, and a subject names it its own way.
+const warnKey = (w: NamingWarning | undefined) => (w === undefined ? "none" : "input" in w ? `${w.cause}:${w.input}` : "face" in w ? `${w.cause}:${faceKeyOf(w.face)}` : w.cause);
 /** What differs between two placements, or null. */
 function placementDiff(got: Placement, want: Placement): string | null {
   if (got.side !== want.side) return `faces ${got.side} along its normal, want ${want.side}`;
@@ -150,7 +154,7 @@ export function namingDiff(want: NamingRebuild, got: NamingRebuild): string | nu
 
 /** Renames every id in a rebuild. */
 function renamed(r: NamingRebuild, to: (id: string) => string): NamingRebuild {
-  const warning = (w: NamingWarning | undefined): NamingWarning | undefined => (w === undefined ? undefined : "input" in w ? { cause: w.cause, input: to(w.input) } : { cause: w.cause, face: renamedFace(w.face, to) });
+  const warning = (w: NamingWarning | undefined): NamingWarning | undefined => (w === undefined ? undefined : "input" in w ? { cause: w.cause, input: to(w.input) } : "face" in w ? { cause: w.cause, face: renamedFace(w.face, to) } : w);
   const results: Record<string, NamingResult> = {};
   for (const [id, res] of Object.entries(r.results)) {
     const w = warning(res.warning);
@@ -166,6 +170,7 @@ function renamedOp(op: NamingOp, to: (id: string) => string): NamingOp {
   const o = JSON.parse(JSON.stringify(op)) as Record<string, unknown>;
   for (const k of ["sketch", "item"]) if (typeof o[k] === "string") o[k] = to(o[k] as string);
   if (op.op === "add-face-sketch") o.face = renamedFace(op.face, to);
+  if (op.op === "add-face-sketch" && op.pin) o.pin = op.pin.at === "corner" ? { at: "corner", before: to(op.pin.before), after: to(op.pin.after) } : { at: "middle", line: to(op.pin.line) };
   return o as NamingOp;
 }
 
@@ -210,6 +215,8 @@ export async function runNaming(subject: NamingSubject, setup: Setup, steps: rea
   const sub = (id: string) => toSubject.get(id) ?? `unknown:${id}`;
   const mod = (id: string) => toModel.get(id) ?? `unknown:${id}`;
   const counts: NamingCounts = {};
+  /** Each face sketch's centre after the last step, to count a pinned one moving. */
+  const centres = new Map<string, Point>();
   let last: NamingRebuild = { order: [], results: {}, bodies: {} };
   const all: NamingStep[] = [...setupOps(setup, subject.cuts).map((op): NamingStep => ({ kind: "op", op, want: "done" })), ...steps];
   for (let n = 0; n < all.length; n++) {
@@ -268,6 +275,11 @@ export async function runNaming(subject: NamingSubject, setup: Setup, steps: rea
       }
       if (item.kind === "face-sketch" && res.kind === "sketch") {
         count(counts, res.warning ? `sketch:${res.warning.cause}` : item.face.role === "side" ? "sketch:side" : "sketch:followed");
+        // Rule 10: a pin followed, and followed somewhere new since the last step.
+        if (item.pin && !res.warning) count(counts, `pin:${item.pin.at}`);
+        const was = centres.get(item.id);
+        if (item.pin && was && (was[0] !== item.centre[0] || was[1] !== item.centre[1])) count(counts, "pin:moved");
+        centres.set(item.id, item.centre);
         const p = res.placement;
         const face = faces.find((f) => faceKeyOf(f.name) === faceKeyOf(item.face));
         if (!res.warning && !vecClose(p.x, item.drawn.x)) count(counts, "sketch:turned");
@@ -487,9 +499,11 @@ export function resolveRandom(doc: NamingDoc, step: RandomStep): NamingStep | nu
  * either way, either cap, and a circle clear of the outline (`clearCut`)
  * that meets it or not; without cuts, half of them on a side instead
  * (never one at exactly 45° between two origin planes, where rule 8's
- * choice is a tie a kernel's rounded normal could break either way).
+ * choice is a tie a kernel's rounded normal could break either way); from
+ * 26f, given `pins`, two in five on a cap with the centre pinned to a
+ * corner or a side's middle (rule 10).
  */
-export function randomSetup(r: SeededRandom, cuts = true): Setup {
+export function randomSetup(r: SeededRandom, cuts = true, pins?: SeededRandom): Setup {
   for (;;) {
     const corners = randomOutline(r);
     const k = int(r, 0, corners.length - 1);
@@ -498,6 +512,20 @@ export function randomSetup(r: SeededRandom, cuts = true): Setup {
     const s: Setup = { corners, distance: nonZero(r, 40), cap, centre: across(corners, [r.next(), r.next()]), radius: radiusOf(r), depth: int(r, 1, 45) };
     const [a, b] = [corners[k], corners[(k + 1) % corners.length]];
     if (onSide && Math.abs(b[0] - a[0]) === Math.abs(b[1] - a[1])) continue;
+    // Step 26f: on a cap, two in five circles snapped onto a corner or a side's middle (from `pins`, a stream of its own, so the sessions without it are as they were).
+    if (!onSide && pins && pins.next() < 0.4) {
+      const n = corners.length;
+      const j = int(pins, 0, n - 1);
+      const line = (i: number) => `line-${((i + n) % n) + 1}`;
+      if (pins.next() < 0.5) {
+        s.pin = { at: "corner", before: line(j - 1), after: line(j) };
+        s.centre = [corners[j][0], corners[j][1]];
+      } else {
+        const [a, b] = [corners[j], corners[(j + 1) % n]];
+        s.pin = { at: "middle", line: line(j) };
+        s.centre = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      }
+    }
     if (onSide || clearCut(s.centre, s.radius, corners)) return s;
   }
 }
@@ -510,7 +538,7 @@ export interface NamingSession {
 /** A seeded session; `cuts` as the subject's, since only a subject without cuts gets setups on a side. */
 export function randomNamingSession(seed: bigint, steps: number, cuts = true): NamingSession {
   const r = seeded(seed);
-  const setup = randomSetup(r, cuts);
+  const setup = randomSetup(r, cuts, seeded(seed ^ 0x26fn));
   return { setup, steps: Array.from({ length: steps }, () => randomStep(r)) };
 }
 
@@ -586,7 +614,7 @@ export function namingModelSubject(faults: Iterable<NamingFault> = [], cuts = tr
 export interface Expect {
   order: string[];
   /** A sketch's placement; `x` and `normal` are the world's XY frame's unless given. */
-  sketch?: { id: string; origin: Vec3; x?: Vec3; normal?: Vec3; side: 1 | -1; warning?: "plane-lost" | "plane-ambiguous" };
+  sketch?: { id: string; origin: Vec3; x?: Vec3; normal?: Vec3; side: 1 | -1; warning?: "plane-lost" | "plane-ambiguous" | "point-lost" };
   cut?: { id: string; removed: number } | { id: string; failed: true };
   bodies: Record<string, number>;
   /** New bodies' centroids (before any cut) and the warning the feature that made each one shows, none unless given. */
@@ -596,7 +624,7 @@ export interface Expect {
 }
 
 export interface FusionCase {
-  /** Which of the owner's answers it encodes: "1" to "7" from 25a (docs/progress/cad.md, "Naming test plan (25a)"), "Q1" to "Q3" from step 26 ("Sketch on a face test plan (26a)"). */
+  /** Which of the owner's answers it encodes: "1" to "7" from 25a (docs/progress/cad.md, "Naming test plan (25a)"), "Q1" to "Q4" from step 26 ("Sketch on a face test plan (26a)"). */
   answer: string;
   title: string;
   /** Whether it needs a cut (booleans), or holds for a subject that makes the circle a new body. */
@@ -664,6 +692,12 @@ const rect = (x0: number, y0: number, x1: number, y1: number): Point[] => [
  * π · 5² · 10 = 250π mm³ and leaves 40 · 30 · 20 − 250π = 24000 − 250π.
  */
 export const BEN: Setup = { corners: rect(0, 0, 40, 30), distance: 20, cap: "end", centre: [20, 15], radius: 5, depth: 10 };
+/**
+ * Ben's part with the circle's centre snapped onto the top's back right
+ * corner (40, 30) instead (Q4, step 26f): corner 2, where line 2 (the
+ * right side, (40, 0) → (40, 30)) ends and line 3 (the back) starts.
+ */
+export const PINNED: Setup = { ...BEN, centre: [40, 30], pin: { at: "corner", before: "line-2", after: "line-3" } };
 const PI = Math.PI;
 
 const op = (o: NamingOp, want?: NamingApplied["kind"] | RefuseCause): NamingStep => ({ kind: "op", op: o, ...(want ? { want } : {}) });
@@ -1156,5 +1190,170 @@ export const FUSION_CASES: readonly FusionCase[] = [
       bodies: { "extrude-2": 12000, "extrude-4": 250 * PI },
       solids: { "extrude-2": { centroid: [40 / 3, 10, 10] }, "extrude-4": { centroid: [45, 15, 10], warning: "source-lost" } },
     },
+  },
+
+  // ---- Q4 (step 26f): a centre snapped onto the top's corner, or a side's middle, follows it. ----
+  {
+    answer: "Q4",
+    title: "new body: a circle's centre snapped to the top's corner follows it when the rectangle is made 60 × 30",
+    cuts: false,
+    setup: PINNED,
+    steps: [op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done")],
+    // The corner between line 2 (the right side, (40, 0) → (40, 30)) and
+    // line 3 (the back) is corner 2 of the outline; the edit moves it to
+    // (60, 30) keeping both lines, so the centre goes there: the cylinder's
+    // middle is (60, 30, 20 + 10 / 2) = (60, 30, 25). The base is
+    // 60 · 30 · 20 = 36000, its middle (30, 15, 10).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 36000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [30, 15, 10] }, "extrude-4": { centroid: [60, 30, 25] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: a pinned corner moved by hand to (50, 40) takes the centre with it",
+    cuts: false,
+    setup: PINNED,
+    steps: [op({ op: "move-corner", sketch: "sketch-1", corner: 2, to: [50, 40] }, "done")],
+    // Corner 2 is the pinned one. The base (0, 0), (40, 0), (50, 40),
+    // (0, 30): twice its area by the shoelace is 0 + 40·40 − 50·0 +
+    // 50·30 − 0·40 + 0 = 3100, so 1550 · 20 = 31000. The cylinder's middle
+    // is (50, 40, 25).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 31000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [50, 40, 25] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: the first extrude made 35 long carries the pinned centre up with the top",
+    cuts: false,
+    setup: PINNED,
+    steps: [op({ op: "set-distance", item: "extrude-2", value: 35 }, "done")],
+    // The corner is still (40, 30) seen from above, now at z = 35: the
+    // sketch's origin (0, 0, 35) and the cylinder 35 to 45, middle
+    // (40, 30, 40). The base 40 · 30 · 35 = 42000, middle (20, 15, 17.5).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 35], side: 1 },
+      bodies: { "extrude-2": 42000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [20, 15, 17.5] }, "extrude-4": { centroid: [40, 30, 40] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: the rectangle redrawn as a triangle loses the pinned corner: the centre stays, the sketch warns",
+    cuts: false,
+    setup: PINNED,
+    steps: [op({ op: "set-corners", sketch: "sketch-1", corners: [[0, 0], [40, 0], [0, 30]] }, "done")],
+    // Three corners: a new outline with new lines (line 5 onwards), so no
+    // corner sits between lines 2 and 3 any more. The centre stays at
+    // (40, 30), the cylinder at (40, 30, 25), and the sketch, still on the
+    // top (the cap keeps its name), says its point is lost; the cylinder's
+    // sketch still makes an outline, so it has no warning. The triangle
+    // 40 · 30 / 2 · 20 = 12000.
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "point-lost" },
+      bodies: { "extrude-2": 12000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [40, 30, 25] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: undo after losing the corner brings the pin back without a warning, through save and open",
+    cuts: false,
+    setup: PINNED,
+    steps: [
+      op({ op: "set-corners", sketch: "sketch-1", corners: [[0, 0], [40, 0], [0, 30]] }, "done"),
+      op({ op: "undo" }, "done"),
+      { kind: "save-open" },
+      op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done"),
+    ],
+    // Back to the rectangle with lines 1 to 4, the pin finds its corner
+    // again, and still follows it after the file is saved and opened:
+    // (60, 30, 25) as in the first Q4 case.
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 36000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [60, 30, 25] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: a centre snapped to the middle of the front edge stays in its middle when the rectangle is made 60 × 30",
+    cuts: false,
+    setup: { ...BEN, centre: [20, 0], pin: { at: "middle", line: "line-1" } },
+    steps: [op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done")],
+    // Line 1 runs (0, 0) → (60, 0) now, its middle (30, 0): the cylinder's
+    // middle (30, 0, 25).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 36000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [30, 0, 25] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: a pinned circle moved by hand is pinned no longer, so the next edit leaves it where it was put",
+    cuts: false,
+    setup: PINNED,
+    steps: [op({ op: "set-circle", sketch: "sketch-3", centre: [10, 10], radius: 5 }, "done"), op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done")],
+    // (10, 10) is free, so the 60 × 30 edit leaves it there: (10, 10, 25).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 36000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [10, 10, 25] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: the corner moved while the first extrude is suppressed: on again, the centre is at the corner's new place",
+    cuts: false,
+    setup: PINNED,
+    steps: [
+      op({ op: "suppress", item: "extrude-2", on: true }, "done"),
+      op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done"),
+      op({ op: "suppress", item: "extrude-2", on: false }, "done"),
+    ],
+    // Pins are judged with nothing suppressed (as holds are), so the greyed
+    // sketch's centre went with the corner to (60, 30): (60, 30, 25).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 36000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [60, 30, 25] } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "new body: the first extrude deleted loses the plane, which says it all: no point warning, the cylinder stays",
+    cuts: false,
+    setup: PINNED,
+    steps: [op({ op: "delete", item: "extrude-2" }, "done")],
+    // As Q1: plane lost, the cylinder held at (40, 30, 25) saying its source is lost.
+    expect: {
+      order: ["sketch-1", "sketch-3", "extrude-4"],
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "plane-lost" },
+      bodies: { "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [40, 30, 25], warning: "source-lost" } },
+    },
+  },
+  {
+    answer: "Q4",
+    title: "a hole on the top's corner bites a quarter out, and follows the corner to 60 × 30",
+    cuts: true,
+    setup: PINNED,
+    steps: [op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done")],
+    // A circle of radius 5 round a right-angled corner has a quarter of it
+    // inside: π · 5² / 4 · 10 = 62.5π removed, from 36000 after the edit.
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", removed: 62.5 * PI }, bodies: { "extrude-2": 36000 - 62.5 * PI } },
   },
 ];

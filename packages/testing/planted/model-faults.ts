@@ -293,6 +293,7 @@ export const PLANTS: Record<ModelFault, Plant> = {
 const FACE = "workspaces/design/src/face-sketch.ts";
 const SKETCH = "workspaces/design/src/sketch.ts";
 const ASK = "workspaces/design/src/delete-ask.ts";
+const EDGES = "workspaces/design/src/face-edges.ts";
 
 /** A plant in Design's sketch on a face (step 26c), and the naming model's bug it is the same mistake as, when it is one. */
 export interface NamingPlant extends Plant {
@@ -315,7 +316,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   "plane-stays-put": {
     fault: "plane-stays-put",
     what: "a face sketch stays on the plane it was drawn on, whatever its face does",
-    edits: [{ file: REBUILD, find: "placement: { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side } };", replace: "placement: { plane: squared(p.frame)!, side: p.side } };" }],
+    edits: [{ file: REBUILD, find: "const placement = { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side };", replace: "const placement = { plane: squared(p.frame)!, side: p.side };" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
@@ -325,8 +326,8 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     edits: [
       {
         file: REBUILD,
-        find: "placement: { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side } };",
-        replace: "placement: { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: frameNow(squared(p.frame)!, outward, view.face_centroids[face]).normal.reduce((a, x, k) => a + x * outward[k], 0) < 0 ? -1 : 1 } };",
+        find: "const placement = { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side };",
+        replace: "const placement = { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: frameNow(squared(p.frame)!, outward, view.face_centroids[face]).normal.reduce((a, x, k) => a + x * outward[k], 0) < 0 ? -1 : 1 };",
       },
     ],
     run: ["naming"],
@@ -440,5 +441,53 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     run: ["naming"],
     caught: "hand-worked: a box's top sketched on",
     why: "the model's sessions never bring a lost face's name back, except by Undo, which restores the snapshot; the box made a sphere and back does",
+  },
+  // ---- Step 26f: points pinned to a face's edges (Q4). ----
+  "pin-stays-put": {
+    fault: "pin-stays-put",
+    what: "a pinned point is never moved: the rebuild and the settle leave it where it was drawn",
+    edits: [{ file: REBUILD, find: "    if (\"at\" in now) pinned.push({ point: pin.point, at: now.at });", replace: "    if (\"at\" in now) continue;" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "lost-pin-silent": {
+    fault: "lost-pin-silent",
+    what: "a pinned point whose edge is gone stays put without a word",
+    edits: [{ file: REBUILD, find: "  if (n === 0) return { pinned };", replace: "  if (n >= 0) return { pinned };" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "lost-pin-moves": {
+    fault: "lost-pin-moves",
+    what: "a pinned point whose edge is gone is sent to the sketch's origin",
+    edits: [{ file: REBUILD, find: "    else held[now.cause]++;", replace: "    else (held[now.cause]++, pinned.push({ point: pin.point, at: [0, 0] }));" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "pin-survives-move": {
+    fault: "pin-survives-move",
+    what: "a pinned point moved by hand keeps its pin, so the next settle puts it back on the edge",
+    edits: [{ file: SKETCH, find: "  return withSketch(doc, sketch.pins ? withPins(moved, sketch.pins.filter((p) => p.point !== pointId)) : moved);", replace: "  return withSketch(doc, moved);" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "pin-wrong-end": {
+    fault: "pin-wrong-end",
+    what: "a corner is found at the far end of one of the edges it is named by",
+    edits: [{ file: EDGES, find: "    if (v >= 0) return { at: inSketch(view.vertex_points[v], plane) };", replace: "    if (v >= 0) { const e = view.edge_vertices.findIndex(([a, b]) => a === v && b !== v); return { at: inSketch(view.vertex_points[e >= 0 ? view.edge_vertices[e][1] : v], plane) }; }" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "pin-ordered-corner": {
+    what: "a corner is named with the order of the side edges meeting there, so a corner moved across the outline (turning it over) loses its pin",
+    edits: [{ file: EDGES, find: "    const n = unordered(names.edges[e]);", replace: "    const n = names.edges[e];" }],
+    run: ["naming"],
+    caught: "seeded",
+  },
+  "pin-not-settled": {
+    what: "neither the settle nor the app writes a pinned point's new place into the sketch, so what is drawn and saved stays behind what is built",
+    edits: [{ file: REBUILD, find: "  const to = new Map(r.pinned.map((p) => [p.point, p.at]));", replace: "  const to = new Map<string, SketchXY>();" }],
+    run: ["naming"],
+    caught: "seeded",
   },
 };

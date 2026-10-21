@@ -24,11 +24,12 @@ import { itemName } from "./timeline-edits.ts";
 import { chooseBarAction, chooseEntry, menuEntries, openAction, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
-import { BodyCache, rebuildTimeline, settleKept, type TimelineBuild } from "./rebuild.ts";
+import { BodyCache, followedDoc, rebuildTimeline, settleKept, type TimelineBuild } from "./rebuild.ts";
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
-import { addFaceSketch, addSketch, askOutline, outlineSourceOf, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane, sketchSide } from "./sketch.ts";
+import { addFaceSketch, addSketch, askOutline, outlineSourceOf, pinNewPoints, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane, sketchSide } from "./sketch.ts";
+import { sketchEdgeTargets } from "./face-edges.ts";
 import { sketchableFaces, sketchSpot, type SketchSpot } from "./face-pick.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, withLocks, type Locks } from "./typed-entry.ts";
@@ -361,7 +362,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (result?.status === "failed") failure = result.message;
     else if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) failure = `${feature.provenance.self.label} is ${result.status}`;
     const drawn = await shownBodies(doc, build, bodies);
-    return { scene: joinBodies(drawn), warnings: warningsOf(doc, build), failure };
+    return { scene: joinBodies(drawn), warnings: warningsOf(doc, build), failure, followed: followedDoc(doc, build) };
   }
   /**
    * The rebuild's warnings in timeline order: an extrude built from its kept
@@ -378,6 +379,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (r.plane) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.plane.message}.`, lost: true });
       if (r.warning) out.push({ item: f.id, rows: [f.id, r.warning.sketch], sketch: r.warning.sketch, words: `${label} keeps its last shape. ${r.warning.message}.` });
       if (r.source) out.push({ item: f.id, rows: [f.id], sketch: r.source.sketch, words: `${r.source.message}.` });
+      if (r.points) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.points.message}.` });
     }
     return out;
   }
@@ -496,6 +498,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let failedNow: ReadonlySet<string> = new Set();
   /** Where the last rebuild placed each sketch on a face (26c), by sketch id: drawn and looked at there. */
   let placedNow: ReadonlyMap<string, Plane> = new Map();
+  /**
+   * What a pointer on sketch `id` may snap to on its face's edges (26f):
+   * their ends, middles and centres in the plane the sketch is drawn in
+   * (the last rebuild's placement, or, for a sketch just made on a face and
+   * not rebuilt since, the frame it was made in).
+   */
+  const edgeTargets = (id: string) => sketchEdgeTargets(designDoc(), id, lastScene, sketchPlane(designDoc(), id, placedNow));
   /** The bar's item whose ⋯ shows (a click or tap picked it). */
   let picked: string | null = null;
   /** The sketch being edited, whose own Suppress and Delete are off. */
@@ -636,6 +645,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!shown) return void (missed = true);
       missed = false;
       const { scene, failure } = value;
+      // Points pinned to a face's edges (26f) where this rebuild found them, taken into the edit's own undo step (the
+      // typing in a box still one step): drawn there, and held there should their edge go. Not while an undo or redo is
+      // putting a snapshot back (it was taken in when that step was made), nor once the design has changed again.
+      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring()) {
+        ctx.project.workspaces.design = value.followed;
+        if (saved?.doc === doc) saved = { ...saved, doc: value.followed };
+        if (shownDoc === doc) shownDoc = value.followed;
+        ctx.history.amend(true);
+      }
       // The rows were drawn before the rebuild said what failed: a failed item has no Body row.
       if (!sameIds(rowsFailed, failedNow)) drawBrowser(doc);
       warningsNow = value.warnings;
@@ -1106,7 +1124,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // A hover off the modelling range just doesn't move the preview.
       void roundPointer(at, mode.grid, pointer.pixel).then((value) => {
         if (move !== moves || mode.kind !== "edit") return;
-        mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel);
+        mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel, edgeTargets(mode.tool.sketch));
         mode.pointer = mode.snap.at;
         mode.pixel = pointer.pixel;
         drawSketches();
@@ -1126,17 +1144,19 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // The tool changed while the kernel snapped (L, R, C or Escape): the click was for the old tool, so it is dropped.
       if (mode.kind !== "edit" || toolChanges !== changes) return;
       // The click lands where the hover showed it would: where it was rounded to (free or on the grid), or on the point or line-up snap.ts finds.
-      const snapped = snapOnSketch(designDoc(), mode.tool, at, rounded, pointer.pixel).at;
+      const edges = edgeTargets(mode.tool.sketch);
+      const snapped = snapOnSketch(designDoc(), mode.tool, at, rounded, pointer.pixel, edges).at;
       // A typed size overrules the pointer for what it locks (SF4): the point goes where the locks put it, exactly.
       const aim = aimOf(designDoc(), mode.tool, snapped, locks);
       if (!aim) return sketchBox.showError(NO_AIM);
       const before = designDoc();
       const done = clickAt(before, withLocks(mode.tool, locks, snapped), aim);
       // The owner's rule (rebuild.ts): an extrude whose sketch this edit breaks keeps the sketch as it was, in the same undo step.
-      let next = done.doc;
+      // A new point on the face's edges is pinned there (26f), in the same step.
+      let next = pinNewPoints(before, done.doc, done.tool.sketch, edges);
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, done.doc, settleBodies);
+          next = await settleKept(kernel, before, next, settleBodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }
@@ -1148,7 +1168,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       mode.tool = done.tool;
       // The pointer is still there: what it snaps to now, with the new point and the tool's next step. (A finger has
       // left the view by now, and this keeps the hint and the boxes by the tap; sketch-hover.journey.ts.)
-      mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel);
+      mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel, edges);
       mode.pointer = mode.snap.at;
       mode.pixel = pointer.pixel;
       if (done.drew) applySketchEdit(next, drawStep(done.tool), done.tool.sketch);
@@ -1166,11 +1186,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const changes = toolChanges;
       const before = designDoc();
       const done = clickAt(before, withLocks(mode.tool, locks, mode.pointer), aim);
-      // As a click: an extrude whose sketch this breaks keeps the sketch as it was (rebuild.ts), in the same undo step.
-      let next = done.doc;
+      // As a click: an extrude whose sketch this breaks keeps the sketch as it was (rebuild.ts), in the same undo step, and a point on the face's edges is pinned (26f).
+      let next = pinNewPoints(before, done.doc, done.tool.sketch, edgeTargets(done.tool.sketch));
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, done.doc, settleBodies);
+          next = await settleKept(kernel, before, next, settleBodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }

@@ -16,6 +16,11 @@
 //    line snaps horizontal or vertical.
 // 3. Otherwise the rounded point.
 //
+// From step 26f a sketch on a face snaps in the same way (1 only) to the
+// ends, middles and centres of that face's edges (face-edges.ts), which are
+// not drawn into the sketch; a point that lands on one is pinned to it
+// (sketch.ts `pinNewPoints`) and follows it.
+//
 // Snapping is only where the click lands: nothing is remembered as a rule
 // (a line drawn horizontal is not kept horizontal); that is what the
 // constraints of step 29 add. The reach is in screen pixels, turned into mm
@@ -25,6 +30,7 @@
 
 import type { SketchDrawing, SketchXY } from "@fission/core";
 import type { DesignDocument, Sketch } from "./document.ts";
+import type { EdgeTarget } from "./face-edges.ts";
 import type { SketchTool } from "./sketch-tool.ts";
 
 /** How near on screen (px) the pointer must come to a point, or to a point's column or row, to snap to it. */
@@ -36,6 +42,8 @@ export type PointKind = "endpoint" | "midpoint" | "centre";
 export interface SnapTarget {
   at: SketchXY;
   kind: PointKind;
+  /** On the sketch's face's edges, not the sketch's own (26f): a point landing here is pinned to it (`pin`). */
+  pin?: EdgeTarget;
 }
 
 /** What the pointer may snap to on one sketch for one tool. */
@@ -52,7 +60,8 @@ export interface SnapTargets {
 /** Where the pointer landed and why: on the grid, on a point, or lined up with a point's column, row or both. */
 export type Snap =
   | { kind: "grid"; at: SketchXY }
-  | { kind: PointKind; at: SketchXY }
+  /** `edge`: a point of the face's edges (26f), not of the sketch. */
+  | { kind: PointKind; at: SketchXY; edge?: true }
   | { kind: "aligned"; at: SketchXY; column: SketchXY | null; row: SketchXY | null };
 
 const same = (a: SketchXY, b: SketchXY) => a[0] === b[0] && a[1] === b[1];
@@ -77,7 +86,9 @@ function ownClicks(sketch: Sketch, tool: SketchTool): SketchXY[] {
 
 /**
  * What the pointer may snap to on `sketch` while `tool` is used. Points:
- * every sketch point, then every line's midpoint ((a + b) / 2), leaving
+ * every sketch point, then every line's midpoint ((a + b) / 2), then
+ * (26f) `edges`, the ends, middles and centres of the edges of the face
+ * the sketch is on (face-edges.ts; never a column or row), leaving
  * out the tool's own clicks: a click there draws nothing (an arc's end on
  * its start, its third point on an end). Columns and rows: every sketch
  * point and the tool's own clicks (lining up with one is horizontal or
@@ -86,7 +97,7 @@ function ownClicks(sketch: Sketch, tool: SketchTool): SketchXY[] {
  * neither the first corner nor any point on its column (or row) is
  * offered as a column (or row).
  */
-export function snapTargets(sketch: Sketch, tool: SketchTool): SnapTargets {
+export function snapTargets(sketch: Sketch, tool: SketchTool, edges: readonly EdgeTarget[] = []): SnapTargets {
   const own = ownClicks(sketch, tool);
   const isEnd = new Set(sketch.curves.flatMap((c) => (c.kind === "circle" ? [] : [c.start, c.end])));
   const at = new Map(sketch.points.map((p) => [p.id, [p.x, p.y] as SketchXY]));
@@ -97,6 +108,8 @@ export function snapTargets(sketch: Sketch, tool: SketchTool): SnapTargets {
     const b = at.get(c.end)!;
     points.push({ at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], kind: "midpoint" });
   }
+  // The face's edges (26f) after the sketch's own points, so where both are at one spot the click shares the sketch's point.
+  for (const e of edges) points.push({ at: e.at, kind: e.kind, pin: e });
   const refs: SketchXY[] = sketch.points.map((p) => [p.x, p.y]);
   for (const o of own) if (!refs.some((r) => same(r, o))) refs.push(o);
   const corner = tool.kind === "rectangle" ? (own[0] ?? null) : null;
@@ -139,7 +152,8 @@ export function snapPointer(raw: SketchXY, grid: SketchXY, targets: SnapTargets,
     const d = Math.sqrt((t.at[0] - raw[0]) ** 2 + (t.at[1] - raw[1]) ** 2);
     if (d <= reach && d < best) [point, best] = [t, d];
   }
-  if (point) return { kind: point.kind, at: point.at };
+  const found = (t: SnapTarget): Snap => (t.pin ? { kind: t.kind, at: t.at, edge: true } : { kind: t.kind, at: t.at });
+  if (point) return found(point);
   const column = nearest(targets.columns, (r) => Math.abs(r[0] - raw[0]), reach);
   const row = nearest(targets.rows, (r) => Math.abs(r[1] - raw[1]), reach);
   if (!column && !row) return { kind: "grid", at: grid };
@@ -147,22 +161,22 @@ export function snapPointer(raw: SketchXY, grid: SketchXY, targets: SnapTargets,
   // Lined up onto one of the tool's own clicks is being on it, not lined up with anything.
   if (targets.own.some((o) => same(at, o))) return { kind: "grid", at: grid };
   const on = targets.points.find((t) => same(t.at, at));
-  return on ? { kind: on.kind, at: on.at } : { kind: "aligned", at, column, row };
+  return on ? found(on) : { kind: "aligned", at, column, row };
 }
 
 /** The snap for a pointer on the sketch a tool is drawing on (snapTargets, then snapPointer). */
-export function snapOnSketch(doc: DesignDocument, tool: SketchTool, raw: SketchXY, grid: SketchXY, pixel: number | undefined): Snap {
+export function snapOnSketch(doc: DesignDocument, tool: SketchTool, raw: SketchXY, grid: SketchXY, pixel: number | undefined, edges: readonly EdgeTarget[] = []): Snap {
   const sketch = doc.sketches.find((s) => s.id === tool.sketch);
   if (!sketch) throw new Error(`there is no sketch ${tool.sketch} in the design`);
-  return snapPointer(raw, grid, snapTargets(sketch, tool), pixel);
+  return snapPointer(raw, grid, snapTargets(sketch, tool, edges), pixel);
 }
 
 const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
 
-/** The snap in words, for the viewport's data (read by the e2e test): "endpoint 10,0", "vertical from 0,0 and horizontal from 10,20", "" on the grid. */
+/** The snap in words, for the viewport's data (read by the e2e test): "endpoint 10,0", "edge endpoint 40,30" (26f), "vertical from 0,0 and horizontal from 10,20", "" on the grid. */
 export function snapLabel(snap: Snap): string {
   if (snap.kind === "grid") return "";
-  if (snap.kind !== "aligned") return `${snap.kind} ${xy(snap.at)}`;
+  if (snap.kind !== "aligned") return `${snap.edge ? "edge " : ""}${snap.kind} ${xy(snap.at)}`;
   const words = [snap.column && `vertical from ${xy(snap.column)}`, snap.row && `horizontal from ${xy(snap.row)}`];
   return words.filter(Boolean).join(" and ");
 }
