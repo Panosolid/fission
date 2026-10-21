@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.26.1 (2026-10-21)
+
+- Fix (security audit 2026-10-22): every GitHub Action the workflows use is pinned to a fixed commit instead of a tag like v4 that its owner could move. The site's build runs these actions and Pages publishes what they build, so a hijacked tag could have changed the app every visitor runs. A new check fails on any action that isn't pinned. Also, .env files can't be committed.
+
 ## 0.26.0 (2026-10-21)
 
 - Step 26a: the test plan and harness for sketching on a face, no app change yet. The model the app will be checked against now knows Ben's Fusion answers for step 26: sketches on an extrude's sides as well as its top and bottom, reading in world coordinates and turning with the face when a corner moves; a body built from a sketch whose face is gone stays where it was and says its source is lost; suppressing a feature greys everything built on it with no warning. 14 new hand-worked cases and 7 deliberately planted bugs, each caught. Fixed in the model while doing it: an outline drawn clockwise gave a negative volume.
