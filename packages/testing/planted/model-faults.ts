@@ -306,8 +306,8 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   },
   "frame-not-turned": {
     fault: "frame-not-turned",
-    what: "a face sketch's x axis stays as drawn when its face turns (only squared up)",
-    edits: [{ file: FACE, find: "xAxis: turned(drawn.xAxis, drawn.normal, n), normal: n })!;", replace: "xAxis: drawn.xAxis, normal: n })!;" }],
+    what: "a face sketch's frame keeps the axes it was drawn with when its face turns (the model's fault: only its origin moves)",
+    edits: [{ file: FACE, find: "xAxis: turned(drawn.xAxis, drawn.normal, n), normal: n })!;", replace: "xAxis: drawn.xAxis, normal: drawn.normal })!;" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
@@ -316,14 +316,16 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "a face sketch's origin is the point of the face it was given, not where the world's origin meets the plane",
     edits: [{ file: FACE, find: "  return squared({ origin: scale(n, dot(point, n)), xAxis: turned(drawn.xAxis, drawn.normal, n), normal: n })!;", replace: "  return squared({ origin: [...point] as Vec3, xAxis: turned(drawn.xAxis, drawn.normal, n), normal: n })!;" }],
     run: ["naming"],
-    caught: "Fusion answers",
+    caught: "hand-worked: a box's top",
+    why: "the hand-worked box top (origin (0,0,20), not the face's middle) comes before the Fusion answers",
   },
   "lost-plane-silent": {
     fault: "lost-plane-silent",
     what: "a face sketch held at its last placement says nothing",
     edits: [{ file: REBUILD, find: "side: p.side }, plane: { cause, face: plane, message: planeWords(cause, f.provenance.self.label) } };", replace: "side: p.side } };" }],
     run: ["naming"],
-    caught: "Fusion answers",
+    caught: "hand-worked: a sketch on a cylinder's flat top",
+    why: "the hand-worked file naming a cylinder's side comes before the Fusion answers",
   },
   "lost-plane-moves": {
     fault: "lost-plane-moves",
@@ -338,7 +340,8 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "an extrude of a held face sketch says nothing",
     edits: [{ file: REBUILD, find: "...made, ...(source ? { source } : {}) };", replace: "...made };" }],
     run: ["naming"],
-    caught: "Fusion answers",
+    caught: "hand-worked: a sketch on a cylinder's flat top",
+    why: "the hand-worked file naming a cylinder's side comes before the Fusion answers",
   },
   "extrude-ignores-side": {
     fault: "extrude-ignores-side",
@@ -380,7 +383,8 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "settling judges held placements with suppression on, so a face redrawn away while greyed is never held",
     edits: [{ file: REBUILD, find: "  const features = doc.timeline.features.map((f) => (f.suppressed ? { ...f, suppressed: false } : f));", replace: "  const features = doc.timeline.features;" }],
     run: ["naming"],
-    caught: "Fusion answers",
+    caught: "seeded:",
+    why: "Design falls back to the frame as drawn when nothing is held, which in the Fusion case Q3 is where the hold would be; the seeded sessions move the face before suppressing",
   },
   "greyed-extrude-fails": {
     what: "an extrude of a greyed sketch fails (red) instead of greying with it",
@@ -392,7 +396,8 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "Flip does nothing on a sketch on XY",
     edits: [{ file: REBUILD, find: "  if (at === null) return { extrude: flip ? { profile, distance, flip: true } : { profile, distance } };", replace: "  if (at === null) return { extrude: { profile, distance } };" }],
     run: ["naming"],
-    caught: "Fusion answers",
+    caught: "hand-worked: a 40 × 30 rectangle on XZ and on YZ",
+    why: "the hand-worked XY flip comes first in the journey",
   },
   "kept-lies-flat": {
     what: "an extrude keeping a deleted sketch that was not on XY keeps its points only, so it is laid on XY",
@@ -403,7 +408,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   },
   "held-never-forgotten": {
     what: "a held placement is kept after the face comes back, so a later loss holds an old place",
-    edits: [{ file: REBUILD, find: "      if (r.plane === undefined) keep = undefined;\n", replace: "" }],
+    edits: [{ file: REBUILD, find: "      if (r.plane === undefined) keep = undefined;", replace: "      if (r.plane === undefined) keep = keep;" }],
     run: ["naming"],
     caught: "hand-worked: a box's top sketched on",
     why: "the model's sessions never bring a lost face's name back, except by Undo, which restores the snapshot; the box made a sphere and back does",
