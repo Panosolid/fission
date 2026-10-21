@@ -9,7 +9,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { partDocument, type DesignDocument } from "../src/document.ts";
-import { addSketch, drawRectangle } from "../src/sketch.ts";
+import { addFaceSketch, addSketch, drawCircle, drawRectangle } from "../src/sketch.ts";
+import { drawnFrame } from "../src/face-sketch.ts";
 import { extrudeSketch } from "../src/extrude.ts";
 import { deleteItem } from "../src/timeline-edits.ts";
 import { deleteAsk, deleteWords, listWords } from "../src/delete-ask.ts";
@@ -82,6 +83,21 @@ test("nothing built from it, nothing to ask: an unused sketch, the extrude itsel
   assert.equal(deleteWords(s2.doc, deleteItem(s2.doc, s2.id), s2.id), null, "a second sketch no extrude uses");
   assert.equal(deleteWords(d, deleteItem(d, "feature-11"), "feature-11"), null, "the extrude: nothing is built from it");
   assert.equal(deleteWords(d, deleteItem(d, "feature-1"), "feature-1"), null, "the box");
+});
+
+test("a box with sketches on its faces: the box says each stays where it is with its plane lost, never that it fails (26c, Q1)", () => {
+  // The box (feature-1), Sketch 1 on its top (sketch-2) with a circle
+  // (point-3, circle-4), Extrude 1 of it (feature-5): deleting the box asks
+  // first; the sketch stays, held where it is, and the extrude with it.
+  const top = addFaceSketch(partDocument("box", 40, 30, 20), { plane: "face:feature-1/end", feature: "feature-1" }, drawnFrame([0, 0, 1], [20, 15, 20]));
+  const one = extrudeSketch(drawCircle(top.doc, top.id, [20, 15], 5).doc, top.id, 10).doc;
+  assert.deepEqual(deleteWords(one, deleteItem(one, "feature-1"), "feature-1"), {
+    heading: "Delete Feature 1 (box)?",
+    words: "Sketch 1 is drawn on a face of Feature 1 (box). If you delete it, Sketch 1 stays where it is and shows its plane is lost. Undo brings Feature 1 (box) back.",
+  });
+  // A second, on its front (sketch-6): plural words.
+  const two = addFaceSketch(one, { plane: "face:feature-1/side:line-0", feature: "feature-1" }, drawnFrame([0, -1, 0], [20, 0, 10])).doc;
+  assert.deepEqual(deleteWords(two, deleteItem(two, "feature-1"), "feature-1")!.words, "Sketch 1 and Sketch 2 are drawn on faces of Feature 1 (box). If you delete it, Sketch 1 and Sketch 2 stay where they are and show their planes are lost. Undo brings Feature 1 (box) back.");
 });
 
 test("an item that isn't there is refused by name", () => {
