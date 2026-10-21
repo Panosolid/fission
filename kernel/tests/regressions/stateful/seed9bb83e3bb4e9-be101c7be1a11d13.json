@@ -1,0 +1,47 @@
+{
+  "seed": 171215620388073,
+  "failure": "step 1 (Add { shape: Extrude { outer: Path { pts: [[99674276.6799047, 0.0], [99674276.6810047, 0.0]], bulges: [-1184444800.3065448, 0.0] }, holes: [], dist: 0.5, expect: Some(true), sketch: Some(0) }, axis: [1.0, 0.0, 0.0], angle: 0.0, at: [0.0, 0.0, 0.0] }): sizes valid = true but kernel rejected",
+  "ops": [
+    {
+      "Add": {
+        "shape": {
+          "Extrude": {
+            "outer": {
+              "Path": {
+                "pts": [
+                  [
+                    "99674276.6799047",
+                    "0.0"
+                  ],
+                  [
+                    "99674276.6810047",
+                    "0.0"
+                  ]
+                ],
+                "bulges": [
+                  "-1184444800.3065448",
+                  "0.0"
+                ]
+              }
+            },
+            "holes": [],
+            "dist": "0.5",
+            "expect": true,
+            "sketch": 0
+          }
+        },
+        "axis": [
+          "1.0",
+          "0.0",
+          "0.0"
+        ],
+        "angle": "0.0",
+        "at": [
+          "0.0",
+          "0.0",
+          "0.0"
+        ]
+      }
+    }
+  ]
+}

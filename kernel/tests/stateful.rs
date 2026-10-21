@@ -279,6 +279,14 @@ impl Ring {
         })
     }
 
+    /// True if some point of this ring is certainly beyond MAX_COORD (by
+    /// more than 1e-9 of it), with the harness's own arcs (`Piece::reach`).
+    /// The generators' verdicts say so too, but saved regressions keep the
+    /// verdict from the day they were found (issue #205's was wrong).
+    fn certainly_out_of_reach(&self) -> bool {
+        self.pieces().iter().any(|p| p.reach() > MAX_COORD * (1.0 + 1e-9))
+    }
+
     fn boundary(&self) -> Boundary {
         match self {
             Ring::Path { pts, bulges } => Boundary::Path { corners: pts.iter().map(p2).collect(), bulges: bulges.iter().map(|b| b.0).collect() },
@@ -383,6 +391,25 @@ impl Piece {
                     p.distance(a).min(p.distance(b))
                 }
             }
+        }
+    }
+
+    /// The largest |coordinate| of any point on the piece: its ends, and
+    /// for a curve each of the four axis extremes of its circle that it
+    /// passes through (turned from a towards b by at most |φ|, as
+    /// `distance` decides).
+    fn reach(&self) -> f64 {
+        let far = |p: DVec2| p.abs().max_element();
+        match *self {
+            Piece::Line { a, b } => far(a).max(far(b)),
+            Piece::Circle { c, r } => far(c.abs() + r),
+            Piece::Arc { a, b, c, r, phi } => [DVec2::X, DVec2::Y, DVec2::NEG_X, DVec2::NEG_Y]
+                .into_iter()
+                .filter(|&u| {
+                    let v = a - c;
+                    (v.perp_dot(u).atan2(v.dot(u)) * phi.signum()).rem_euclid(std::f64::consts::TAU) <= phi.abs()
+                })
+                .fold(far(a).max(far(b)), |m, u| m.max(far(c + u * r))),
         }
     }
 
@@ -797,6 +824,32 @@ fn verdict(thinnest: f64, span: f64, reach: f64) -> Option<bool> {
     }
 }
 
+/// The "D" of `curved_profile`: corners `at` and `at` + (c, 0), the long
+/// way round a circle of radius `radius` (at least c) from one to the
+/// other, then the flat back; with the generator's verdict.
+///
+/// Everything is measured on the corners as built, not as asked for. Far
+/// out the flat rounds: 1e8 mm out a double's step is 1.49e-8 mm, so a
+/// 0.0011 mm flat comes out up to ~1e-5 of itself long or short. The
+/// radius is c·β/4 for the bulge β, so a β worked out from the flat asked
+/// for, put on the flat as built, makes a circle off by that same
+/// fraction: issue #205 (seed 0x9bb83e3bb4e9) asked for 325722.32 mm,
+/// got 325723.42 mm (the flat came out 0.00110000372), and the circle
+/// reached 0.1 mm past MAX_COORD where the verdict, from the radius asked
+/// for, had it 1 mm inside.
+fn d_profile(radius: f64, c: f64, at: DVec2) -> (Vec<DVec2>, Vec<f64>, Option<bool>) {
+    let pts = vec![at, at + DVec2::new(c, 0.0)];
+    let flat = pts[0].distance(pts[1]);
+    let r = radius.max(flat);
+    let k = 4.0 * r / flat;
+    let beta = (k + (k * k - 4.0).sqrt()) / 2.0;
+    let Piece::Arc { c: centre, r, .. } = Piece::new(pts[0], pts[1], -beta) else { unreachable!("a non-zero bulge is an arc") };
+    // Nearly the whole circle: both sides (|x| + r is the farther of x ± r),
+    // its top, and its lowest points, the corners (its bottom is in the gap).
+    let reach = (centre.x.abs() + r).max((centre.y + r).abs()).max(at.y.abs());
+    (pts, vec![-beta, 0.0], verdict(flat.min(r), 2.0 * r, reach))
+}
+
 /// Curved outlines. Five families built around a known thinnest feature,
 /// so whether the kernel must accept them is known (`verdict`), plus one
 /// of random shapes:
@@ -895,14 +948,9 @@ fn curved_profile(scene: &Scene) -> BoxedStrategy<Shape> {
     // circle spans 2R; its thinnest feature is the flat (or R itself).
     let flat = prop::sample::select(vec![0.5 * LINEAR, 0.9 * MIN_FEATURE, MIN_FEATURE, 1.1 * MIN_FEATURE, 1.0]);
     let d_shape = (l.clone(), flat, centre.clone(), flip).prop_map(move |(radius, c, at, flip)| {
-        let r = radius.max(c);
-        let k = 4.0 * r / c;
-        let beta = (k + (k * k - 4.0).sqrt()) / 2.0;
-        let pts = vec![at, at + DVec2::new(c, 0.0)];
-        let (pts, bulges) = if flip { reverse(pts, vec![-beta, 0.0]) } else { (pts, vec![-beta, 0.0]) };
-        let reach = (at.x + c / 2.0).abs() + r;
-        let reach = reach.max(at.y.abs()).max((at.y + 2.0 * r).abs());
-        (Ring::curved(pts, bulges), vec![], verdict(c.min(r), 2.0 * r, reach))
+        let (pts, bulges, expect) = d_profile(radius, c, at);
+        let (pts, bulges) = if flip { reverse(pts, bulges) } else { (pts, bulges) };
+        (Ring::curved(pts, bulges), vec![], expect)
     });
     let bulge = prop_oneof![
         3 => Just(0.0),
@@ -1842,6 +1890,7 @@ fn extrude_expect(shape: &Shape) -> Expect {
         || shape.clone().numbers().iter().any(|v| !v.0.is_finite())
         || rings().flat_map(Ring::coords).any(|v| v.abs() > MAX_COORD)
         || rings().any(Ring::arc_radius_out_of_range)
+        || rings().any(Ring::certainly_out_of_reach)
         || outer.certainly_too_big()
         || sketch_line_out_of_range(shape)
     {
@@ -2564,6 +2613,125 @@ fn arc_pieces_by_hand() {
     // 605.0000000228 (3.8e-11 of it too large).
     let Piece::Arc { r, .. } = Piece::new(DVec2::new(0.5, 0.0), DVec2::new(0.5, 0.0022), 1.1e6) else { panic!() };
     assert!((r - (605.0 + 5e-10)).abs() <= 605.0 * 4.0 * f64::EPSILON, "{r}");
+}
+
+#[test]
+fn piece_reach_by_hand() {
+    // Bulge 1 over (x, −1000) → (x, 1000) is a half turn counter-clockwise
+    // round (x, 0), radius 1000: the right half, through (x + 1000, 0).
+    // Reversed, (x, 1000) → (x, −1000), it is the left half, whose
+    // farthest point right is its ends at x.
+    let x = 5000.0;
+    let right = Piece::new(DVec2::new(x, -1000.0), DVec2::new(x, 1000.0), 1.0);
+    let left = Piece::new(DVec2::new(x, 1000.0), DVec2::new(x, -1000.0), 1.0);
+    assert_eq!((right.reach(), left.reach()), (6000.0, 5000.0));
+    // The same arcs bulging the other way (bulge −1, clockwise) swap.
+    assert_eq!(Piece::new(DVec2::new(x, 1000.0), DVec2::new(x, -1000.0), -1.0).reach(), 6000.0);
+    // A circle round (−3, 4) of radius 2 reaches x = −5 and y = 6.
+    assert_eq!(Piece::Circle { c: DVec2::new(-3.0, 4.0), r: 2.0 }.reach(), 6.0);
+}
+
+#[test]
+fn certainly_out_of_reach_boundary() {
+    // A circle drawn as two half arcs round (cx, 0), radius 1000, its
+    // corners at x = cx inside the range; its right side, cx + 1000, at
+    // MAX_COORD·(1 + k·1e-9): over by 0.9 of the 1e-9 band (0.09 mm) is
+    // too close to call, by 1.1 of it certainly out. Mirrored to −x and
+    // turned onto ±y the same.
+    for k in [0.9, 1.1] {
+        let edge = MAX_COORD * (1.0 + k * 1e-9);
+        let cx = edge - 1000.0;
+        for (sx, sy, swap) in [(1.0, 1.0, false), (-1.0, 1.0, false), (1.0, 1.0, true), (1.0, -1.0, true)] {
+            let p = |x: f64, y: f64| if swap { DVec2::new(y * sy, x * sx) } else { DVec2::new(x * sx, y * sy) };
+            // Two corners, both bulges 1: the whole circle, whichever way
+            // round the corners lie.
+            let ring = Ring::curved(vec![p(cx, -1000.0), p(cx, 1000.0)], vec![1.0, 1.0]);
+            assert_eq!(ring.certainly_out_of_reach(), k > 1.0, "k {k}, {ring:?}");
+            let shape = Shape::Extrude { outer: ring, holes: vec![], dist: Num(1.0), expect: None, sketch: None };
+            // Beyond MAX_COORD at all, the kernel refuses it.
+            assert!(shape.make().is_err(), "k {k}");
+            assert_eq!(extrude_expect(&shape) == Expect::Invalid, k > 1.0, "k {k}");
+        }
+    }
+}
+
+#[test]
+fn a_far_d_is_judged_as_built_by_hand() {
+    // Issue #205 (seed 0x9bb83e3bb4e9): a "D" asked for with a 0.0011 mm
+    // flat from x = 99674276.6799047 and radius 325722.32. Between 2^26 and
+    // 2^27 a double's step is 2^−26 = 1.4901e-8 mm, so the flat is a whole
+    // number of steps: 0.0011 / 2^−26 = 73819.75, rounding to 73820 steps
+    // = 0.0011000037193298340 mm. The radius is (flat)·β/4, so the bulge
+    // worked out from 0.0011 makes a circle 3.38e-6 of itself bigger:
+    // 325723.42 mm, whose right side, at the flat's middle plus r =
+    // 99674276.68046 + 325723.42 = 100000000.10, is past MAX_COORD.
+    let at = DVec2::new(99674276.6799047, 0.0);
+    let flat = 73820.0 * 2f64.powi(-26);
+    assert_eq!((at + DVec2::new(1.1 * MIN_FEATURE, 0.0)).x - at.x, flat);
+    let (asked, c) = (325722.32, 1.1 * MIN_FEATURE);
+    let k = 4.0 * asked / c;
+    let old_beta = (k + (k * k - 4.0).sqrt()) / 2.0;
+    let Piece::Arc { r, .. } = Piece::new(at, at + DVec2::new(c, 0.0), -old_beta) else { panic!() };
+    assert!((r / asked - flat / c).abs() < 1e-9, "radius {r} is the flat's {} of the asked", flat / c);
+    let issue = Shape::Extrude {
+        outer: Ring::curved(vec![at, DVec2::new(99674276.6810047, 0.0)], vec![-1184444800.3065448, 0.0]),
+        holes: vec![],
+        dist: Num(0.5),
+        expect: Some(true),
+        sketch: Some(0),
+    };
+    assert!(issue.make().is_err());
+    assert_eq!(extrude_expect(&issue), Expect::Invalid, "the saved verdict is overruled");
+    // Built now: β from the flat as built, so the radius is the one asked
+    // for and the right side is 99674276.68045 + 325722.32 = 99999999.0005,
+    // 0.9995 mm inside: valid, and the kernel agrees, sketched or not.
+    let (pts, bulges, expect) = d_profile(asked, c, at);
+    let Piece::Arc { r, c: centre, .. } = Piece::new(pts[0], pts[1], bulges[0]) else { panic!() };
+    assert!((r - asked).abs() < 1e-9 * asked && (centre.x + r - 99999999.0005).abs() < 1e-3, "{r} {centre}");
+    assert_eq!(expect, Some(true));
+    for sketch in [None, Some(0), Some(7)] {
+        let shape = Shape::Extrude { outer: Ring::curved(pts.clone(), bulges.clone()), holes: vec![], dist: Num(0.5), expect, sketch };
+        assert!(shape.make().is_ok(), "{sketch:?}");
+    }
+}
+
+#[test]
+fn far_ds_judged_like_the_kernel() {
+    // Seeded (SplitMix64): Ds near the edge of the range, every flat the
+    // generator uses and radii from 1 mm to 1 km, their right side, top or
+    // left within ±2 mm of MAX_COORD. Whatever the generator calls certain
+    // the kernel must agree with, sketched and as a plain profile.
+    let mut state = 0x205u64;
+    let mut next = || {
+        state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        (z ^ (z >> 31)) as f64 / u64::MAX as f64
+    };
+    let flats = [0.5 * LINEAR, 0.9 * MIN_FEATURE, MIN_FEATURE, 1.1 * MIN_FEATURE, 1.0];
+    let (mut certain, mut wrong) = (0, vec![]);
+    for i in 0..3000 {
+        let c = flats[i % flats.len()];
+        let radius = 10f64.powf(6.0 * next());
+        let miss = (next() - 0.5) * 4.0;
+        let at = match i % 3 {
+            0 => DVec2::new(MAX_COORD + miss - radius - c / 2.0, (next() - 0.5) * 1e6),
+            1 => DVec2::new((next() - 0.5) * 1e6, MAX_COORD + miss - 2.0 * radius),
+            _ => DVec2::new(-MAX_COORD - miss + radius - c / 2.0, (next() - 0.5) * 1e6),
+        };
+        let (pts, bulges, expect) = d_profile(radius, c, at);
+        let Some(valid) = expect else { continue };
+        certain += 1;
+        for sketch in [None, Some(i as u64)] {
+            let shape = Shape::Extrude { outer: Ring::curved(pts.clone(), bulges.clone()), holes: vec![], dist: Num(1.0), expect, sketch };
+            if shape.make().is_ok() != valid {
+                wrong.push(format!("{shape:?}"));
+            }
+        }
+    }
+    assert!(certain > 1000, "only {certain} certain");
+    assert!(wrong.is_empty(), "{} wrong, first {}", wrong.len(), wrong[0]);
 }
 
 #[test]
