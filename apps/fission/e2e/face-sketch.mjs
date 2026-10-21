@@ -321,7 +321,9 @@ try {
     await until(page, () => document.querySelector("#volume")?.textContent === "1,000 mm³", null, "1,000 mm³");
     await page.context().close();
   });
-  for (const [width, tap] of [[1280, false], [375, true]]) {
+  // Playwright's Firefox gives the mouse of a touch page no pointer events, so the bar can't be dragged there with it
+  // (timeline.mjs's note): in Firefox the 375 px check uses the mouse on a page without touch.
+  for (const [width, tap] of [[1280, false], [375, browserName !== "firefox"]]) {
     await check(`${width} px${tap ? ", taps" : ""}: the timeline's rules on a face sketch (26e): the box suppressed greys the sketch and its extrude, no warning; the sketch dragged before the box refused in words; the box deleted asks, then both stay warned red, the sketch's lines red (pixel probed), one undo step`, async () => {
       const page = await fresh(width, tap);
       await settle(page);
@@ -419,7 +421,9 @@ try {
       await shot(page, `face-delete-ask-${width}`);
       await press(page, "#delete-ask-confirm", tap);
       await until(page, () => document.querySelectorAll("#timeline [data-item]").length === 2, null, "the box gone");
-      await until(page, () => document.querySelector("#volume")?.textContent === "2,000 mm³", null, "the block stays");
+      // The volume was 2,000 mm³ before too (the part is the block), so wait for the rebuild's warnings themselves.
+      await until(page, () => document.querySelectorAll("#timeline [data-item][data-warned]").length === 2, null, "the rebuild's warnings");
+      assert.equal(await page.textContent("#volume"), "2,000 mm³", "the block stays");
       const LOST = "Sketch 1's face is gone, so its plane is lost: it stays where it was.";
       const SOURCE = "Extrude 1's source is lost: Sketch 1's plane is lost, so it stays where it was.";
       const deleted = async () => {
