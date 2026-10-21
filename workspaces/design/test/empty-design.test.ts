@@ -118,7 +118,7 @@ test("no body to download, and no solid for other workspaces: the sketch's outli
   assert.deepEqual(designObjects(part(), kernel).map((o) => `${o.type} ${o.id}`), ["design.sketch sketch-2", "design.feature feature-1", "design.feature feature-11"]);
 });
 
-test("hand-worked: the part's view reads nothing once no body builds, and a result reading it is told the part was removed", () => {
+test("hand-worked: the part's view reads nothing once no body builds, and a result reading it is told the marker moved", () => {
   const g = new DependencyGraph();
   const notes = new ChangeNotes();
   const before = part();
@@ -126,12 +126,13 @@ test("hand-worked: the part's view reads nothing once no body builds, and a resu
   g.set({ id: "stress", label: "Stress", workspace: "simulate", cost: "expensive" }, [PART_VIEW]);
   for (const id of g.stale()) g.markFresh(id);
   assert.deepEqual([...g.upstreamOf(PART_VIEW)].sort(), ["feature-11", "sketch-2"]);
-  // The marker to the start changes no feature (only the timeline's marker),
-  // so only the part changing tells Stress: the part was Extrude 1, now none.
+  // The marker to the start changes no feature's own data (only the timeline's
+  // marker), so Stress hears of it through the part: Extrude 1 then, none now.
+  // The note names what the user did (25c2), not "the part".
   const after = moveMarker(before, "start");
   syncGraph(g, after, before, notes);
   assert.deepEqual([...g.upstreamOf(PART_VIEW)], []);
-  assert.deepEqual(notes.current(g).map((n) => [n.node, n.state, n.text]), [["stress", "needs-rerun", "Stress out of date: you removed the part in Design. Rerun it in Simulate."]]);
+  assert.deepEqual(notes.current(g).map((n) => [n.node, n.state, n.text]), [["stress", "needs-rerun", "Stress out of date: you moved the timeline marker in Design. Rerun it in Simulate."]]);
 });
 
 test("the panel with no body: the feature says so, the numbers are blank, and the Parameters say how to add one", async () => {
