@@ -7,7 +7,8 @@
 // this same producer, so there is no sketch-only path.
 
 import type { KernelCalls, Outline, Plane, Producible, Producer, RepresentationRegistry, SourceLookup } from "@fission/core";
-import { partFeature, type DesignDocument, type SketchPlane } from "./document.ts";
+import { bodyFeatures } from "./browser.ts";
+import type { DesignDocument, SketchPlane } from "./document.ts";
 import { featureSpec } from "./extrude.ts";
 import { outline } from "./profiles.ts";
 import { readDesignReference, readProfileReference } from "./references.ts";
@@ -36,7 +37,8 @@ export interface FeatureHandle extends Producible {
 /**
  * Design's objects that other workspaces can take: each profile, each
  * sketch (its outline found by `kernel` when asked for, never stored) and
- * the part's solid feature (none for a design with no body, 24f4).
+ * every solid feature that builds, in build order (25c1; none for a design
+ * with no body, 24f4).
  */
 export function designObjects(document: DesignDocument, kernel: KernelCalls): (OutlineSource | FeatureHandle)[] {
   const profiles: OutlineSource[] = document.profiles.map((p) => ({
@@ -51,16 +53,15 @@ export function designObjects(document: DesignDocument, kernel: KernelCalls): (O
     plane: planeOf(sketchItem(document, s.id).intent.parameters.plane as SketchPlane),
     outline: () => sketchOutline(kernel, document, s.id),
   }));
-  // A design with no body (24f4) offers no solid.
-  const part = partFeature(document);
-  const solid: FeatureHandle[] = part === null ? [] : [{ type: "design.feature", id: part.id, document }];
-  return [...profiles, ...sketches, ...solid];
+  // Every body shown, not only the part's (25c1); a design with no body (24f4) offers no solid.
+  const solids: FeatureHandle[] = bodyFeatures(document).map((f) => ({ type: "design.feature", id: f.id, document }));
+  return [...profiles, ...sketches, ...solids];
 }
 
 /**
  * How a link another workspace holds finds what it points at in Design
  * (step 25a4), after every rebuild: an object by its id (a profile, a
- * sketch, the part), and a body, face or edge by its stable name on the
+ * sketch, a body that builds), and a body, face or edge by its stable name on the
  * bodies shown (`scene`, null before the first build), never by the
  * kernel's index. A face or edge found delivers the solid of the body it
  * is on (its feature's), the link keeping the name of which face; one the
@@ -73,7 +74,11 @@ export function designLookup(document: DesignDocument, scene: Scene | null, kern
   const solidOf = (featureId: string): FeatureHandle => ({ type: "design.feature", id: featureId, document });
   return (source) => {
     if (source.origin.workspace !== "design") return null;
-    if (source.kind === "object") return designObjects(document, kernel).find((o) => o.id === source.origin.id) ?? null;
+    if (source.kind === "object") {
+      const object = designObjects(document, kernel).find((o) => o.id === source.origin.id) ?? null;
+      // A body the last rebuild failed is not shown, so a link to it is gone until it builds again.
+      return object?.type === "design.feature" && scene !== null && !scene.bodies.some((b) => b.feature === object.id) ? null : object;
+    }
     const { ref } = source;
     const profile = readProfileReference(ref);
     if (profile !== null) return designObjects(document, kernel).find((o) => o.type === "design.profile" && o.id === profile) ?? null;

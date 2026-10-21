@@ -170,7 +170,7 @@ function keepFor(r: SeededRandom, before: DesignDocument, after: DesignDocument,
  * files hold kept shapes, suppressed and rolled-back items, items that
  * fail, and edited early items in any order Design allows.
  */
-function timelineEdits(r: SeededRandom, start: DesignDocument): DesignDocument {
+export function timelineEdits(r: SeededRandom, start: DesignDocument): DesignDocument {
   // A sketch extruded first, so most timelines have an extrude for the later edits to break.
   let doc = drawSketch(r, start);
   if (r.next() < 0.8) doc = extrudeSketch(doc, doc.sketches.at(-1)!.id, 1 + below(r, 50)).doc;

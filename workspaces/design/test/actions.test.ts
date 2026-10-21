@@ -79,15 +79,24 @@ test("a kernel error comes back as a bad outcome, never thrown, and saves nothin
   assert.deepEqual(overlays, []);
 });
 
-test("Download STL refuses without a part, with two things, or with a body no longer in the part", async () => {
+test("Download STL refuses without a part, with nothing, or with anything not a body shown, before asking the kernel", async () => {
   const { r, saved } = registry();
   const never = () => Promise.reject(new Error("the kernel must not be asked"));
   const run = (doc: unknown, targets: Selected[]) => r.get(DOWNLOAD_STL)!.run(targets, context(doc, never).ctx);
   assert.deepEqual(await run(undefined, [body]), { message: "There is no part to download yet.", bad: true });
-  assert.deepEqual(await run(box, [body, body]), { message: "Download STL takes one body, not 2 things.", bad: true });
-  assert.deepEqual(await run(box, [{ kind: "body", id: "body:feature-9" }]), { message: "body:feature-9 is not a body of the part, so there is nothing to download.", bad: true });
-  assert.deepEqual(await run(box, [{ kind: "face", id: "face:feature-1/0" }]), { message: "face:feature-1/0 is not a body of the part, so there is nothing to download.", bad: true });
+  assert.deepEqual(await run(box, []), { message: "Download STL takes at least one body.", bad: true });
+  assert.deepEqual(await run(box, [{ kind: "body", id: "body:feature-9" }]), { message: "body:feature-9 is not a body shown in the design, so there is nothing to download.", bad: true });
+  assert.deepEqual(await run(box, [{ kind: "face", id: "face:feature-1/0" }]), { message: "face:feature-1/0 is not a body shown in the design, so there is nothing to download.", bad: true });
+  // One bad target among good ones refuses the lot: nothing half downloaded.
+  assert.deepEqual(await run(box, [body, { kind: "body", id: "body:feature-9" }]), { message: "body:feature-9 is not a body shown in the design, so there is nothing to download.", bad: true });
   assert.deepEqual(saved, []);
+});
+
+test("the same body picked twice is downloaded once, as its own file", async () => {
+  const { r, saved } = registry();
+  const { ctx } = context(box, async () => ({ bytes: new Uint8Array([1, 2, 3]), rounding: 0, warning: null }));
+  assert.deepEqual(await r.get(DOWNLOAD_STL)!.run([body, body], ctx), { message: "", bad: false });
+  assert.deepEqual(saved, [{ name: "fission-box.stl", bytes: [1, 2, 3] }]);
 });
 
 // ---- Copy as SVG (X6b) ----
@@ -150,10 +159,10 @@ test("hand-worked: the star's size is its points' box, not the 40 × 40 it was a
 test("Copy as SVG refuses without a part, with two things, or with a profile no longer in the part", async () => {
   const { run, copied } = copying(slot, fine);
   assert.deepEqual(await copying(undefined, fine).run([profile]), { message: "There is no profile to copy yet.", bad: true });
-  assert.deepEqual(await run([profile, profile]), { message: "Copy as SVG takes one profile, not 2 things.", bad: true });
-  assert.deepEqual(await run([{ kind: "outline", id: "outline:profile-9" }]), { message: "outline:profile-9 is not a profile of the part, so there is nothing to copy.", bad: true });
-  assert.deepEqual(await run([body]), { message: "body:feature-1 is not a profile of the part, so there is nothing to copy.", bad: true });
-  assert.deepEqual(await copying(box, fine).run([profile]), { message: "outline:profile-1 is not a profile of the part, so there is nothing to copy.", bad: true });
+  assert.deepEqual(await run([profile, profile]), { message: "Copy as SVG takes one profile or sketch, not 2 things.", bad: true });
+  assert.deepEqual(await run([{ kind: "outline", id: "outline:profile-9" }]), { message: "outline:profile-9 is not a profile or a sketch with curves, so there is nothing to copy.", bad: true });
+  assert.deepEqual(await run([body]), { message: "body:feature-1 is not a profile or a sketch with curves, so there is nothing to copy.", bad: true });
+  assert.deepEqual(await copying(box, fine).run([profile]), { message: "outline:profile-1 is not a profile or a sketch with curves, so there is nothing to copy.", bad: true });
   assert.deepEqual(copied, []);
 });
 

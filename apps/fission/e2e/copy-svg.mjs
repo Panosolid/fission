@@ -3,10 +3,13 @@
 // Ctrl+C both put the profile on the clipboard as SVG (image/svg+xml where
 // the browser takes it, and the same text as text/plain), sized in mm. In a
 // text field Ctrl+C copies the text as usual; a change to a shape with no
-// profile takes the profile out of the selection with a note.
+// profile takes the profile out of the selection with a note. A sketch's
+// rows select its outline (25c1): Copy as SVG and Ctrl+C copy a closed
+// sketch, and deleting it takes it out of the selection with a note.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
+import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4177, strictPort: true }, logLevel: "error" });
@@ -144,6 +147,63 @@ try {
       assert.equal(await page.textContent("#selection-note"), "Taken out of the selection: the profile. The part has no profile now.");
       assert.equal(await page.isVisible("#selection-actions"), false);
       assert.equal(await page.$("#browser [data-node=profile-2]"), null);
+    } finally {
+      await page.close();
+    }
+  });
+
+  await check("a sketch's rows select its outline: Copy as SVG and Ctrl+C copy it in mm; deleted, it leaves the selection with a note (25c1)", async () => {
+    const page = await fresh();
+    try {
+      // Sketch 1 (sketch-2): a 40 × 30 rectangle from (0, 0) by the rectangle tool, on the grid.
+      await page.click("#create-sketch");
+      await page.click("#sketch-plane-XY");
+      await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true");
+      await page.check("#sketch-grid-snap");
+      await page.click("#sketch-tool-rectangle");
+      for (const p of [[0, 0], [40, 30]]) await clickPlane(page, p, TOP);
+      await page.waitForFunction(() => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.");
+      await page.click("#finish-sketch");
+      await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching !== "true");
+      // Corners (0,0) (40,0) (40,30) (0,30); in SVG y flips: (0,0) (40,−30)…, the box 40 × 30 from (0, −30).
+      const sketchSvg = [
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="30mm" viewBox="0 -30 40 30">',
+        "<title>Sketch 1</title>",
+        '<path d="M0 0L40 0L40 -30L0 -30Z" fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1" vector-effect="non-scaling-stroke"/>',
+        "</svg>",
+        "",
+      ].join("\n");
+      // Its row in Sketches selects it, lit, with Copy as SVG under it.
+      const row = '#browser [data-node="sketches/sketch-2"]';
+      await page.evaluate(() => document.querySelectorAll("#browser details").forEach((d) => d.setAttribute("open", "")));
+      await page.click(row);
+      await page.waitForFunction(() => document.body.dataset.selection === "outline:sketch-2");
+      assert.equal(await page.getAttribute(row, "aria-current"), "true");
+      // Its Timeline row is the same thing selected, so it lights too.
+      assert.equal(await page.getAttribute('#browser [data-node="sketch-2"]', "aria-current"), "true");
+      assert.deepEqual(await page.$$eval("#selection-actions button", (bs) => bs.map((b) => [b.textContent, b.dataset.action])), [["Copy as SVG", "design.copy-svg"]]);
+      await clearClipboard(page);
+      await page.click("#selection-actions [data-action='design.copy-svg']");
+      await page.waitForFunction(() => document.querySelector("#action-note")?.textContent !== "");
+      assert.equal(await page.textContent("#action-note"), "Copied as SVG: Sketch 1, 40 × 30 mm.");
+      assert.equal((await clipboard(page)).find(([t]) => t === "text/plain")[1], sketchSvg);
+      // The Timeline row and Ctrl+C: the same copy.
+      await page.click("#browser [data-node=body-1]");
+      await page.click('#browser [data-node="sketch-2"]');
+      await page.waitForFunction(() => document.body.dataset.selection === "outline:sketch-2");
+      await clearClipboard(page);
+      await page.keyboard.press("Control+c");
+      // The clipboard can't be read synchronously, so ask it until it changes (5 s at most).
+      for (let i = 0; i < 50 && (await page.evaluate(() => navigator.clipboard.readText())) === "nothing yet"; i++) await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), sketchSvg);
+      // Deleted from its row's menu (nothing uses it, so at once): out of the selection, said as a sketch's.
+      await page.click(row, { button: "right" });
+      await page.waitForFunction(() => document.getElementById("row-menu").open);
+      await page.click("#row-menu-delete");
+      await page.waitForFunction(() => document.querySelector("#selection-note")?.textContent !== "");
+      assert.equal(await page.textContent("#selection-note"), "Taken out of the selection: the sketch. The sketch is gone or has no curves now.");
+      assert.equal(await page.isVisible("#selection-actions"), false);
+      await page.screenshot({ path: "e2e/copy-svg-sketch.png" });
     } finally {
       await page.close();
     }

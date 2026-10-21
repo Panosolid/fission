@@ -24,7 +24,7 @@ export const DESIGN_COMMANDS: readonly CommandSpec[] = [
   },
   {
     op: "export_stl",
-    summary: "Download the part as a binary STL file, for printing or another program. Warns when the part is too big for STL's single-precision numbers.",
+    summary: "Download every body shown as one binary STL file, for printing or another program. Warns when a body is too big for STL's single-precision numbers.",
     params: {},
   },
 ];

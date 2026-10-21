@@ -81,9 +81,10 @@ export function browserTree(document: DesignDocument, failed: ReadonlySet<string
  * The browser rows that stand for selectable geometry, and the reference
  * each selects: "body-n" its body, a profile's row its outline, and (step
  * 24f6) a Timeline row of a solid feature that builds the body it makes,
- * the same as its Body row. A sketch's row selects nothing yet (sketches
- * are not selectable geometry), nor does an item that builds no body,
- * one the last rebuild failed (`failed`) among them.
+ * the same as its Body row. A sketch's rows (its Timeline row and its
+ * row in Sketches) select its outline once it has a curve (25c1), to copy
+ * or hand over; an item that builds no body selects nothing, one the last
+ * rebuild failed (`failed`) among them.
  */
 export function rowReference(node: string, doc: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): GeometryReference | null {
   return rowReferences(doc, failed)(node);
@@ -97,11 +98,13 @@ export function rowReference(node: string, doc: DesignDocument, failed: Readonly
 export function rowReferences(doc: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): (node: string) => GeometryReference | null {
   const rows = new Map(bodyRows(doc, failed).map((r) => [r.id, r.feature.id]));
   const solids = new Set(rows.values());
-  const profiles = new Set(doc.profiles.map((p) => p.id));
+  // A profile, and (25c1) a sketch with curves by either of its rows: its outline.
+  const outlines = new Set([...doc.profiles.map((p) => p.id), ...doc.sketches.flatMap((s) => (s.curves.length > 0 ? [s.id] : []))]);
   return (node) => {
     const body = rows.get(node);
     if (body !== undefined) return bodyReference(body);
     if (solids.has(node)) return bodyReference(node);
-    return profiles.has(node) ? profileReference(node) : null;
+    const outline = node.startsWith("sketches/") ? node.slice("sketches/".length) : node;
+    return outlines.has(outline) ? profileReference(outline) : null;
   };
 }
