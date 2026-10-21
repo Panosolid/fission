@@ -16,10 +16,15 @@ import {
   discInsidePolygon,
   discMeetsPolygon,
   discPolygonArea,
+  drawnFrame,
+  frameNow,
   placeOn,
   pointInPolygon,
   rebuildNaming,
-  type CapFace,
+  turned,
+  worldOf,
+  type Drawn,
+  type ModelFace,
   type NamingItem,
   type NamingModel,
   type NamingOp,
@@ -35,6 +40,8 @@ const rect = (x0: number, y0: number, x1: number, y1: number): Point[] => [
   [x0, y1],
 ];
 const run = (m: NamingModel, ...ops: NamingOp[]) => ops.map((op) => applyNaming(m, op));
+/** A placement in the world's XY frame at height z, facing up (+1) or down (−1). */
+const flat = (z: number, side: 1 | -1 = 1) => ({ origin: [0, 0, z], x: [1, 0, 0], normal: [0, 0, 1], side });
 const ben = (cuts = true) => {
   const m = createNamingModel();
   run(m, ...setupOps(BEN, cuts));
@@ -167,22 +174,22 @@ test("a face sketch follows the one face with its name, and warns without guessi
     id: "sketch-3",
     kind: "face-sketch",
     face: { feature: "extrude-2", role: "end" },
-    normal: 1,
+    side: 1,
     centre: [20, 15],
     radius: 5,
-    drawn: { z: 20, centroid: [20, 15] },
-    kept: { origin: [0, 0, 20], normal: 1 },
+    drawn: { outward: [0, 0, 1], x: [1, 0, 0], normal: [0, 0, 1], origin: [0, 0, 20], centroid: [20, 15] },
+    kept: flat(20),
   };
-  const cap = (z: number): CapFace => ({ name: { feature: "extrude-2", role: "end" }, z, outward: 1, corners: rect(0, 0, 40, 30) });
+  const cap = (z: number): ModelFace => ({ name: { feature: "extrude-2", role: "end" }, point: [0, 0, z], outward: [0, 0, 1], corners: rect(0, 0, 40, 30), centroid: [20, 15] });
   // One face named extrude-2/end at z = 35: the sketch is there, frame unmoved.
-  assert.deepEqual(placeOn([cap(35)], s), { placement: { origin: [0, 0, 35], normal: 1 }, matches: 1 });
+  assert.deepEqual(placeOn([cap(35)], s), { placement: flat(35), matches: 1 });
   // None: plane lost, held where it last was.
-  assert.deepEqual(placeOn([], s), { placement: { origin: [0, 0, 20], normal: 1 }, matches: 0, warning: { cause: "plane-lost", face: { feature: "extrude-2", role: "end" } } });
+  assert.deepEqual(placeOn([], s), { placement: flat(20), matches: 0, warning: { cause: "plane-lost", face: { feature: "extrude-2", role: "end" } } });
   // Two faces with the name (a face split in two, from booleans on): ambiguous, held, never one of them.
   const two = placeOn([cap(35), cap(50)], s);
-  assert.deepEqual(two, { placement: { origin: [0, 0, 20], normal: 1 }, matches: 2, warning: { cause: "plane-ambiguous", face: { feature: "extrude-2", role: "end" } } });
+  assert.deepEqual(two, { placement: flat(20), matches: 2, warning: { cause: "plane-ambiguous", face: { feature: "extrude-2", role: "end" } } });
   // The planted guess takes the first, and that is caught right here.
-  assert.deepEqual(placeOn([cap(35), cap(50)], s, new Set(["ambiguous-picks-first"])).placement, { origin: [0, 0, 35], normal: 1 });
+  assert.deepEqual(placeOn([cap(35), cap(50)], s, new Set(["ambiguous-picks-first"])).placement, flat(35));
   // Another feature's end cap is not this one, however alike.
   assert.equal(placeOn([{ ...cap(20), name: { feature: "extrude-9", role: "end" } }], s).warning?.cause, "plane-lost");
 });
@@ -192,8 +199,8 @@ test("Ben's part on the model, by hand: 24000 − 250π, the sketch on the top a
   const r = rebuildNaming(m.doc);
   assert.deepEqual(r.order, ["sketch-1", "extrude-2", "sketch-3", "cut-4"]);
   // 40 · 30 · 20 = 24000; the hole π · 5² · 10 = 250π.
-  assert.deepEqual(r.results["extrude-2"], { kind: "solid", volume: 24000 });
-  assert.deepEqual(r.results["sketch-3"], { kind: "sketch", placement: { origin: [0, 0, 20], normal: 1 } });
+  assert.deepEqual(r.results["extrude-2"], { kind: "solid", volume: 24000, centroid: [20, 15, 10] });
+  assert.deepEqual(r.results["sketch-3"], { kind: "sketch", placement: flat(20) });
   const cut = r.results["cut-4"];
   assert.ok(cut.kind === "cut" && cut.status === "built" && near(cut.removed, 250 * PI));
   assert.ok(near(r.bodies["extrude-2"], 24000 - 250 * PI));
@@ -201,7 +208,7 @@ test("Ben's part on the model, by hand: 24000 − 250π, the sketch on the top a
   const b = createNamingModel();
   run(b, ...setupOps({ ...BEN, cap: "start" }, true));
   const rb = rebuildNaming(b.doc);
-  assert.deepEqual(rb.results["sketch-3"], { kind: "sketch", placement: { origin: [0, 0, 0], normal: -1 } });
+  assert.deepEqual(rb.results["sketch-3"], { kind: "sketch", placement: flat(0, -1) });
   assert.ok(near(rb.bodies["extrude-2"], 24000 - 250 * PI));
   // A cut deeper than the body (40 into 20) goes through: 250π · 20 removed.
   run(b, { op: "set-depth", item: "cut-4", value: 40 });
@@ -213,8 +220,8 @@ test("a deleted outline sketch: the extrude keeps its last outline with a warnin
   run(m, { op: "delete", item: "sketch-1" }, { op: "set-distance", item: "extrude-2", value: 35 });
   const r = rebuildNaming(m.doc);
   // The kept 40 × 30 at 35: 42000, the sketch on top at 35, the hole 250π.
-  assert.deepEqual(r.results["extrude-2"], { kind: "solid", volume: 42000, warning: { cause: "deleted-input", input: "sketch-1" } });
-  assert.deepEqual(r.results["sketch-3"], { kind: "sketch", placement: { origin: [0, 0, 35], normal: 1 } });
+  assert.deepEqual(r.results["extrude-2"], { kind: "solid", volume: 42000, centroid: [20, 15, 17.5], warning: { cause: "deleted-input", input: "sketch-1" } });
+  assert.deepEqual(r.results["sketch-3"], { kind: "sketch", placement: flat(35) });
   assert.ok(near(r.bodies["extrude-2"], 42000 - 250 * PI));
 });
 
@@ -240,12 +247,12 @@ test("the plane-lost sketch keeps its last placement through undo and redo, and 
   const lost = m.doc.items.find((i) => i.id === "sketch-3");
   // It was last on the top at 35.
   assert.ok(lost?.kind === "face-sketch");
-  assert.deepEqual(lost.kept, { origin: [0, 0, 35], normal: 1 });
+  assert.deepEqual(lost.kept, flat(35));
   run(m, { op: "undo" });
   const back = m.doc.items.find((i) => i.id === "sketch-3");
   assert.ok(back?.kind === "face-sketch" && back.kept === undefined);
   run(m, { op: "redo" });
-  assert.deepEqual(rebuildNaming(m.doc).results["sketch-3"], { kind: "sketch", placement: { origin: [0, 0, 35], normal: 1 }, warning: { cause: "plane-lost", face: { feature: "extrude-2", role: "end" } } });
+  assert.deepEqual(rebuildNaming(m.doc).results["sketch-3"], { kind: "sketch", placement: flat(35), warning: { cause: "plane-lost", face: { feature: "extrude-2", role: "end" } } });
 });
 
 test("an edit that changes nothing records no undo step, and a refused one changes nothing", () => {
@@ -260,7 +267,8 @@ test("an edit that changes nothing records no undo step, and a refused one chang
 test("ids come from the counter and are never reused after a delete", () => {
   const m = createNamingModel();
   const made = run(m, { op: "add-sketch", corners: rect(0, 0, 10, 10) }, { op: "delete", item: "sketch-1" }, { op: "add-sketch", corners: rect(0, 0, 10, 10) });
-  assert.deepEqual(made, [{ kind: "done", ids: ["sketch-1"] }, { kind: "done", ids: [] }, { kind: "done", ids: ["sketch-2"] }]);
+  // An outline's lines are counted apart: line-1 to line-4, then line-5 to line-8, never reused either.
+  assert.deepEqual(made, [{ kind: "done", ids: ["sketch-1", "line-1", "line-2", "line-3", "line-4"] }, { kind: "done", ids: [] }, { kind: "done", ids: ["sketch-2", "line-5", "line-6", "line-7", "line-8"] }]);
 });
 
 test("the model refuses what its callers must never ask: an invalid outline, a zero distance, a sketch on a face that isn't there", () => {
@@ -268,4 +276,128 @@ test("the model refuses what its callers must never ask: an invalid outline, a z
   assert.throws(() => run(m, { op: "set-corners", sketch: "sketch-1", corners: [[0, 0], [10, 10], [10, 0], [0, 10]] }), /not a valid outline/);
   assert.throws(() => run(m, { op: "set-distance", item: "extrude-2", value: 0 }), /no distance/);
   assert.throws(() => run(m, { op: "add-face-sketch", face: { feature: "extrude-9", role: "end" }, centre: [0, 0], radius: 1 }), /no single face/);
+});
+
+// ------------------------------------------------------------ step 26 (26a)
+
+const r17 = Math.sqrt(17);
+const vNear = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((x, k) => near(x, b[k]));
+
+test("rule 8 by hand: the frame each face of a box gets is the nearest origin plane's, so sketch coordinates read as the world's", () => {
+  // Outward normal → (frame x, frame normal, side). Top and bottom: the
+  // ground plane (x = X, normal +Z), the bottom facing against it. Front
+  // and back: the front plane (x = X, normal −Y, so y = −Y × X = Z). Right
+  // and left: the side plane (x = Y, normal +X, y = X × Y = Z).
+  const cases: [number[], number[], number[], 1 | -1][] = [
+    [[0, 0, 7], [1, 0, 0], [0, 0, 1], 1],
+    [[0, 0, -7], [1, 0, 0], [0, 0, 1], -1],
+    [[0, -7, 0], [1, 0, 0], [0, -1, 0], 1],
+    [[0, 7, 0], [1, 0, 0], [0, -1, 0], -1],
+    [[7, 0, 0], [0, 1, 0], [1, 0, 0], 1],
+    [[-7, 0, 0], [0, 1, 0], [1, 0, 0], -1],
+  ];
+  for (const [out, x, normal, side] of cases) {
+    const f = drawnFrame(out as [number, number, number]);
+    assert.deepEqual([f.x, f.normal, f.side], [x, normal, side], `facing ${out}`);
+  }
+});
+
+test("rule 8 by hand: a slanted side and an exact 45° tie", () => {
+  // Facing (3, −4, 0)/5: |· −Y| = 4 beats |· X| = 3, so the front plane,
+  // the same way (side +1). Turning −Y onto (0.6, −0.8, 0) about Z is a turn
+  // by θ with sin θ = 0.6, cos θ = 0.8, which takes X to (0.8, 0.6, 0):
+  // along the side, square to the normal (0.8 · 0.6 − 0.6 · 0.8 = 0).
+  const f = drawnFrame([3, -4, 0]);
+  assert.ok(vNear(f.normal, [0.6, -0.8, 0]) && vNear(f.x, [0.8, 0.6, 0]) && f.side === 1);
+  // Facing (1, 1, 0): |· −Y| = |· X| = 1, a tie in whole numbers, broken in
+  // the order XY, XZ, YZ: the front plane, the other way (1 · −1 < 0), so
+  // side −1 and the normal is −(1, 1, 0)/√2. Turning −Y onto it is a turn by
+  // −45° about Z: X goes to (1, −1, 0)/√2.
+  const t = drawnFrame([1, 1, 0]);
+  assert.ok(vNear(t.normal, [-Math.SQRT1_2, -Math.SQRT1_2, 0]) && vNear(t.x, [Math.SQRT1_2, -Math.SQRT1_2, 0]) && t.side === -1);
+  // Turning checked on its own: −Y onto (1, −4, 0)/√17 takes X to (4, 1, 0)/√17 (cos 4/√17, sin 1/√17), and the identity when from = to.
+  assert.ok(vNear(turned([1, 0, 0], [0, -1, 0], [1 / r17, -4 / r17, 0]), [4 / r17, 1 / r17, 0]));
+  assert.deepEqual(turned([1, 0, 0], [0, 0, 1], [0, 0, 1]), [1, 0, 0]);
+});
+
+test("rule 8 by hand: a turned face keeps its normal on the drawn side; exactly a right angle takes the outward side", () => {
+  // Drawn on a front side facing (0, −40, 0): frame normal −Y, x = X, side +1.
+  const drawn: Drawn = { outward: [0, -40, 0], x: [1, 0, 0], normal: [0, -1, 0], origin: [0, 0, 0], centroid: [20, 0] };
+  // Turned to face (40, −10, 0) (75.96° round): 1 · (0 · 40 + −40 · −10) = 400 > 0, so the normal stays outward, (4, −1, 0)/√17.
+  const a = frameNow(drawn, 1, [40, -10, 0], [0, 0, 0]);
+  assert.ok(vNear(a.normal, [4 / r17, -1 / r17, 0]));
+  // Exactly square, facing (40, 0, 0): the dot is 0, a tie: the outward side, +X, and X turned a quarter turn to Y.
+  const b = frameNow(drawn, 1, [40, 0, 0], [40, 0, 0]);
+  assert.ok(vNear(b.normal, [1, 0, 0]) && vNear(b.x, [0, 1, 0]) && vNear(b.origin, [40, 0, 0]));
+  // Past square, facing (40, 10, 0): 1 · (−40 · 10) < 0, so the normal is the inward one, −(4, 1, 0)/√17, nearer the drawn −Y.
+  const c = frameNow(drawn, 1, [40, 10, 0], [0, 0, 0]);
+  assert.ok(vNear(c.normal, [-4 / r17, -1 / r17, 0]));
+  // A cap flipped (drawn facing +Z, now −Z): the frame stays the world's XY; with the planted bug that never turns, a side's frame stays off its plane.
+  const cap: Drawn = { outward: [0, 0, 1], x: [1, 0, 0], normal: [0, 0, 1], origin: [0, 0, 20], centroid: [20, 15] };
+  assert.deepEqual(frameNow(cap, 1, [0, 0, -1], [0, 0, -20]), { origin: [0, 0, -20], x: [1, 0, 0], normal: [0, 0, 1] });
+  assert.deepEqual(frameNow(drawn, 1, [40, -10, 0], [0, 0, 0], new Set(["frame-not-turned"])).normal, [0, -1, 0]);
+});
+
+test("a sketch's point in the world: origin + u x + v (normal × x)", () => {
+  // The front plane at y = 0: (20, 10) is (20, 0, 10); the back face's frame at y = 30: (20, 30, 10).
+  assert.deepEqual(worldOf({ origin: [0, 0, 0], x: [1, 0, 0], normal: [0, -1, 0], side: 1 }, 20, 10), [20, 0, 10]);
+  assert.deepEqual(worldOf({ origin: [0, 30, 0], x: [1, 0, 0], normal: [0, -1, 0], side: -1 }, 20, 10), [20, 30, 10]);
+});
+
+test("regression: a clockwise outline is no smaller a body (the 25a model gave it a negative volume)", () => {
+  // The triangle (0, 0), (0, 30), (40, 0) goes clockwise: shoelace −600,
+  // but the body is 600 · 10 = 6000 mm³, its middle (40/3, 10, 5).
+  const m = createNamingModel();
+  run(m, { op: "add-sketch", corners: [[0, 0], [0, 30], [40, 0]] }, { op: "add-extrude", sketch: "sketch-1", distance: 10 });
+  const r = rebuildNaming(m.doc);
+  assert.equal(r.bodies["extrude-2"], 6000);
+  const e = r.results["extrude-2"];
+  assert.ok(e.kind === "solid" && vNear(e.centroid, [40 / 3, 10, 5]));
+  // Its sides face out all the same: line 1, (0, 0) to (0, 30), faces −X, so a sketch on it has the side plane's frame facing against it.
+  run(m, { op: "add-face-sketch", face: { feature: "extrude-2", role: "side", line: "line-1" }, centre: [0, 0], radius: 1 });
+  assert.deepEqual(rebuildNaming(m.doc).results["sketch-3"], { kind: "sketch", placement: { origin: [0, 0, 0], x: [0, 1, 0], normal: [1, 0, 0], side: -1 } });
+});
+
+test("an outline's lines: moved corners keep them, another number of corners makes new ones", () => {
+  const m = ben(false);
+  assert.deepEqual(run(m, { op: "move-corner", sketch: "sketch-1", corner: 2, to: [45, 30] }), [{ kind: "done", ids: [] }]);
+  assert.deepEqual(run(m, { op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 50, 30) }), [{ kind: "done", ids: [] }]);
+  const s = m.doc.items[0];
+  assert.ok(s.kind === "sketch");
+  assert.deepEqual(s.lines, ["line-1", "line-2", "line-3", "line-4"]);
+  assert.deepEqual(run(m, { op: "set-corners", sketch: "sketch-1", corners: [[0, 0], [40, 0], [0, 30]] }), [{ kind: "done", ids: ["line-5", "line-6", "line-7"] }]);
+  // The planted bug reuses the old lines by place, so a sketch on line 2 would follow the triangle's slanted side.
+  const bad = createNamingModel(["side-by-index"]);
+  run(bad, ...setupOps(BEN, false));
+  assert.deepEqual(run(bad, { op: "set-corners", sketch: "sketch-1", corners: [[0, 0], [40, 0], [0, 30]] }), [{ kind: "done", ids: ["line-1", "line-2", "line-3"] }]);
+});
+
+test("rule 9: suppressing greys what is built on it, keeps nothing while greyed, and a delete keeps where it would have been", () => {
+  const m = ben(false);
+  run(m, { op: "suppress", item: "extrude-2", on: true });
+  let r = rebuildNaming(m.doc);
+  assert.deepEqual([r.results["extrude-2"], r.results["sketch-3"], r.results["extrude-4"], r.bodies], [{ kind: "suppressed" }, { kind: "greyed" }, { kind: "greyed" }, {}]);
+  // Greyed is not lost: the sketch holds no placement.
+  const s = m.doc.items.find((i) => i.id === "sketch-3");
+  assert.ok(s?.kind === "face-sketch" && s.kept === undefined);
+  // The sketch on the top deleted while greyed: the cylinder keeps the circle where it would be with nothing suppressed, the top at 20.
+  run(m, { op: "delete", item: "sketch-3" }, { op: "suppress", item: "extrude-2", on: false });
+  r = rebuildNaming(m.doc);
+  const e = r.results["extrude-4"];
+  assert.ok(e.kind === "solid" && vNear(e.centroid, [20, 15, 25]));
+  assert.deepEqual(e.warning, { cause: "deleted-input", input: "sketch-3" });
+  // The planted bug that lets dependents build: the sketch's face is off, so it says plane lost, which Ben's Q3 says it must not.
+  const bad = createNamingModel(["suppress-keeps-dependents"]);
+  run(bad, ...setupOps(BEN, false), { op: "suppress", item: "extrude-2", on: true });
+  assert.equal(rebuildNaming(bad.doc, bad.faults).results["sketch-3"].warning?.cause, "plane-lost");
+});
+
+test("the model refuses what step 26 doesn't model: a cut from a side, suppressing a sketch", () => {
+  const m = ben(false);
+  run(m, { op: "add-face-sketch", face: { feature: "extrude-2", role: "side", line: "line-2" }, centre: [15, 10], radius: 3 });
+  assert.throws(() => run(m, { op: "add-cut", sketch: "sketch-5", depth: 5 }), /not modelled until booleans/);
+  assert.throws(() => run(m, { op: "suppress", item: "sketch-1", on: true }), /only a feature/);
+  // A face that is off can't be sketched on.
+  run(m, { op: "suppress", item: "extrude-2", on: true });
+  assert.throws(() => run(m, { op: "add-face-sketch", face: { feature: "extrude-2", role: "end" }, centre: [0, 0], radius: 1 }), /no single face/);
 });

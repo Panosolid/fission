@@ -11,9 +11,10 @@
 //   before the delete is made;
 // - reading twice gives the same answer;
 // - the rebuild is the model's: order, each sketch's placement (where its
-//   (0, 0) lands, which way it faces, and any plane warning naming its
-//   face), each solid's volume, each cut's removed volume or failure, and
-//   every body's volume after its cuts;
+//   (0, 0) lands, its frame, which way it faces, and any plane warning
+//   naming its face), each solid's volume and centroid and any warning,
+//   each cut's removed volume or failure, which items are suppressed or
+//   greyed, and every body's volume after its cuts;
 // - saving and opening changes none of that.
 // `FUSION_CASES` add the owner's own answers, hand-worked, on top: the
 // subject must agree with the model and with the numbers written there.
@@ -23,14 +24,17 @@ import { close } from "./timeline-session.ts";
 import { polygonValid, type Point } from "./timeline-model.ts";
 import {
   applyNaming,
-  capKey,
   clearCut,
   createNamingModel,
   discInsidePolygon,
   discMeetsPolygon,
+  faceKeyOf,
+  namingFaces,
   planDelete,
   rebuildNaming,
+  worldOf,
   type Cap,
+  type FaceName,
   type DeletePlan,
   type NamingApplied,
   type NamingDoc,
@@ -39,6 +43,7 @@ import {
   type NamingRebuild,
   type NamingResult,
   type NamingWarning,
+  type Placement,
   type RefuseCause,
   type Vec3,
 } from "./naming-model.ts";
@@ -55,23 +60,27 @@ export interface NamingSubject {
   saveOpen?(): Maybe<void>;
 }
 
-/** The owner's test part, before any edit: an outline on XY extruded, a circle on one of its caps, and a cut (or a new body) from it. */
+/** The owner's test part, before any edit: an outline on XY extruded, a circle on one of its faces, and a cut (or a new body) from it. */
 export interface Setup {
   corners: Point[];
   distance: number;
-  cap: Cap;
+  /** A cap, or the side swept from the outline's k-th line (corner k to k + 1; step 26, new bodies only). */
+  cap: Cap | { side: number };
   centre: Point;
   radius: number;
   /** The cut's depth, or the new body's distance when the subject can't cut. */
   depth: number;
 }
 
-/** The setup as edits. The model's ids are fixed by its counter: sketch-1, extrude-2, sketch-3, then cut-4 or extrude-4. */
+/** The face a setup's circle is on, in the model's ids. */
+export const setupFace = (cap: Setup["cap"]): FaceName => (typeof cap === "string" ? { feature: "extrude-2", role: cap } : { feature: "extrude-2", role: "side", line: `line-${cap.side + 1}` });
+
+/** The setup as edits. The model's ids are fixed by its counters: sketch-1 (lines line-1 onwards, the k-th from corner k − 1), extrude-2, sketch-3, then cut-4 or extrude-4. */
 export function setupOps(s: Setup, cuts: boolean): NamingOp[] {
   return [
     { op: "add-sketch", corners: s.corners },
     { op: "add-extrude", sketch: "sketch-1", distance: s.distance },
-    { op: "add-face-sketch", face: { feature: "extrude-2", role: s.cap }, centre: s.centre, radius: s.radius },
+    { op: "add-face-sketch", face: setupFace(s.cap), centre: s.centre, radius: s.radius },
     cuts ? { op: "add-cut", sketch: "sketch-3", depth: s.depth } : { op: "add-face-extrude", sketch: "sketch-3", distance: s.depth },
   ];
 }
@@ -97,17 +106,28 @@ export type NamingCounts = Record<string, number>;
 // ------------------------------------------------------------ comparing
 
 const vecClose = (a: Vec3, b: Vec3) => a.every((x, k) => close(x, b[k]));
-const warnKey = (w: NamingWarning | undefined) => (w === undefined ? "none" : w.cause === "deleted-input" ? `${w.cause}:${w.input}` : `${w.cause}:${capKey(w.face)}`);
+const warnKey = (w: NamingWarning | undefined) => (w === undefined ? "none" : "input" in w ? `${w.cause}:${w.input}` : `${w.cause}:${faceKeyOf(w.face)}`);
+/** What differs between two placements, or null. */
+function placementDiff(got: Placement, want: Placement): string | null {
+  if (got.side !== want.side) return `faces ${got.side} along its normal, want ${want.side}`;
+  if (!vecClose(got.origin, want.origin)) return `origin ${got.origin}, want ${want.origin}`;
+  if (!vecClose(got.x, want.x)) return `x axis ${got.x}, want ${want.x}`;
+  if (!vecClose(got.normal, want.normal)) return `normal ${got.normal}, want ${want.normal}`;
+  return null;
+}
 
 function resultDiff(id: string, want: NamingResult, got: NamingResult | undefined): string | null {
   if (got === undefined) return `${id}: missing`;
   if (got.kind !== want.kind) return `${id}: a ${got.kind}, not a ${want.kind}`;
   if (warnKey(got.warning) !== warnKey(want.warning)) return `${id}: warning ${warnKey(got.warning)}, want ${warnKey(want.warning)}`;
   if (want.kind === "sketch" && got.kind === "sketch") {
-    if (got.placement.normal !== want.placement.normal) return `${id}: faces ${got.placement.normal}, want ${want.placement.normal}`;
-    if (!vecClose(got.placement.origin, want.placement.origin)) return `${id}: origin ${got.placement.origin}, want ${want.placement.origin}`;
+    const d = placementDiff(got.placement, want.placement);
+    if (d) return `${id}: ${d}`;
   }
-  if (want.kind === "solid" && got.kind === "solid" && !close(got.volume, want.volume)) return `${id}: volume ${got.volume}, want ${want.volume}`;
+  if (want.kind === "solid" && got.kind === "solid") {
+    if (!close(got.volume, want.volume)) return `${id}: volume ${got.volume}, want ${want.volume}`;
+    if (!vecClose(got.centroid, want.centroid)) return `${id}: centroid ${got.centroid}, want ${want.centroid}`;
+  }
   if (want.kind === "cut" && got.kind === "cut") {
     if (got.status !== want.status) return `${id}: ${got.status}, want ${want.status}`;
     if (want.status === "built" && got.status === "built" && !close(got.removed, want.removed)) return `${id}: removed ${got.removed}, want ${want.removed}`;
@@ -130,8 +150,7 @@ export function namingDiff(want: NamingRebuild, got: NamingRebuild): string | nu
 
 /** Renames every id in a rebuild. */
 function renamed(r: NamingRebuild, to: (id: string) => string): NamingRebuild {
-  const warning = (w: NamingWarning | undefined): NamingWarning | undefined =>
-    w === undefined ? undefined : w.cause === "deleted-input" ? { cause: w.cause, input: to(w.input) } : { cause: w.cause, face: { feature: to(w.face.feature), role: w.face.role } };
+  const warning = (w: NamingWarning | undefined): NamingWarning | undefined => (w === undefined ? undefined : "input" in w ? { cause: w.cause, input: to(w.input) } : { cause: w.cause, face: renamedFace(w.face, to) });
   const results: Record<string, NamingResult> = {};
   for (const [id, res] of Object.entries(r.results)) {
     const w = warning(res.warning);
@@ -140,10 +159,13 @@ function renamed(r: NamingRebuild, to: (id: string) => string): NamingRebuild {
   return { order: r.order.map(to), results, bodies: Object.fromEntries(Object.entries(r.bodies).map(([id, v]) => [to(id), v])) };
 }
 
+/** A face's name with its feature's (and side's line's) id renamed. */
+const renamedFace = (f: FaceName, to: (id: string) => string): FaceName => (f.role === "side" ? { feature: to(f.feature), role: "side", line: to(f.line) } : { feature: to(f.feature), role: f.role });
+
 function renamedOp(op: NamingOp, to: (id: string) => string): NamingOp {
   const o = JSON.parse(JSON.stringify(op)) as Record<string, unknown>;
   for (const k of ["sketch", "item"]) if (typeof o[k] === "string") o[k] = to(o[k] as string);
-  if (op.op === "add-face-sketch") o.face = { feature: to(op.face.feature), role: op.face.role };
+  if (op.op === "add-face-sketch") o.face = renamedFace(op.face, to);
   return o as NamingOp;
 }
 
@@ -162,7 +184,9 @@ function cutCases(doc: NamingDoc, r: NamingRebuild): string[] {
     const bs = base?.kind === "extrude" ? doc.items.find((i) => i.id === base.sketch) : undefined;
     const corners = bs?.kind === "sketch" ? bs.corners : base?.kind === "extrude" ? base.kept : undefined;
     if (!tool || !corners) continue;
-    const c: Point = [tool.placement.origin[0] + tool.centre[0], tool.placement.origin[1] + tool.centre[1]];
+    const at = worldOf(tool.placement, tool.centre[0], tool.centre[1]);
+    const c: Point = [at[0], at[1]];
+    if (res?.kind === "suppressed" || res?.kind === "greyed") continue;
     if (res?.kind === "cut" && res.status === "built") out.push(discInsidePolygon(c, tool.radius, corners) ? "cut:whole" : "cut:bite");
     else out.push(discMeetsPolygon(c, tool.radius, corners) ? "cut:no-target-height" : "cut:no-target-outside");
   }
@@ -235,10 +259,21 @@ export async function runNaming(subject: NamingSubject, setup: Setup, steps: rea
     last = renamed(first, mod);
     const d = namingDiff(want, last);
     if (d) throw fail("rebuild", d);
+    const faces = namingFaces(model.doc);
     for (const item of model.doc.items) {
       const res = want.results[item.id];
-      if (item.kind === "face-sketch") count(counts, res.warning ? `sketch:${res.warning.cause}` : "sketch:followed");
-      if (res.kind !== "sketch" && res.warning) count(counts, `${res.kind}:kept`);
+      if (res.kind === "suppressed" || res.kind === "greyed") {
+        count(counts, `off:${res.kind}`);
+        continue;
+      }
+      if (item.kind === "face-sketch" && res.kind === "sketch") {
+        count(counts, res.warning ? `sketch:${res.warning.cause}` : item.face.role === "side" ? "sketch:side" : "sketch:followed");
+        const p = res.placement;
+        const face = faces.find((f) => faceKeyOf(f.name) === faceKeyOf(item.face));
+        if (!res.warning && !vecClose(p.x, item.drawn.x)) count(counts, "sketch:turned");
+        if (!res.warning && face && p.side * (p.normal[0] * face.outward[0] + p.normal[1] * face.outward[1] + p.normal[2] * face.outward[2]) < 0) count(counts, "sketch:facing-in");
+      }
+      if (res.kind !== "sketch" && res.warning) count(counts, res.warning.cause === "source-lost" ? `${res.kind}:source-lost` : `${res.kind}:kept`);
       if (item.kind === "extrude" && item.distance < 0) count(counts, "extrude:flipped");
     }
     for (const c of cutCases(model.doc, want)) count(counts, c);
@@ -258,6 +293,8 @@ export type RandomStep =
   | { op: "set-depth"; value: number }
   | { op: "delete"; pick: number }
   | { op: "plan"; pick: number }
+  /** Turns a feature's suppression the other way (step 26, rule 9). */
+  | { op: "suppress"; pick: number }
   | { op: "reorder"; pick: number; to: number }
   | { op: "undo" }
   | { op: "redo" }
@@ -297,6 +334,7 @@ const WEIGHTS: [RandomStep["op"], number][] = [
   ["set-depth", 6],
   ["delete", 4],
   ["plan", 4],
+  ["suppress", 6],
   ["reorder", 10],
   ["undo", 10],
   ["redo", 6],
@@ -323,6 +361,7 @@ function randomStep(r: SeededRandom): RandomStep {
       return { op, value: int(r, 1, 45) };
     case "delete":
     case "plan":
+    case "suppress":
       return { op, pick: r.next() };
     case "reorder":
       return { op, pick: r.next(), to: r.next() };
@@ -348,6 +387,24 @@ function clearDoc(doc: NamingDoc): boolean {
   return true;
 }
 
+/**
+ * No sketch on a side is on a face turned exactly a right angle from where
+ * it was drawn (outward normals square, decided in whole numbers): there
+ * rule 8's choice of side is a tie the model breaks by rule, but a kernel's
+ * rounded normals could break either way. The tie itself is hand-worked in
+ * test/naming-model.test.ts.
+ */
+function clearSides(doc: NamingDoc): boolean {
+  const faces = namingFaces(doc);
+  for (const item of doc.items) {
+    if (item.kind !== "face-sketch" || item.face.role !== "side") continue;
+    const face = faces.find((f) => faceKeyOf(f.name) === faceKeyOf(item.face));
+    const o = item.drawn.outward;
+    if (face && o[0] * face.outward[0] + o[1] * face.outward[1] + o[2] * face.outward[2] === 0) return false;
+  }
+  return true;
+}
+
 /** A grid point at fractions `f` across the outline's bounds, 5 mm wider each way. */
 function across(corners: readonly Point[], f: readonly [number, number]): Point {
   const at = (k: 0 | 1) => {
@@ -368,7 +425,7 @@ export function resolveRandom(doc: NamingDoc, step: RandomStep): NamingStep | nu
     if (op.op !== "undo" && op.op !== "redo") {
       const m = createNamingModel();
       m.doc = JSON.parse(JSON.stringify(doc));
-      if (applyNaming(m, op).kind === "done" && !clearDoc(m.doc)) return null;
+      if (applyNaming(m, op).kind === "done" && !(clearDoc(m.doc) && clearSides(m.doc))) return null;
     }
     return { kind: "op", op };
   };
@@ -406,6 +463,13 @@ export function resolveRandom(doc: NamingDoc, step: RandomStep): NamingStep | nu
       const item = pickOf(doc.items, step.pick);
       return item ? { kind: "plan", item: item.id } : null;
     }
+    case "suppress": {
+      const item = pickOf(
+        doc.items.filter((i): i is Extract<typeof i, { kind: "extrude" | "face-extrude" | "cut" }> => i.kind === "extrude" || i.kind === "face-extrude" || i.kind === "cut"),
+        step.pick,
+      );
+      return item ? edit({ op: "suppress", item: item.id, on: !item.suppressed }) : null;
+    }
     case "reorder": {
       const item = pickOf(doc.items, step.pick);
       return item ? edit({ op: "reorder", item: item.id, to: Math.min(doc.items.length - 1, Math.floor(step.to * doc.items.length)) }) : null;
@@ -418,12 +482,23 @@ export function resolveRandom(doc: NamingDoc, step: RandomStep): NamingStep | nu
   }
 }
 
-/** A random setup the model is sure of: a rectangle or triangle, a distance either way, either cap, and a circle clear of the outline (`clearCut`) that meets it or not. */
-export function randomSetup(r: SeededRandom): Setup {
+/**
+ * A random setup the model is sure of: a rectangle or triangle, a distance
+ * either way, either cap, and a circle clear of the outline (`clearCut`)
+ * that meets it or not; without cuts, half of them on a side instead
+ * (never one at exactly 45° between two origin planes, where rule 8's
+ * choice is a tie a kernel's rounded normal could break either way).
+ */
+export function randomSetup(r: SeededRandom, cuts = true): Setup {
   for (;;) {
     const corners = randomOutline(r);
-    const s: Setup = { corners, distance: nonZero(r, 40), cap: r.next() < 0.5 ? "end" : "start", centre: across(corners, [r.next(), r.next()]), radius: radiusOf(r), depth: int(r, 1, 45) };
-    if (clearCut(s.centre, s.radius, corners)) return s;
+    const k = int(r, 0, corners.length - 1);
+    const onSide = !cuts && r.next() < 0.5;
+    const cap: Setup["cap"] = onSide ? { side: k } : r.next() < 0.5 ? "end" : "start";
+    const s: Setup = { corners, distance: nonZero(r, 40), cap, centre: across(corners, [r.next(), r.next()]), radius: radiusOf(r), depth: int(r, 1, 45) };
+    const [a, b] = [corners[k], corners[(k + 1) % corners.length]];
+    if (onSide && Math.abs(b[0] - a[0]) === Math.abs(b[1] - a[1])) continue;
+    if (onSide || clearCut(s.centre, s.radius, corners)) return s;
   }
 }
 
@@ -432,9 +507,10 @@ export interface NamingSession {
   steps: RandomStep[];
 }
 
-export function randomNamingSession(seed: bigint, steps: number): NamingSession {
+/** A seeded session; `cuts` as the subject's, since only a subject without cuts gets setups on a side. */
+export function randomNamingSession(seed: bigint, steps: number, cuts = true): NamingSession {
   const r = seeded(seed);
-  const setup = randomSetup(r);
+  const setup = randomSetup(r, cuts);
   return { setup, steps: Array.from({ length: steps }, () => randomStep(r)) };
 }
 
@@ -509,14 +585,19 @@ export function namingModelSubject(faults: Iterable<NamingFault> = [], cuts = tr
 /** What a case's last read must show, worked out by hand (model ids). Bodies are listed whole: every body and its volume after its cuts. */
 export interface Expect {
   order: string[];
-  sketch?: { id: string; origin: Vec3; normal: 1 | -1; warning?: "plane-lost" | "plane-ambiguous" };
+  /** A sketch's placement; `x` and `normal` are the world's XY frame's unless given. */
+  sketch?: { id: string; origin: Vec3; x?: Vec3; normal?: Vec3; side: 1 | -1; warning?: "plane-lost" | "plane-ambiguous" };
   cut?: { id: string; removed: number } | { id: string; failed: true };
   bodies: Record<string, number>;
+  /** New bodies' centroids (before any cut) and the warning the feature that made each one shows, none unless given. */
+  solids?: Record<string, { centroid: Vec3; warning?: "deleted-input" | "source-lost" }>;
+  /** Items that must be off: suppressed themselves, or greyed by what they are built on (step 26, Q3). */
+  off?: Record<string, "suppressed" | "greyed">;
 }
 
 export interface FusionCase {
-  /** Which of the owner's answers (docs/progress/cad.md, "Naming test plan (25a)") it encodes. */
-  answer: number;
+  /** Which of the owner's answers it encodes: "1" to "7" from 25a (docs/progress/cad.md, "Naming test plan (25a)"), "Q1" to "Q3" from step 26 ("Sketch on a face test plan (26a)"). */
+  answer: string;
   title: string;
   /** Whether it needs a cut (booleans), or holds for a subject that makes the circle a new body. */
   cuts: boolean;
@@ -530,9 +611,10 @@ export function expectDiff(r: NamingRebuild, e: Expect): string | null {
   if (r.order.join() !== e.order.join()) return `order [${r.order}], want [${e.order}]`;
   if (e.sketch) {
     const s = r.results[e.sketch.id];
-    if (s?.kind !== "sketch") return `${e.sketch.id} is not a sketch`;
-    if (s.placement.normal !== e.sketch.normal) return `${e.sketch.id} faces ${s.placement.normal}, want ${e.sketch.normal}`;
-    if (!vecClose(s.placement.origin, e.sketch.origin)) return `${e.sketch.id} at ${s.placement.origin}, want ${e.sketch.origin}`;
+    if (s?.kind !== "sketch") return `${e.sketch.id} is ${s?.kind ?? "missing"}, not a sketch`;
+    const want: Placement = { origin: e.sketch.origin, x: e.sketch.x ?? [1, 0, 0], normal: e.sketch.normal ?? [0, 0, 1], side: e.sketch.side };
+    const d = placementDiff(s.placement, want);
+    if (d) return `${e.sketch.id}: ${d}`;
     const w = s.warning?.cause;
     if (w !== e.sketch.warning) return `${e.sketch.id} warning ${w ?? "none"}, want ${e.sketch.warning ?? "none"}`;
   }
@@ -545,6 +627,15 @@ export function expectDiff(r: NamingRebuild, e: Expect): string | null {
     else if (!close(c.removed, e.cut.removed)) return `${e.cut.id} removed ${c.removed}, want ${e.cut.removed}`;
     else if (c.warning) return `${e.cut.id} warns ${c.warning.cause}, want no warning`;
   }
+  for (const [id, want] of Object.entries(e.solids ?? {})) {
+    const got = r.results[id];
+    if (got?.kind !== "solid") return `${id} is ${got?.kind ?? "missing"}, not a solid`;
+    if (!vecClose(got.centroid, want.centroid)) return `${id}: centroid ${got.centroid}, want ${want.centroid}`;
+    if (got.warning?.cause !== want.warning) return `${id} warning ${got.warning?.cause ?? "none"}, want ${want.warning ?? "none"}`;
+  }
+  for (const [id, want] of Object.entries(e.off ?? {})) if (r.results[id]?.kind !== want) return `${id} is ${r.results[id]?.kind ?? "missing"}, want ${want}`;
+  // Nothing else is off.
+  for (const [id, res] of Object.entries(r.results)) if ((res.kind === "suppressed" || res.kind === "greyed") && e.off?.[id] === undefined) return `${id} is ${res.kind}, want it on`;
   const keys = Object.keys(r.bodies).sort().join();
   if (keys !== Object.keys(e.bodies).sort().join()) return `bodies [${keys}], want [${Object.keys(e.bodies).sort()}]`;
   for (const [id, v] of Object.entries(e.bodies)) if (!close(r.bodies[id], v)) return `body ${id}: ${r.bodies[id]} mm³, want ${v}`;
@@ -577,6 +668,14 @@ const PI = Math.PI;
 
 const op = (o: NamingOp, want?: NamingApplied["kind"] | RefuseCause): NamingStep => ({ kind: "op", op: o, ...(want ? { want } : {}) });
 const FULL = ["sketch-1", "extrude-2", "sketch-3", "cut-4"];
+const NEW = ["sketch-1", "extrude-2", "sketch-3", "extrude-4"];
+/** Ben's part with a new body, unedited: the base and the cylinder on its top, both on, nothing warning. */
+const BASE_NEW: Expect = {
+  order: NEW,
+  sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+  bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+  solids: { "extrude-2": { centroid: [20, 15, 10] }, "extrude-4": { centroid: [20, 15, 25] } },
+};
 
 /** Every drag in Ben's four-item chain (answer 7), worked out by hand. `to` is the place in the list without the item. */
 function chainDrags(last: string): NamingStep[] {
@@ -609,7 +708,7 @@ function chainDrags(last: string): NamingStep[] {
 /** The owner's answers 1 to 7 with the cut, then the ones that hold for a new body (step 26, before booleans), each worked out by hand. */
 export const FUSION_CASES: readonly FusionCase[] = [
   {
-    answer: 1,
+    answer: "1",
     title: "the rectangle made 60 × 30: the hole stays on the top face and stays put",
     cuts: true,
     setup: BEN,
@@ -617,10 +716,10 @@ export const FUSION_CASES: readonly FusionCase[] = [
     // The sketch's frame is the world's: its (0, 0) stays over the origin, at
     // the top's height 20, so the circle is still at (20, 15), wholly inside
     // the wider rectangle: 250π removed from 60 · 30 · 20 = 36000.
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 36000 - 250 * PI } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 36000 - 250 * PI } },
   },
   {
-    answer: 2,
+    answer: "2",
     title: "the first extrude flipped downward: the cut finds no target body and the body stays",
     cuts: true,
     setup: BEN,
@@ -630,10 +729,10 @@ export const FUSION_CASES: readonly FusionCase[] = [
     // was drawn from, so the cut goes from −20 down to −30: it only touches
     // the body's bottom, no height in common, "no target body". The body is
     // whole: 40 · 30 · 20 = 24000.
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, -20], normal: 1 }, cut: { id: "cut-4", failed: true }, bodies: { "extrude-2": 24000 } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, -20], side: 1 }, cut: { id: "cut-4", failed: true }, bodies: { "extrude-2": 24000 } },
   },
   {
-    answer: 3,
+    answer: "3",
     title: "the rectangle made a triangle whose long side runs through the hole: the hole is cut in half, no error",
     cuts: true,
     setup: BEN,
@@ -654,10 +753,10 @@ export const FUSION_CASES: readonly FusionCase[] = [
     // The long side, (40, 0) to (0, 30), is 3x + 4y = 120; the centre gives
     // 3 · 20 + 4 · 15 = 120, on it, so half the circle is inside: 25π / 2 ·
     // 10 = 125π removed from the triangle's 40 · 30 / 2 · 20 = 12000.
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, cut: { id: "cut-4", removed: 125 * PI }, bodies: { "extrude-2": 12000 - 125 * PI } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", removed: 125 * PI }, bodies: { "extrude-2": 12000 - 125 * PI } },
   },
   {
-    answer: 4,
+    answer: "4",
     title: "the first extrude deleted: it asks first, the body and the cut go, the sketch stays with its plane lost",
     cuts: true,
     setup: BEN,
@@ -673,38 +772,38 @@ export const FUSION_CASES: readonly FusionCase[] = [
     ],
     // Sketch 3 is held where it last was, the top at z = 20 facing +Z, with
     // the warning naming the lost face; no body is left.
-    expect: { order: ["sketch-1", "sketch-3"], sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1, warning: "plane-lost" }, bodies: {} },
+    expect: { order: ["sketch-1", "sketch-3"], sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "plane-lost" }, bodies: {} },
   },
   {
-    answer: 4,
+    answer: "4",
     title: "undo after deleting the first extrude brings back the body, the hole and the sketch's plane",
     cuts: true,
     setup: BEN,
     steps: [op({ op: "delete", item: "extrude-2" }, "done"), op({ op: "undo" }, "done"), { kind: "save-open" }],
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 24000 - 250 * PI } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 24000 - 250 * PI } },
   },
   {
-    answer: 5,
+    answer: "5",
     title: "the first extrude made 35 long: the hole's sketch moves up with the top face",
     cuts: true,
     setup: BEN,
     steps: [op({ op: "set-distance", item: "extrude-2", value: 35 }, "done")],
     // The top is at 35; the cut goes 35 down to 25, all inside: 250π removed
     // from 40 · 30 · 35 = 42000.
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 35], normal: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 42000 - 250 * PI } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 35], side: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 42000 - 250 * PI } },
   },
   {
-    answer: 6,
+    answer: "6",
     title: "the outline made 10 × 30 so the hole falls outside: no target body, the body stays",
     cuts: true,
     setup: BEN,
     steps: [op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 10, 30) }, "done")],
     // The circle spans x 15 to 25, all past x = 10: no area in common.
     // The body: 10 · 30 · 20 = 6000.
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, cut: { id: "cut-4", failed: true }, bodies: { "extrude-2": 6000 } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", failed: true }, bodies: { "extrude-2": 6000 } },
   },
   {
-    answer: 6,
+    answer: "6",
     title: "nasty: the outline's side exactly tangent to the hole (15 × 30): touching only, no target body",
     cuts: true,
     setup: BEN,
@@ -713,10 +812,10 @@ export const FUSION_CASES: readonly FusionCase[] = [
     // touches it at one point, decided in whole numbers: the side (15, 0) to
     // (15, 30) has cross((0, 30), (5, 15))² = 150² = 22500 = r² · |side|² =
     // 25 · 900, not less, so no area; no tolerance is involved. The body: 15 · 30 · 20 = 9000.
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, cut: { id: "cut-4", failed: true }, bodies: { "extrude-2": 9000 } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", failed: true }, bodies: { "extrude-2": 9000 } },
   },
   {
-    answer: 6,
+    answer: "6",
     title: "nasty: one grid step further (16 × 30) the side takes a 1 mm sliver of the hole: built",
     cuts: true,
     setup: BEN,
@@ -727,64 +826,300 @@ export const FUSION_CASES: readonly FusionCase[] = [
     // the body: 16 · 30 · 20 = 9600 less that.
     expect: {
       order: FULL,
-      sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 },
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
       cut: { id: "cut-4", removed: (25 * Math.acos(0.8) - 12) * 10 },
       bodies: { "extrude-2": 9600 - (25 * Math.acos(0.8) - 12) * 10 },
     },
   },
   {
-    answer: 7,
+    answer: "7",
     title: "every drag in the four-item chain is refused, and dragging an item to its own place changes nothing",
     cuts: true,
     setup: BEN,
     steps: chainDrags("cut-4"),
-    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 24000 - 250 * PI } },
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", removed: 250 * PI }, bodies: { "extrude-2": 24000 - 250 * PI } },
   },
   // ---- the same part with the circle extruded 10 up as a new body (step 26, before booleans)
+  //
+  // Centroids, worked by hand: the base 40 × 30 × 20 has its middle at (20,
+  // 15, 10); the cylinder of radius 5 and height 10 on the top (z 20 to 30)
+  // at (20, 15, 25), volume π · 5² · 10 = 250π.
   {
-    answer: 1,
+    answer: "1",
     title: "new body: the rectangle made 60 × 30, the circle's body stays put on the top",
     cuts: false,
     setup: BEN,
     steps: [op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done")],
-    // A cylinder of radius 5 and height 10: 250π; the base 36000.
-    expect: { order: ["sketch-1", "extrude-2", "sketch-3", "extrude-4"], sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, bodies: { "extrude-2": 36000, "extrude-4": 250 * PI } },
+    // The base 36000 with its middle at (30, 15, 10); the cylinder unmoved.
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 36000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [30, 15, 10] }, "extrude-4": { centroid: [20, 15, 25] } },
+    },
   },
   {
-    answer: 2,
+    answer: "2",
     title: "new body: the first extrude flipped, the sketch follows the end cap down and still faces up",
     cuts: false,
     setup: BEN,
     steps: [op({ op: "set-distance", item: "extrude-2", value: -20 }, "done")],
     // The sketch at z = −20 facing +Z; its body goes up from −20 to −10,
-    // inside the base (bodies may overlap until booleans join them).
-    expect: { order: ["sketch-1", "extrude-2", "sketch-3", "extrude-4"], sketch: { id: "sketch-3", origin: [0, 0, -20], normal: 1 }, bodies: { "extrude-2": 24000, "extrude-4": 250 * PI } },
+    // middle (20, 15, −15), inside the base (−20 to 0, middle at −10;
+    // bodies may overlap until booleans join them).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, -20], side: 1 },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [20, 15, -10] }, "extrude-4": { centroid: [20, 15, -15] } },
+    },
   },
   {
-    answer: 4,
-    title: "new body: the first extrude deleted asks first, and only it goes; the sketch stays with its plane lost and its body is built there",
+    answer: "Q1",
+    title: "new body: the first extrude deleted asks first, and only it goes; the sketch stays with its plane lost, the cylinder stays built there saying its source is lost",
     cuts: false,
     setup: BEN,
     steps: [{ kind: "plan", item: "extrude-2", want: { ask: true, removes: ["extrude-2"] } }, op({ op: "delete", item: "extrude-2" }, "done")],
-    // The model's rule, extended from answer 4 (a question for the owner
-    // before step 26): only cuts into its body go with it; the new body is
-    // built from the sketch held at z = 20.
-    expect: { order: ["sketch-1", "sketch-3", "extrude-4"], sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1, warning: "plane-lost" }, bodies: { "extrude-4": 250 * PI } },
+    // Ben's Q1 (2026-10-19): only cuts into its body go with it; the
+    // cylinder is built from the sketch held at z = 20 (Fusion's cached
+    // geometry), so it is where it was, (20, 15, 25), with "source lost".
+    expect: {
+      order: ["sketch-1", "sketch-3", "extrude-4"],
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "plane-lost" },
+      bodies: { "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [20, 15, 25], warning: "source-lost" } },
+    },
   },
   {
-    answer: 5,
+    answer: "Q1",
+    title: "new body: undo after deleting the first extrude brings back the base, the sketch's plane and the cylinder without a warning",
+    cuts: false,
+    setup: BEN,
+    steps: [op({ op: "delete", item: "extrude-2" }, "done"), op({ op: "undo" }, "done"), { kind: "save-open" }],
+    expect: BASE_NEW,
+  },
+  {
+    answer: "5",
     title: "new body: the first extrude made 35 long, the sketch moves up with the top",
     cuts: false,
     setup: BEN,
     steps: [op({ op: "set-distance", item: "extrude-2", value: 35 }, "done")],
-    expect: { order: ["sketch-1", "extrude-2", "sketch-3", "extrude-4"], sketch: { id: "sketch-3", origin: [0, 0, 35], normal: 1 }, bodies: { "extrude-2": 42000, "extrude-4": 250 * PI } },
+    // The base 42000, middle (20, 15, 17.5); the cylinder 35 to 45, middle at 40.
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 35], side: 1 },
+      bodies: { "extrude-2": 42000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [20, 15, 17.5] }, "extrude-4": { centroid: [20, 15, 40] } },
+    },
   },
   {
-    answer: 7,
+    answer: "7",
     title: "new body: every drag in the chain is refused",
     cuts: false,
     setup: BEN,
     steps: chainDrags("extrude-4"),
-    expect: { order: ["sketch-1", "extrude-2", "sketch-3", "extrude-4"], sketch: { id: "sketch-3", origin: [0, 0, 20], normal: 1 }, bodies: { "extrude-2": 24000, "extrude-4": 250 * PI } },
+    expect: BASE_NEW,
+  },
+  // ---- Q2 (Ben, 2026-10-19): a sketch on a side reads in world coordinates
+  //
+  // Ben's rectangle goes (0, 0), (40, 0), (40, 30), (0, 30), counter-
+  // clockwise, so line k (corner k to k + 1) sweeps the side facing
+  // (dy, −dx): line 1 the front (y = 0, facing −Y), line 2 the right (x =
+  // 40, +X), line 3 the back (y = 30, +Y), line 4 the left (x = 0, −X).
+  {
+    answer: "Q2",
+    title: "a sketch on the front side has the front plane's frame: x along world X, y up world Z",
+    cuts: false,
+    setup: { ...BEN, cap: { side: 0 }, centre: [20, 10] },
+    steps: [],
+    // Facing −Y: of the origin planes' normals (+Z, −Y, +X) the front
+    // plane's −Y is along it (|(0, −40, 0) · (0, −1, 0)| = 40, the others 0),
+    // the same way (side +1). The plane y = 0 holds the origin, so the frame
+    // is the front plane's own: x = X, normal −Y, y = −Y × X = Z. The circle
+    // at (20, 10) is world (20, 0, 10); its body goes 10 out along −Y:
+    // middle (20, −5, 10).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 0], x: [1, 0, 0], normal: [0, -1, 0], side: 1 },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [20, -5, 10] } },
+    },
+  },
+  {
+    answer: "Q2",
+    title: "a sketch on the back side still reads world X and Z, facing against the frame's normal",
+    cuts: false,
+    setup: { ...BEN, cap: { side: 2 }, centre: [20, 10] },
+    steps: [],
+    // Facing +Y, (0, 40, 0): again the front plane's −Y is the nearest
+    // normal, but the other way (40 · −1 < 0), so side −1 and the frame
+    // stays the front plane's (x = X, y = Z): coordinates still the world's.
+    // The origin is where y = 30 meets the origin square on, (0, 30, 0); the
+    // circle is world (20, 30, 10) and its body goes out along +Y (−1 ×
+    // −Y): middle (20, 35, 10). (A frame that faced out would mirror x.)
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 30, 0], x: [1, 0, 0], normal: [0, -1, 0], side: -1 },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [20, 35, 10] } },
+    },
+  },
+  {
+    answer: "Q2",
+    title: "sketches on the right and left sides have the side plane's frame: x along world Y, y up world Z",
+    cuts: false,
+    setup: { ...BEN, cap: { side: 1 }, centre: [15, 10] },
+    steps: [],
+    // Facing +X, (30, 0, 0): the side plane's +X, same way. Origin (40, 0,
+    // 0); x = Y, y = X × Y = Z; the circle (15, 10) is world (40, 15, 10),
+    // its body 40 to 50 along X: middle (45, 15, 10).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [40, 0, 0], x: [0, 1, 0], normal: [1, 0, 0], side: 1 },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [45, 15, 10] } },
+    },
+  },
+  {
+    answer: "Q2",
+    title: "the left side: the side plane's frame at x = 0, facing against it",
+    cuts: false,
+    setup: { ...BEN, cap: { side: 3 }, centre: [15, 10] },
+    steps: [],
+    // Facing −X, (−30, 0, 0): side −1, frame unchanged, origin (0, 0, 0);
+    // the circle is world (0, 15, 10), its body 0 to −10 along X: middle
+    // (−5, 15, 10).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 0], x: [0, 1, 0], normal: [1, 0, 0], side: -1 },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [-5, 15, 10] } },
+    },
+  },
+  {
+    answer: "Q2",
+    title: "a sketch on the bottom cap reads world X and Y and faces down",
+    cuts: false,
+    setup: { ...BEN, cap: "start" },
+    steps: [],
+    // Facing −Z: the ground plane's normal +Z the other way, side −1, frame
+    // XY at z = 0. The circle (20, 15) is world (20, 15, 0); its body goes
+    // down 10: middle (20, 15, −5).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 0], side: -1 },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [20, 15, -5] } },
+    },
+  },
+  {
+    answer: "Q2",
+    title: "the front side turned by moving a corner: the sketch turns with it the shortest way, its origin where the world's meets the new plane",
+    cuts: false,
+    setup: { ...BEN, cap: { side: 0 }, centre: [20, 10] },
+    steps: [op({ op: "move-corner", sketch: "sketch-1", corner: 0, to: [0, -10] }, "done")],
+    // Line 1 now runs (0, −10) to (40, 0): dx = 40, dy = 10, facing (10,
+    // −40, 0), n = (1, −4, 0)/√17; drawn facing (0, −40, 0), and 40 · 40 >
+    // 0, so the normal stays on the outside. Turning −Y onto n about Z:
+    // cos = 4/√17, sin = 1/√17, so X turns to x = (4, 1, 0)/√17, along the
+    // line, and y = n × x = (0, 0, (1 · 1 + 4 · 4)/17) = Z. The plane holds
+    // (0, −10, 0): (0, −10, 0) · n = 40/√17, so the origin is 40/√17 · n =
+    // (40/17, −160/17, 0). The circle (20, 10) is origin + 20 x + 10 Z and
+    // its body's middle 5 n further: x part 40/17 + 80/√17 + 5/√17 = 40/17
+    // + 85/√17, y part −160/17 + 20/√17 − 20/√17 = −160/17, z 10. The base:
+    // shoelace (400 + 1200 + 1200 + 0)/2 = 1400, × 20 = 28000, middle
+    // (160000/8400, 104000/8400, 10) = (400/21, 260/21, 10).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [40 / 17, -160 / 17, 0], x: [4 / Math.sqrt(17), 1 / Math.sqrt(17), 0], normal: [1 / Math.sqrt(17), -4 / Math.sqrt(17), 0], side: 1 },
+      bodies: { "extrude-2": 28000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [400 / 21, 260 / 21, 10] }, "extrude-4": { centroid: [40 / 17 + 85 / Math.sqrt(17), -160 / 17, 10] } },
+    },
+  },
+  {
+    answer: "Q2",
+    title: "the outline redrawn as a triangle: the right side's line is gone, so its sketch's plane is lost and the cylinder stays where it was",
+    cuts: false,
+    setup: { ...BEN, cap: { side: 1 }, centre: [15, 10] },
+    steps: [
+      op(
+        {
+          op: "set-corners",
+          sketch: "sketch-1",
+          corners: [
+            [0, 0],
+            [40, 0],
+            [0, 30],
+          ],
+        },
+        "done",
+      ),
+    ],
+    // Three corners instead of four is a new outline with new lines, so no
+    // face is named for line 2 any more (never the triangle's second side,
+    // which is another line): held on the right side's plane, its body where
+    // it was, (45, 15, 10), with "source lost". The base: 40 · 30 / 2 · 20 =
+    // 12000, middle (40/3, 10, 10).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [40, 0, 0], x: [0, 1, 0], normal: [1, 0, 0], side: 1, warning: "plane-lost" },
+      bodies: { "extrude-2": 12000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [40 / 3, 10, 10] }, "extrude-4": { centroid: [45, 15, 10], warning: "source-lost" } },
+    },
+  },
+  // ---- Q3 (Ben, 2026-10-19): suppressing the first extrude greys what is built on it, with no warning
+  {
+    answer: "Q3",
+    title: "new body: Extrude 2 suppressed greys the sketch on its top and the cylinder, with no warning",
+    cuts: false,
+    setup: BEN,
+    steps: [op({ op: "suppress", item: "extrude-2", on: true }, "done")],
+    expect: { order: NEW, bodies: {}, off: { "extrude-2": "suppressed", "sketch-3": "greyed", "extrude-4": "greyed" } },
+  },
+  {
+    answer: "Q3",
+    title: "with the cut: Extrude 2 suppressed greys the sketch and the cut",
+    cuts: true,
+    setup: BEN,
+    steps: [op({ op: "suppress", item: "extrude-2", on: true }, "done")],
+    expect: { order: FULL, bodies: {}, off: { "extrude-2": "suppressed", "sketch-3": "greyed", "cut-4": "greyed" } },
+  },
+  {
+    answer: "Q3",
+    title: "new body: suppressed and back on, through save and open, everything is as it was and nothing warns",
+    cuts: false,
+    setup: BEN,
+    steps: [op({ op: "suppress", item: "extrude-2", on: true }, "done"), { kind: "save-open" }, op({ op: "suppress", item: "extrude-2", on: false }, "done"), op({ op: "suppress", item: "extrude-2", on: false }, "unchanged")],
+    expect: BASE_NEW,
+  },
+  {
+    answer: "Q3",
+    title: "new body: only what is built on the suppressed extrude greys; a body drawn after it apart stays",
+    cuts: false,
+    setup: BEN,
+    steps: [op({ op: "add-sketch", corners: rect(50, 0, 60, 10) }, "done"), op({ op: "add-extrude", sketch: "sketch-5", distance: 5 }, "done"), op({ op: "suppress", item: "extrude-2", on: true }, "done")],
+    // Sketch 5 and Extrude 6 aren't built on Extrude 2: the 10 × 10 × 5
+    // block, 500 mm³, middle (55, 5, 2.5), stays.
+    expect: {
+      order: [...NEW, "sketch-5", "extrude-6"],
+      bodies: { "extrude-6": 500 },
+      solids: { "extrude-6": { centroid: [55, 5, 2.5] } },
+      off: { "extrude-2": "suppressed", "sketch-3": "greyed", "extrude-4": "greyed" },
+    },
+  },
+  {
+    answer: "Q3",
+    title: "new body: the suppressed extrude deleted: its top's sketch, no longer greyed, is held where it would have been, plane lost, and the cylinder comes back saying its source is lost",
+    cuts: false,
+    setup: BEN,
+    steps: [op({ op: "suppress", item: "extrude-2", on: true }, "done"), op({ op: "delete", item: "extrude-2" }, "done")],
+    // While greyed the sketch had no place; with nothing suppressed it was
+    // on the top at 20, so that is the placement it keeps (rule 9).
+    expect: {
+      order: ["sketch-1", "sketch-3", "extrude-4"],
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "plane-lost" },
+      bodies: { "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [20, 15, 25], warning: "source-lost" } },
+    },
   },
 ];
