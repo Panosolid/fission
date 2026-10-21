@@ -12,7 +12,7 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.26.3 (2026-10-22)
 
-- Fix (a failing check): the new browser check for snapping onto a face's edges failed in Firefox and WebKit on a phone-width screen. After a tap, the snap marker and its guide lines stay drawn where the tap landed, and the check read the picture with them still on it. It now clears them first, as the other drawing checks do, and a miss says what colours it found. No change to the app.
+- Fix (a failing check): the new browser check for snapping onto a face's edges failed in Firefox and WebKit on a phone-width screen. After a tap, the snap marker and its guide lines stay drawn where the tap landed, and the check read the picture with them still on it. Moving the test's mouse away clears them in Chromium, but Firefox gives the canvas no mouse events on a touch page, so on phone width the check now finishes the sketch and opens it again before reading the picture (that clears them in every browser); with a mouse it still moves the pointer away. A miss says what colours it found. No change to the app.
 
 ## 0.26.2 (2026-10-21)
 

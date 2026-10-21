@@ -9,7 +9,9 @@
 // drawn round it, not round (40, 30). Points on screen come from the
 // app's own camera (?test-hooks) through the pinhole sums worked here, as
 // face-sketch.mjs does. 1280 px with a mouse (hover, then click) and
-// 375 px with taps (the tap itself snaps). Screenshots go to E2E_SHOTS
+// 375 px with taps (the tap itself snaps; the circle is probed after the
+// sketch is finished and opened again, which clears the tap's marks in
+// every engine). Screenshots go to E2E_SHOTS
 // when set. Run with `npm run e2e` (after `npm run build`); Firefox and
 // WebKit in CI (`e2e:engines`).
 import assert from "node:assert/strict";
@@ -104,12 +106,20 @@ async function lineNear(page, img, p) {
     }
   return false;
 }
+/** No snap or preview shown, then two frames so the canvas shows it (as sketch-pixels.mjs waits). */
+async function unmarked(page) {
+  await shown(page, "sketchSnap", "");
+  await shown(page, "sketchPreview", "");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+}
 /**
- * Clears what the pointer leaves drawn (a tap leaves the snap marker and
- * its guides where it landed): the mouse onto the canvas and off it to
- * the page's corner (the canvas hears it leave), then no snap or preview
- * shown, and two frames so the canvas shows it (as sketch-pixels.mjs
- * waits).
+ * Clears what the mouse leaves drawn (the snap marker and its guides
+ * where it last was): onto the canvas and off it to the page's corner
+ * (the canvas hears it leave), then nothing marked. Mouse runs only: in
+ * a touch page Firefox gives the canvas no pointer events for
+ * Playwright's mouse, so a tap's marks never clear this way (CI on
+ * #235, twice); the tap runs finish the sketch and open it again
+ * instead (`closeAndReopen`).
  */
 async function pointerAway(page) {
   // The canvas's middle (its corners are under the View buttons and the view cube at 375 px), checked to be the canvas.
@@ -120,9 +130,31 @@ async function pointerAway(page) {
   await page.mouse.move(x, y);
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   await page.mouse.move(0, 0);
-  await shown(page, "sketchSnap", "");
-  await shown(page, "sketchPreview", "");
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await unmarked(page);
+}
+/** Finish Sketch (scrolled to the top first: at 375 px the bar is above the fold after a tap). */
+async function finish(page, tap) {
+  await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
+  await press(page, "#finish-sketch", tap);
+  await until(page, () => document.querySelector("#viewport").dataset.sketching !== "true", null, "the sketch finished");
+}
+/** Sketch 1 opened again from its timeline row (a double click, or two taps), the camera still. */
+async function reopen(page, tap) {
+  const item = page.locator('#timeline [data-item="sketch-2"]');
+  await item.scrollIntoViewIfNeeded();
+  if (tap) {
+    const b = await item.boundingBox();
+    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  } else await item.dblclick();
+  await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "Sketch 1 open again");
+  await settle(page);
+}
+/** A tap's marks gone with the sketch: finished, opened again, nothing marked (the circle is drawn blue only while open). */
+async function closeAndReopen(page) {
+  await finish(page, true);
+  await reopen(page, true);
+  await unmarked(page);
 }
 /** The canvas colours in the 3 × 3 square round the world point `p`, for a failure's message. */
 async function colours(page, img, p) {
@@ -213,26 +245,17 @@ try {
       await shown(page, "sketchPoints", "40,30");
       await at(page, [35, 30, 20], tap);
       await until(page, () => document.querySelector("#undo").title.startsWith("Undo Draw circle"), null, "Draw circle recorded");
-      await pointerAway(page);
+      await (tap ? closeAndReopen(page) : pointerAway(page));
       await circleDrawn(page, [40, 30], "drawn round the corner");
       await shot(page, `face-edges-circle-${width}`);
-      await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
-      await press(page, "#finish-sketch", tap);
-      await until(page, () => document.querySelector("#viewport").dataset.sketching !== "true", null, "the sketch finished");
+      await finish(page, tap);
       // The box 60 wide, typed: the corner moves to (60, 30), and the circle's centre with it.
       await page.fill("#width", "60");
       await until(page, () => document.querySelector("#volume")?.textContent === "36,000 mm³", null, "60 × 30 × 20 = 36,000 mm³");
-      const item = page.locator('#timeline [data-item="sketch-2"]');
-      await item.scrollIntoViewIfNeeded();
-      if (tap) {
-        const b = await item.boundingBox();
-        await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
-        await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
-      } else await item.dblclick();
-      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "Sketch 1 open again");
-      await settle(page);
+      await reopen(page, tap);
       assert.equal(await data(page, "sketchPoints"), "60,30", "the centre followed the corner");
-      await pointerAway(page);
+      // Opened from the timeline: a tap run hasn't touched the canvas since it finished; a mouse run's pointer may still be over it.
+      await (tap ? unmarked(page) : pointerAway(page));
       await circleDrawn(page, [60, 30], "drawn round the moved corner");
       // Not round where it was: the old rim's points are on the top's face now, no blue there.
       const img = await canvasImage(page);
