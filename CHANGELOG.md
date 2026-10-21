@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.26.4 (2026-10-22)
+
+- Fix (found by the daily bug hunt's sweep of every size from 1 µm to 1 km): a small hole or curve close to a long straight side, away from its ends, was refused as crossing it ("0 mm apart") once the side was a few hundred metres long, for example a 1 µm hole 1.1 µm in from the side of a 1 km plate. The check worked out the distance from the line as the difference of two numbers as big as the line's length squared, and their rounding swamped a gap that small; it now measures the distance directly. A new kernel test builds about 6,400 bodies across the whole size range, up to 90 km from the origin, and 4,300 nearly touching holes, checking each one's exact volume and area, where it lands and its STL file; it found nothing else wrong.
+
 ## 0.26.3 (2026-10-22)
 
 - Fix (a failing check): the new browser check for snapping onto a face's edges failed in Firefox and WebKit on a phone-width screen. After a tap, the snap marker and its guide lines stay drawn where the tap landed, and the check read the picture with them still on it. Moving the test's mouse away clears them in Chromium, but Firefox gives the canvas no mouse events on a touch page, so on phone width the check now finishes the sketch and opens it again before reading the picture (that clears them in every browser); with a mouse it still moves the pointer away. A miss says what colours it found. No change to the app.
