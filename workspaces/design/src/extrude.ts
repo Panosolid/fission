@@ -12,11 +12,14 @@
 
 import type { BodySpec, Feature, KernelCalls } from "@fission/core";
 import { insertAt, insertItem, isSketchExtrude, partFeature, shown, specOf, type DesignDocument } from "./document.ts";
-import { extrudeSpec } from "./rebuild.ts";
+import { extrudeSpec, type CurveIds } from "./rebuild.ts";
 import { sketchItem } from "./sketch.ts";
 
 /** How far a new extrude goes until the user types another distance (mm). */
 export const DEFAULT_DISTANCE = 10;
+
+/** What the Extrude panel says when every sketch is after the rollback marker or suppressed, so none is offered. */
+export const NO_USABLE_SKETCH = "No sketch can be extruded here: each comes after the rollback marker or is suppressed. Move the marker past one, or unsuppress it.";
 
 /** The undo step an extrude is recorded as: "Extrude Sketch 1". */
 export const extrudeStep = (doc: DesignDocument, sketchId: string) => `Extrude ${sketchItem(doc, sketchId).provenance.self.label}`;
@@ -74,9 +77,14 @@ export function setExtrudeDistance(doc: DesignDocument, distance: number, id?: s
  * its intent alone (specOf).
  */
 export async function featureSpec(kernel: KernelCalls, doc: DesignDocument, feature: Feature): Promise<BodySpec> {
-  if (!isSketchExtrude(feature)) return specOf(doc, feature);
+  return (await featureBuild(kernel, doc, feature)).spec;
+}
+
+/** `featureSpec` with, for an extrude of a sketch, the ids of the curves its outline came from (the kept shape's while its sketch is lost), as `featureNames` takes them. */
+export async function featureBuild(kernel: KernelCalls, doc: DesignDocument, feature: Feature): Promise<{ spec: BodySpec; curves?: CurveIds }> {
+  if (!isSketchExtrude(feature)) return { spec: specOf(doc, feature) };
   // The owner's rule (rebuild.ts): a lost sketch's extrude is built from its kept shape.
   const made = await extrudeSpec(kernel, doc, feature);
   if ("status" in made) throw new Error(made.message);
-  return made.spec;
+  return { spec: made.spec, curves: made.curves };
 }
