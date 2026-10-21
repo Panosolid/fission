@@ -27,7 +27,13 @@ export const extrudeStep = (doc: DesignDocument, sketchId: string) => `Extrude $
 /** The undo step a typed distance is recorded as, merged per box like the other sizes. */
 export const DISTANCE_STEP = "Change extrude distance";
 
-const summary = (sketchLabel: string, distance: number) => `Extrude ${sketchLabel} by ${distance} mm`;
+const summary = (sketchLabel: string, distance: number, flip = false) => `Extrude ${sketchLabel} by ${distance} mm${flip ? ", flipped" : ""}`;
+
+/** The undo step Flip is recorded as. */
+export const FLIP_STEP = "Flip extrude";
+
+/** Whether an extrude of a sketch goes the other way from its sketch's plane (step 26c; Fusion's Flip). */
+export const isFlipped = (f: Feature): boolean => f.intent.parameters.flip === true;
 
 /**
  * The document with an extrude of this sketch by `distance` mm added: a
@@ -35,9 +41,11 @@ const summary = (sketchLabel: string, distance: number) => `Extrude ${sketchLabe
  * must be after the sketch, depending on the sketch; every feature already
  * there stays. It is named "Extrude n", n one more than the extrudes of
  * sketches there are, skipping a name in use. The kernel judges the
- * distance and the outline when the feature is built.
+ * distance and the outline when the feature is built. `flip` sends it the
+ * other way from the sketch's plane, its start cap still on the plane
+ * (step 26c, Fusion's Flip; kernel/src/ops/place.rs).
  */
-export function extrudeSketch(doc: DesignDocument, sketchId: string, distance: number): { doc: DesignDocument; id: string } {
+export function extrudeSketch(doc: DesignDocument, sketchId: string, distance: number, flip = false): { doc: DesignDocument; id: string } {
   const sketch = sketchItem(doc, sketchId);
   if (!Number.isFinite(distance)) throw new Error(`an extrude needs its distance in mm, not ${shown(distance)}`);
   if (doc.timeline.features.indexOf(sketch) >= insertAt(doc)) throw new Error(`${sketch.provenance.self.label} comes after the rollback marker, so an extrude put in at the marker can't use it`);
@@ -49,7 +57,7 @@ export function extrudeSketch(doc: DesignDocument, sketchId: string, distance: n
   while (names.has(`Extrude ${n}`)) n++;
   const feature: Feature = {
     id,
-    intent: { type: "extrude", parameters: { sketch: sketchId, distance }, summary: summary(label, distance) },
+    intent: { type: "extrude", parameters: flip ? { sketch: sketchId, distance, flip: true } : { sketch: sketchId, distance }, summary: summary(label, distance, flip) },
     provenance: { self: { workspace: "design", id, label: `Extrude ${n}` }, from: [{ workspace: "design", id: sketchId, label }] },
     dependsOn: [sketchId],
     suppressed: false,
@@ -66,7 +74,28 @@ export function setExtrudeDistance(doc: DesignDocument, distance: number, id?: s
   const sketchId = old.intent.parameters.sketch as string;
   const there = doc.timeline.features.some((f) => f.id === sketchId);
   const sketchLabel = there ? sketchItem(doc, sketchId).provenance.self.label : (old.provenance.from.find((p) => p.id === sketchId)?.label ?? sketchId);
-  const feature: Feature = { ...old, intent: { ...old.intent, parameters: { ...old.intent.parameters, distance }, summary: summary(sketchLabel, distance) } };
+  const feature: Feature = { ...old, intent: { ...old.intent, parameters: { ...old.intent.parameters, distance }, summary: summary(sketchLabel, distance, isFlipped(old)) } };
+  return { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f) => (f === old ? feature : f)) } };
+}
+
+/**
+ * The document with an extrude of a sketch (the part unless `id` names
+ * another) flipped (`on`) or not: it goes the other way from its sketch's
+ * plane, its start cap staying on the plane (step 26c). `flip` is left out
+ * when off, so a file without flips reads as before. The same document
+ * back when it already is.
+ */
+export function setExtrudeFlip(doc: DesignDocument, on: boolean, id?: string): DesignDocument {
+  const old = id === undefined ? partFeature(doc) : doc.timeline.features.find((f) => f.id === id);
+  if (!old) throw new Error(id === undefined ? "the design has no body to flip" : `there is no feature ${shown(id)} in the design`);
+  if (!isSketchExtrude(old)) throw new Error(`${old.intent.summary} is not an extrude of a sketch`);
+  if (typeof on !== "boolean") throw new Error(`flipping ${old.provenance.self.label} needs true or false, not ${shown(on)}`);
+  if (isFlipped(old) === on) return doc;
+  const { flip: _, ...rest } = old.intent.parameters;
+  const sketchId = old.intent.parameters.sketch as string;
+  const there = doc.timeline.features.some((f) => f.id === sketchId);
+  const sketchLabel = there ? sketchItem(doc, sketchId).provenance.self.label : (old.provenance.from.find((p) => p.id === sketchId)?.label ?? sketchId);
+  const feature: Feature = { ...old, intent: { ...old.intent, parameters: on ? { ...rest, flip: true } : rest, summary: summary(sketchLabel, old.intent.parameters.distance as number, on) } };
   return { ...doc, timeline: { ...doc.timeline, features: doc.timeline.features.map((f) => (f === old ? feature : f)) } };
 }
 

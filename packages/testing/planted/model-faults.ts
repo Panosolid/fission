@@ -13,6 +13,7 @@
 // guards against the mistake itself, a different check catches it than the
 // model's (`CAUGHT_BY` in test/timeline-session.test.ts); `why` says so.
 
+import type { NamingFault } from "../src/naming-model.ts";
 import type { ModelFault } from "../src/timeline-model.ts";
 
 export interface Edit {
@@ -29,10 +30,11 @@ export interface Plant {
   /**
    * The checks to run, in order, until one fails: "timeline", Design's
    * seeded sessions against the model (12 seeds × 150 steps); "history",
-   * test/history-fuzz.test.ts.
+   * test/history-fuzz.test.ts; "naming", journeys/naming.journey.ts (step
+   * 26c: Design against the naming model on the real kernel).
    */
-  run: ("timeline" | "history")[];
-  /** The timeline session's failing check, or text in history-fuzz's failure. */
+  run: ("timeline" | "history" | "naming")[];
+  /** The timeline session's failing check, or text in history-fuzz's or the naming journey's failure. */
   caught: string;
   /** Why the check differs from the model's own, when it does. */
   why?: string;
@@ -205,12 +207,12 @@ export const PLANTS: Record<ModelFault, Plant> = {
   "kept-not-forgotten": {
     what: "settleKept never forgets a kept shape and extrudeSpec builds from it even when the sketch is whole again",
     edits: [
-      { file: REBUILD, find: "    if (await makesOutline(kernel, after, sketch)) continue;", replace: "    if (keptOf(after, f) === undefined && (await makesOutline(kernel, after, sketch))) continue;" },
+      { file: REBUILD, find: "      if (await makesOutline(kernel, after, sketch)) continue;", replace: "      if (keptOf(after, f) === undefined && (await makesOutline(kernel, after, sketch))) continue;" },
       {
         file: REBUILD,
-        find: "  const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, { cause, sketch: sketchId, message, curves }, kernel);",
+        find: "  const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, flip, { cause, sketch: sketchId, message, curves }, kernel);",
         replace:
-          '  const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, { cause, sketch: sketchId, message, curves }, kernel);\n  if (keptOf(doc, f) !== undefined) return await lost("open-outline", "kept", []);',
+          '  const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, flip, { cause, sketch: sketchId, message, curves }, kernel);\n  if (keptOf(doc, f) !== undefined) return await lost("open-outline", "kept", []);',
       },
     ],
     run: ["timeline"],
@@ -257,5 +259,153 @@ export const PLANTS: Record<ModelFault, Plant> = {
     run: ["timeline"],
     caught: "the rebuild differs from a rebuild from scratch",
     why: "the reused body is wrong, which the comparison with a rebuild from scratch sees before the build count is checked",
+  },
+};
+
+const FACE = "workspaces/design/src/face-sketch.ts";
+const SKETCH = "workspaces/design/src/sketch.ts";
+const ASK = "workspaces/design/src/delete-ask.ts";
+
+/** A plant in Design's sketch on a face (step 26c), and the naming model's bug it is the same mistake as, when it is one. */
+export interface NamingPlant extends Plant {
+  fault?: NamingFault;
+}
+
+/**
+ * Bugs planted in Design's sketch on a face (step 26c): the naming model's
+ * own bugs (NAMING_FAULTS) where Design can make the same mistake, and
+ * mistakes only Design can make. `caught` is text in the naming journey's
+ * first failure (the test's title, then its words). The model's bugs left
+ * out have no counterpart in Design yet: the cut's (bite-fails,
+ * empty-cut-builds, delete-keeps-dependents), side-by-index (Design's
+ * lines are ids, never places), suppress-greys-all-after (Design greys by
+ * what an item is built from, never by place), frame-follows-face (Design
+ * never keeps a face's middle), and ambiguous-picks-first (no Design
+ * outline names two faces alike: rebuild's `sharedBy`).
+ */
+export const NAMING_PLANTS: Record<string, NamingPlant> = {
+  "plane-stays-put": {
+    fault: "plane-stays-put",
+    what: "a face sketch stays on the plane it was drawn on, whatever its face does",
+    edits: [{ file: REBUILD, find: "placement: { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side } };", replace: "placement: { plane: squared(p.frame)!, side: p.side } };" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "normal-follows-face": {
+    fault: "normal-follows-face",
+    what: "a face sketch's side is worked out again from its face, so it flips with the face",
+    edits: [
+      {
+        file: REBUILD,
+        find: "placement: { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side } };",
+        replace: "placement: { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: frameNow(squared(p.frame)!, outward, view.face_centroids[face]).normal.reduce((a, x, k) => a + x * outward[k], 0) < 0 ? -1 : 1 } };",
+      },
+    ],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "frame-not-turned": {
+    fault: "frame-not-turned",
+    what: "a face sketch's x axis stays as drawn when its face turns (only squared up)",
+    edits: [{ file: FACE, find: "xAxis: turned(drawn.xAxis, drawn.normal, n), normal: n })!;", replace: "xAxis: drawn.xAxis, normal: n })!;" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "origin-at-corner": {
+    fault: "origin-at-corner",
+    what: "a face sketch's origin is the point of the face it was given, not where the world's origin meets the plane",
+    edits: [{ file: FACE, find: "  return squared({ origin: scale(n, dot(point, n)), xAxis: turned(drawn.xAxis, drawn.normal, n), normal: n })!;", replace: "  return squared({ origin: [...point] as Vec3, xAxis: turned(drawn.xAxis, drawn.normal, n), normal: n })!;" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "lost-plane-silent": {
+    fault: "lost-plane-silent",
+    what: "a face sketch held at its last placement says nothing",
+    edits: [{ file: REBUILD, find: "side: p.side }, plane: { cause, face: plane, message: planeWords(cause, f.provenance.self.label) } };", replace: "side: p.side } };" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "lost-plane-moves": {
+    fault: "lost-plane-moves",
+    what: "a face sketch whose face is lost goes back to where it was drawn, not where it last was",
+    edits: [{ file: REBUILD, find: "placement: { plane: squared(p.held ?? p.frame)!, side: p.side }", replace: "placement: { plane: squared(p.frame)!, side: p.side }" }],
+    run: ["naming"],
+    caught: "seeded:",
+    why: "in each Fusion case the face is lost where it was drawn; the seeded sessions move it first",
+  },
+  "source-lost-silent": {
+    fault: "source-lost-silent",
+    what: "an extrude of a held face sketch says nothing",
+    edits: [{ file: REBUILD, find: "...made, ...(source ? { source } : {}) };", replace: "...made };" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "extrude-ignores-side": {
+    fault: "extrude-ignores-side",
+    what: "an extrude of a face sketch goes along the frame's normal, whichever way the sketch faces",
+    edits: [{ file: REBUILD, find: "  const back = (at.side === -1) !== flip;", replace: "  const back = flip;" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "reorder-ignores-plane": {
+    fault: "reorder-ignores-plane",
+    what: "a face sketch doesn't depend on its face's feature, so it can be dragged before it",
+    edits: [{ file: SKETCH, find: "{ plane: face.plane }, [face.feature], [{", replace: "{ plane: face.plane }, [], [{" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "delete-takes-sketch": {
+    fault: "delete-takes-sketch",
+    what: "deleting a feature deletes the sketches on its faces too",
+    edits: [{ file: EDITS, find: "  const features = all.filter((f) => f !== item);", replace: '  const features = all.filter((f) => f !== item && !(f.intent.type === "sketch" && f.dependsOn.includes(id)));' }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "delete-no-ask": {
+    fault: "delete-no-ask",
+    what: "deleting a feature a sketch is on doesn't ask first",
+    edits: [{ file: ASK, find: "  const users = before.timeline.features.filter((f) => f.dependsOn.includes(id));", replace: '  const users = before.timeline.features.filter((f) => f.dependsOn.includes(id) && f.intent.type !== "sketch");' }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "suppress-keeps-dependents": {
+    fault: "suppress-keeps-dependents",
+    what: "a sketch on a suppressed feature's face is held with its plane lost, not greyed",
+    edits: [{ file: REBUILD, find: '  if (on?.status === "suppressed") return { status: "greyed", by: featureId };', replace: "" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "greyed-loses-hold": {
+    fault: "greyed-loses-hold",
+    what: "settling judges held placements with suppression on, so a face redrawn away while greyed is never held",
+    edits: [{ file: REBUILD, find: "  const features = doc.timeline.features.map((f) => (f.suppressed ? { ...f, suppressed: false } : f));", replace: "  const features = doc.timeline.features;" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "greyed-extrude-fails": {
+    what: "an extrude of a greyed sketch fails (red) instead of greying with it",
+    edits: [{ file: REBUILD, find: '    if (item !== undefined && input?.status === "greyed") return { status: "greyed", by: input.by };', replace: "" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "flip-ignored": {
+    what: "Flip does nothing on a sketch on XY",
+    edits: [{ file: REBUILD, find: "  if (at === null) return { extrude: flip ? { profile, distance, flip: true } : { profile, distance } };", replace: "  if (at === null) return { extrude: { profile, distance } };" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "kept-lies-flat": {
+    what: "an extrude keeping a deleted sketch that was not on XY keeps its points only, so it is laid on XY",
+    edits: [{ file: REBUILD, find: "        next[f.id] = placement ? { points: was.points, curves: was.curves, placement } : { points: was.points, curves: was.curves };", replace: "        next[f.id] = placement ? { points: was.points, curves: was.curves } : { points: was.points, curves: was.curves };" }],
+    run: ["naming"],
+    caught: "hand-worked: the XZ sketch deleted",
+    why: "the hand-worked XZ delete comes first in the journey; the seeded sessions catch it too (a face sketch deleted under its cylinder)",
+  },
+  "held-never-forgotten": {
+    what: "a held placement is kept after the face comes back, so a later loss holds an old place",
+    edits: [{ file: REBUILD, find: "      if (r.plane === undefined) keep = undefined;\n", replace: "" }],
+    run: ["naming"],
+    caught: "hand-worked: a box's top sketched on",
+    why: "the model's sessions never bring a lost face's name back, except by Undo, which restores the snapshot; the box made a sphere and back does",
   },
 };

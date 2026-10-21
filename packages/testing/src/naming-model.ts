@@ -206,7 +206,9 @@ export type NamingFault =
   | "extrude-ignores-side"
   | "side-by-index"
   | "suppress-keeps-dependents"
-  | "suppress-greys-all-after";
+  | "suppress-greys-all-after"
+  // Step 26c:
+  | "greyed-loses-hold";
 
 export const NAMING_FAULTS: readonly NamingFault[] = [
   "frame-follows-face",
@@ -228,6 +230,7 @@ export const NAMING_FAULTS: readonly NamingFault[] = [
   "side-by-index",
   "suppress-keeps-dependents",
   "suppress-greys-all-after",
+  "greyed-loses-hold",
 ];
 
 export const faceKeyOf = (f: FaceName): string => (f.role === "side" ? `${f.feature}/side:${f.line}` : `${f.feature}/${f.role}`);
@@ -704,10 +707,14 @@ function unsuppressed(doc: NamingDoc): NamingDoc {
 /**
  * After an edit, every face sketch whose face is gone or ambiguous keeps the
  * placement it had just before (and forgets it once its face is back), and
- * every feature whose sketch was deleted keeps that sketch's last shape. A
- * greyed sketch's face is not gone, only off, so it keeps nothing and
- * forgets nothing; what it had "just before" is where it would have been
- * with nothing suppressed, the same for every item that was built.
+ * every feature whose sketch was deleted keeps that sketch's last shape.
+ * Both are judged with nothing suppressed: a greyed sketch's face is not
+ * gone, only off, so it keeps nothing while its face is there; but a face
+ * taken away while greyed (its outline redrawn under a suppressed extrude)
+ * is gone, and the sketch keeps where it was before that edit, never
+ * where a lost sketch would fall back to (step 26c). What it had "just
+ * before" is where it would have been with nothing suppressed, the same
+ * for every item that was built.
  */
 function settle(before: NamingDoc, doc: NamingDoc, faults: ReadonlySet<NamingFault>) {
   const was = evaluate(unsuppressed(before), faults);
@@ -723,7 +730,7 @@ function settle(before: NamingDoc, doc: NamingDoc, faults: ReadonlySet<NamingFau
     }
     if (item.kind !== "extrude" && s?.kind === "face-sketch" && r?.kind === "sketch") item.kept = { centre: s.centre, radius: s.radius, placement: r.placement };
   }
-  const now = evaluate(doc, faults);
+  const now = evaluate(faults.has("greyed-loses-hold") ? doc : unsuppressed(doc), faults);
   for (const item of doc.items) {
     if (item.kind !== "face-sketch" || now.rebuild.results[item.id]?.kind !== "sketch") continue;
     if (now.matches[item.id] === 1) delete item.kept;

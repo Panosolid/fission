@@ -14,6 +14,7 @@
 
 import type { BodySpec, Feature, Plane } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
+import { faceFeature, isFacePlane, squared, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
 import { outline, type ProfileKind, type ShapeKind } from "./profiles.ts";
 
 /** A ready-made outline on a plane (until the sketcher, step 21, adds sketches next to these). */
@@ -67,13 +68,22 @@ export type SketchCurve = SketchLineCurve | SketchCircleCurve | SketchArcCurve;
 /** The points a curve is drawn from: a line's two ends, a circle's centre, an arc's ends and centre. */
 export const curvePoints = (c: SketchCurve): string[] => (c.kind === "line" ? [c.start, c.end] : c.kind === "circle" ? [c.centre] : [c.start, c.end, c.centre]);
 
-/** A sketch's content; its place in the build order and its plane are its timeline item with the same id. */
+/**
+ * A sketch's content; its place in the build order and its plane are its
+ * timeline item with the same id. The plane is an origin plane ("XY",
+ * "XZ", "YZ") or, from step 26c, a face's name ("face:feature-2/end",
+ * face-sketch.ts); a sketch on a face keeps here (`face`) the frame it was
+ * drawn with, its side and, while the face is lost or ambiguous, the
+ * placement it holds.
+ */
 export interface Sketch {
   id: string;
   points: SketchPoint[];
   curves: SketchCurve[];
   /** Empty until the solver (step 29). */
   constraints: never[];
+  /** Only for a sketch on a face (step 26c). */
+  face?: SketchFace;
 }
 
 /**
@@ -82,17 +92,21 @@ export interface Sketch {
  * the sketch (deleted it, or left it with no outline). Saved in the
  * document's `kept`, by the extrude's id, while the sketch is lost, so the extrude
  * still builds, with a warning, after the file is opened again
- * (`rebuild.ts`, `settleKept`). Its ids are the sketch's old ones.
+ * (`rebuild.ts`, `settleKept`). Its ids are the sketch's old ones, so
+ * the extrude's sides keep their names. A sketch not on XY keeps where it
+ * lay too (step 26c: `placement`, an origin plane's frame or a face
+ * sketch's placement just before), so the extrude stays where it was.
  */
 export interface KeptShape {
   points: SketchPoint[];
   curves: SketchCurve[];
+  placement?: SketchPlacement;
 }
 
 /** An extrude's kept shape, or undefined while its sketch makes an outline. */
 export const keptOf = (doc: Pick<DesignDocument, "kept">, f: Feature): KeptShape | undefined => (doc.kept && Object.hasOwn(doc.kept, f.id) ? doc.kept[f.id] : undefined);
 
-/** The planes a sketch can be on (a stable face id joins these at step 24). */
+/** The origin planes a sketch can be on; a face's name is the other kind of plane (step 26c, face-sketch.ts). */
 export const SKETCH_PLANES = ["XY", "XZ", "YZ"] as const;
 export type SketchPlane = (typeof SKETCH_PLANES)[number];
 
@@ -423,10 +437,48 @@ function checkContent(pointList: unknown[], curves: unknown[], at: string): void
   }
 }
 
-/** An extrude's kept shape, checked: a sketch's points and curves (checkContent), each id once. */
+/** Three finite numbers. */
+const isVec3 = (x: unknown): x is [number, number, number] => Array.isArray(x) && x.length === 3 && x.every(isFiniteNumber);
+
+/** A frame from a file, checked: origin, x axis and normal, three finite numbers each, from which a frame can be squared up (face-sketch.ts `squared`). */
+function checkPlane(p: unknown, at: string): void {
+  if (!isRecord(p) || !isVec3(p.origin) || !isVec3(p.xAxis) || !isVec3(p.normal)) throw new Error(`${at} needs an origin, an xAxis and a normal, each three numbers`);
+  if (squared(p as unknown as Plane) === null) throw new Error(`${at} has no frame: its normal is nothing or its xAxis lies along it`);
+}
+
+/** A placement from a file, checked: a frame (checkPlane) and a side of 1 or −1. */
+function checkPlacement(p: unknown, at: string): void {
+  if (!isRecord(p)) throw new Error(`${at} is not an object`);
+  checkPlane(p.plane, `${at}'s plane`);
+  if (p.side !== 1 && p.side !== -1) throw new Error(`${at}'s side must be 1 or -1, not ${shown(p.side)}`);
+}
+
+/**
+ * A sketch on a face, checked (step 26c): its plane a face's name as a
+ * reference has it, the frame it was drawn with, its side (1 or −1), the
+ * placement it holds if any; the face's feature a solid item before it,
+ * or gone (deleted: the sketch is held with "plane lost"), and depended on.
+ */
+function checkFaceSketch(f: Feature, content: Sketch, byId: ReadonlyMap<string, { item: Feature; at: number }>): void {
+  const p = f.intent.parameters;
+  const at = `Design sketch ${f.id}`;
+  const feature = faceFeature(p.plane as string);
+  if (feature === null) throw new Error(`${at} is on ${shown(p.plane)}, which is not a face's name this Panosolid makes`);
+  const face = content.face as unknown;
+  if (!isRecord(face)) throw new Error(`${at} is on a face but has no frame it was drawn with`);
+  checkPlane(face.frame, `${at}'s frame`);
+  if (face.side !== 1 && face.side !== -1) throw new Error(`${at}'s side must be 1 or -1, not ${shown(face.side)}`);
+  if (Object.hasOwn(face, "held")) checkPlane(face.held, `${at}'s held plane`);
+  const there = byId.get(feature);
+  if (there !== undefined && (there.at > byId.get(f.id)!.at || isSketchItem(there.item))) throw new Error(`${at} is on a face of ${shown(feature)}, which is not a solid item before it in the timeline`);
+  if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(feature)) throw new Error(`${at} is on a face of ${feature} but does not depend on it`);
+}
+
+/** An extrude's kept shape, checked: a sketch's points and curves (checkContent), each id once, and where it lay if not on XY. */
 function checkKept(kept: unknown, feature: string): void {
   const at = `Design feature ${feature}'s kept shape`;
   if (!isRecord(kept) || !Array.isArray(kept.points) || !Array.isArray(kept.curves)) throw new Error(`${at} needs points and curves lists`);
+  if (Object.hasOwn(kept, "placement")) checkPlacement(kept.placement, `${at}'s placement`);
   notTooMany(kept.points.length + kept.curves.length, DESIGN_LIMITS.sketch, `${at} has`, "points and curves");
   checkContent(kept.points, kept.curves, at);
   const seen = new Set<string>();
@@ -478,11 +530,15 @@ export function readDesignDocument(data: unknown): DesignDocument {
     notTooMany(content, DESIGN_LIMITS.content, "Design data's sketches have at least", "points and curves together");
   }
   // Each sketch has exactly one timeline item, on a plane this Panosolid knows, and each sketch item its sketch.
-  const sketchIds = new Set(d.sketches.map((s) => s.id));
+  const sketchIds = new Map<string, Sketch>();
+  for (const s of d.sketches) if (!sketchIds.has(s.id)) sketchIds.set(s.id, s);
   const items = d.timeline.features.filter(isSketchItem);
   for (const f of items) {
-    if (!sketchIds.has(f.id)) throw new Error(`Design timeline item ${f.id} is a sketch with no content in the sketches list`);
-    if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Panosolid knows (XY, XZ or YZ)`);
+    const content = sketchIds.get(f.id);
+    if (content === undefined) throw new Error(`Design timeline item ${f.id} is a sketch with no content in the sketches list`);
+    if (isFacePlane(f.intent.parameters.plane)) checkFaceSketch(f, content, byId);
+    else if (Object.hasOwn(content, "face")) throw new Error(`Design sketch ${f.id} is on the ${shown(f.intent.parameters.plane)} plane but keeps a face's frame`);
+    else if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Panosolid knows (XY, XZ, YZ or a face)`);
   }
   const itemIds = new Set(items.map((f) => f.id));
   for (const s of d.sketches) if (!itemIds.has(s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
@@ -497,6 +553,7 @@ export function readDesignDocument(data: unknown): DesignDocument {
       throw new Error(`Design feature ${f.id} extrudes ${shown(p.sketch)}, which is not a sketch before it in the timeline`);
     if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(p.sketch as string)) throw new Error(`Design feature ${f.id} extrudes ${p.sketch} but does not depend on it`);
     if (!isFiniteNumber(p.distance)) throw new Error(`Design feature ${f.id}: distance ${shown(p.distance)} is not a number of mm`);
+    if (Object.hasOwn(p, "flip") && p.flip !== true) throw new Error(`Design feature ${f.id}: flip must be true or left out, not ${shown(p.flip)}`);
   }
   if (Object.hasOwn(d, "kept")) {
     if (!isRecord(d.kept)) throw new Error("Design data's kept shapes are not an object of extrude ids");
@@ -548,6 +605,11 @@ export function builds(document: DesignDocument, f: Feature): boolean {
   const at = features.indexOf(f);
   if (at < 0 || f.suppressed) return false;
   if (marker === "start" || (marker !== undefined && at > features.findIndex((x) => x.id === marker))) return false;
+  // A sketch on a face is greyed while its face's feature is off (Q3); a deleted one leaves it held, built.
+  if (isSketchItem(f)) {
+    const on = isFacePlane(f.intent.parameters.plane) ? features.find((x) => x.id === faceFeature(f.intent.parameters.plane as string)) : undefined;
+    return on === undefined || builds(document, on);
+  }
   if (!isSketchExtrude(f)) return true;
   const sketch = features.find((x) => x.id === f.intent.parameters.sketch && isSketchItem(x));
   // A deleted sketch: the extrude builds from its kept shape, if it has one (24d2).
@@ -571,12 +633,20 @@ export function buildingItems(document: DesignDocument): Set<Feature> {
     if (i < end && !f.suppressed) open.add(f);
     if (isSketchItem(f) && !sketches.has(f.id)) sketches.set(f.id, f);
   }
+  const byId = new Map<unknown, Feature>();
+  for (const f of features) if (!byId.has(f.id)) byId.set(f.id, f);
+  // In timeline order, so what an item is built from (always before it) is decided first.
   const out = new Set<Feature>();
   for (const f of open) {
-    if (!isSketchExtrude(f)) out.add(f);
+    if (isSketchItem(f)) {
+      // A sketch on a face is greyed while its face's feature is off (Q3); a deleted one leaves it held, built.
+      const on = isFacePlane(f.intent.parameters.plane) ? byId.get(faceFeature(f.intent.parameters.plane as string)) : undefined;
+      if (on === undefined || out.has(on)) out.add(f);
+    } else if (!isSketchExtrude(f)) out.add(f);
     else {
       const sketch = sketches.get(f.intent.parameters.sketch);
-      if (sketch === undefined ? keptOf(document, f) !== undefined : open.has(sketch)) out.add(f);
+      // A face sketch's answer needs its face's feature's, decided before it (a file that puts it later is refused when opened).
+      if (sketch === undefined ? keptOf(document, f) !== undefined : isFacePlane(sketch.intent.parameters.plane) ? out.has(sketch) : open.has(sketch)) out.add(f);
     }
   }
   return out;

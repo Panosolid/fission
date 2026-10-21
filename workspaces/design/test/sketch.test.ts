@@ -235,7 +235,7 @@ test("a file with sketches that breaks a rule is refused when it is opened, each
     [(d) => ((d.sketches[0].curves[0] as { id: unknown }).id = undefined), /^Error: Design sketch sketch-2: curve 1 has no id$/],
     [(d) => d.timeline.features.pop(), /^Error: Design sketch sketch-2 has no place in the timeline$/],
     [(d) => (d.sketches = []), /^Error: Design timeline item sketch-2 is a sketch with no content in the sketches list$/],
-    [(d) => (d.timeline.features[1].intent.parameters.plane = "AB"), /sketch-2 is on AB, not a plane this Panosolid knows \(XY, XZ or YZ\)/],
+    [(d) => (d.timeline.features[1].intent.parameters.plane = "AB"), /sketch-2 is on AB, not a plane this Panosolid knows \(XY, XZ, YZ or a face\)/],
     [(d) => d.sketches[0].points.push({ id: "point-3", x: 1, y: 1 }), /^Error: Design id point-3 is used twice$/],
     [(d) => (d.sketches[0].curves[0].id = "feature-1"), /^Error: Design id feature-1 is used twice$/],
   ];
