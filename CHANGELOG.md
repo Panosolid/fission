@@ -12,7 +12,8 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.25.13 (2026-10-21)
 
-- Step 25b3: the nightly fuzzing runs long timeline sessions (5 × 500 steps a round) of Design on the real kernel against the model, checks no body is left behind, shrinks any failure to the fewest steps and files an issue for it.
+- Step 25b4: the baseline now measures the naming success rate: 8 seeded timeline sessions of Design on the real kernel check every held face and edge reference against the model (100% over 4,466 references today), and any miss fails the comparison. Step 25b is done.
+- Step 25b3: the nightly fuzzing runs long timeline sessions (5 × 500 steps a round) of Design on the real kernel against the model, checks no body is left behind, shrinks any failure to the fewest steps and files an issue for it. #219
 - Step 25b2: the undo/redo fuzzer now edits any earlier item's sizes (Edit feature) and draws into earlier sketches (Edit Sketch), with several sketches, checked step by step against its model. #218
 - Fix: a body's bounding box reaches the top of a long, nearly flat arc (one with a huge radius), which it missed by a hair after a turn. #217
 

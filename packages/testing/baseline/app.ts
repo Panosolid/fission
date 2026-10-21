@@ -14,7 +14,10 @@
 //   edit on a part of 20 extrudes with arcs, timed as above, and counted
 //   exactly: `body_builds` (1 with a working cache) and `kernel_calls`.
 //   FISSION_BASELINE_FAULT=full-replay or outline-twice plants a bug there
-//   (`REBUILD_FAULTS`), to see the check fail.
+//   (`REBUILD_FAULTS`), to see the check fail;
+// - `naming_sessions` (step 25b4, `naming.ts`): the naming success rate as
+//   `miss_percent` (0 is 100%) over the `references` checked;
+//   FISSION_BASELINE_FAULT=lose-refs plants a bug there.
 // Needs the WASM build (`npm run kernel` in apps/fission).
 // Run: node --expose-gc --experimental-strip-types --no-warnings packages/testing/baseline/app.ts
 import { readFileSync } from "node:fs";
@@ -23,6 +26,7 @@ import { designWorkspace, partDocument } from "@fission/design";
 import * as wasm from "../../core/src/kernel/wasm/fission_kernel.js";
 import { READERS } from "../src/project-fuzz.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
+import { namingRate } from "./naming.ts";
 import { BodyCache, countingKernel, editFirst, REBUILD_FAULTS, rebuildPart, showEdit, type RebuildFault } from "./rebuild.ts";
 import { seeded } from "../src/index.ts";
 
@@ -108,8 +112,9 @@ out.kernel_memory = { wasm_bytes: exports.memory.buffer.byteLength };
 // The rebuild after one edit (async: the kernel answers with promises, as
 // the worker does). Each run moves the first sketch's corner the other
 // way, so every run is a real edit with one body to build.
-const fault = process.env.FISSION_BASELINE_FAULT as RebuildFault | undefined;
-if (fault !== undefined && !REBUILD_FAULTS.includes(fault)) throw new Error(`FISSION_BASELINE_FAULT is ${fault}, not one of ${REBUILD_FAULTS.join(", ")}`);
+const planted = process.env.FISSION_BASELINE_FAULT;
+if (planted !== undefined && planted !== "lose-refs" && !(REBUILD_FAULTS as readonly string[]).includes(planted)) throw new Error(`FISSION_BASELINE_FAULT is ${planted}, not lose-refs or one of ${REBUILD_FAULTS.join(", ")}`);
+const fault = planted === "lose-refs" ? undefined : (planted as RebuildFault | undefined);
 {
   const kernel = countingKernel(nodeKernel());
   const cache = new BodyCache(kernel);
@@ -134,4 +139,6 @@ if (fault !== undefined && !REBUILD_FAULTS.includes(fault)) throw new Error(`FIS
   out.rebuild_20_arcs_edit_first = metrics;
   await cache.clear();
 }
+// The naming success rate (25b4): every held reference in seeded timeline sessions, counted against the model.
+out.naming_sessions = await namingRate(nodeKernel(), planted === "lose-refs" ? "lose-refs" : undefined);
 console.log(JSON.stringify(out, null, 2));

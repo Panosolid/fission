@@ -45,6 +45,10 @@
     "body_builds": {
       "fail": 0,
       "why": "bodies the kernel builds for one edit: exact; a working cache builds only the edited feature's body, so any more means unchanged features are being rebuilt"
+    },
+    "miss_percent": {
+      "fail": 0,
+      "why": "held references the naming sessions resolved otherwise than the model says (lost, moved, or found on two faces), as a percent of those checked, so 0 is a 100% naming success rate (step 25b4, packages/testing/baseline/naming.ts); any miss is a naming bug, so any rise from 0 fails (owner, 2026-10-21)"
     }
   },
   "metrics": {
@@ -57,6 +61,7 @@
     "app.kernel_sphere.retained_bytes": 1451256,
     "app.kernel_stl_sphere.relative_time": 0.2394,
     "app.kernel_stl_sphere.retained_bytes": 968,
+    "app.naming_sessions.miss_percent": 0,
     "app.project_open.relative_time": 0.0361,
     "app.project_open.retained_bytes": 523928,
     "app.project_save.relative_time": 0.06,
