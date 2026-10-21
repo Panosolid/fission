@@ -19,3 +19,7 @@ training/data/
 
 # StrykerJS sandboxes (packages/testing/stryker/run.sh), removed after each run
 .stryker-tmp/
+
+# Secrets: never committed (audit 2026-10-22). The app has none; this keeps a local one out.
+.env
+.env.*
