@@ -12,6 +12,12 @@
 .extrude .extrude-note { color: #8b95a3; font-size: 0.9em; }
 .extrude .extrude-buttons { display: flex; gap: 6px; margin-top: 4px; }
 .extrude button:disabled { opacity: 0.45; cursor: default; }
+/* Flip (26c): a tick box before its word, the whole row a target for the pointer. */
+.extrude .extrude-flip { display: flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; }
+.extrude .extrude-flip input { width: 18px; height: 18px; margin: 0; }
 @media (max-width: 700px) {
   .extrude button, .extrude select, .extrude input { min-height: 44px; }
+  /* The row is the 44 px target; the box itself stays a box. */
+  .extrude .extrude-flip { min-height: 44px; }
+  .extrude .extrude-flip input { min-height: 0; width: 22px; height: 22px; }
 }

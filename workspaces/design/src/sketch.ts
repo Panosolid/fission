@@ -11,7 +11,8 @@
 
 import type { Feature, KernelCalls, Outline, Plane, SketchArc, SketchCircle, SketchLine } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
-import { curvePoints, insertItem, isSketchItem, profileLabel, shown, type DesignDocument, type ReadyProfile, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
+import { faceFeature, isFacePlane, squared, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
+import { curvePoints, insertAt, insertItem, isSketchItem, profileLabel, shown, type DesignDocument, type ReadyProfile, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
 import { readProfileReference } from "./references.ts";
 
 /** The undo step each sketch edit is recorded as. */
@@ -28,8 +29,25 @@ const PLANES: Record<SketchPlane, Plane> = {
   YZ: { origin: [0, 0, 0], xAxis: [0, 1, 0], normal: [1, 0, 0] },
 };
 
-/** Where a sketch plane reference is; a face id joins these at step 24. */
+/** Where an origin plane is. */
 export const planeOf = (ref: SketchPlane): Plane => PLANES[ref];
+
+/**
+ * Where sketch `id` is drawn: its origin plane's frame, or for a sketch on
+ * a face (26c) the frame the last rebuild placed it in (`placed`, by
+ * sketch id), else the placement it holds, else the frame it was drawn
+ * with (a design not rebuilt yet: a file just opened, another workspace).
+ */
+export function sketchPlane(doc: DesignDocument, id: string, placed?: ReadonlyMap<string, Plane>): Plane {
+  return planeFor(doc.timeline.features.find((f) => f.id === id), doc.sketches.find((s) => s.id === id), placed);
+}
+
+/** `sketchPlane` from the sketch's item and content, found already (sketch-tool.ts finds every sketch's at once). */
+export function planeFor(item: Feature | undefined, content: Sketch | undefined, placed?: ReadonlyMap<string, Plane>): Plane {
+  const plane = item?.intent.parameters.plane;
+  if (!isFacePlane(plane)) return planeOf((plane as SketchPlane | undefined) ?? "XY");
+  return (item && placed?.get(item.id)) ?? content?.face?.held ?? content?.face?.frame ?? planeOf("XY");
+}
 
 /** The document with the next id taken: "line-4" and the counter moved on. */
 function take(doc: DesignDocument, prefix: string): [string, DesignDocument] {
@@ -73,20 +91,43 @@ export function sketchItem(doc: DesignDocument, id: string): Feature {
  */
 export function addSketch(doc: DesignDocument, plane: SketchPlane = "XY"): { doc: DesignDocument; id: string } {
   if (!PLANES[plane]) throw new Error(`${shown(plane)} is not a plane a sketch can be on (XY, XZ or YZ)`);
+  return newSketch(doc, (n) => `Sketch ${n} on the ${plane} plane`, { plane }, []);
+}
+
+/**
+ * A new empty sketch on a flat face of the body `face.feature` built (step
+ * 26c), put in at the marker like `addSketch`: its plane the face's name
+ * (`face.plane`, as a reference names it, face-sketch.ts `facePlane`),
+ * its content keeping the frame and side it is drawn with (`drawnFrame` on
+ * the face as built now), depending on that feature so it can't be dragged
+ * before it.
+ */
+export function addFaceSketch(doc: DesignDocument, face: { plane: string; feature: string }, drawn: SketchPlacement): { doc: DesignDocument; id: string } {
+  if (!isFacePlane(face.plane) || faceFeature(face.plane) !== face.feature) throw new Error(`${shown(face.plane)} is not a face of ${shown(face.feature)}`);
+  const on = doc.timeline.features.find((f) => f.id === face.feature);
+  if (!on || isSketchItem(on)) throw new Error(`there is no solid item ${shown(face.feature)} to sketch on`);
+  if (doc.timeline.features.indexOf(on) >= insertAt(doc)) throw new Error(`${on.provenance.self.label} comes after the rollback marker, so a sketch put in at the marker can't be on it`);
+  const frame = squared(drawn.plane);
+  if (frame === null || (drawn.side !== 1 && drawn.side !== -1)) throw new Error("a sketch on a face needs a frame and a side of 1 or -1");
+  const label = on.provenance.self.label;
+  return newSketch(doc, (n) => `Sketch ${n} on a face of ${label}`, { plane: face.plane }, [face.feature], [{ workspace: "design", id: face.feature, label }], { frame, side: drawn.side });
+}
+
+function newSketch(doc: DesignDocument, summary: (n: number) => string, parameters: Feature["intent"]["parameters"], dependsOn: string[], from: Feature["provenance"]["from"] = [], face?: SketchFace): { doc: DesignDocument; id: string } {
   const [id, next] = take(doc, "sketch");
   const names = new Set(doc.timeline.features.filter(isSketchItem).map((f) => f.intent.summary.split(" on ")[0]));
   let n = doc.sketches.length + 1;
   while (names.has(`Sketch ${n}`)) n++;
   const item: Feature = {
     id,
-    intent: { type: "sketch", parameters: { plane }, summary: `Sketch ${n} on the ${plane} plane` },
-    provenance: { self: { workspace: "design", id, label: `Sketch ${n}` }, from: [] },
-    dependsOn: [],
+    intent: { type: "sketch", parameters, summary: summary(n) },
+    provenance: { self: { workspace: "design", id, label: `Sketch ${n}` }, from },
+    dependsOn,
     suppressed: false,
   };
   return {
     id,
-    doc: { ...next, sketches: [...doc.sketches, { id, points: [], curves: [], constraints: [] }], timeline: insertItem(doc, item) },
+    doc: { ...next, sketches: [...doc.sketches, face ? { id, points: [], curves: [], constraints: [], face } : { id, points: [], curves: [], constraints: [] }], timeline: insertItem(doc, item) },
   };
 }
 

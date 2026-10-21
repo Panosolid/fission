@@ -1122,4 +1122,39 @@ export const FUSION_CASES: readonly FusionCase[] = [
       solids: { "extrude-4": { centroid: [20, 15, 25], warning: "source-lost" } },
     },
   },
+  {
+    answer: "Q3",
+    title: "new body: the outline redrawn as a triangle while Extrude 2 is suppressed: back on, the right side's sketch is held where it was, plane lost",
+    cuts: false,
+    setup: { ...BEN, cap: { side: 1 }, centre: [15, 10] },
+    steps: [
+      op({ op: "suppress", item: "extrude-2", on: true }, "done"),
+      op(
+        {
+          op: "set-corners",
+          sketch: "sketch-1",
+          corners: [
+            [0, 0],
+            [40, 0],
+            [0, 30],
+          ],
+        },
+        "done",
+      ),
+      op({ op: "suppress", item: "extrude-2", on: false }, "done"),
+    ],
+    // While greyed the right side (line 2) was only off; the triangle has
+    // new lines, so with nothing suppressed it is gone: the sketch keeps
+    // the right side's plane from before the redraw (origin (40, 0, 0), x
+    // along Y, normal X, as in the side case above), never the ground
+    // plane a lost sketch with nothing held falls back to. The cylinder is
+    // where it was, (45, 15, 10), saying its source is lost; the triangle
+    // 40 · 30 / 2 · 20 = 12000, middle (40/3, 10, 10).
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [40, 0, 0], x: [0, 1, 0], normal: [1, 0, 0], side: 1, warning: "plane-lost" },
+      bodies: { "extrude-2": 12000, "extrude-4": 250 * PI },
+      solids: { "extrude-2": { centroid: [40 / 3, 10, 10] }, "extrude-4": { centroid: [45, 15, 10], warning: "source-lost" } },
+    },
+  },
 ];

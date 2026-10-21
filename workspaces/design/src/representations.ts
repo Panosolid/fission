@@ -8,12 +8,12 @@
 
 import type { KernelCalls, Outline, Plane, Producible, Producer, RepresentationRegistry, SourceLookup } from "@fission/core";
 import { bodyFeatures } from "./browser.ts";
-import type { DesignDocument, SketchPlane } from "./document.ts";
+import type { DesignDocument } from "./document.ts";
 import { featureSpec } from "./extrude.ts";
 import { outline } from "./profiles.ts";
 import { readDesignReference, readProfileReference } from "./references.ts";
 import { bodyOf, findInScene, type Scene } from "./scene.ts";
-import { planeOf, sketchItem, sketchOutline } from "./sketch.ts";
+import { sketchOutline, sketchPlane } from "./sketch.ts";
 import { buildSpec } from "./spec.ts";
 
 /** Anything in Design that is a closed 2D shape on a plane; a sketch's outline comes from the kernel, so it may be a promise. */
@@ -50,7 +50,7 @@ export function designObjects(document: DesignDocument, kernel: KernelCalls): (O
   const sketches: OutlineSource[] = document.sketches.map((s) => ({
     type: "design.sketch",
     id: s.id,
-    plane: planeOf(sketchItem(document, s.id).intent.parameters.plane as SketchPlane),
+    plane: sketchPlane(document, s.id),
     outline: () => sketchOutline(kernel, document, s.id),
   }));
   // Every body shown, not only the part's (25c1); a design with no body (24f4) offers no solid.

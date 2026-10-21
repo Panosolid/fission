@@ -4,13 +4,15 @@
 // A sketch no other item is built from goes at once, as one undo step; one
 // that is used asks first, naming what is built from it and what happens
 // to each: an extrude that keeps its last shape shows the warning, one with
-// no shape to keep fails. What the box says is worked out from the very
+// no shape to keep fails, and a sketch on one of its faces stays where it
+// is with its plane lost (26c, Q1). What the box says is worked out from the very
 // document the delete would record (`deleteItem`, then `settleKept`), so
 // it can't promise a kept shape the rebuild then doesn't have.
 // Styles: src/styles/delete-ask.css.
 
 import type { KernelCalls } from "@fission/core";
 import { isSketchExtrude, type DesignDocument } from "./document.ts";
+import { isFaceSketch } from "./face-sketch.ts";
 import { settleKept } from "./rebuild.ts";
 import { deleteItem, itemName } from "./timeline-edits.ts";
 
@@ -39,6 +41,7 @@ export function listWords(names: readonly string[]): string {
  * document the delete records (kept shapes already settled): null when no
  * other item is built from it. An item built from it keeps its last shape
  * when `after` keeps one for it; otherwise it has none to keep and fails.
+ * A sketch on one of its faces stays, held where it is (26c, Q1).
  */
 export function deleteWords(before: DesignDocument, after: DesignDocument, id: string): DeleteQuestion | null {
   const item = before.timeline.features.find((f) => f.id === id);
@@ -47,13 +50,16 @@ export function deleteWords(before: DesignDocument, after: DesignDocument, id: s
   const users = before.timeline.features.filter((f) => f.dependsOn.includes(id));
   if (users.length === 0) return null;
   const keeps = users.filter((f) => isSketchExtrude(f) && after.kept !== undefined && Object.hasOwn(after.kept, f.id)).map(itemName);
-  const fails = users.map(itemName).filter((n) => !keeps.includes(n));
+  const stays = users.filter(isFaceSketch).map(itemName);
+  const fails = users.map(itemName).filter((n) => !keeps.includes(n) && !stays.includes(n));
   const one = (n: readonly unknown[]) => n.length === 1;
   const what = [
     ...(keeps.length > 0 ? [`${listWords(keeps)} ${one(keeps) ? "keeps its last shape and shows a warning" : "keep their last shapes and show a warning"}`] : []),
+    ...(stays.length > 0 ? [`${listWords(stays)} ${one(stays) ? "stays where it is and shows its plane is lost" : "stay where they are and show their planes are lost"}`] : []),
     ...(fails.length > 0 ? [`${listWords(fails)} ${one(fails) ? "has no shape to keep and fails" : "have no shapes to keep and fail"}`] : []),
   ].join(", and ");
-  const usedBy = `${listWords(users.map(itemName))} ${one(users) ? "is" : "are"} built from ${name}.`;
+  const on = stays.length === users.length ? (one(users) ? "is drawn on a face of" : "are drawn on faces of") : one(users) ? "is built from" : "are built from";
+  const usedBy = `${listWords(users.map(itemName))} ${on} ${name}.`;
   return { heading: `Delete ${name}?`, words: `${usedBy} If you delete it, ${what}. Undo brings ${name} back.` };
 }
 

@@ -341,6 +341,8 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
       const r = build.results[id];
       if (r.status === "suppressed" || r.status === "rolled-back") results[id] = { status: r.status };
       else if (r.status === "failed") results[id] = { status: "failed", cause: r.cause as never, input: r.input };
+      // Only a sketch on a face greys what is built on it (26c), and these sessions draw none.
+      else if (r.status === "greyed") throw new Error(`${id} is greyed, but the timeline sessions make no sketch on a face`);
       else if (r.body === undefined || !shown.has(id)) results[id] = { status: "built" };
       else {
         // Planted bug ("cache-by-feature"): a body read once per feature id, so later edits never reach it.

@@ -12,7 +12,11 @@
 // With the box and an extrude both shown (25c1), the toolbar's STL holds
 // both bodies in one file, Body 1's row downloads the box alone (it is not
 // the part), and both rows selected download both, at 1280 and 375 px.
-// Screenshots go to E2E_SHOTS when set. Run with
+// Step 26c: Flip in the Extrude panel sends a rectangle down from z = 0 and
+// Edit feature unticks it (1280 px and 375 px with taps); a file with a
+// sketch on the box's top and one on XZ builds each extrude in its
+// sketch's frame, and a flipped XZ extrude the other way, checked on the
+// STL's corners. Screenshots go to E2E_SHOTS when set. Run with
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -459,6 +463,110 @@ try {
       await page.context().close();
     });
   }
+
+  // Step 26c: a sketch on a face or on XZ builds a body placed in its frame,
+  // and Flip sends an extrude the other way, its start still on the sketch's
+  // plane. Checked on the STL's corners, in world mm (the kernel places the
+  // mesh in doubles, then rounds to float, so to within 1e-4 mm here).
+  /** The toolbar's STL: its triangles' corners, in mm. */
+  const corners = async (page, tap) => {
+    const [dl] = await Promise.all([page.waitForEvent("download"), tap ? page.tap("#toolbar [data-op=export_stl]") : page.click("#toolbar [data-op=export_stl]")]);
+    const bytes = readFileSync(await dl.path());
+    const n = bytes.readUInt32LE(80);
+    const out = [];
+    for (let t = 0; t < n; t++) for (let k = 0; k < 3; k++) out.push([0, 1, 2].map((i) => bytes.readFloatLE(84 + 50 * t + 12 + 12 * k + 4 * i)));
+    return out;
+  };
+  /** The bounds of the corners `keep` picks: [min, max] for x, y and z. */
+  const bounds = (pts, keep = () => true) => [0, 1, 2].map((i) => {
+    const v = pts.filter(keep).map((p) => p[i]);
+    return [Math.min(...v), Math.max(...v)];
+  });
+  const near = (got, want, what) => got.flat().forEach((x, i) => assert.ok(Math.abs(x - want.flat()[i]) <= 1e-4, `${what}: [${JSON.stringify(got)}], want ${JSON.stringify(want)}`));
+  // The design as Design writes it (workspaces/design/test/face-sketch.test.ts
+  // makes the same): the 40 × 30 × 20 box, Sketch 1 on its top (frame as
+  // drawn: origin (0, 0, 20), x along x, normal up, facing along it) with a
+  // circle r 5 at (20, 15), Extrude 1 of it by 10; Sketch 2 on XZ, a 40 × 30
+  // rectangle from (50, 0), Extrude 2 of it by 10.
+  const FACE_DESIGN = {"version":3,"nextId":16,"profiles":[],"sketches":[{"id":"sketch-2","points":[{"id":"point-3","x":20,"y":15}],"curves":[{"id":"circle-4","kind":"circle","centre":"point-3","radius":5}],"constraints":[],"face":{"frame":{"origin":[0,0,20],"xAxis":[1,0,0],"normal":[0,0,1]},"side":1}},{"id":"sketch-6","points":[{"id":"point-7","x":50,"y":0},{"id":"point-8","x":90,"y":0},{"id":"point-10","x":90,"y":30},{"id":"point-12","x":50,"y":30}],"curves":[{"id":"line-9","kind":"line","start":"point-7","end":"point-8"},{"id":"line-11","kind":"line","start":"point-8","end":"point-10"},{"id":"line-13","kind":"line","start":"point-10","end":"point-12"},{"id":"line-14","kind":"line","start":"point-12","end":"point-7"}],"constraints":[]}],"timeline":{"features":[{"id":"feature-1","intent":{"type":"box","parameters":{"width":40,"depth":30,"height":20},"summary":"Box: 40 × 30 × 20 mm"},"provenance":{"self":{"workspace":"design","id":"feature-1","label":"Feature 1 (box)"},"from":[]},"dependsOn":[],"suppressed":false},{"id":"sketch-2","intent":{"type":"sketch","parameters":{"plane":"face:feature-1/top"},"summary":"Sketch 1 on a face of Feature 1 (box)"},"provenance":{"self":{"workspace":"design","id":"sketch-2","label":"Sketch 1"},"from":[{"workspace":"design","id":"feature-1","label":"Feature 1 (box)"}]},"dependsOn":["feature-1"],"suppressed":false},{"id":"feature-5","intent":{"type":"extrude","parameters":{"sketch":"sketch-2","distance":10},"summary":"Extrude Sketch 1 by 10 mm"},"provenance":{"self":{"workspace":"design","id":"feature-5","label":"Extrude 1"},"from":[{"workspace":"design","id":"sketch-2","label":"Sketch 1"}]},"dependsOn":["sketch-2"],"suppressed":false},{"id":"sketch-6","intent":{"type":"sketch","parameters":{"plane":"XZ"},"summary":"Sketch 2 on the XZ plane"},"provenance":{"self":{"workspace":"design","id":"sketch-6","label":"Sketch 2"},"from":[]},"dependsOn":[],"suppressed":false},{"id":"feature-15","intent":{"type":"extrude","parameters":{"sketch":"sketch-6","distance":10},"summary":"Extrude Sketch 2 by 10 mm"},"provenance":{"self":{"workspace":"design","id":"feature-15","label":"Extrude 2"},"from":[{"workspace":"design","id":"sketch-6","label":"Sketch 2"}]},"dependsOn":["sketch-6"],"suppressed":false}]}};
+
+  for (const { width, tap } of [{ width: 1280, tap: false }, { width: 375, tap: true }]) {
+    await check(`Flip in the Extrude panel: the rectangle goes down from z = 0, not up; Edit feature unticks it (26c, ${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      const press = (sel) => (tap ? page.tap(sel) : page.click(sel));
+      await drawn(page, [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]], tap);
+      await status(page, "4 lines, a closed outline.");
+      await press("#sketch-extrude");
+      await extrudeStatus(page, "Sketch 1 makes a closed outline");
+      assert.equal(await page.isChecked("#extrude-flip"), false, "Flip starts unticked");
+      // The row is the target: a tap on its word ticks it (44 px tall at phone width).
+      const row = await page.locator(".extrude-flip").boundingBox();
+      if (width === 375) assert.ok(row.height >= 44, `the Flip row is ${row.height} px tall`);
+      await press(".extrude-flip");
+      assert.equal(await page.isChecked("#extrude-flip"), true);
+      if (shots) await page.screenshot({ path: `${shots}/extrude-flip-${width}.png` });
+      await press("#extrude-ok");
+      await volume(page, "12,000 mm³");
+      assert.equal(await undoTitle(page), "Undo Extrude Sketch 1 (Ctrl+Z)");
+      assert.equal(await page.textContent("#intent"), "Extrude Sketch 1 by 10 mm, flipped");
+      // The rectangle flipped: its start cap on z = 0, its end at z = −10 (the box sits on z = 0 to 20).
+      let pts = await corners(page, tap);
+      near(bounds(pts, (p) => p[2] < -1e-3), [[0, 40], [0, 30], [-10, -10]], "the end cap's corners, below z = 0");
+      near(bounds(pts).slice(2), [[-10, 20]], "z from the flipped end to the box's top");
+      // Edit feature (the bar's menu) shows Flip ticked; unticked, the body goes back up: z 0 to 10.
+      const item = page.locator('#timeline [data-item="feature-11"]');
+      await item.scrollIntoViewIfNeeded();
+      if (tap) {
+        if (!(await page.isVisible('#timeline [data-more="feature-11"]'))) await item.tap();
+        await page.tap('#timeline [data-more="feature-11"]');
+      } else await item.click({ button: "right" });
+      await until(page, () => document.getElementById("row-menu").open, null, "the item's menu");
+      await press("#row-menu-edit");
+      await until(page, () => document.getElementById("feature-edit")?.hidden === false, null, "the Edit feature panel");
+      assert.equal(await page.isChecked("#edit-flip"), true, "Edit feature opens with Flip ticked");
+      await press(".feature-edit-flip");
+      await press("#feature-edit-ok");
+      await until(page, (w) => document.querySelector("#intent")?.textContent === w, "Extrude Sketch 1 by 10 mm", "unflipped");
+      assert.equal(await undoTitle(page), "Undo Edit Extrude 1 (Ctrl+Z)");
+      pts = await corners(page, tap);
+      near(bounds(pts), [[0, 40], [0, 30], [0, 20]], "nothing below z = 0, the box the tallest");
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+  }
+
+  await check("a file with a sketch on the box's top and one on XZ: each extrude is built in its sketch's frame, and Flip sends the XZ one the other way (26c)", async () => {
+    const page = await fresh();
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
+    const project = JSON.parse(readFileSync(await download.path(), "utf8"));
+    project.workspaces.design = structuredClone(FACE_DESIGN);
+    const open = (p) => page.setInputFiles("#open-file", { name: "faces.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(p)) });
+    await open(project);
+    // The part is Extrude 2: 40 · 30 · 10 = 12,000 mm³.
+    await volume(page, "12,000 mm³");
+    assert.equal(await page.textContent("#error"), "");
+    let pts = await corners(page);
+    // Extrude 1, on the top: every corner above z = 20 is on the circle r 5
+    // about (20, 15) at z = 30 (the end cap); and the corners on that circle
+    // (none of the box's: its top corners are 25 mm from the centre) run
+    // from z = 20, the box's top, to 30.
+    const above = pts.filter((p) => p[2] > 20 + 1e-4 && p[0] < 50 - 1e-4);
+    assert.ok(above.length > 0, "the cylinder is there");
+    for (const p of above) assert.ok(Math.abs(p[2] - 30) <= 1e-4 && Math.abs(Math.hypot(p[0] - 20, p[1] - 15) - 5) <= 1e-4, `the cylinder's end cap corner ${p}`);
+    near(bounds(pts, (p) => Math.abs(Math.hypot(p[0] - 20, p[1] - 15) - 5) <= 1e-4).slice(2), [[20, 30]], "the cylinder's z");
+    // Extrude 2, on XZ: sketch x is world x, sketch y is world z, and XZ's normal is −y: x 50 to 90, z 0 to 30, y 0 to −10.
+    near(bounds(pts, (p) => p[0] > 50 - 1e-4), [[50, 90], [-10, 0], [0, 30]], "the XZ body");
+    if (shots) await page.screenshot({ path: `${shots}/face-and-xz-1280.png` });
+    // Flipped, from the file: y 0 to +10, still from the XZ plane.
+    const flipped = project.workspaces.design.timeline.features[4].intent;
+    Object.assign(flipped, { parameters: { ...flipped.parameters, flip: true }, summary: "Extrude Sketch 2 by 10 mm, flipped" });
+    await open(project);
+    await until(page, (w) => document.querySelector("#intent")?.textContent === w, flipped.summary, "reopened");
+    await until(page, () => document.querySelector("#viewport").dataset.rebuilding !== "true", null, "rebuilt");
+    pts = await corners(page);
+    near(bounds(pts, (p) => p[0] > 50 - 1e-4), [[50, 90], [0, 10], [0, 30]], "the XZ body flipped");
+    await page.context().close();
+  });
 
   await check("no errors in the console", async () => assert.deepEqual(errors, []));
 } finally {

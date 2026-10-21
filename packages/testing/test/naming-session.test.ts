@@ -28,6 +28,8 @@ import {
 
 const SEEDS = Array.from({ length: 12 }, (_, k) => BigInt(2500 + k));
 const STEPS = 150;
+/** Where the planted-bug hunt looks: the sessions' seeds first, then on; it stops at the first catch, so a common bug costs no more. */
+const HUNT_SEEDS = Array.from({ length: 100 }, (_, k) => BigInt(2500 + k));
 
 async function caseFailure(make: () => NamingSubject, c: (typeof FUSION_CASES)[number]): Promise<NamingFailure | null> {
   try {
@@ -71,6 +73,7 @@ const CAUGHT_BY: Record<NamingFault, string[]> = {
   "side-by-index": ["Q2"],
   "suppress-keeps-dependents": ["Q3"],
   "suppress-greys-all-after": ["Q3"],
+  "greyed-loses-hold": ["Q3"],
 };
 
 test("each planted bug breaks the Fusion answers it should, and no other bug goes unnoticed by them", async () => {
@@ -142,8 +145,9 @@ test("each planted bug a session can reach is caught by the random sessions, and
     if (fault === "ambiguous-picks-first") continue; // this part never names two faces alike (see above)
     let found: { cuts: boolean; s: NamingSession; f: NamingFailure } | null = null;
     // With the cut first; the side faces' bugs only show without it, where setups go on sides too.
+    // A rare one (a face redrawn away while greyed, then back on: 1 session in 18) may take more seeds than the 12 above.
     for (const cuts of [true, false])
-      for (const seed of SEEDS) {
+      for (const seed of HUNT_SEEDS) {
         if (found) break;
         const s = randomNamingSession(seed, STEPS, cuts);
         const f = await namingFailureOf(() => namingModelSubject([fault], cuts), s);

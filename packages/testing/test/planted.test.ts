@@ -9,7 +9,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { MODEL_FAULTS } from "../src/timeline-model.ts";
-import { PLANTS, type Plant } from "../planted/model-faults.ts";
+import { NAMING_PLANTS, PLANTS, type Plant } from "../planted/model-faults.ts";
+import { NAMING_FAULTS } from "../src/naming-model.ts";
 import { planted } from "../planted/run.ts";
 
 const ROOT = new URL("../../../", import.meta.url);
@@ -23,8 +24,15 @@ test("every one of the model's planted bugs has a plant in the real code, record
   }
 });
 
+test("every naming plant (26c) records what caught it, and names a model bug only when it is one", () => {
+  for (const [name, p] of Object.entries(NAMING_PLANTS)) {
+    assert.ok(p.edits.length > 0 && p.caught.length > 0 && p.run.includes("naming"), name);
+    if (p.fault !== undefined) assert.ok(NAMING_FAULTS.includes(p.fault) && p.fault === name, `${name}: ${p.fault}`);
+  }
+});
+
 test("every plant still applies: each text it replaces is in its file exactly once, and planting changes the file", () => {
-  for (const [fault, p] of Object.entries(PLANTS))
+  for (const [fault, p] of [...Object.entries(PLANTS), ...Object.entries(NAMING_PLANTS)])
     for (const file of new Set(p.edits.map((e) => e.file))) {
       const text = read(file);
       assert.notEqual(planted(text, p, file), text, `${fault} changes nothing in ${file}`);
