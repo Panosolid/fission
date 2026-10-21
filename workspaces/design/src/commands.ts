@@ -1,7 +1,8 @@
 // Design's commands, as data (the command API in core). The panel and the
 // AI assistant do the same thing through these: the AI gets schemas
-// generated from them and can't do anything a user couldn't. Until the
-// timeline (step 24) there are two: set the part, and export it.
+// generated from them and can't do anything a user couldn't. There are
+// two: set the part (change it, or add a body at the marker), and export
+// every body shown.
 
 import type { Command, CommandSpec } from "@fission/core";
 import { withPart, type DesignDocument } from "./document.ts";
@@ -12,7 +13,7 @@ export const SHAPES: readonly ShapeKind[] = ["box", "cylinder", "sphere", "l-bra
 export const DESIGN_COMMANDS: readonly CommandSpec[] = [
   {
     op: "set_part",
-    summary: "Make the part a shape of these sizes: feature 1 of the timeline. Cylinders and spheres use width as the diameter; other shapes extrude a ready-made profile by the height.",
+    summary: "Make the part a shape of these sizes. The part is the last body the timeline builds: set_part changes it in place when it is one of these shapes, and otherwise (an extruded sketch, or no body) adds a new body at the timeline marker. Cylinders and spheres use width as the diameter; other shapes extrude a ready-made profile by the height.",
     params: {
       shape: { type: "choice", values: SHAPES, description: "which shape" },
       width: { type: "length", description: "width, or diameter for a cylinder or sphere" },

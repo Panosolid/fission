@@ -40,6 +40,21 @@ test("the size rules are in the prompt, after the part and before the request", 
   assert.ok(p.indexOf("Keep every size the user doesn't mention") > p.indexOf(CUBE_RULE));
 });
 
+test("a workspace's notes follow the part's commands, before the size rules (25c3)", () => {
+  const notes = ["The design's timeline, in build order:", "1. Box: 40 × 30 × 20 mm. Builds Body 1. This is the part set_part changes."];
+  const p = systemPrompt([{ op: "set_part", shape: "box", width: 40 }], [SET_PART], notes).split("\n");
+  const part = p.indexOf('The part now is made by these commands: [{"op":"set_part","shape":"box","width":40}]');
+  assert.ok(part >= 0, p.join("\n"));
+  assert.deepEqual(p.slice(part + 1, part + 3), notes);
+  assert.equal(p[part + 3], UNIT_RULE);
+  // No setup with notes (an extruded sketch): no "made by []", which reads as an empty project.
+  const q = systemPrompt([], [SET_PART], notes);
+  assert.doesNotMatch(q, /made by these commands/);
+  assert.match(q, /^No command you can use makes the part as it is now\.$/m);
+  // A new project (no notes) still says it is made by no commands.
+  assert.match(systemPrompt([], [SET_PART]), /^The part now is made by these commands: \[\]$/m);
+});
+
 test("the unit rule's factors are the units' definitions", () => {
   // By definition: 1 cm = 10 mm, 1 m = 1000 mm, and the international inch is exactly 25.4 mm (1959).
   const factors = Object.fromEntries([...UNIT_RULE.matchAll(/1 (cm|m|inch) = ([\d.]+) mm/g)].map((m) => [m[1], Number(m[2])]));

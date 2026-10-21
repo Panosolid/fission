@@ -9,8 +9,8 @@ export interface AIContext {
   units: string;
   /** Selected items by stable id, with their intent. Empty until selection exists (step 17). */
   selection: { id: string; intent?: string }[];
-  /** Every timeline feature of every workspace: id, intent and parameters. */
-  features: { workspace: string; id: string; summary: string; parameters: Feature["intent"]["parameters"]; suppressed: boolean }[];
+  /** Every timeline feature of every workspace: id, intent and parameters, and whether it is after its timeline's marker (rolled back, so not built; 25c3). */
+  features: { workspace: string; id: string; summary: string; parameters: Feature["intent"]["parameters"]; suppressed: boolean; afterMarker: boolean }[];
   materials: string[];
   /** Recent errors and failed features, newest first. */
   errors: string[];
@@ -34,8 +34,11 @@ export function buildContext(project: Project, o: ContextOptions): AIContext {
   const limit = LIMITS[o.detail ?? "small"];
   const features: AIContext["features"] = [];
   for (const [workspace, data] of Object.entries(project.workspaces)) {
-    const list = (data as { timeline?: { features?: Feature[] } } | undefined)?.timeline?.features ?? [];
-    for (const f of list) features.push({ workspace, id: f.id, summary: f.intent.summary, parameters: f.intent.parameters, suppressed: f.suppressed });
+    const timeline = (data as { timeline?: { features?: Feature[]; marker?: string } } | undefined)?.timeline;
+    const list = timeline?.features ?? [];
+    // The marker names the last item built, or "start" when none is; left out, every item is built (docs/project-format.md).
+    const end = timeline?.marker === undefined ? list.length : timeline.marker === "start" ? 0 : list.findIndex((f) => f.id === timeline.marker) + 1;
+    for (const [i, f] of list.entries()) features.push({ workspace, id: f.id, summary: f.intent.summary, parameters: f.intent.parameters, suppressed: f.suppressed, afterMarker: i >= end });
   }
   const selection = o.selection ?? [];
   const byId = new Map(features.map((f) => [f.id, f.summary]));

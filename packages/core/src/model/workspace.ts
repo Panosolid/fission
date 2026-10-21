@@ -39,6 +39,21 @@ export interface ViewportOverlay {
 
 export const WORKSPACE_API_VERSION = 1;
 
+/**
+ * What the AI assistant is told about a mounted workspace (25c3), and what
+ * an accepted command would do there: short words, never raw geometry.
+ */
+export interface AIView {
+  /** The commands that make what is open, as the prompt shows them; empty when none does (a new project, Design's extruded sketch). */
+  setup: Command[];
+  /** The value each parameter a command leaves out keeps (Design: the panel's sizes), so the prompt and the preview say what Accept makes. */
+  keeps: Record<string, unknown>;
+  /** Lines the prompt adds after the commands (Design: its timeline in build order, each item's state). */
+  notes: string[];
+  /** Set when an accepted command adds something rather than changing what `setup` makes: what it adds and where ("a new body as item 4, after 3. Extrude 1"). */
+  adds: string | null;
+}
+
 /** What the shell hands a workspace when it is shown. */
 export interface WorkspaceContext {
   project: Project;
@@ -113,6 +128,8 @@ export interface MountedWorkspace {
    * afterwards (a rebuild) may finish later. Throws for a command it lacks.
    */
   run?(command: Command): void | Promise<void>;
+  /** What the AI assistant is told before a request, as things stand now (`AIView`). Leave out when the workspace offers the AI no command. */
+  aiView?(): AIView;
   /** Gone for good (a project opened, its pane closed): stops listening if awake, and empties every slot it filled. */
   unmount(): void;
   /**

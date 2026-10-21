@@ -15,6 +15,7 @@
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
+import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 
 const server = await preview({ preview: { port: 4181, strictPort: true }, logLevel: "error" });
@@ -214,7 +215,11 @@ try {
   });
 
   await check("an answer that leaves sizes out keeps them: only the width changes, and a sphere needs no depth", async () => {
-    const { page } = await fresh([JSON.stringify({ commands: [{ op: "set_part", shape: "box", width: 50 }] }), JSON.stringify({ commands: [{ op: "set_part", shape: "sphere", width: 30 }] })]);
+    const { page } = await fresh([
+      JSON.stringify({ commands: [{ op: "set_part", shape: "box", width: 50 }] }),
+      JSON.stringify({ commands: [{ op: "set_part", shape: "sphere", width: 30 }] }),
+      JSON.stringify({ commands: [{ op: "set_part", shape: "box", width: 40 }] }),
+    ]);
     try {
       await useOllama(page);
       await ask(page, "Make it 10 mm wider.");
@@ -230,10 +235,77 @@ try {
       assert.equal(await page.textContent("#ai-preview .ai-label"), "AI: sphere ⌀30 mm");
       await page.click("#ai-accept");
       await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "sphere");
+      // Back to a box naming only its width (25c3): a sphere has no depth or height, so they come from the panel,
+      // which still holds the box's 30 and 20. Before, the preview read "box 40 × undefined × undefined mm".
+      await ask(page, "Make it a box 40 mm wide again.");
+      await page.waitForSelector("#ai-preview");
+      assert.equal(await page.textContent("#ai-preview .ai-label"), "AI: box 40 × 30 × 20 mm");
+      assert.deepEqual(await page.$$eval("#ai-preview tr", (rows) => rows.map((r) => r.textContent)), ["shapesphere→box", "width30→40", "depth—→30", "height—→20"]);
+      await page.click("#ai-reject");
       await page.click("#undo");
       await volume(page, "30,000 mm³");
     } finally {
       await page.close();
+    }
+  });
+
+  await check("on an extruded sketch the AI is told the timeline, and the preview says Accept adds a body after it, with the panel's kept sizes (25c3, 1280 and 375 px)", async () => {
+    for (const width of [1280, 375]) {
+      // Sizes left out: the AI names only the shape and width.
+      const { page, asked } = await fresh([JSON.stringify({ commands: [{ op: "set_part", shape: "box", width: 50 }] })], { open: false });
+      try {
+        if (width === 375) await page.setViewportSize({ width: 375, height: 800 });
+        // Sketch 1: a 40 × 30 rectangle from (0, 0), extruded 10 mm (Extrude 1, item 3): the part is the extrude, 40 · 30 · 10 = 12,000 mm³.
+        await page.click("#create-sketch");
+        await page.click("#sketch-plane-XY");
+        await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true");
+        await page.check("#sketch-grid-snap");
+        await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0)); // ticking it scrolled the panel into view at phone width
+        await page.click("#sketch-tool-rectangle");
+        for (const p of [[0, 0], [40, 30]]) await clickPlane(page, p, TOP);
+        await page.waitForFunction(() => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.");
+        await page.click("#sketch-extrude");
+        await page.fill("#extrude-distance", "10");
+        await page.press("#extrude-distance", "Enter");
+        await volume(page, "12,000 mm³");
+        const steps = await undoTitle(page);
+        if (width === 375) await page.click("#menu-toggle"); // the header's buttons fold into Menu at phone width
+        await page.click("#assistant-toggle");
+        await useOllama(page);
+        await ask(page, "Add a box 50 mm wide.");
+        await page.waitForSelector("#ai-preview");
+        // What the model was told: no command makes the part, the timeline item by item, where set_part puts a new body,
+        // and the panel's sizes it keeps (width and depth the box's 40 and 30, height the extrude's distance 10).
+        const prompt = asked[0].body.messages[0].content;
+        assert.doesNotMatch(prompt, /made by these commands/, "not an empty project");
+        for (const line of [
+          "No command you can use makes the part as it is now.",
+          "1. Box: 40 × 30 × 20 mm. Builds Body 1.",
+          "2. Sketch 1 on the XY plane. A sketch: builds no body.",
+          "3. Extrude Sketch 1 by 10 mm. Builds Body 2.",
+          "The timeline marker is at the end: every item is built.",
+          "The part (the last body) is 3. Extrude Sketch 1 by 10 mm, an extruded sketch, which no command you can use changes, so set_part adds a new body as item 4, after 3. Extrude Sketch 1 by 10 mm; nothing already in the timeline changes.",
+          "A size set_part leaves out keeps the value it has now: width 40, depth 30, height 10.",
+        ])
+          assert.ok(prompt.split("\n").includes(line), `prompt lacks: ${line}\n${prompt}`);
+        // The preview: a new box 50 × 30 × 10, every size from nothing, and where it goes; nothing changed yet.
+        assert.equal(await page.textContent("#ai-preview .ai-label"), "AI: new box 50 × 30 × 10 mm");
+        assert.deepEqual(await page.$$eval("#ai-preview tr", (rows) => rows.map((r) => r.textContent)), ["shape—→box", "width—→50", "depth—→30", "height—→10"]);
+        assert.match(await page.textContent("#ai-preview .ai-note"), /^Nothing has changed yet\. Accept adds a new body as item 4, after 3\. Extrude Sketch 1 by 10 mm; nothing already in the timeline changes\.$/);
+        await volume(page, "12,000 mm³");
+        assert.equal(await undoTitle(page), steps);
+        if (width === 375) await page.screenshot({ path: "e2e/assistant-adds-375.png" });
+        await page.click("#ai-accept");
+        // The new box is the part now: 50 · 30 · 10 = 15,000 mm³; Extrude 1 is still item 3.
+        await volume(page, "15,000 mm³");
+        assert.equal(await undoTitle(page), `Undo AI: new box 50 × 30 × 10 mm (Ctrl+Z)`);
+        assert.equal(await page.$$eval("#timeline [data-item]", (items) => items.map((i) => i.dataset.item).join(" ")), "feature-1 sketch-2 feature-11 feature-12");
+        await page.click("#undo");
+        await volume(page, "12,000 mm³");
+        assert.equal(await undoTitle(page), steps, "one step, taken back whole");
+      } finally {
+        await page.close();
+      }
     }
   });
 

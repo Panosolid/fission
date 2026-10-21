@@ -37,6 +37,7 @@ import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawSt
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
+import { designAIView } from "./ai-view.ts";
 import { COPY_SVG, DOWNLOAD_STL, NO_BODY_STL, registerDesignActions, shownBodyRefs, STL_OVERLAY, targetsOf, type DesignRun } from "./actions.ts";
 
 /**
@@ -1165,6 +1166,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     ),
     sleep,
     run,
+    // What the AI assistant is told before a request (25c3): the timeline as last built, and the panel's sizes, which a set_part keeps for each it leaves out.
+    aiView: () => {
+      const [width, depth, height] = inputs.map((i) => Number(i.value));
+      return designAIView(ctx.project.workspaces.design as DesignDocument | undefined, failedNow, { width, depth, height });
+    },
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
