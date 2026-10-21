@@ -1,6 +1,7 @@
 // The Edit feature panel (step 25a2, feature-edit.ts), at the top of the
 // properties: the item's name, a box for each size its shape uses with the
-// value it has now, the kernel's refusal, and OK or Cancel. Enter in a box
+// value it has now, an extrude's Flip (26c), the kernel's refusal, and OK
+// or Cancel. Enter in a box
 // is OK; Escape is Cancel (workspace.ts `shortcut`). The workspace drives
 // it; the panel only shows what it is given and reports what was typed and
 // clicked. Styles: src/styles/feature-edit.css.
@@ -9,8 +10,8 @@ import type { EditableFeature } from "./feature-edit.ts";
 import { parameterRows, type SizeKey } from "./properties.ts";
 
 export interface FeatureEditEvents {
-  /** OK (or Enter), with each shown box as typed. */
-  ok(typed: Partial<Record<SizeKey, string>>): void;
+  /** OK (or Enter), with each shown box as typed and, for an extrude, whether Flip is ticked. */
+  ok(typed: Partial<Record<SizeKey, string>>, flip?: boolean): void;
   cancel(): void;
 }
 
@@ -45,6 +46,7 @@ export function featureEditPanel(slot: HTMLElement, on: FeatureEditEvents): Feat
   let error: HTMLElement | null = null;
   let ok: HTMLButtonElement | null = null;
   let inputs: [SizeKey, HTMLInputElement][] = [];
+  let flip: HTMLInputElement | null = null;
   const typed = () => Object.fromEntries(inputs.map(([k, i]) => [k, i.value])) as Partial<Record<SizeKey, string>>;
   return {
     show(f) {
@@ -56,7 +58,7 @@ export function featureEditPanel(slot: HTMLElement, on: FeatureEditEvents): Feat
         Object.assign(input, { type: "number", step: "any", value: String(f.sizes[r.key] ?? "") });
         // Enter in a box is OK, as in any dialog.
         input.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" && ok && !ok.disabled) on.ok(typed());
+          if (e.key === "Enter" && ok && !ok.disabled) on.ok(typed(), flip?.checked);
         });
         inputs.push([r.key, input]);
         const label = el("label", "", "feature-edit-row");
@@ -64,12 +66,22 @@ export function featureEditPanel(slot: HTMLElement, on: FeatureEditEvents): Feat
         label.append(`${f.shape === "sketch-extrude" ? "Distance" : r.label} `, input, " mm");
         return label;
       });
+      flip = null;
+      if (f.flip !== undefined) {
+        flip = el("input", "edit-flip");
+        flip.type = "checkbox";
+        flip.checked = f.flip;
+        const row = el("label", "", "feature-edit-row feature-edit-flip");
+        row.title = "Extrude the other way from the sketch's plane; the body still starts on it";
+        row.append(flip, " Flip");
+        labels.push(row);
+      }
       error = el("p", "feature-edit-error", "bad");
       error.hidden = true;
       error.setAttribute("role", "alert");
       ok = el("button", "feature-edit-ok", "", "OK");
       ok.type = "button";
-      ok.addEventListener("click", () => on.ok(typed()));
+      ok.addEventListener("click", () => on.ok(typed(), flip?.checked));
       const cancel = el("button", "feature-edit-cancel", "", "Cancel");
       cancel.type = "button";
       cancel.addEventListener("click", () => on.cancel());
@@ -94,7 +106,7 @@ export function featureEditPanel(slot: HTMLElement, on: FeatureEditEvents): Feat
       editing = null;
       box.hidden = true;
       box.replaceChildren();
-      error = ok = null;
+      error = ok = flip = null;
       inputs = [];
     },
     get editing() {

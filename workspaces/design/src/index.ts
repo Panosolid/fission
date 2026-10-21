@@ -11,7 +11,7 @@ export { builds, buildingItems, changePreset, curvePoints, idNumber, keptOf, typ
 export { drawnFrame, drawnOnFace, faceFeature, facePlane, frameNow, isFacePlane, isFaceSketch, squared, turned, type PlaneCause, type PlaneWarning, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
 export { addFaceSketch, addSketch, askOutline, deleteCurve, drawArc, drawCircle, drawLine, drawRectangle, movePoint, planeOf, pointAt, SKETCH_STEPS, sketchCurves, sketchItem, sketchLines, sketchOutline, type LineEnd } from "./sketch.ts";
 export { clickAt, hoverTool, SAME_LINE, SKETCH_TOOLS, startTool, switchTool, toolBusy, type LineTool, type RectangleTool, type SketchTool, type ToolKind } from "./sketch-tool.ts";
-export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureBuild, featureSpec, FLIP_STEP, isFlipped, setExtrudeDistance, setExtrudeFlip } from "./extrude.ts";
+export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureBuild, featureSpec, isFlipped, setExtrudeDistance, setExtrudeFlip } from "./extrude.ts";
 export { PART_VIEW, syncGraph } from "./graph.ts";
 export { designLookup, designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
 export { bodyReference, designReference, NAME_NOTE, profileReference, readDesignReference, readProfileReference, resolveReference, sharedBy } from "./references.ts";

@@ -885,7 +885,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       extrudeBox.showError("");
       void checkExtrude(id);
     },
-    ok: (typed) => void finishExtrude(typed),
+    ok: (typed, flip) => void finishExtrude(typed, flip),
     cancel: () => leaveExtrude(),
   });
 
@@ -937,7 +937,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * recorded, as one undo step ("Replace the part with Extrude of Sketch
    * 1"). A refused distance keeps the panel open and says why.
    */
-  async function finishExtrude(typed: string) {
+  async function finishExtrude(typed: string, flip: boolean) {
     const id = extruding?.sketch;
     if (!id) return;
     const distance = Number(typed);
@@ -945,7 +945,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const before = designDoc();
     let made: ReturnType<typeof extrudeSketch>;
     try {
-      made = extrudeSketch(before, id, distance);
+      made = extrudeSketch(before, id, distance, flip);
       await buildSpec(kernel, await featureSpec(kernel, made.doc, made.doc.timeline.features.find((f) => f.id === made.id)!));
     } catch (e) {
       if (extruding?.sketch === id) extrudeBox.showError(e instanceof Error ? e.message : String(e));
@@ -961,7 +961,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
 
   // Edit feature (step 25a2): an earlier feature's sizes from its timeline item or browser row.
   const editBox = featureEditPanel(ctx.properties, {
-    ok: (typed) => void finishEdit(typed),
+    ok: (typed, flip) => void finishEdit(typed, flip),
     cancel: () => leaveEdit(),
   });
 
@@ -983,7 +983,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * after it. A refused size keeps the panel open with the kernel's words
    * and records nothing; sizes that change nothing close it.
    */
-  async function finishEdit(typed: Partial<Record<SizeKey, string>>) {
+  async function finishEdit(typed: Partial<Record<SizeKey, string>>, flip?: boolean) {
     const id = editBox.editing;
     if (id === null) return;
     const before = designDoc();
@@ -995,7 +995,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         const label = f.shape === "sketch-extrude" ? "distance" : parameterRows(f.shape).find((r) => r.key === read.bad)!.label.toLowerCase();
         return editBox.showError(`Type the ${label} in mm.`);
       }
-      next = editFeature(before, id, read.sizes);
+      next = editFeature(before, id, read.sizes, flip);
     } catch (e) {
       return editBox.showError(e instanceof Error ? e.message : String(e));
     }

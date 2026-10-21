@@ -29,9 +29,6 @@ export const DISTANCE_STEP = "Change extrude distance";
 
 const summary = (sketchLabel: string, distance: number, flip = false) => `Extrude ${sketchLabel} by ${distance} mm${flip ? ", flipped" : ""}`;
 
-/** The undo step Flip is recorded as. */
-export const FLIP_STEP = "Flip extrude";
-
 /** Whether an extrude of a sketch goes the other way from its sketch's plane (step 26c; Fusion's Flip). */
 export const isFlipped = (f: Feature): boolean => f.intent.parameters.flip === true;
 

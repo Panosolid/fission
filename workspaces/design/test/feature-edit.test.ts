@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { KernelError, type BodySpec, type KernelCalls } from "@fission/core";
 import { insertPreset, partDocument, shapeOf, type DesignDocument, type PartSizes } from "../src/document.ts";
 import { addSketch, drawRectangle } from "../src/sketch.ts";
-import { extrudeSketch } from "../src/extrude.ts";
+import { extrudeSketch, setExtrudeFlip } from "../src/extrude.ts";
 import { moveMarker, suppressItem } from "../src/timeline-edits.ts";
 import * as edit from "../src/feature-edit.ts";
 import { featureEditPanel } from "../src/feature-edit-panel.ts";
@@ -294,6 +294,26 @@ test("each bug planted in feature-edit.ts is caught, by the check recorded for i
   }
 });
 
+test("hand-worked: Edit feature flips an extrude with its distance as one change; a preset has no Flip; the same Flip changes nothing", () => {
+  const d = design();
+  const item = (doc: DesignDocument, id: string) => doc.timeline.features.find((f) => f.id === id)!;
+  assert.equal(edit.editableFeature(d, "feature-11").flip, false);
+  assert.equal(Object.hasOwn(edit.editableFeature(d, "feature-1"), "flip"), false);
+  // Extrude 1 (by 10) flipped and made 12 in one OK: both land, nothing else moves.
+  const both = edit.editFeature(d, "feature-11", { height: 12 }, true);
+  assert.deepEqual(item(both, "feature-11").intent.parameters, { sketch: "sketch-2", distance: 12, flip: true });
+  assert.equal(item(both, "feature-11").intent.summary, "Extrude Sketch 1 by 12 mm, flipped");
+  assert.deepEqual(both.timeline.features.filter((f) => f.id !== "feature-11"), d.timeline.features.filter((f) => f.id !== "feature-11"));
+  // Flip alone, then back: the distance stays; the same Flip and sizes give the document itself (nothing recorded).
+  const flipped = edit.editFeature(d, "feature-11", { height: 10 }, true);
+  assert.deepEqual(item(flipped, "feature-11").intent.parameters, { sketch: "sketch-2", distance: 10, flip: true });
+  assert.equal(edit.editFeature(flipped, "feature-11", { height: 10 }, true), flipped);
+  assert.deepEqual(item(edit.editFeature(flipped, "feature-11", { height: 10 }, false), "feature-11").intent.parameters, { sketch: "sketch-2", distance: 10 });
+  assert.equal(edit.editFeature(d, "feature-11", { height: 10 }), d, "Flip left out keeps it");
+  assert.throws(() => edit.editFeature(d, "feature-1", { width: 40 }, true), { message: "Feature 1 (box) has no Flip: only an extrude of a sketch goes either way" });
+  assert.throws(() => edit.editFeature(d, "feature-11", {}, 1 as unknown as boolean), { message: "Extrude 1: Flip must be true or false, not 1" });
+});
+
 const { Window } = await import("happy-dom");
 
 function panelSetup() {
@@ -301,8 +321,8 @@ function panelSetup() {
   const doc = window.document as unknown as Document;
   const slot = doc.createElement("div");
   doc.body.append(slot);
-  const log = { ok: [] as Partial<Record<string, string>>[], cancel: 0 };
-  const panel = featureEditPanel(slot, { ok: (t) => void log.ok.push(t), cancel: () => void log.cancel++ });
+  const log = { ok: [] as Partial<Record<string, string>>[], flips: [] as (boolean | undefined)[], cancel: 0 };
+  const panel = featureEditPanel(slot, { ok: (t, flip) => void (log.ok.push(t), log.flips.push(flip)), cancel: () => void log.cancel++ });
   const $ = (id: string) => doc.getElementById(id) as HTMLInputElement;
   const key = (target: HTMLElement, k: string) => target.dispatchEvent(new window.KeyboardEvent("keydown", { key: k, bubbles: true }) as unknown as Event);
   return { panel, $, key, log, doc };
@@ -345,10 +365,20 @@ test("the panel: a box per size its shape uses with its value, Enter or OK repor
   assert.equal($("feature-edit-error").hidden, true);
   ($("feature-edit-cancel") as unknown as HTMLButtonElement).click();
   assert.equal(log.cancel, 1);
-  // An extrude: one Distance box.
+  // A preset has no Flip to report.
+  assert.deepEqual(log.flips, [undefined, undefined]);
+  assert.equal($("edit-flip"), null);
+  // An extrude: one Distance box, and Flip (26c) ticked as it is now.
   panel.show(edit.editableFeature(d, "feature-11"));
-  assert.deepEqual([...doc.querySelectorAll(".feature-edit-row")].map((r) => r.textContent!.trim()), ["Distance  mm"]);
+  assert.deepEqual([...doc.querySelectorAll(".feature-edit-row")].map((r) => r.textContent!.trim()), ["Distance  mm", "Flip"]);
   assert.equal($("edit-height").value, "10");
+  assert.equal($("edit-flip").checked, false);
+  $("edit-flip").checked = true;
+  key($("edit-height"), "Enter");
+  ($("feature-edit-ok") as unknown as HTMLButtonElement).click();
+  assert.deepEqual(log.flips.slice(2), [true, true]);
+  panel.show(edit.editableFeature(setExtrudeFlip(d, true, "feature-11"), "feature-11"));
+  assert.equal($("edit-flip").checked, true, "a flipped extrude opens ticked");
   panel.hide();
   assert.equal(panel.editing, null);
   assert.equal($("feature-edit").hidden, true);

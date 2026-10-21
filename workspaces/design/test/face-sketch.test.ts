@@ -144,7 +144,7 @@ test("hand-worked: frameNow turns the frame as drawn with its face, keeping the 
 /** A 40 × 30 × 20 box (feature-1) with Sketch 1 (sketch-2) on its top: a circle of radius 5 at (20, 15), extruded 10 (feature-5: its circle took point-3 and circle-4). */
 function onTop(): { doc: DesignDocument; sketch: string; extrude: string } {
   const top: SketchPlacement = drawnFrame([0, 0, 1], [20, 15, 20]);
-  const s = addFaceSketch(partDocument("box", 40, 30, 20), { plane: "face:feature-1/end", feature: "feature-1" }, top);
+  const s = addFaceSketch(partDocument("box", 40, 30, 20), { plane: "face:feature-1/top", feature: "feature-1" }, top);
   const circle = drawCircle(s.doc, s.id, [20, 15], 5).doc;
   const e = extrudeSketch(circle, s.id, 10);
   return { doc: e.doc, sketch: s.id, extrude: e.id };
@@ -154,14 +154,14 @@ test("addFaceSketch puts a sketch on a solid item's face, depending on it, with 
   const { doc, sketch } = onTop();
   const item = doc.timeline.features.find((f) => f.id === sketch)!;
   assert.equal(item.intent.summary, "Sketch 1 on a face of Feature 1 (box)");
-  assert.deepEqual(item.intent.parameters, { plane: "face:feature-1/end" });
+  assert.deepEqual(item.intent.parameters, { plane: "face:feature-1/top" });
   assert.deepEqual(item.dependsOn, ["feature-1"]);
   assert.deepEqual(item.provenance.from, [{ workspace: "design", id: "feature-1", label: "Feature 1 (box)" }]);
   const content = doc.sketches.find((s) => s.id === sketch)!;
   assert.deepEqual(content.face, { frame: { origin: [0, 0, 20], xAxis: [1, 0, 0], normal: [0, 0, 1] }, side: 1 });
   // A frame drawn a little off is squared before it is kept: (2, 0, 0.5)
   // less its part along z is x.
-  const off = addFaceSketch(partDocument("box", 40, 30, 20), { plane: "face:feature-1/end", feature: "feature-1" }, { plane: plane([0, 0, 20], [2, 0, 0.5], [0, 0, 3]), side: -1 });
+  const off = addFaceSketch(partDocument("box", 40, 30, 20), { plane: "face:feature-1/top", feature: "feature-1" }, { plane: plane([0, 0, 20], [2, 0, 0.5], [0, 0, 3]), side: -1 });
   assert.deepEqual(off.doc.sketches.at(-1)!.face, { frame: { origin: [0, 0, 20], xAxis: [1, 0, 0], normal: [0, 0, 1] }, side: -1 });
   assert.equal(faceFeature("face:feature-1/side:line-4"), "feature-1");
   assert.equal(faceFeature("face:"), null);
@@ -171,13 +171,13 @@ test("addFaceSketch refuses a face it can't put a sketch on, each with its reaso
   const box = partDocument("box", 40, 30, 20);
   const top = drawnFrame([0, 0, 1], [20, 15, 20]);
   assert.throws(() => addFaceSketch(box, { plane: "XY", feature: "feature-1" }, top), /XY is not a face of feature-1/);
-  assert.throws(() => addFaceSketch(box, { plane: "face:feature-1/end", feature: "feature-9" }, top), /is not a face of feature-9/);
+  assert.throws(() => addFaceSketch(box, { plane: "face:feature-1/top", feature: "feature-9" }, top), /is not a face of feature-9/);
   assert.throws(() => addFaceSketch(box, { plane: "face:feature-9/end", feature: "feature-9" }, top), /there is no solid item feature-9 to sketch on/);
   const { doc, sketch } = onTop();
   assert.throws(() => addFaceSketch(doc, { plane: `face:${sketch}/end`, feature: sketch }, top), /there is no solid item sketch-2 to sketch on/);
-  assert.throws(() => addFaceSketch(moveMarker(box, "start"), { plane: "face:feature-1/end", feature: "feature-1" }, top), /Feature 1 \(box\) comes after the rollback marker/);
-  assert.throws(() => addFaceSketch(box, { plane: "face:feature-1/end", feature: "feature-1" }, { plane: plane([0, 0, 0], [0, 0, 1], [0, 0, 1]), side: 1 }), /needs a frame and a side/);
-  assert.throws(() => addFaceSketch(box, { plane: "face:feature-1/end", feature: "feature-1" }, { plane: top.plane, side: 0 as 1 }), /needs a frame and a side/);
+  assert.throws(() => addFaceSketch(moveMarker(box, "start"), { plane: "face:feature-1/top", feature: "feature-1" }, top), /Feature 1 \(box\) comes after the rollback marker/);
+  assert.throws(() => addFaceSketch(box, { plane: "face:feature-1/top", feature: "feature-1" }, { plane: plane([0, 0, 0], [0, 0, 1], [0, 0, 1]), side: 1 }), /needs a frame and a side/);
+  assert.throws(() => addFaceSketch(box, { plane: "face:feature-1/top", feature: "feature-1" }, { plane: top.plane, side: 0 as 1 }), /needs a frame and a side/);
 });
 
 test("Flip is kept as flip: true and only then, says so in the summary, and changes nothing when already so", () => {
