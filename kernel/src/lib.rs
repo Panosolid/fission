@@ -120,6 +120,21 @@ pub struct BodyView {
     /// on the left: counter-clockwise round the outline seen from the end
     /// cap, clockwise round a hole.
     pub edge_faces: Vec<Option<[usize; 2]>>,
+    /// Each vertex's point [x, y, z] in the world, exact (placed in double
+    /// precision, like `face_centroids`): what a sketch point snapped to a
+    /// face's corner lands on and follows (step 26f), where the display
+    /// mesh's single-precision edge lines would be micrometres off.
+    pub vertex_points: Vec<[f64; 3]>,
+    /// Each edge's start and end vertex, by edge index (the edge's own
+    /// direction, as in `edge_faces`); the same vertex twice for a closed
+    /// edge (a whole circle, whose one vertex is only where its seam is).
+    pub edge_vertices: Vec<[usize; 2]>,
+    /// The point halfway along each edge's parameter, in the world: a line's
+    /// midpoint, an arc's middle (half its turn, since a circle's parameter
+    /// is its angle). Meaningless for a closed edge, which has no ends.
+    pub edge_middles: Vec<[f64; 3]>,
+    /// Each circular edge's centre in the world; null for a line.
+    pub edge_centres: Vec<Option<[f64; 3]>>,
     /// Empty when the body passed validation.
     pub errors: Vec<String>,
 }
@@ -172,6 +187,17 @@ fn view_parts(body: &Body, placement: &geom::Placement, mesh: &mesh::Mesh, error
         face_centroids: faces.iter().map(|m| m.centroid.to_array()).collect(),
         face_normals: (0..body.faces.len()).map(normal).collect(),
         edge_faces: edge_faces(body),
+        vertex_points: body.vertices.iter().map(|v| placement.point(v.point).to_array()).collect(),
+        edge_vertices: body.edges.iter().map(|e| [e.start, e.end]).collect(),
+        edge_middles: body.edges.iter().map(|e| placement.point(e.curve.eval(0.5 * (e.t0 + e.t1))).to_array()).collect(),
+        edge_centres: body
+            .edges
+            .iter()
+            .map(|e| match e.curve {
+                geom::Curve::Circle { center, .. } => Some(placement.point(center).to_array()),
+                geom::Curve::Line { .. } => None,
+            })
+            .collect(),
         errors,
     }
 }
@@ -1296,6 +1322,98 @@ mod tests {
         let normals: Vec<_> = c.face_types.iter().zip(&c.face_normals).map(|(t, n)| (*t, *n)).collect();
         assert!(normals.contains(&("plane", Some([0.0, 0.0, 1.0]))) && normals.contains(&("plane", Some([0.0, 0.0, -1.0]))) && normals.contains(&("cylinder", None)), "{normals:?}");
         assert!(view_of(BodySpec::Sphere { radius: 1.0 }).unwrap().face_normals.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn corners_middles_and_centres_by_hand() {
+        // Step 26f. The front-plane box (sketch (u, v) → world (u, −w, v),
+        // x in [0, 40], y in [−20, 0], z in [0, 30]) has the eight corners
+        // of that range, exactly: every coordinate is a whole number and
+        // the quarter turn's rounding (~2e-16 of the size, so ~1e-14 mm)
+        // is far below LINEAR. Every edge is a line, so its middle is the
+        // average of its two corners and it has no centre; its two ends
+        // are two different corners.
+        let v = view_of(front_box(false)).unwrap();
+        let near = |a: [f64; 3], b: [f64; 3]| tolerance::points_eq(a.into(), b.into());
+        assert_eq!((v.vertex_points.len(), v.edge_vertices.len(), v.edge_middles.len(), v.edge_centres.len()), (8, 12, 12, 12));
+        for x in [0.0, 40.0] {
+            for y in [-20.0, 0.0] {
+                for z in [0.0, 30.0] {
+                    assert_eq!(v.vertex_points.iter().filter(|p| near(**p, [x, y, z])).count(), 1, "corner {x} {y} {z}: {:?}", v.vertex_points);
+                }
+            }
+        }
+        for (e, [a, b]) in v.edge_vertices.iter().enumerate() {
+            let (pa, pb) = (glam::DVec3::from(v.vertex_points[*a]), glam::DVec3::from(v.vertex_points[*b]));
+            assert!(a != b && near(v.edge_middles[e], ((pa + pb) / 2.0).to_array()) && v.edge_centres[e].is_none(), "edge {e}");
+        }
+        // The edge between the start cap (y = 0) and piece 0's side (z = 0)
+        // runs from (0, 0, 0) to (40, 0, 0) one way or the other: its middle
+        // is (20, 0, 0).
+        let face = |role: &str, piece: Option<usize>| v.face_roles.iter().position(|r| r.as_ref().is_some_and(|r| r.role == role && r.piece == piece)).unwrap();
+        let (start, bottom) = (face("start", None), face("side", Some(0)));
+        let e = v.edge_faces.iter().position(|p| p.is_some_and(|[a, b]| (a, b) == (start, bottom) || (a, b) == (bottom, start))).unwrap();
+        assert!(near(v.edge_middles[e], [20.0, 0.0, 0.0]), "{:?}", v.edge_middles[e]);
+
+        // A half disc of radius 10 on XY extruded 5: corners (10, 0) and
+        // (−10, 0), the arc from (10, 0) to (−10, 0) with bulge 1 (a half
+        // turn counter-clockwise, through (0, 10)), the line back. Each
+        // cap's arc edge: centre (0, 0, z), middle (0, 10, z) (half of a
+        // half turn from angle 0 is angle π/2: (10 cos π/2, 10 sin π/2)),
+        // ends (±10, 0, z); z = 0 and 5.
+        let half = BodySpec::Extrude {
+            profile: ProfileIn { outer: BoundaryIn::Path { corners: vec![10.0, 0.0, -10.0, 0.0], bulges: vec![1.0, 0.0] }, holes: vec![] },
+            distance: 5.0,
+            frame: None,
+            flip: false,
+        };
+        let h = view_of(half).unwrap();
+        let arcs: Vec<usize> = (0..h.edges).filter(|&e| h.edge_types[e] == "circle").collect();
+        assert_eq!(arcs.len(), 2, "{:?}", h.edge_types);
+        for z in [0.0, 5.0] {
+            let e = *arcs.iter().find(|&&e| (h.edge_centres[e].unwrap()[2] - z).abs() <= tolerance::LINEAR).unwrap();
+            assert!(near(h.edge_centres[e].unwrap(), [0.0, 0.0, z]) && near(h.edge_middles[e], [0.0, 10.0, z]), "z {z}: {:?} {:?}", h.edge_centres[e], h.edge_middles[e]);
+            let ends = h.edge_vertices[e].map(|k| h.vertex_points[k]);
+            assert!(ends.iter().any(|p| near(*p, [10.0, 0.0, z])) && ends.iter().any(|p| near(*p, [-10.0, 0.0, z])), "z {z}: {ends:?}");
+        }
+        // A cylinder r 1, h 2: its two cap circles are closed (one vertex,
+        // at the seam (1, 0, z)), centred (0, 0, 0) and (0, 0, 2).
+        let c = view_of(BodySpec::Cylinder { radius: 1.0, height: 2.0 }).unwrap();
+        let circles: Vec<usize> = (0..c.edges).filter(|&e| c.edge_types[e] == "circle").collect();
+        assert_eq!(circles.len(), 2);
+        for (e, z) in circles.iter().zip([0.0, 2.0]) {
+            let [a, b] = c.edge_vertices[*e];
+            assert!(a == b && near(c.vertex_points[a], [1.0, 0.0, z]) && near(c.edge_centres[*e].unwrap(), [0.0, 0.0, z]), "edge {e}");
+        }
+    }
+
+    #[test]
+    fn a_placed_view_s_corners_are_the_baked_body_s() {
+        // A slanted 3-4-5 frame far from the origin, flipped: the placed
+        // view's corners, middles and centres against the baked body's, to
+        // rounding at that reach (they are the same geometry, placed once
+        // or baked once).
+        let spec = || BodySpec::Extrude {
+            profile: ProfileIn {
+                outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 30.0, 0.0, 30.0, 20.0, 0.0, 20.0], bulges: vec![0.0, 0.4, 0.0, 0.0] },
+                holes: vec![BoundaryIn::Circle { center: [10.0, 10.0], radius: 4.0 }],
+            },
+            distance: 7.0,
+            frame: Some(FrameIn { origin: [5e4, -3e3, 7.5], x: [0.0, 0.6, 0.8], normal: [1.0, 0.0, 0.0] }),
+            flip: true,
+        };
+        let a = view_of(spec()).unwrap();
+        let b = view_body(&build(spec()).unwrap().baked()).unwrap();
+        let slack = 1e3 * tolerance::rounding_slack(5.1e4);
+        let close = |p: [f64; 3], q: [f64; 3]| glam::DVec3::from(p).distance(q.into()) <= slack;
+        assert_eq!((&a.edge_vertices, a.vertex_points.len()), (&b.edge_vertices, b.vertex_points.len()));
+        assert!(a.vertex_points.iter().zip(&b.vertex_points).all(|(p, q)| close(*p, *q)));
+        assert!(a.edge_middles.iter().zip(&b.edge_middles).all(|(p, q)| close(*p, *q)));
+        assert!(a.edge_centres.iter().zip(&b.edge_centres).all(|(p, q)| match (p, q) {
+            (Some(p), Some(q)) => close(*p, *q),
+            (None, None) => true,
+            _ => false,
+        }));
     }
 
     #[test]

@@ -1,0 +1,43 @@
+{
+  "seed": 24301,
+  "failure": "step 1 (Place { shape: Extrude { outer: Circle { c: [0.0, 0.0], r: 1.0 }, holes: [], dist: 0.5, expect: Some(true), sketch: Some(0) }, origin: [0.0, 0.0, 0.5], x: [1.0, 0.0, 0.0], normal: [0.0, 0.0, 1.0], flip: false }): circle at z 0.5: its centre should be at [0, 0, 1], and no view edge's is",
+  "ops": [
+    {
+      "Place": {
+        "shape": {
+          "Extrude": {
+            "outer": {
+              "Circle": {
+                "c": [
+                  "0.0",
+                  "0.0"
+                ],
+                "r": "1.0"
+              }
+            },
+            "holes": [],
+            "dist": "0.5",
+            "expect": true,
+            "sketch": 0
+          }
+        },
+        "origin": [
+          "0.0",
+          "0.0",
+          "0.5"
+        ],
+        "x": [
+          "1.0",
+          "0.0",
+          "0.0"
+        ],
+        "normal": [
+          "0.0",
+          "0.0",
+          "1.0"
+        ],
+        "flip": false
+      }
+    }
+  ]
+}
