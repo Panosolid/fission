@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, type Framing, type ImageRep, type OriginPlane, type Plane, type SharedViewport, type SketchDrawing, type SketchPointer, type SketchXY, type ViewportHighlight, type ViewportPick } from "@fission/core";
-import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, segmentsNear, unhidden } from "./picking.ts";
+import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, planeOrFace, segmentsNear, unhidden } from "./picking.ts";
 import { fitDistance, orbitSafeOffset, planeViewBasis, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
 import { lookAtFraming, selectionFraming } from "./framing.ts";
@@ -30,9 +30,15 @@ interface ViewHost {
   bodyFraming(): Framing;
   /** The plane of the sketch being edited, while a workspace listens to the pointer on it; else null. */
   sketchPlane(): Plane | null;
+  /** Which way the edited sketch faces against its plane's normal (SketchDrawing.side), for Look At. */
+  sketchSide(): 1 | -1;
   sketchPointer(pointer: SketchPointer): void;
   /** The offered origin planes on screen (showPlanes), to be clicked. */
   planeMeshes(): THREE.Mesh[];
+  /** While planes are offered (showPlanes), the body's faces that can be picked with them (26d); null when none are offered. */
+  offeredFaces(): ReadonlySet<number> | null;
+  /** The offered plane under the pointer, drawn brighter; null for none. */
+  setPlaneHover(plane: string | null): void;
   /** What Look At frames on a plane: the body and the edited sketch. */
   lookAtFraming(plane: Plane): Framing;
   /** Called by each view before it draws a frame (the sketch grid follows the main view's camera). */
@@ -86,7 +92,7 @@ export class ViewportView {
       fit: () => this.fitSelection() ?? this.fit(),
       lookAt: () => {
         const plane = this.host.sketchPlane();
-        if (plane) this.lookAt(plane);
+        if (plane) this.lookAt(plane, this.host.sketchSide());
       },
       view: (name) => this.setView(name),
     });
@@ -124,8 +130,8 @@ export class ViewportView {
       // Sketching: a click places a point on the sketch's plane, it picks nothing.
       const plane = this.host.sketchPlane();
       if (plane) return this.host.sketchPointer({ kind: "click", ...this.pointerOn(e.clientX, e.clientY, plane) });
-      const offered = this.planeAt(e.clientX, e.clientY);
-      if (offered) return this.host.pick({ face: null, edge: null, plane: offered, shift: e.shiftKey });
+      // Picking where a sketch goes: the face under the pointer, else the nearest offered plane, never an edge (26d).
+      if (this.host.offeredFaces()) return this.host.pick({ ...this.planeTarget(e.clientX, e.clientY), edge: null, shift: e.shiftKey });
       const edge = this.edgeAt(e.clientX, e.clientY);
       this.host.pick({ face: edge === null ? this.faceAt(e.clientX, e.clientY) : null, edge, shift: e.shiftKey });
     });
@@ -138,7 +144,17 @@ export class ViewportView {
         this.queuedHover = 0;
         const plane = this.host.sketchPlane();
         if (plane) return this.host.sketchPointer(pointer ? { kind: "move", ...this.pointerOn(pointer.x, pointer.y, plane) } : { kind: "move", at: null });
-        if (!pointer || !this.host.picking()) return this.host.setHover(null, null);
+        if (!pointer || !this.host.picking()) {
+          this.host.setPlaneHover(null);
+          return this.host.setHover(null, null);
+        }
+        const offered = this.host.offeredFaces();
+        if (offered) {
+          // Only what a click would pick and could sketch on lights: an offered plane, or an offered face.
+          const target = this.planeTarget(pointer.x, pointer.y);
+          this.host.setPlaneHover(target.plane);
+          return this.host.setHover(target.face !== null && offered.has(target.face) ? target.face : null, null);
+        }
         const edge = this.edgeAt(pointer.x, pointer.y);
         this.host.setHover(edge === null ? this.faceAt(pointer.x, pointer.y) : null, edge);
       });
@@ -146,6 +162,7 @@ export class ViewportView {
     canvas.addEventListener("pointerleave", () => {
       pointer = null;
       this.host.setHover(null, null);
+      this.host.setPlaneHover(null);
       if (this.host.sketchPlane()) this.host.sketchPointer({ kind: "move", at: null });
     });
 
@@ -328,7 +345,7 @@ export class ViewportView {
     return `${this.camera.matrixWorld.elements.join(",")}|${this.camera.projectionMatrix.elements.join(",")}|${size.x}x${size.y}`;
   }
 
-  /** The offered origin plane under a point on screen, by id, or null. */
+  /** The offered origin plane under a point on screen, by id (the nearest), or null. */
   private planeAt(clientX: number, clientY: number): string | null {
     const meshes = this.host.planeMeshes();
     if (meshes.length === 0 || this.image || !this.aim(clientX, clientY)) return null;
@@ -347,6 +364,14 @@ export class ViewportView {
     // Nearest hit first; for indexed geometry faceIndex is the triangle number.
     const [hit] = this.raycaster.intersectObject(faceMesh, false);
     return faceOfTriangle(mesh.triangle_faces, hit?.faceIndex);
+  }
+
+  /** While planes are offered (26d): the plane or the face a click there picks (picking.ts planeOrFace), any face, offered or not, so a curved one can be refused in words. */
+  private planeTarget(clientX: number, clientY: number): { plane: string | null; face: number | null } {
+    const face = this.faceAt(clientX, clientY);
+    const plane = face === null ? this.planeAt(clientX, clientY) : null;
+    const which = planeOrFace(plane !== null, face !== null);
+    return { plane: which === "plane" ? plane : null, face: which === "face" ? face : null };
   }
 
   /**
@@ -397,11 +422,11 @@ export class ViewportView {
     return framing;
   }
 
-  /** Look At (SF2): square onto the plane, its y axis up, framing the body and the edited sketch (planeViewBasis); null while this view shows an image. */
-  lookAt(plane: Plane): Framing | null {
+  /** Look At (SF2): square onto the plane from `side` of it (26d), its y axis (or −y from below) up, framing the body and the edited sketch (planeViewBasis); null while this view shows an image. */
+  lookAt(plane: Plane, side: 1 | -1 = 1): Framing | null {
     if (this.image) return null;
     const framing = this.host.lookAtFraming(plane);
-    const { position, target, up } = planeViewBasis(plane, framing, this.camera.fov, this.camera.aspect);
+    const { position, target, up } = planeViewBasis(plane, framing, this.camera.fov, this.camera.aspect, side);
     this.place(position, target, up);
     return framing;
   }
@@ -574,7 +599,7 @@ export class ViewportView {
 }
 
 /** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint, the axes red (x) and green (y). */
-const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, lost: 0xff6b6b, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
 /**
  * How opaque the sketch grid's major lines are (minor ones fade in up to
  * this as they spread apart, sketch-view's minorStrength): light and see-
@@ -584,6 +609,8 @@ const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, preview: 0xffb454, 
 export const GRID_OPACITY = 0.16;
 /** How opaque the origin axes are while sketching. */
 export const AXIS_OPACITY = 1;
+/** How opaque an origin plane offered for a sketch is, under the pointer, and one not offered. */
+export const PLANE_OPACITY = { offered: 0.35, hover: 0.6, off: 0.12 };
 /** How opaque the body's faces and edges are while a sketch is edited, so what is drawn shows through it (SF2). */
 export const BODY_FADE = { faces: 0.3, edges: 0.35 };
 /**
@@ -597,7 +624,11 @@ export const BODY_FADE = { faces: 0.3, edges: 0.35 };
  * hover colour.
  */
 const GROUND_ORDER = -2;
+/** The origin planes offered for a sketch: over the ground grid, under everything else (showPlanes). */
+const PLANE_ORDER = -1.5;
 const FINISHED_SKETCH_ORDER = -1;
+/** A finished sketch whose plane is lost (26e): after the body, so its red shows on the edges it lies on. */
+const LOST_SKETCH_ORDER = 0.5;
 
 /** Empties a group, freeing its geometry and materials. */
 function clearGroup(group: THREE.Group) {
@@ -643,10 +674,14 @@ export class Viewer implements SharedViewport {
   /** The sketches drawn (showSketches) and the plane of the one being edited. */
   private sketches = new THREE.Group();
   private editedPlane: Plane | null = null;
+  private editedSide: 1 | -1 = 1;
   private sketchHandler: ((pointer: SketchPointer) => void) | null = null;
   /** The origin planes drawn for picking (showPlanes). */
   private planes = new THREE.Group();
   private planeHits: THREE.Mesh[] = [];
+  /** The body's faces offered with the planes (showPlanes), null while no planes are offered, and the offered plane under the pointer. */
+  private pickFaces: ReadonlySet<number> | null = null;
+  private planeHover: string | null = null;
   /** The main view first, then any added ones. */
   private views: ViewportView[] = [];
   readonly element: HTMLElement;
@@ -677,8 +712,11 @@ export class Viewer implements SharedViewport {
       setHover: (face, edge) => this.setHover(face, edge),
       bodyFraming: () => this.bodyFraming(),
       sketchPlane: () => (this.sketchHandler ? this.editedPlane : null),
+      sketchSide: () => this.editedSide,
       sketchPointer: (pointer) => this.sketchHandler?.(pointer),
       planeMeshes: () => this.planeHits,
+      offeredFaces: () => this.pickFaces,
+      setPlaneHover: (plane) => this.setPlaneHover(plane),
       lookAtFraming: (plane) => this.lookAtFraming(plane),
       frame: (view) => this.frame(view),
     };
@@ -773,31 +811,40 @@ export class Viewer implements SharedViewport {
    * polygon offset keeps a line lying on a face in front of it; drawn after
    * the ground grid and axes but before the body (FINISHED_SKETCH_ORDER), so
    * where it lies on a body edge the edge, with its selection or hover
-   * colour, is drawn over it. Replaces what was drawn.
+   * colour, is drawn over it. A finished one whose plane is lost (26e) is
+   * red and drawn after the body (LOST_SKETCH_ORDER): it most often lies on
+   * the edges of the extrude built from it, and the warning must show
+   * there. Replaces what was drawn.
    */
   showSketches(drawings: readonly SketchDrawing[]) {
     clearGroup(this.sketches);
     this.editedPlane = null;
+    this.editedSide = 1;
     this.gridFor = null;
     this.editedWorld = [];
     let lines = 0;
+    let lost = 0;
     for (const d of drawings) {
       const at = (p: SketchXY) => toWorld(d.plane, p);
       const segments = (pairs: readonly (readonly [SketchXY, SketchXY])[], colour: number, order: number) => {
         if (pairs.length === 0) return;
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(pairs.flatMap(([a, b]) => [...at(a), ...at(b)]), 3));
-        const finished = order === FINISHED_SKETCH_ORDER;
+        const finished = order === FINISHED_SKETCH_ORDER || order === LOST_SKETCH_ORDER;
         const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial(finished ? { color: colour } : { color: colour, depthTest: false, transparent: true }));
         l.renderOrder = order;
         this.sketches.add(l);
       };
       lines += d.lines.length;
       if (!d.editing) {
-        segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
+        // 26e: a sketch whose plane is lost red, where it stays.
+        if (d.lost) segments(d.lines, SKETCH_COLOURS.lost, LOST_SKETCH_ORDER);
+        else segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
+        if (d.lost) lost += d.lines.length;
         continue;
       }
       this.editedPlane = d.plane;
+      this.editedSide = d.side === -1 ? -1 : 1;
       this.gridFor = { plane: d.plane, step: d.editing.gridSnap ? d.editing.grid : null };
       this.editedWorld = [...d.lines.flatMap(([a, b]) => [at(a), at(b)]), ...d.editing.points.map(at)];
       segments(d.lines, SKETCH_COLOURS.line, 3);
@@ -819,6 +866,7 @@ export class Viewer implements SharedViewport {
     const edited = drawings.find((d) => d.editing)?.editing;
     const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
     this.element.dataset.sketchLines = String(lines);
+    this.element.dataset.sketchLost = String(lost);
     this.element.dataset.sketchPoints = edited ? edited.points.map(xy).join(" ") : "";
     this.element.dataset.sketchPreview = edited ? edited.preview.map((s) => s.map(xy).join(" ")).join(" | ") : "";
     this.element.dataset.sketchSnap = edited?.snap?.label ?? "";
@@ -897,8 +945,8 @@ export class Viewer implements SharedViewport {
   }
 
   /** Look At in the main view. */
-  lookAt(plane: Plane): Framing | null {
-    return this.main.lookAt(plane);
+  lookAt(plane: Plane, side: 1 | -1 = 1): Framing | null {
+    return this.main.lookAt(plane, side);
   }
 
   /** Says on the element whether a sketch is being edited with the pointer on it (read by the e2e test). */
@@ -908,30 +956,51 @@ export class Viewer implements SharedViewport {
 
   /**
    * Draws the origin planes as squares from the origin, as wide as the
-   * 1.6 times the body's framing radius (at least 20 mm), so each sticks out past the
-   * body; an offered one is drawn through the body and is clickable.
+   * 1.6 times the body's framing radius (at least 20 mm), so each sticks
+   * out past the body. An offered one can be clicked, with the body's
+   * `faces` (26d). The planes are drawn behind the body wherever it is,
+   * even where a plane is nearer (drawn first, in the opaque pass with
+   * blending of their own, so the body then covers them), since a face
+   * under the pointer is what a click picks (picking.ts planeOrFace).
    */
-  showPlanes(planes: readonly OriginPlane[]) {
+  showPlanes(planes: readonly OriginPlane[], faces: readonly number[] = []) {
     clearGroup(this.planes);
     this.planeHits = [];
+    this.planeHover = null;
+    this.pickFaces = planes.length > 0 || faces.length > 0 ? new Set(faces) : null;
+    if (!this.pickFaces) this.setHover(null, null);
     const half = Math.max(10, 0.8 * this.bodyFraming().radius);
+    // See-through, but drawn with the opaque objects (before the body, PLANE_ORDER): three.js keeps a material's
+    // own blending when it is not `transparent` only for CustomBlending, so the alpha is mixed by hand.
+    const behindBody = { transparent: false, blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor, depthTest: false, depthWrite: false };
     for (const p of planes) {
       const corners: SketchXY[] = [[0, 0], [2 * half, 0], [2 * half, 2 * half], [0, 2 * half]];
       const world = corners.map((c) => toWorld(p.plane, c));
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(world.flat(), 3));
       g.setIndex([0, 1, 2, 0, 2, 3]);
-      const fill = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, transparent: true, opacity: p.offered ? 0.35 : 0.12, side: THREE.DoubleSide, depthWrite: false, depthTest: !p.offered }));
-      fill.renderOrder = 6;
+      const fill = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, opacity: p.offered ? PLANE_OPACITY.offered : PLANE_OPACITY.off, side: THREE.DoubleSide, ...behindBody }));
+      fill.renderOrder = PLANE_ORDER;
       fill.userData.plane = p.id;
       const outline = new THREE.BufferGeometry();
       outline.setAttribute("position", new THREE.Float32BufferAttribute(world.flat(), 3));
-      const rim = new THREE.LineLoop(outline, new THREE.LineBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, transparent: true, opacity: p.offered ? 1 : 0.4, depthTest: !p.offered }));
-      rim.renderOrder = 6;
+      const rim = new THREE.LineLoop(outline, new THREE.LineBasicMaterial({ color: p.offered ? SKETCH_COLOURS.plane : SKETCH_COLOURS.planeOff, opacity: p.offered ? 1 : 0.4, ...behindBody }));
+      rim.renderOrder = PLANE_ORDER;
       this.planes.add(fill, rim);
       if (p.offered) this.planeHits.push(fill);
     }
     this.element.dataset.planes = planes.map((p) => `${p.id}${p.offered ? "" : " (not offered)"}`).join(", "); // read by the e2e test
+    this.element.dataset.pickFaces = faces.join(" "); // read by the e2e test
+    delete this.element.dataset.hoverPlane;
+  }
+
+  /** The offered plane under the pointer drawn brighter (PLANE_OPACITY.hover); said on the element for the e2e test. */
+  private setPlaneHover(plane: string | null) {
+    if (plane === this.planeHover) return;
+    this.planeHover = plane;
+    for (const m of this.planeHits) (m.material as THREE.MeshBasicMaterial).opacity = m.userData.plane === plane ? PLANE_OPACITY.hover : PLANE_OPACITY.offered;
+    if (plane) this.element.dataset.hoverPlane = plane;
+    else delete this.element.dataset.hoverPlane;
   }
 
   showSelection(highlight: ViewportHighlight) {

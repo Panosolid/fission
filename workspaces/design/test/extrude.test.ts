@@ -148,15 +148,24 @@ test("featureSpec asks the kernel for the sketch's outline each time, with the l
   assert.equal(asked.length, 2);
 });
 
-test("featureSpec refuses an open sketch with the kernel's reason, and a sketch it can't place yet", async () => {
+test("featureSpec refuses an open sketch with the kernel's reason, and places a sketch on XZ or YZ in its plane's frame (26c)", async () => {
   const { doc, sketch } = rectangle();
   const made = extrudeSketch(doc, sketch, 10).doc;
   const { kernel } = fakeKernel({ open: "the line end at (0, 0) is not joined to another line" });
   await assert.rejects(featureSpec(kernel, made, lastFeature(made)), /^Error: Sketch 1 has no closed outline: the line end at \(0, 0\) is not joined to another line$/);
-  // On XZ the outline would need turning upright, which comes with step 26: refused, never built flat.
-  const upright = structuredClone(made);
-  upright.timeline.features[1].intent.parameters.plane = "XZ";
-  await assert.rejects(featureSpec(kernel, upright, lastFeature(upright)), /Sketch 1 is on the XZ plane, and only sketches on the XY plane can be extruded so far/);
+  const outline: Outline = { outer: { path: { corners: [0, 0, 40, 0, 40, 30, 0, 30], bulges: [0, 0, 0, 0] } }, holes: [] };
+  // Until 26c a sketch on XZ was refused; now it is built upright in XZ's frame (x along X, normal −Y, so y = −Y × X = Z), never flat.
+  const closed = fakeKernel({ closed: outline }).kernel;
+  for (const [plane, frame] of [
+    ["XZ", { origin: [0, 0, 0], x: [1, 0, 0], normal: [0, -1, 0] }],
+    ["YZ", { origin: [0, 0, 0], x: [0, 1, 0], normal: [1, 0, 0] }],
+  ] as const) {
+    const upright = structuredClone(made);
+    upright.timeline.features[1].intent.parameters.plane = plane;
+    assert.deepEqual(await featureSpec(closed, upright, lastFeature(upright)), { extrude: { profile: outline, distance: 10, frame } });
+  }
+  // On XY, as before 26c: no frame at all, so every body built before is built bit for bit the same.
+  assert.deepEqual(await featureSpec(closed, made, lastFeature(made)), { extrude: { profile: outline, distance: 10 } });
   // specOf alone can't build it: the outline needs the kernel.
   assert.throws(() => specOf(made, lastFeature(made)), /built through featureSpec/);
 });

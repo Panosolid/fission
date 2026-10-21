@@ -501,10 +501,10 @@ test("the owner's rule on the real kernel, hand-worked: a lost sketch's extrude 
   // An edit to the open sketch doesn't reach the kept shape: corner (0, 0) to (0, −10), still 18000.
   await edit(movePoint(doc, s.id, point(0, 0), 0, -10));
   assert.ok(close((await body()).view.volume, 18000));
-  // Suppressing the sketch fails the extrude, kept shape or not; unsuppressing brings the kept shape back.
+  // Suppressing the sketch greys the extrude (26e, Q3), kept shape or not; unsuppressing brings the kept shape back.
   const suppress = (on: boolean): DesignDocument => suppressItem(doc, s.id, on);
   await edit(suppress(true));
-  assert.deepEqual(await result(), { status: "failed", cause: "suppressed-input", input: s.id, message: "Sketch 1 is suppressed" });
+  assert.deepEqual(await result(), { status: "greyed", by: s.id });
   await edit(suppress(false));
   assert.deepEqual(warned((await body()).r), ["open-outline", s.id]);
   // The right side drawn again: built from the sketch, corners (0, −10), (40, 0), (40, 15), (0, 30): a trapezium with
@@ -566,9 +566,13 @@ test("seeded sessions: Design's timeline on the real kernel passes runSession fo
   }
   if (process.env.FISSION_SEED) return;
   const wanted = [
-    ...["add-sketch", "add-extrude", "add-preset", "set-size", "move-corner", "delete-curve", "redraw-curve", "delete-item", "reorder", "suppress", "marker", "undo", "redo", "save-open", "hold-ref"].map((o) => `op:${o}`),
-    ...["built", "suppressed", "rolled-back", "failed"].map((x) => `status:${x}`),
-    "cause:suppressed-input",
+    ...["add-sketch", "add-face-sketch", "add-extrude", "add-preset", "set-size", "move-corner", "delete-curve", "redraw-curve", "delete-item", "reorder", "suppress", "marker", "undo", "redo", "save-open", "hold-ref"].map((o) => `op:${o}`),
+    // 26e: built on a suppressed item is greyed (Q3), so a session's extrudes never fail (hand-worked above).
+    ...["built", "suppressed", "greyed", "rolled-back"].map((x) => `status:${x}`),
+    // 26e: sketches on a face followed, held when their face goes, and extrudes of held ones saying their source is lost.
+    "plane:followed",
+    "plane:plane-lost",
+    "source-lost",
     ...["deleted-input", "open-outline", "invalid-outline"].map((c) => `warning:${c}`),
     "refused:before-dependency",
     "refused:after-dependent",
@@ -646,13 +650,21 @@ const DESIGN_CAUGHT_BY: Record<Exclude<DesignFault, "leak-bodies">, string> = {
   "reorder-unchecked": "outcome differs from the model",
   // Unsuppressing changes nothing, so the edit's outcome is "unchanged" where the model's is "done".
   "unsuppress-ignored": "outcome differs from the model",
-  "marker-start-ignored": "the rebuild differs from the model",
+  // From 26e's sessions (face sketches drawn too) the first catch is the marker moved to the start with no marker
+  // already there: Design reads "start" as none, so it changes nothing where the model changes the document.
+  "marker-start-ignored": "outcome differs from the model",
 };
+
+/**
+ * The seeds searched for a planted bug's first catch: from 26e the sessions draw face sketches too, and a delete of the
+ * item the marker is on with an item after it (what "delete-marker-forward" needs) first comes in seed 24.
+ */
+const PLANT_SEEDS = process.env.FISSION_SEED ? SEEDS : Array.from({ length: 24 }, (_, k) => BigInt(k + 1));
 
 for (const fault of DESIGN_FAULTS.filter((f): f is Exclude<DesignFault, "leak-bodies"> => f !== "leak-bodies"))
   test(`planted in Design: "${fault}" is caught: ${DESIGN_CAUGHT_BY[fault]}`, async () => {
     let found: TimelineFailure | null = null;
-    for (const seed of SEEDS) {
+    for (const seed of PLANT_SEEDS) {
       const subject = designSubject(nodeKernel(), [fault]);
       found = await failureOf(() => subject, randomSession(seed, STEPS), meshEdgeMatches);
       await subject.dispose();
@@ -704,9 +716,9 @@ test("Design's timeline edits on the real kernel, hand-worked (24e2): suppress, 
   const order = () => doc.timeline.features.map((f) => f.id);
   assert.ok(close(await volume("feature-1"), 24000) && close(await volume("feature-11"), 12000));
 
-  // Suppress Sketch 1: its extrude fails naming it, the box still builds.
+  // Suppress Sketch 1: its extrude is greyed by it (26e, Q3), the box still builds.
   await record(TIMELINE_STEPS.suppress("Sketch 1"), suppressItem(doc, "sketch-2", true));
-  assert.deepEqual((await results())["feature-11"], { status: "failed", cause: "suppressed-input", input: "sketch-2", message: "Sketch 1 is suppressed" });
+  assert.deepEqual((await results())["feature-11"], { status: "greyed", by: "sketch-2" });
   assert.deepEqual((await results())["sketch-2"], { status: "suppressed" });
   assert.ok(close(await volume("feature-1"), 24000));
   await record(TIMELINE_STEPS.unsuppress("Sketch 1"), suppressItem(doc, "sketch-2", false));

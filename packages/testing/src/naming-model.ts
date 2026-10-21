@@ -62,8 +62,21 @@
 // 9. Suppressing a feature greys every item built on it, all the way down,
 //    with no warning (Q3); nothing else changes, and unsuppressing brings
 //    them back as they were.
-// Not here: curved faces (refused by Design, Q5), snapping to a face's
-// edges (26e adds it, Q4), a sketch on a cut's floor (Q6) and a split face
+// Step 26f (Q4: a face's edges are not drawn into its sketch, but a point
+// can be snapped to them, and then follows them):
+// 10. A circle on a cap may have its centre pinned to one of the cap's
+//    corners (named by the two outline lines it sits between, the one
+//    ending there and the one starting there) or to the middle of one of
+//    its sides (named by the line it was swept from). After every edit the
+//    centre goes where that corner or middle is now, judged with nothing
+//    suppressed (as rule 9's holds are); when the name finds nothing (the
+//    outline redrawn with new lines) the centre stays where it was and the
+//    sketch warns "point lost". A sketch whose plane is lost or ambiguous
+//    is not judged (the plane's warning says it all). Moving the circle
+//    takes the pin away.
+// Not here: curved faces (refused by Design, Q5), pins on a side face
+// (Design's own tests have them; the model's numbers stay whole only on
+// caps), a sketch on a cut's floor (Q6) and a split face
 // (the piece holding the sketch's origin, else the largest, always warned),
 // which need booleans' cut.
 //
@@ -98,6 +111,15 @@ export interface Placement {
   side: 1 | -1;
 }
 
+/**
+ * What a face sketch's circle centre is pinned to (rule 10): the cap's
+ * corner between line `before` (ending there) and line `after` (starting
+ * there), or the middle of the cap's edge along line `line`.
+ */
+export type PinName = { at: "corner"; before: string; after: string } | { at: "middle"; line: string };
+
+export const pinKeyOf = (p: PinName): string => (p.at === "corner" ? `corner:${p.before}>${p.after}` : `middle:${p.line}`);
+
 /** A face sketch's circle, as a feature kept it when its sketch was deleted. */
 export interface Tool {
   centre: Point;
@@ -123,7 +145,7 @@ export type NamingItem =
   /** `lines`: each side's line id, the k-th from corner k to corner k + 1. */
   | { id: string; kind: "sketch"; corners: Point[]; lines: string[] }
   /** `kept`: the last placement, while the face is lost or ambiguous. */
-  | { id: string; kind: "face-sketch"; face: FaceName; side: 1 | -1; centre: Point; radius: number; drawn: Drawn; kept?: Placement }
+  | { id: string; kind: "face-sketch"; face: FaceName; side: 1 | -1; centre: Point; radius: number; drawn: Drawn; kept?: Placement; pin?: PinName }
   /** `kept`, `keptLines`: the sketch's corners and line ids just before it was deleted, so its sides keep their names. */
   | { id: string; kind: "extrude"; sketch: string; distance: number; suppressed?: true; kept?: Point[]; keptLines?: string[] }
   | { id: string; kind: "face-extrude"; sketch: string; distance: number; suppressed?: true; kept?: Tool }
@@ -138,6 +160,8 @@ export interface NamingDoc {
 
 export type NamingWarning =
   | { cause: "plane-lost" | "plane-ambiguous"; face: FaceName }
+  /** Rule 10: a pinned centre whose corner or middle is gone, held where it was. */
+  | { cause: "point-lost"; pin: PinName }
   | { cause: "deleted-input" | "source-lost"; input: string };
 
 export type NamingResult =
@@ -161,7 +185,8 @@ export type RefuseCause = "before-dependency" | "after-dependent";
 export type NamingOp =
   | { op: "add-sketch"; corners: Point[] }
   | { op: "add-extrude"; sketch: string; distance: number }
-  | { op: "add-face-sketch"; face: FaceName; centre: Point; radius: number }
+  /** With `pin`, the centre lands on that corner or middle of the cap (`centre` is not used) and is pinned there (rule 10). */
+  | { op: "add-face-sketch"; face: FaceName; centre: Point; radius: number; pin?: PinName }
   | { op: "add-cut"; sketch: string; depth: number }
   | { op: "add-face-extrude"; sketch: string; distance: number }
   /** Same number of corners: each corner moved, every line kept; another number: the outline redrawn with new lines. */
@@ -206,7 +231,15 @@ export type NamingFault =
   | "extrude-ignores-side"
   | "side-by-index"
   | "suppress-keeps-dependents"
-  | "suppress-greys-all-after";
+  | "suppress-greys-all-after"
+  // Step 26c:
+  | "greyed-loses-hold"
+  // Step 26f:
+  | "pin-stays-put"
+  | "lost-pin-silent"
+  | "lost-pin-moves"
+  | "pin-wrong-end"
+  | "pin-survives-move";
 
 export const NAMING_FAULTS: readonly NamingFault[] = [
   "frame-follows-face",
@@ -228,6 +261,12 @@ export const NAMING_FAULTS: readonly NamingFault[] = [
   "side-by-index",
   "suppress-keeps-dependents",
   "suppress-greys-all-after",
+  "greyed-loses-hold",
+  "pin-stays-put",
+  "lost-pin-silent",
+  "lost-pin-moves",
+  "pin-wrong-end",
+  "pin-survives-move",
 ];
 
 export const faceKeyOf = (f: FaceName): string => (f.role === "side" ? `${f.feature}/side:${f.line}` : `${f.feature}/${f.role}`);
@@ -537,6 +576,34 @@ function extrudeFaces(feature: string, corners: readonly Point[], lines: readonl
   return faces;
 }
 
+/**
+ * Where a pin on a cap of feature `face.feature` is now (rule 10): the
+ * corner of its outline (the sketch's, or the shape kept when the sketch
+ * was deleted) between line `before` and line `after`, or the middle of
+ * line `line`'s side; null when its lines are gone (or the feature is, or
+ * the face is a side). On a cap, sketch (x, y) is world (x, y) (rule 8),
+ * so these are whole or half millimetres.
+ */
+export function pinAt(doc: NamingDoc, face: FaceName, pin: PinName, faults: ReadonlySet<NamingFault> = new Set()): Point | null {
+  const f = doc.items.find((i) => i.id === face.feature);
+  if (face.role === "side" || f?.kind !== "extrude") return null;
+  const s = doc.items.find((i) => i.id === f.sketch);
+  const [corners, lines] = s?.kind === "sketch" ? [s.corners, s.lines] : [f.kept, f.keptLines];
+  if (corners === undefined || lines === undefined) return null;
+  const n = corners.length;
+  if (pin.at === "middle") {
+    const k = lines.indexOf(pin.line);
+    if (k < 0) return null;
+    const [a, b] = [corners[k], corners[(k + 1) % n]];
+    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  }
+  // Corner k is where line k − 1 ends and line k starts.
+  const k = lines.findIndex((l, j) => l === pin.after && lines[(j + n - 1) % n] === pin.before);
+  if (k < 0) return null;
+  const c = corners[faults.has("pin-wrong-end") ? (k + 1) % n : k];
+  return [c[0], c[1]];
+}
+
 const isFeature = (i: NamingItem): i is Extract<NamingItem, { kind: "extrude" | "face-extrude" | "cut" }> => i.kind === "extrude" || i.kind === "face-extrude" || i.kind === "cut";
 
 function evaluate(doc: NamingDoc, faults: ReadonlySet<NamingFault>): Evaluated {
@@ -552,7 +619,8 @@ function evaluate(doc: NamingDoc, faults: ReadonlySet<NamingFault>): Evaluated {
     const placed = results[item.sketch];
     if (s?.kind === "face-sketch" && placed?.kind === "sketch") {
       // Rule 7: built where its sketch is held, saying its source is lost.
-      const lost = placed.warning !== undefined && !faults.has("source-lost-silent");
+      // Only a plane's warning: a lost pin leaves the sketch where it was, its outline as good as ever (rule 10).
+      const lost = placed.warning !== undefined && "face" in placed.warning && !faults.has("source-lost-silent");
       return { tool: { centre: s.centre, radius: s.radius, placement: placed.placement }, ...(lost ? { warning: { cause: "source-lost" as const, input: item.sketch } } : {}) };
     }
     if (item.kept === undefined) throw new Error(`${item.id}: its sketch ${item.sketch} is gone and nothing was kept`);
@@ -588,7 +656,10 @@ function evaluate(doc: NamingDoc, faults: ReadonlySet<NamingFault>): Evaluated {
       case "face-sketch": {
         const p = placeOn(faces, item, faults);
         matches[item.id] = p.matches;
-        results[item.id] = { kind: "sketch", placement: p.placement, ...(p.warning ? { warning: p.warning } : {}) };
+        // Rule 10: a pin judged only on a face found; one whose corner or middle is gone warns.
+        const lostPin = p.warning === undefined && item.pin !== undefined && pinAt(doc, item.face, item.pin, faults) === null && !faults.has("lost-pin-silent");
+        const warning: NamingWarning | undefined = p.warning ?? (lostPin ? { cause: "point-lost", pin: { ...item.pin! } } : undefined);
+        results[item.id] = { kind: "sketch", placement: p.placement, ...(warning ? { warning } : {}) };
         break;
       }
       case "face-extrude": {
@@ -704,10 +775,14 @@ function unsuppressed(doc: NamingDoc): NamingDoc {
 /**
  * After an edit, every face sketch whose face is gone or ambiguous keeps the
  * placement it had just before (and forgets it once its face is back), and
- * every feature whose sketch was deleted keeps that sketch's last shape. A
- * greyed sketch's face is not gone, only off, so it keeps nothing and
- * forgets nothing; what it had "just before" is where it would have been
- * with nothing suppressed, the same for every item that was built.
+ * every feature whose sketch was deleted keeps that sketch's last shape.
+ * Both are judged with nothing suppressed: a greyed sketch's face is not
+ * gone, only off, so it keeps nothing while its face is there; but a face
+ * taken away while greyed (its outline redrawn under a suppressed extrude)
+ * is gone, and the sketch keeps where it was before that edit, never
+ * where a lost sketch would fall back to (step 26c). What it had "just
+ * before" is where it would have been with nothing suppressed, the same
+ * for every item that was built.
  */
 function settle(before: NamingDoc, doc: NamingDoc, faults: ReadonlySet<NamingFault>) {
   const was = evaluate(unsuppressed(before), faults);
@@ -723,7 +798,7 @@ function settle(before: NamingDoc, doc: NamingDoc, faults: ReadonlySet<NamingFau
     }
     if (item.kind !== "extrude" && s?.kind === "face-sketch" && r?.kind === "sketch") item.kept = { centre: s.centre, radius: s.radius, placement: r.placement };
   }
-  const now = evaluate(doc, faults);
+  const now = evaluate(faults.has("greyed-loses-hold") ? doc : unsuppressed(doc), faults);
   for (const item of doc.items) {
     if (item.kind !== "face-sketch" || now.rebuild.results[item.id]?.kind !== "sketch") continue;
     if (now.matches[item.id] === 1) delete item.kept;
@@ -731,6 +806,11 @@ function settle(before: NamingDoc, doc: NamingDoc, faults: ReadonlySet<NamingFau
       const r = was.rebuild.results[item.id];
       if (r?.kind === "sketch") item.kept = r.placement;
     }
+    // Rule 10: a pinned centre goes where its corner or middle is now, on a face found; else it stays (planted: back to the origin).
+    if (item.pin === undefined || now.matches[item.id] !== 1) continue;
+    const at = pinAt(doc, item.face, item.pin, faults);
+    if (at !== null && !faults.has("pin-stays-put")) item.centre = at;
+    if (at === null && faults.has("lost-pin-moves")) item.centre = [0, 0];
   }
 }
 
@@ -762,7 +842,11 @@ function edit(doc: NamingDoc, op: Exclude<NamingOp, { op: "undo" | "redo" }>, fa
       const [f] = face;
       const frame = drawnFrame(f.outward);
       const drawn: Drawn = { outward: f.outward, x: frame.x, normal: frame.normal, origin: scale3(frame.normal, dot3(f.point, frame.normal)), centroid: f.centroid };
-      return add({ id: newId("sketch"), kind: "face-sketch", face: { ...op.face }, side: frame.side, centre: [op.centre[0], op.centre[1]], radius: op.radius, drawn });
+      // Rule 10: snapped onto a corner or a middle, the centre lands exactly there and is pinned.
+      const pinned = op.pin && pinAt(doc, op.face, op.pin);
+      if (op.pin && !pinned) throw new Error(`no ${pinKeyOf(op.pin)} on ${faceKeyOf(op.face)} to pin to`);
+      const centre: Point = pinned ?? [op.centre[0], op.centre[1]];
+      return add({ id: newId("sketch"), kind: "face-sketch", face: { ...op.face }, side: frame.side, centre, radius: op.radius, drawn, ...(op.pin ? { pin: { ...op.pin } } : {}) });
     }
     case "add-cut":
     case "add-face-extrude": {
@@ -797,6 +881,8 @@ function edit(doc: NamingDoc, op: Exclude<NamingOp, { op: "undo" | "redo" }>, fa
       if (s.kind !== "face-sketch" || op.radius <= 0) throw new Error(`${op.sketch}: no circle of radius ${op.radius}`);
       s.centre = [op.centre[0], op.centre[1]];
       s.radius = op.radius;
+      // Moved, the centre is pinned no longer (rule 10).
+      if (!faults.has("pin-survives-move")) delete s.pin;
       return { kind: "done", ids: [] };
     }
     case "set-depth": {

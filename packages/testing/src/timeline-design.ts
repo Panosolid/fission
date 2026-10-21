@@ -29,15 +29,19 @@
 
 import { emptyProject, projectFromJson, projectToJson, type BodyView, type KernelCalls, type StableId } from "@fission/core";
 import {
+  addFaceSketch,
   addSketch,
   BodyCache,
   deleteCurve,
   drawArc,
   drawCircle,
   drawLine,
+  drawnOnFace,
   editFeature,
   extrudeSketch,
   deleteItem,
+  facePlane,
+  isFaceSketch,
   insertPreset,
   isSketchExtrude,
   moveMarker,
@@ -59,6 +63,7 @@ import {
   type LineEnd,
   type Scene,
   type SketchCurve,
+  type SketchPlacement,
   type TimelineBuild,
 } from "@fission/design";
 import { edgeName, faceKey, type Applied, type ConcreteOp, type FaceName, type FaceRole, type ItemResult, type ModelBody, type ModelShape, type Point, type Rebuild } from "./timeline-model.ts";
@@ -229,13 +234,31 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
     return drawArc(doc, sketch, pt("t2"), pt("a"), pt("c0"));
   }
 
+  /**
+   * Where a sketch on face `name` would be drawn now (26e), as the app's
+   * pick does it: the face found on the scene by its name (`findInScene`)
+   * and its frame from the kernel's normal and centroid (`drawnOnFace`).
+   */
+  async function drawnOn(name: FaceName) {
+    const s = await scene();
+    const found = findInScene({ kind: "face", id: designFace(name) as StableId }, s);
+    if (found.status !== "found") throw new Error(`harness: Design finds no face ${faceKey(name)} to sketch on (${found.status})`);
+    const hit = sceneHit(s, "face", found.index)!;
+    const drawn = drawnOnFace(s.bodies[hit.body].view, hit.index);
+    if (drawn === null) throw new Error(`harness: ${faceKey(name)} is curved`);
+    return drawn;
+  }
+
   /** The edit on Design's side: the new state and the ids it made, or a refusal. */
-  function edit(s: State, op: Exclude<ConcreteOp, { op: "undo" | "redo" }>): { state: State; made: string[] } | Applied {
+  async function edit(s: State, op: Exclude<ConcreteOp, { op: "undo" | "redo" }>): Promise<{ state: State; made: string[] } | Applied> {
     let doc = s.doc;
     const meta = clone(s.meta);
     switch (op.op) {
-      case "add-sketch": {
-        const made = addSketch(doc);
+      case "add-sketch":
+      case "add-face-sketch": {
+        // 26e: a sketch on a face is drawn where the app's pick puts it; its curves in its own coordinates, which on a
+        // top or an end read as the world's x and y (rule 8).
+        const made = op.op === "add-sketch" ? addSketch(doc) : addFaceSketch(doc, { plane: designFace(op.face), feature: op.face.feature }, await drawnOn(op.face));
         doc = made.doc;
         const count = op.shape.kind === "polygon" ? op.shape.corners.length : op.shape.kind === "slot" ? 4 : 1;
         const curves: (string | null)[] = Array.from({ length: count }, () => null);
@@ -341,7 +364,10 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
       const r = build.results[id];
       if (r.status === "suppressed" || r.status === "rolled-back") results[id] = { status: r.status };
       else if (r.status === "failed") results[id] = { status: "failed", cause: r.cause as never, input: r.input };
-      else if (r.body === undefined || !shown.has(id)) results[id] = { status: "built" };
+      else if (r.status === "greyed") results[id] = { status: "greyed", by: r.by };
+      // 26e: a sketch on a face says how high it lies (the sessions' faces all face +Z, so it is XY lifted) and whether it is held.
+      else if (isFaceSketchId(id)) results[id] = { status: "built", lift: liftOf(id, r.placement), ...(r.plane && { plane: r.plane.cause as "plane-lost" }) };
+      else if (r.body === undefined || !shown.has(id)) results[id] = { status: "built", ...(r.source && { source: r.source.sketch }) };
       else {
         // Planted bug ("cache-by-feature"): a body read once per feature id, so later edits never reach it.
         const key = fs.has("cache-by-feature") ? id : `${id}|${r.body}|${JSON.stringify(r.curves ?? null)}`;
@@ -350,10 +376,24 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
           body = measure(id, shown.get(id)!, r.spec && "extrude" in r.spec ? outlineCurves(r.spec.extrude.profile, r.curves) : () => null);
           if (keep) bodies.set(key, body);
         }
-        results[id] = r.warning ? { status: "built", body, warning: { cause: r.warning.cause, input: r.warning.sketch } } : { status: "built", body };
+        results[id] = { status: "built", body, ...(r.warning && { warning: { cause: r.warning.cause, input: r.warning.sketch } }), ...(r.source && { source: r.source.sketch }) };
       }
     }
     return { order: build.order, results };
+  }
+
+  const isFaceSketchId = (id: string) => {
+    const f = state.doc.timeline.features.find((x) => x.id === id);
+    return f !== undefined && isFaceSketch(f);
+  };
+
+  /** A face sketch's height: its frame's origin's z, after checking the frame is XY lifted (every face the sessions draw on is a top or an end). */
+  function liftOf(id: string, at: SketchPlacement | undefined): number {
+    if (at === undefined) throw new Error(`${id} is built but lies nowhere`);
+    const { origin, xAxis, normal } = at.plane;
+    const off = Math.max(Math.abs(origin[0]), Math.abs(origin[1]), Math.abs(xAxis[0] - 1), Math.abs(xAxis[1]), Math.abs(xAxis[2]), Math.abs(normal[0]), Math.abs(normal[1]), Math.abs(normal[2] - 1));
+    if (off > 1e-12 || at.side !== 1) throw new Error(`${id} lies in a frame that is not XY lifted: ${JSON.stringify(at)}`);
+    return origin[2];
   }
 
   /** Design's rebuild on the subject's cache, with the planted bugs that reach it. */
@@ -388,7 +428,7 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
         state = JSON.parse(back);
         return { kind: "done", ids: [] };
       }
-      const r = edit(state, op);
+      const r = await edit(state, op);
       if ("kind" in r) {
         state = JSON.parse(before);
         return r;
@@ -430,8 +470,7 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
       // on the scene by Design's own `findInScene`, and the face it lands on named back; a name it finds on two faces
       // (25a4) is told apart from one it finds on none.
       const s = await scene();
-      const part = name.curve === undefined ? name.role : `${name.role}:${encodeURIComponent(name.curve)}`;
-      const found = findInScene({ kind: "face", id: `face:${encodeURIComponent(name.feature)}/${part}` as StableId }, s);
+      const found = findInScene({ kind: "face", id: designFace(name) as StableId }, s);
       if (found.status === "shared") return "shared";
       if (found.status === "gone") return null;
       const i = found.index;
@@ -445,6 +484,9 @@ export function designSubject(kernel: KernelCalls, faults: Iterable<DesignFault>
     },
   };
 }
+
+/** The model's face name (in Design's ids) as Design names the face: "face:feature-1/top", "face:feature-7/side:line-4". */
+const designFace = (name: FaceName): string => facePlane(encodeURIComponent(name.feature), name.curve === undefined ? name.role : `${name.role}:${encodeURIComponent(name.curve)}`);
 
 /** A face name part from Design ("side:line-4", "top") as the model's FaceName; an unnamed face gets a name no model face has. */
 function faceName(feature: string, part: string | null, index: number): FaceName {

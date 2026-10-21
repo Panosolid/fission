@@ -1,5 +1,6 @@
 // The Extrude panel (step 21d), at the top of the properties: which sketch,
-// how far (typeable), whether that sketch makes a closed outline or the
+// how far (typeable), Flip (26c: the other way from the sketch's plane, its
+// start still on the plane), whether that sketch makes a closed outline or the
 // kernel's reason it doesn't, and OK or Cancel. OK stays off until the
 // kernel says the outline is closed. The workspace drives it; the panel
 // only shows what it is given and reports what was typed and clicked.
@@ -8,8 +9,8 @@
 export interface ExtrudePanelEvents {
   /** Another sketch chosen. */
   sketch(id: string): void;
-  /** OK, with the distance as typed. */
-  ok(distance: string): void;
+  /** OK, with the distance as typed and whether Flip is ticked. */
+  ok(distance: string, flip: boolean): void;
   cancel(): void;
 }
 
@@ -57,19 +58,24 @@ export function extrudePanel(slot: HTMLElement, on: ExtrudePanelEvents): Extrude
       Object.assign(input, { type: "number", step: "any", value: distance });
       // Enter in the box is OK, as in any dialog.
       input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && ok && !ok.disabled) on.ok(input.value);
+        if (e.key === "Enter" && ok && !ok.disabled) on.ok(input.value, flip.checked);
       });
       const sketchRow = el("label", "", "extrude-row");
       sketchRow.append("Sketch ", select);
       const distanceRow = el("label", "", "extrude-row");
       distanceRow.append("Distance ", input, " mm");
+      const flip = el("input", "extrude-flip");
+      flip.type = "checkbox";
+      const flipRow = el("label", "", "extrude-row extrude-flip");
+      flipRow.title = "Extrude the other way from the sketch's plane; the body still starts on it";
+      flipRow.append(flip, " Flip");
       status = el("p", "extrude-status", "extrude-status");
       error = el("p", "extrude-error", "bad");
       error.hidden = true;
       ok = el("button", "extrude-ok", "", "OK");
       ok.type = "button";
       ok.disabled = true; // until the kernel says the outline is closed
-      ok.addEventListener("click", () => on.ok(input.value));
+      ok.addEventListener("click", () => on.ok(input.value, flip.checked));
       const cancel = el("button", "extrude-cancel", "", "Cancel");
       cancel.type = "button";
       cancel.addEventListener("click", () => on.cancel());
@@ -79,6 +85,7 @@ export function extrudePanel(slot: HTMLElement, on: ExtrudePanelEvents): Extrude
         el("h2", "", "", "Extrude"),
         sketchRow,
         distanceRow,
+        flipRow,
         status,
         error,
         el("p", "", "extrude-note", "The extrude is a new body, put in the timeline at the marker."),

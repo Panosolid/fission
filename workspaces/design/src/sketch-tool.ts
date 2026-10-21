@@ -21,9 +21,9 @@
 // with the sketch constraints (29).
 
 import type { Feature, Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
-import type { DesignDocument, Sketch, SketchArcCurve, SketchLineCurve, SketchPlane } from "./document.ts";
+import { greyedItems, type DesignDocument, type Sketch, type SketchArcCurve, type SketchLineCurve, type SketchPlane } from "./document.ts";
 import { centreClick, centreHover, centrePreview, type CentreArcTool } from "./centre-arc.ts";
-import { drawArc, drawCircle, drawLine, drawRectangle, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
+import { drawArc, drawCircle, drawLine, drawRectangle, planeFor, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
 
 export { pointAt };
 
@@ -107,16 +107,16 @@ export const DEFAULT_GRID = 10;
 /** Whether points snap to the grid until you tick it (sketch feel SF1): off, so points go where you click, as in other CAD sketchers. */
 export const DEFAULT_GRID_SNAP = false;
 
-/** The origin planes the Create sketch prompt draws; only the ground plane until step 26 brings the other two and flat faces. */
-export const ORIGIN_PLANES: readonly { id: SketchPlane; offered: boolean; label: string }[] = [
-  { id: "XY", offered: true, label: "Ground plane (XY)" },
-  { id: "XZ", offered: false, label: "Front plane (XZ)" },
-  { id: "YZ", offered: false, label: "Side plane (YZ)" },
+/** The origin planes the Create sketch prompt draws, every one offered (step 26d), with the flat faces of the bodies on screen (face-pick.ts). */
+export const ORIGIN_PLANES: readonly { id: SketchPlane; label: string }[] = [
+  { id: "XY", label: "Ground plane (XY)" },
+  { id: "XZ", label: "Front plane (XZ)" },
+  { id: "YZ", label: "Side plane (YZ)" },
 ];
 
 /** The origin planes as the viewport draws them for picking. */
 export function originPlanes(): OriginPlane[] {
-  return ORIGIN_PLANES.map((p) => ({ id: p.id, plane: planeOf(p.id), offered: p.offered }));
+  return ORIGIN_PLANES.map((p) => ({ id: p.id, plane: planeOf(p.id), offered: true }));
 }
 
 /** The standard view that looks straight down on a plane: the camera on the side its normal points to. */
@@ -522,30 +522,35 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
  * Every sketch as the viewport draws it, lines, then circles (each as
  * `circleSegments`), then arcs (`arcSegments`): the one being edited (if
  * any) with its grid, its points (and a first click not yet a point) and
- * the preview.
+ * the preview. A sketch on a face is drawn where the last rebuild placed
+ * it (`placed`, by sketch id; sketch.ts `planeFor`); one on a back or
+ * bottom face says it faces against its frame's normal (`side` −1, 26d),
+ * so Look At looks at it from outside the body.
  */
-export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null): SketchDrawing[] {
+export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null, placed?: ReadonlyMap<string, Plane>, lost: ReadonlySet<string> = new Set()): SketchDrawing[] {
   // Each sketch's plane from its item, found by id once (security audit S2: a search per sketch took the timeline's length squared).
   const items = new Map<string, Feature>();
   for (const f of doc.timeline.features) if (!items.has(f.id)) items.set(f.id, f);
-  return doc.sketches.map((s) => {
-    const plane: Plane = planeOf(planeOfItem(items.get(s.id)));
+  // 26e: a suppressed sketch, and one greyed by a suppressed item it is built on (Q3), isn't drawn, as the reference app hides them.
+  const greyed = greyedItems(doc);
+  const off = (s: Sketch) => {
+    const item = items.get(s.id);
+    return item !== undefined && editing?.tool.sketch !== s.id && (item.suppressed || greyed.has(item));
+  };
+  return doc.sketches.filter((s) => !off(s)).map((s) => {
+    const plane: Plane = planeFor(items.get(s.id), s, placed);
+    const side = s.face?.side === -1 ? ({ side: -1 } as const) : {};
     const curves = sketchCurves(s);
     const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
-    if (editing?.tool.sketch !== s.id) return { plane, lines };
+    // 26e: a sketch held with its plane lost is drawn red where it stays (the rebuild's plane warnings, `lost`).
+    if (editing?.tool.sketch !== s.id) return lost.has(s.id) ? { plane, ...side, lines, lost: true as const } : { plane, ...side, lines };
     const points: SketchXY[] = s.points.map((p) => [p.x, p.y]);
     const tool = editing.tool;
     for (const at of pendingClicks(tool)) if (!s.points.some((p) => p.x === at[0] && p.y === at[1])) points.push([at[0], at[1]]);
-    return { plane, lines, editing: { grid: editing.grid, gridSnap: editing.gridSnap ?? false, points, preview: previewSegments(doc, tool, editing.pointer) } };
+    return { plane, ...side, lines, editing: { grid: editing.grid, gridSnap: editing.gridSnap ?? false, points, preview: previewSegments(doc, tool, editing.pointer) } };
   });
 }
 
-/** The plane a sketch is on, from its timeline item. */
-export function sketchPlaneOf(doc: DesignDocument, id: string): SketchPlane {
-  return planeOfItem(doc.timeline.features.find((f) => f.id === id));
-}
-
-const planeOfItem = (item: Feature | undefined): SketchPlane => (item?.intent.parameters.plane as SketchPlane | undefined) ?? "XY";
 
 /** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", "2 lines, 1 arc and 1 circle", or "Nothing drawn yet" when empty. */
 export function curveCount(sketch: Sketch): string {

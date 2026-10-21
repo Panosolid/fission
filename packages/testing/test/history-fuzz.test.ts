@@ -42,10 +42,18 @@
 // not after the marker), mostly the newest, sometimes an earlier one with
 // extrudes built from it. Opening a sketch records nothing; each edit in it
 // is its own step, as before.
+//
+// Step 26e: a new sketch is sometimes drawn on a box's top (`addFaceSketch`,
+// the box built and before where it goes in), built on that box: it can't
+// move before it, nor the box after it; suppressing the box greys it and
+// everything built on it (Q3), as suppressing a sketch greys its extrudes;
+// a greyed sketch can't be opened; deleting the box leaves it held where it
+// was, still built (Q1), so its extrude builds and can be the part.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHistory, emptyProject, projectFromJson, projectToJson, type Feature, type Project } from "@fission/core";
 import {
+  addFaceSketch,
   addSketch,
   curvePoints,
   deleteCurve,
@@ -59,6 +67,9 @@ import {
   editStep,
   extrudeSketch,
   extrudeStep,
+  faceFeature,
+  facePlane,
+  isFacePlane,
   isSketchExtrude,
   isSketchItem,
   itemName,
@@ -98,7 +109,7 @@ type Line = [string, number, number, number, number] | [string, number, number, 
 const placesOf = (c: Line): string[] => (c.length === 4 ? [`${c[1]},${c[2]}`] : Array.from({ length: (c.length - 1) / 2 }, (_, k) => `${c[1 + 2 * k]},${c[2 + 2 * k]}`));
 
 /** A timeline item as the model keeps it. */
-type Item = { id: string; kind: "box"; size: number; off: boolean } | { id: string; kind: "sketch"; off: boolean } | { id: string; kind: "extrude"; sketch: string; size: number; off: boolean };
+type Item = { id: string; kind: "box"; size: number; off: boolean } | { id: string; kind: "sketch"; off: boolean; on?: string } | { id: string; kind: "extrude"; sketch: string; size: number; off: boolean };
 
 /**
  * The model's state: the timeline's items in order, the marker ("start",
@@ -120,13 +131,24 @@ const parse = (s: string): Model => {
 
 // ---- The model's timeline rules, written from the owner's rules (docs/progress/cad.md, 24d1 and 24e), not from Design's code.
 
-/** Whether an item builds: not suppressed, not after the marker, and an extrude's sketch there and building. */
+/** What an item is built on (26e): an extrude its sketch, a sketch on a face the box it is on; undefined when that is gone or there is none. */
+const inputOf = (m: Model, item: Item): Item | undefined => m.items.find((i) => i.id === (item.kind === "extrude" ? item.sketch : item.kind === "sketch" ? item.on : undefined));
+/** Whether an item is greyed (26e, Q3): something it is built on, directly or through others, is suppressed. */
+function greyed(m: Model, item: Item): boolean {
+  const input = inputOf(m, item);
+  return input !== undefined && (input.off || greyed(m, input));
+}
+/**
+ * Whether an item builds: not suppressed, not after the marker, not greyed,
+ * and an extrude's sketch there and building. A sketch on a face whose box
+ * is gone still builds, held where it was (26e, Q1).
+ */
 function buildsIn(m: Model, item: Item): boolean {
   const at = m.items.indexOf(item);
-  if (item.off || m.marker === "start") return false;
+  if (item.off || m.marker === "start" || greyed(m, item)) return false;
   if (m.marker !== null && at > m.items.findIndex((i) => i.id === m.marker)) return false;
   if (item.kind !== "extrude") return true;
-  const sketch = m.items.find((i) => i.id === item.sketch);
+  const sketch = inputOf(m, item);
   return sketch !== undefined && buildsIn(m, sketch);
 }
 /** The part: the last solid item (not a sketch) that builds; null when none does. */
@@ -147,10 +169,10 @@ const clone = (m: Model): Model => JSON.parse(JSON.stringify(m));
 const insertPlace = (m: Model) => (m.marker === null ? m.items.length : m.marker === "start" ? 0 : m.items.findIndex((i) => i.id === m.marker) + 1);
 /** Whether sketch `id` comes at or after where a new item goes in, so an extrude of it is refused. */
 const isLate = (m: Model, id: string) => m.items.findIndex((i) => i.id === id) >= insertPlace(m);
-/** Whether sketch `id` can be opened to draw in (Edit Sketch, 25a3, the item menu's rule): not suppressed, not after the marker. */
+/** Whether sketch `id` can be opened to draw in (Edit Sketch, 25a3, the item menu's rule): not suppressed or greyed (26e), not after the marker. */
 function canOpen(m: Model, id: string): boolean {
   const at = m.items.findIndex((i) => i.id === id);
-  if (at < 0 || m.items[at].off || m.marker === "start") return false;
+  if (at < 0 || m.items[at].off || greyed(m, m.items[at]) || m.marker === "start") return false;
   return m.marker === null || at <= m.items.findIndex((i) => i.id === m.marker);
 }
 /** The model with sketch `id`'s curves replaced. */
@@ -162,7 +184,10 @@ function stateOf(p: Project): string {
   // No kernel here, so no shape is ever kept (that needs the kernel's outline: settleKept, tested in packages/testing's timeline sessions).
   assert.equal(doc.kept, undefined, "a kept shape with no kernel to keep it");
   const items = doc.timeline.features.map((f): Item => {
-    if (isSketchItem(f)) return { id: f.id, kind: "sketch", off: f.suppressed };
+    if (isSketchItem(f)) {
+      const on = isFacePlane(f.intent.parameters.plane) ? faceFeature(f.intent.parameters.plane as string) : null;
+      return on === null ? { id: f.id, kind: "sketch", off: f.suppressed } : { id: f.id, kind: "sketch", off: f.suppressed, on };
+    }
     if (isSketchExtrude(f)) return { id: f.id, kind: "extrude", sketch: f.intent.parameters.sketch as string, size: f.intent.parameters.distance as number, off: f.suppressed };
     const { shape, sizes } = shapeOf(doc, f);
     assert.equal(shape, "box", `${f.id} is a ${shape}`);
@@ -268,6 +293,12 @@ function session(seed: bigint, steps: number) {
     assert.equal(h.canRedo(), redos.length > 0, at);
     assert.equal(h.undoLabel(), undos.length ? undos[undos.length - 1].label : null, at);
     assert.equal(h.redoLabel(), redos.length ? redos[redos.length - 1].label : null, at);
+    // 26e: the states face sketches reach, counted so each is shown reached.
+    const m = parse(present);
+    if (m.items.some((x) => x.kind === "sketch" && x.on !== undefined && greyed(m, x))) counts.faceGreyed++;
+    if (m.items.some((x) => x.kind === "extrude" && !x.off && inputOf(m, x)?.off)) counts.extrudeGreyed++;
+    if (m.items.some((x) => x.kind === "sketch" && x.on !== undefined && inputOf(m, x) === undefined && buildsIn(m, x))) counts.faceHeld++;
+    if (m.items.some((x) => x.kind === "extrude" && buildsIn(m, x) && (inputOf(m, x) as { on?: string } | undefined)?.on !== undefined)) counts.faceExtrudeBuilds++;
   };
   const counts = {
     draws: 0, chained: 0, circles: 0, centred: 0, arcs: 0, arcsChained: 0, deletes: 0, moves: 0, extrudes: 0, extrudesRefused: 0, sketchesAdded: 0, distances: 0, edits: 0, merged: 0, foldedAway: 0, same: 0, dropped: 0, undos: 0, redos: 0, empty: 0, failed: 0, nasty: 0, resets: 0, walks: 0, amends: 0, amendedAway: 0, steps: 0, stepsFailed: 0, stepsEmpty: 0,
@@ -277,6 +308,9 @@ function session(seed: bigint, steps: number) {
     boxIntoEmpty: 0, amendsNoBody: 0, stepsOnEmpty: 0, deletedAll: 0,
     // Step 25b2: several sketches, Edit Sketch on an earlier one, Edit feature on any solid item.
     moreSketches: 0, earlierSketch: 0, sketchWithExtrude: 0, featureEdits: 0, featureEditsSame: 0, featureEditsNotPart: 0, featureEditsExtrude: 0, featureEditsUnbuilt: 0,
+    // Step 26e: sketches on a box's top, refused reorders round them, greyed by a suppressed box (and extrudes by a
+    // suppressed sketch), held once their box is deleted, and their extrudes building.
+    faceSketches: 0, refusedFace: 0, faceGreyed: 0, extrudeGreyed: 0, faceHeld: 0, faceExtrudeBuilds: 0,
   };
 
   for (let i = 0; i < steps; i++) {
@@ -337,11 +371,16 @@ function session(seed: bigint, steps: number) {
       const doc = designOf(project);
       const open = m.sketches.filter((k) => canOpen(m, k.id));
       if (open.length === 0 || (m.sketches.length < 3 && r.next() < 0.08)) {
-        const made = addSketch(doc);
+        // 26e: sometimes on a box's top, a box that builds and comes before where the sketch goes in (as Create sketch offers).
+        const boxes = m.items.filter((x, k) => x.kind === "box" && buildsIn(m, x) && k < insertPlace(m));
+        const box = boxes.length > 0 && r.next() < 0.4 ? pick(r, boxes) : null;
+        const made = box ? addFaceSketch(doc, { plane: facePlane(box.id, "top"), feature: box.id }, { plane: { origin: [0, 0, 20], xAxis: [1, 0, 0], normal: [0, 0, 1] }, side: 1 }) : addSketch(doc);
         isNew(made.id, at);
         project = { ...project, workspaces: { design: made.doc } };
-        recordStep(SKETCH_STEPS.create, { ...insert(m, { id: made.id, kind: "sketch", off: false }), sketches: [...m.sketches, { id: made.id, lines: [] }] }, at);
+        const item: Item = box ? { id: made.id, kind: "sketch", off: false, on: box.id } : { id: made.id, kind: "sketch", off: false };
+        recordStep(SKETCH_STEPS.create, { ...insert(m, item), sketches: [...m.sketches, { id: made.id, lines: [] }] }, at);
         counts.sketchesAdded++;
+        if (box) counts.faceSketches++;
         if (m.sketches.length > 0) counts.moreSketches++;
       } else {
         let target = r.next() < 0.6 ? open[open.length - 1] : pick(r, open);
@@ -473,8 +512,11 @@ function session(seed: bigint, steps: number) {
         const items = m.items.filter((x) => x !== item);
         items.splice(to, 0, item);
         const place = (id: string) => items.findIndex((x) => x.id === id);
-        const before = item.kind === "extrude" && place(item.sketch) > to;
-        const afterUser = items.some((x, j) => j < to && x.kind === "extrude" && x.sketch === item.id);
+        // 26e: a sketch on a box's top is built on that box (answer 7).
+        const builtOn = (x: Item) => (x.kind === "extrude" ? x.sketch : x.kind === "sketch" ? x.on : undefined);
+        const before = builtOn(item) !== undefined && place(builtOn(item)!) > to;
+        const afterUser = items.some((x, j) => j < to && builtOn(x) === item.id);
+        if ((before || afterUser) && (item.kind === "box" || (item.kind === "sketch" && item.on !== undefined))) counts.refusedFace++;
         const got = reorderItem(doc, item.id, to);
         if (before || afterUser) {
           assert.ok("refused" in got, `${at}: moving ${item.id} to ${to} was not refused`);

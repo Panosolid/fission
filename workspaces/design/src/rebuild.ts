@@ -12,10 +12,28 @@
 // `settleKept` keeps and forgets those shapes after every edit. Causes and
 // the curves at fault come from the kernel's `kind` and `inputs` (and
 // sketch_outline's `invalid`), never from its words.
+//
+// Step 26e: suppressing an item greys everything built on it, all the way
+// down, with no warning (Q3): an extrude of a suppressed sketch is greyed
+// too, where until 26e it failed.
+//
+// Step 26c: a sketch item's result says where it lies (`placement`); a
+// sketch on a face is placed on its face as built just before it (rule 8,
+// face-sketch.ts), or held at its last placement with a plane warning when
+// the face's name finds no face or two (rule 6), and greyed while its
+// face's feature is suppressed or greyed (Q3). An extrude of a sketch not
+// on XY, or flipped, is built placed (the kernel's frame and flip, 26b);
+// one whose face sketch is held says its source is lost (rule 7).
+// `settleKept` also keeps and forgets the held placements, judged with
+// nothing suppressed and no marker, as the naming model's `settle` does.
 
-import { KernelError, type BodyHandle, type BodySpec, type BodyView, type Feature, type KernelCalls, type KernelInput, type Outline } from "@fission/core";
-import { buildingItems, isSketchExtrude, isSketchItem, keptOf, specOf, type DesignDocument, type KeptShape, type Sketch } from "./document.ts";
-import { sketchCurves } from "./sketch.ts";
+import { KernelError, type BodyHandle, type BodySpec, type BodyView, type Feature, type KernelCalls, type KernelInput, type Outline, type Plane, type SketchXY } from "@fission/core";
+import { buildingItems, isSketchExtrude, isSketchItem, keptOf, specOf, type DesignDocument, type KeptShape, type Sketch, type SketchPlane } from "./document.ts";
+import { faceFeature, faceReference, frameNow, frameOf, isFaceSketch, planeWords, squared, type PlaneWarning, type SketchPlacement } from "./face-sketch.ts";
+import { pinNow, pointWords, type PointWarning } from "./face-edges.ts";
+import { featureNames, type BodyNames } from "./naming.ts";
+import { resolveReference, sharedBy } from "./references.ts";
+import { planeOf, sketchCurves } from "./sketch.ts";
 
 /** Why an extrude's sketch gives it no outline (the model's causes). */
 export type LostCause = "deleted-input" | "open-outline" | "invalid-outline";
@@ -36,17 +54,36 @@ export interface KeptWarning {
 }
 
 export type FeatureResult =
-  /** A sketch item, or a solid feature with its body (and, for an extrude of a sketch, the curves it was built from). */
-  | { status: "built"; body?: BodyHandle; spec?: BodySpec; curves?: CurveIds; warning?: KeptWarning }
+  /**
+   * A sketch item with where it lies (`placement`) and, for a sketch on a
+   * face held at its last placement, why (`plane`); or a solid feature with
+   * its body (and, for an extrude of a sketch, the curves it was built
+   * from, and `source` when its sketch is held: rule 7).
+   */
+  | {
+      status: "built";
+      body?: BodyHandle;
+      spec?: BodySpec;
+      curves?: CurveIds;
+      warning?: KeptWarning;
+      placement?: SketchPlacement;
+      plane?: PlaneWarning;
+      source?: PlaneWarning & { sketch: string };
+      /** A face sketch's pinned points that found their edge, where they are now (26f), and why the others are held. */
+      pinned?: { point: string; at: SketchXY }[];
+      points?: PointWarning;
+    }
   | { status: "suppressed" }
+  /** Built on a suppressed item (`by`), directly or through others (Q3; from 26e an extrude of a suppressed sketch too): off, with no warning, until it is unsuppressed. */
+  | { status: "greyed"; by: string }
   | { status: "rolled-back" }
   /**
-   * `cause` the model's (an input lost, suppressed or failed) or "error":
+   * `cause` the model's (an input lost or failed) or "error":
    * the kernel refused something that isn't the sketch (a distance) or
    * isn't built yet (a sketch on another plane). `curves`: the sketch
    * curves at fault, when the kernel named them.
    */
-  | { status: "failed"; cause: LostCause | "suppressed-input" | "failed-input" | "error"; input?: string; message: string; curves?: string[] };
+  | { status: "failed"; cause: LostCause | "failed-input" | "error"; input?: string; message: string; curves?: string[] };
 
 export interface TimelineBuild {
   order: string[];
@@ -224,25 +261,96 @@ async function makesOutline(kernel: KernelCalls, doc: DesignDocument, sketchId: 
  * The document after an edit from `before` to `after`, with the owner's
  * rule applied: an extrude whose sketch is lost in `after` keeps the
  * sketch's points and curves from `before` (if it made an outline there
- * and the extrude has no kept shape yet); one whose sketch makes an
- * outline forgets its kept shape. The same rule as the model's `settle`.
+ * and the extrude has no kept shape yet), and where it lay when not on XY;
+ * one whose sketch makes an outline forgets its kept shape. From step 26c
+ * a sketch on a face whose name finds no face or two in `after` holds the
+ * placement it had in `before` (if it holds none yet), and forgets it once
+ * its face is back; from 26f, each point pinned to its face's edge goes
+ * where that edge is now, judged the same way (`followPins`), and stays
+ * where it was when the edge is gone. The same rules as the model's `settle`: suppression
+ * and the marker don't count, so a greyed sketch keeps nothing while its
+ * face is there, and one whose face went while it was greyed keeps where
+ * it was. `after` itself when nothing changes.
+ *
+ * Placing face sketches builds bodies: on `cache` when given (a cache the
+ * caller keeps for settling only, never the one drawn from: it keeps only
+ * the bodies this settle used), else on one of its own, freed after.
  */
-export async function settleKept(calls: KernelCalls, before: DesignDocument, after: DesignDocument): Promise<DesignDocument> {
+export async function settleKept(calls: KernelCalls, before: DesignDocument, after: DesignDocument, cache?: BodyCache): Promise<DesignDocument> {
   // Every outline `after` needs asked at once; `before`'s, needed only for a sketch just lost, as they come.
   const kernel = outlinesAtOnce(calls, [after]);
-  const next: Record<string, KeptShape> = {};
-  for (const f of after.timeline.features) {
-    if (!isSketchExtrude(f)) continue;
-    const sketch = f.intent.parameters.sketch as string;
-    if (await makesOutline(kernel, after, sketch)) continue;
-    const had = keptOf(after, f);
-    const was = contentOf(before, sketch);
-    if (had !== undefined) next[f.id] = had;
-    else if (was !== undefined && (await makesOutline(kernel, before, sketch))) next[f.id] = { points: was.points, curves: was.curves };
+  const bodies = cache ?? new BodyCache(calls);
+  const used: BodyHandle[] = [];
+  const placed = async (doc: DesignDocument) => {
+    const results = await placeOpen(doc, bodies, kernel);
+    used.push(...handlesOf(results));
+    return results;
+  };
+  let was: Promise<Record<string, FeatureResult>> | undefined;
+  /** Where a face sketch lay in `before` with nothing suppressed and no marker. */
+  const wasAt = async (id: string) => {
+    was ??= placed(before);
+    const r = (await was)[id];
+    return r?.status === "built" ? r.placement : undefined;
+  };
+  try {
+    const beforeItems = indexOf(before).items;
+    const next: Record<string, KeptShape> = {};
+    for (const f of after.timeline.features) {
+      if (!isSketchExtrude(f)) continue;
+      const sketch = f.intent.parameters.sketch as string;
+      if (await makesOutline(kernel, after, sketch)) continue;
+      const had = keptOf(after, f);
+      const was = contentOf(before, sketch);
+      if (had !== undefined) next[f.id] = had;
+      else if (was !== undefined && (await makesOutline(kernel, before, sketch))) {
+        const item = beforeItems.get(sketch)!;
+        const placement = isFaceSketch(item) ? await wasAt(sketch) : (originPlacement(item) ?? undefined);
+        next[f.id] = placement ? { points: was.points, curves: was.curves, placement } : { points: was.points, curves: was.curves };
+      }
+    }
+    const { kept: old, ...rest } = after;
+    let doc = after;
+    if (JSON.stringify(old ?? {}) !== JSON.stringify(next)) doc = Object.keys(next).length === 0 ? rest : { ...rest, kept: next };
+    if (!doc.timeline.features.some(isFaceSketch)) return doc;
+    // Held placements, decided on the document with its kept shapes settled.
+    const now = await placed(doc);
+    let changed = false;
+    const sketches: Sketch[] = [];
+    for (const content of doc.sketches) {
+      const r = now[content.id];
+      if (content.face === undefined || r?.status !== "built") {
+        sketches.push(content);
+        continue;
+      }
+      const { held, ...face } = content.face;
+      let keep = held;
+      if (r.plane === undefined) keep = undefined;
+      else if (held === undefined) keep = (await wasAt(content.id))?.plane;
+      changed ||= keep !== held;
+      const settled = keep === held ? content : { ...content, face: keep ? { ...face, held: keep } : face };
+      // Step 26f: each pinned point that found its edge goes where the edge is now; one that didn't stays where it was.
+      const followed = followedSketch(settled, r);
+      changed ||= followed !== settled;
+      sketches.push(followed);
+    }
+    return changed ? { ...doc, sketches } : doc;
+  } finally {
+    if (cache === undefined) await bodies.clear();
+    else await bodies.keepOnly(used);
   }
-  const { kept: old, ...rest } = after;
-  if (JSON.stringify(old ?? {}) === JSON.stringify(next)) return after;
-  return Object.keys(next).length === 0 ? rest : { ...rest, kept: next };
+}
+
+/**
+ * Every item of `doc` up to its last sketch on a face, built with nothing
+ * suppressed and no marker, without freeing anything: where each face
+ * sketch would lie with everything on (none for a document without one).
+ */
+async function placeOpen(doc: DesignDocument, cache: BodyCache, kernel: KernelCalls): Promise<Record<string, FeatureResult>> {
+  const last = doc.timeline.features.filter(isFaceSketch).at(-1);
+  if (last === undefined) return {};
+  const features = doc.timeline.features.map((f) => (f.suppressed ? { ...f, suppressed: false } : f));
+  return (await buildTimeline({ ...doc, timeline: { features, marker: last.id } }, cache, kernel)).results;
 }
 
 /**
@@ -251,6 +359,16 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
  * feature's result is its handle or why it has none.
  */
 export async function rebuildTimeline(doc: DesignDocument, cache: BodyCache, calls: KernelCalls): Promise<TimelineBuild> {
+  const build = await buildTimeline(doc, cache, calls);
+  await cache.keepOnly(handlesOf(build.results));
+  return build;
+}
+
+/** The bodies a rebuild's results hold. */
+const handlesOf = (results: Record<string, FeatureResult>): BodyHandle[] => Object.values(results).flatMap((r) => (r.status === "built" && r.body !== undefined ? [r.body] : []));
+
+/** `rebuildTimeline` without freeing anything: every result, its bodies in `cache` with whatever else is there. */
+async function buildTimeline(doc: DesignDocument, cache: BodyCache, calls: KernelCalls): Promise<TimelineBuild> {
   const kernel = outlinesAtOnce(calls, [doc]);
   const index = indexOf(doc);
   bodiesAtOnce(doc, cache, kernel, index);
@@ -264,7 +382,6 @@ export async function rebuildTimeline(doc: DesignDocument, cache: BodyCache, cal
     else results[f.id] = await buildFeature(doc, f, results, cache, kernel, index);
     if (marker === f.id) rolled = true;
   }
-  await cache.keepOnly(Object.values(results).flatMap((r) => (r.status === "built" && r.body !== undefined ? [r.body] : [])));
   return { order: features.map((f) => f.id), results };
 }
 
@@ -283,16 +400,110 @@ function bodiesAtOnce(doc: DesignDocument, cache: BodyCache, kernel: KernelCalls
   const building = buildingItems(doc);
   for (const f of doc.timeline.features) {
     if (isSketchItem(f) || !building.has(f)) continue;
+    // A sketch on a face is placed on its face as built, so its extrude waits for the loop.
+    const on = isSketchExtrude(f) ? index.items.get(f.intent.parameters.sketch as string) : undefined;
+    if (on !== undefined && isFaceSketch(on)) continue;
     const ask = isSketchExtrude(f)
-      ? extrudeSpec(kernel, doc, f, index).then((made) => ("status" in made ? undefined : cache.body(made.spec)))
+      ? extrudeSpec(kernel, doc, f, index, on && originPlacement(on)).then((made) => ("status" in made ? undefined : cache.body(made.spec)))
       : Promise.resolve().then(() => cache.body(specOf(doc, f)));
     ask.catch(() => {});
   }
 }
 
+/** Where a sketch on an origin plane lies; null for XY, where an extrude is built as before 26c, with no frame. */
+const originPlacement = (item: Feature): SketchPlacement | null => (item.intent.parameters.plane === "XY" ? null : { plane: planeOf(item.intent.parameters.plane as SketchPlane), side: 1 });
+
+const XY_PLACEMENT: SketchPlacement = { plane: planeOf("XY"), side: 1 };
+
+/**
+ * A sketch item's result: where it lies. On an origin plane, that plane.
+ * On a face (rule 8): greyed while the face's feature is suppressed or
+ * greyed (Q3); else the face its name finds on that feature's body, as
+ * built just before, with the frame drawn turned onto it (`frameNow`);
+ * else held (the placement kept by `settleKept`, or the frame as drawn
+ * when a file has none) with "plane lost" (no face of that name, the
+ * feature gone or not built, or the face no longer flat) or "plane
+ * ambiguous" (two or more faces would have the name; never one of them).
+ */
+async function placeSketch(f: Feature, done: Record<string, FeatureResult>, cache: BodyCache, index: DocIndex): Promise<FeatureResult> {
+  if (!isFaceSketch(f)) return { status: "built", placement: originPlacement(f) ?? XY_PLACEMENT };
+  const plane = f.intent.parameters.plane as string;
+  const p = index.sketches.get(f.id)!.face!;
+  const featureId = faceFeature(plane)!;
+  const on = done[featureId];
+  if (on?.status === "suppressed") return { status: "greyed", by: featureId };
+  if (on?.status === "greyed") return { status: "greyed", by: on.by };
+  let cause: PlaneWarning["cause"] = "plane-lost";
+  if (on?.status === "built" && on.body !== undefined && on.spec !== undefined) {
+    const view = await cache.view(on.body);
+    const names = featureNames(featureId, { spec: on.spec, curves: on.curves }, view);
+    const ref = faceReference(plane);
+    const face = resolveReference(ref, names);
+    const outward = face === null ? null : view.face_normals[face];
+    if (face !== null && outward) {
+      const placement = { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side };
+      return { status: "built", placement, ...followPins(f, index, view, names, placement.plane) };
+    }
+    if (sharedBy(ref, names) > 1) cause = "plane-ambiguous";
+  }
+  return { status: "built", placement: { plane: squared(p.held ?? p.frame)!, side: p.side }, plane: { cause, face: plane, message: planeWords(cause, f.provenance.self.label) } };
+}
+
+/**
+ * A face sketch's pinned points on its face's body as built now (step 26f,
+ * Q4): each found one where its vertex or edge is now (`pinned`; the
+ * sketch's content in `index` takes those places, so the extrude built
+ * from it uses them), each one not found left where it was, counted in a
+ * warning ("point-lost" when any lost its edge, else "point-ambiguous").
+ * Nothing for a sketch without pins.
+ */
+/** Sketch `content` with each of its pinned points where `r` (its result in a rebuild) found it (26f), or `content` itself when none moved. */
+export function followedSketch(content: Sketch, r: FeatureResult | undefined): Sketch {
+  if (r?.status !== "built" || !r.pinned) return content;
+  const to = new Map(r.pinned.map((p) => [p.point, p.at]));
+  if (!content.points.some((p) => to.has(p.id) && (to.get(p.id)![0] !== p.x || to.get(p.id)![1] !== p.y))) return content;
+  return { ...content, points: content.points.map((p) => (to.has(p.id) ? { ...p, x: to.get(p.id)![0], y: to.get(p.id)![1] } : p)) };
+}
+
+/**
+ * `doc` with every pinned point where `build` (a rebuild of `doc`) found
+ * it (26f), or `doc` itself when none moved: what the app takes into the
+ * edit's undo step once the edit has rebuilt, so the sketch is drawn, and
+ * a point whose edge goes later held, where the point followed to.
+ */
+export function followedDoc(doc: DesignDocument, build: TimelineBuild): DesignDocument {
+  let moved = false;
+  const sketches = doc.sketches.map((s) => {
+    const next = followedSketch(s, build.results[s.id]);
+    moved ||= next !== s;
+    return next;
+  });
+  return moved ? { ...doc, sketches } : doc;
+}
+
+function followPins(f: Feature, index: DocIndex, view: BodyView, names: BodyNames, plane: Plane): { pinned?: { point: string; at: SketchXY }[]; points?: PointWarning } {
+  const content = index.sketches.get(f.id)!;
+  if (!content.pins) return {};
+  const pinned: { point: string; at: SketchXY }[] = [];
+  const held = { "point-lost": 0, "point-ambiguous": 0 };
+  for (const pin of content.pins) {
+    const now = pinNow(pin, view, names, plane);
+    if ("at" in now) pinned.push({ point: pin.point, at: now.at });
+    else held[now.cause]++;
+  }
+  const at = new Map(pinned.map((p) => [p.point, p.at]));
+  if (content.points.some((p) => at.has(p.id) && (at.get(p.id)![0] !== p.x || at.get(p.id)![1] !== p.y)))
+    index.sketches.set(f.id, { ...content, points: content.points.map((p) => (at.has(p.id) ? { ...p, x: at.get(p.id)![0], y: at.get(p.id)![1] } : p)) });
+  const n = held["point-lost"] + held["point-ambiguous"];
+  if (n === 0) return { pinned };
+  const label = f.provenance.self.label;
+  const words = (["point-lost", "point-ambiguous"] as const).filter((c) => held[c] > 0).map((c) => pointWords(c, held[c], label));
+  return { pinned, points: { cause: held["point-lost"] > 0 ? "point-lost" : "point-ambiguous", points: n, message: words.join(". ") } };
+}
+
 async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string, FeatureResult>, cache: BodyCache, kernel: KernelCalls, index: DocIndex): Promise<FeatureResult> {
-  if (isSketchItem(f)) return { status: "built" };
   try {
+    if (isSketchItem(f)) return await placeSketch(f, done, cache, index);
     if (!isSketchExtrude(f)) {
       const spec = specOf(doc, f);
       return { status: "built", body: await cache.body(spec), spec };
@@ -300,11 +511,17 @@ async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string
     const sketchId = f.intent.parameters.sketch as string;
     const item = index.items.get(sketchId);
     const input = done[sketchId];
-    if (item !== undefined && input?.status === "suppressed") return { status: "failed", cause: "suppressed-input", input: sketchId, message: `${item.provenance.self.label} is suppressed` };
+    // Q3, unified in 26e: built on a suppressed sketch, or on one greyed, it is greyed too, with no warning.
+    if (item !== undefined && input?.status === "suppressed") return { status: "greyed", by: sketchId };
+    if (item !== undefined && input?.status === "greyed") return { status: "greyed", by: input.by };
     if (item !== undefined && input?.status !== "built") return { status: "failed", cause: "failed-input", input: sketchId, message: `${item.provenance.self.label} is not built` };
-    const made = await extrudeSpec(kernel, doc, f, index);
+    // A face sketch's placement is the rebuild's; an origin plane's, extrudeSpec's own.
+    const placed = item !== undefined && isFaceSketch(item) && input?.status === "built" ? input.placement : undefined;
+    const made = await extrudeSpec(kernel, doc, f, index, placed);
     if ("status" in made) return made;
-    return { status: "built", body: await cache.body(made.spec), ...made };
+    const lost = input?.status === "built" ? input.plane : undefined;
+    const source = lost && { ...lost, sketch: sketchId, message: `${f.provenance.self.label}'s source is lost: ${item!.provenance.self.label}'s plane is ${lost.cause === "plane-lost" ? "lost" : "ambiguous"}, so it stays where it was` };
+    return { status: "built", body: await cache.body(made.spec), ...made, ...(source ? { source } : {}) };
   } catch (e) {
     return { status: "failed", cause: "error", message: words(e) };
   }
@@ -324,27 +541,61 @@ export interface ExtrudeSpec {
  * is the one place the rule is applied, so Design's view, the Extrude
  * panel and what other workspaces are handed (`featureSpec`) all agree.
  */
-export async function extrudeSpec(kernel: KernelCalls, doc: DesignDocument, f: Feature, index: DocIndex = indexOf(doc)): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
+export async function extrudeSpec(
+  kernel: KernelCalls,
+  doc: DesignDocument,
+  f: Feature,
+  index: DocIndex = indexOf(doc),
+  placed?: SketchPlacement | null,
+): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
   const sketchId = f.intent.parameters.sketch as string;
   const distance = f.intent.parameters.distance as number;
+  const flip = f.intent.parameters.flip === true;
   const item = index.items.get(sketchId);
-  const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, { cause, sketch: sketchId, message, curves }, kernel);
+  const lost = (cause: LostCause, message: string, curves: string[]) => keptSpec(keptOf(doc, f), distance, flip, { cause, sketch: sketchId, message, curves }, kernel);
   // The extrude's provenance names the sketch it was made from, so a deleted one is still called by its label.
   if (item === undefined) return await lost("deleted-input", `${f.provenance.from.find((r) => r.id === sketchId)?.label ?? sketchId} was deleted`, []);
-  // The kernel extrudes along +Z: a sketch on XZ or YZ needs placing, which comes with sketches on other planes (step 26).
-  if (item.intent.parameters.plane !== "XY") return { status: "failed", cause: "error", message: `${item.provenance.self.label} is on the ${item.intent.parameters.plane} plane, and only sketches on the XY plane can be extruded so far` };
   const content = index.sketches.get(sketchId)!;
   const out = await outlineOf(kernel, content);
   // A curve the kernel refused is named in its own words ("line 1 must be …"), as before 24d2; an outline that doesn't close says whose.
   if (!("outline" in out)) return await lost(out.lost, out.refused ? out.message : `${item.provenance.self.label} has no closed outline: ${out.message}`, out.curves);
-  return { spec: { extrude: { profile: out.outline, distance } }, curves: idsOf(content) };
+  // Where the sketch lies: given by the rebuild, an origin plane's, or (asked from outside a rebuild) its face's as the timeline builds it.
+  const at = placed !== undefined ? placed : isFaceSketch(item) ? await placementOf(kernel, doc, sketchId) : originPlacement(item);
+  return { spec: placedSpec(out.outline, distance, at, flip), curves: idsOf(content) };
+}
+
+/**
+ * An extrude's spec: on XY (`at` null) as before 26c, with no frame unless
+ * flipped; else in the sketch's frame (squared up, face-sketch.ts), going
+ * the way the sketch faces (rule 2), the other way when flipped.
+ */
+function placedSpec(profile: Outline, distance: number, at: SketchPlacement | null, flip: boolean): BodySpec {
+  if (at === null) return { extrude: flip ? { profile, distance, flip: true } : { profile, distance } };
+  const back = (at.side === -1) !== flip;
+  return { extrude: { profile, distance, frame: frameOf(squared(at.plane)!), ...(back ? { flip: true } : {}) } };
+}
+
+/**
+ * Where a sketch lies in `doc` as its timeline builds up to it (for an
+ * extrude asked for outside a rebuild: featureSpec, the Extrude panel's
+ * check), built on a cache of its own that is freed after.
+ */
+async function placementOf(kernel: KernelCalls, doc: DesignDocument, sketchId: string): Promise<SketchPlacement> {
+  const cache = new BodyCache(kernel);
+  try {
+    const r = (await buildTimeline({ ...doc, timeline: { ...doc.timeline, marker: sketchId } }, cache, kernel)).results[sketchId];
+    if (r?.status !== "built" || r.placement === undefined) throw new Error(`${sketchId} is not built, so it lies nowhere`);
+    return r.placement;
+  } finally {
+    await cache.clear();
+  }
 }
 
 /** An extrude whose sketch is lost: its kept shape with the warning, or failed with the cause when it has none. */
-async function keptSpec(kept: KeptShape | undefined, distance: number, warning: KeptWarning, kernel: KernelCalls): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
+async function keptSpec(kept: KeptShape | undefined, distance: number, flip: boolean, warning: KeptWarning, kernel: KernelCalls): Promise<ExtrudeSpec | Extract<FeatureResult, { status: "failed" }>> {
   if (kept === undefined) return { status: "failed", cause: warning.cause, input: warning.sketch, message: warning.message, curves: warning.curves };
   const out = await outlineOf(kernel, kept);
   // A kept shape made an outline when it was kept; one that doesn't (a hand-edited file) fails the extrude with the kernel's words.
   if (!("outline" in out)) return { status: "failed", cause: "error", message: `the kept shape makes no outline: ${out.message}` };
-  return { spec: { extrude: { profile: out.outline, distance } }, curves: idsOf(kept), warning };
+  return { spec: placedSpec(out.outline, distance, kept.placement ?? null, flip), curves: idsOf(kept), warning };
 }

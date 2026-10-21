@@ -133,7 +133,7 @@ function modelDrag(m: Model, k: number, p: number, editing: string | null): [Mod
   return [next, { kind: "edit", step: `Move ${item.name} in the timeline` }];
 }
 
-/** What the bar must show for `m`: each item's id, name, suppressed, rolled-back and failed flags, and the marker's place. */
+/** What the bar must show for `m`: each item's id, name, suppressed, rolled-back, failed and (26e) greyed flags, and the marker's place. */
 function modelBar(m: Model) {
   const p = place(m);
   const shown = (id: string | null) => {
@@ -144,8 +144,10 @@ function modelBar(m: Model) {
     marker: p,
     items: m.items.map((i, j) => {
       const rolledBack = j >= p;
-      const failed = !rolledBack && !i.suppressed && i.kind === "extrude" && !shown(i.uses);
-      return [i.id, i.name, i.suppressed, rolledBack, failed] as const;
+      // 26e (Q3): an extrude of a suppressed sketch is greyed, not failed; one whose sketch is gone fails.
+      const greyed = !rolledBack && !i.suppressed && i.kind === "extrude" && m.items.some((x) => x.id === i.uses && x.suppressed);
+      const failed = !rolledBack && !i.suppressed && !greyed && i.kind === "extrude" && !shown(i.uses);
+      return [i.id, i.name, i.suppressed, rolledBack, failed, greyed] as const;
     }),
   };
 }
@@ -320,12 +322,12 @@ export function runBarSession(bar: Bar, steps: readonly Step[]): Failure | null 
     }
 
     const shown = bar.timelineBarItems(doc);
-    const have = { marker: shown.marker, items: shown.items.map((i) => [i.id, i.label.replace(/^\d+\. /, ""), i.suppressed, i.rolledBack, i.failed]) };
+    const have = { marker: shown.marker, items: shown.items.map((i) => [i.id, i.label.replace(/^\d+\. /, ""), i.suppressed, i.rolledBack, i.failed, i.greyed !== null]) };
     const want = modelBar(model);
     const names = doc.timeline.features.map((f) => [f.id, f.provenance.self.label]);
     const wantNames = model.items.map((i) => [i.id, i.name]);
     if (JSON.stringify(names) !== JSON.stringify(wantNames)) return fail(`the items are ${JSON.stringify(names)}, the model's ${JSON.stringify(wantNames)}`);
-    const flags = (x: typeof have) => JSON.stringify({ marker: x.marker, items: x.items.map(([id, , sup, rb, f]) => [id, sup, rb, f]) });
+    const flags = (x: typeof have) => JSON.stringify({ marker: x.marker, items: x.items.map(([id, , sup, rb, f, g]) => [id, sup, rb, f, g]) });
     if (flags(have) !== flags(want as unknown as typeof have)) return fail(`the bar shows ${flags(have)}, the model ${flags(want as unknown as typeof have)}`);
     const marker = doc.timeline.marker ?? null;
     if (marker !== model.marker) return fail(`the document's marker is ${JSON.stringify(marker)}, the model's ${JSON.stringify(model.marker)}`);

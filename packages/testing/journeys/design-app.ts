@@ -5,7 +5,7 @@
 // kernel; the viewport is a stand-in that keeps the last mesh and the last
 // selection highlight it was asked to draw. Not a journey itself.
 import assert from "node:assert/strict";
-import { ActionRegistry, ChangeNotes, createHistory, createSelection, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, type DisplayMesh, type KernelCalls, type MountedWorkspace, type SharedViewport, type SketchPointer, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
+import { ActionRegistry, ChangeNotes, createHistory, createSelection, DependencyGraph, DownstreamRegistry, emptyProject, projectFromJson, projectToJson, RepresentationRegistry, type DisplayMesh, type KernelCalls, type MountedWorkspace, type OriginPlane, type Plane, type SharedViewport, type SketchDrawing, type SketchPointer, type ViewportHighlight, type ViewportPick, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 import { designWorkspace, type DesignDocument } from "@fission/design";
 import { nodeKernel } from "../src/node-kernel.ts";
 
@@ -48,6 +48,10 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
   let mesh: DisplayMesh | null = null;
   let highlight: ViewportHighlight = { body: false, faces: [], edges: [] };
   let builds = 0;
+  // What Create sketch offered (step 26d), each Look At asked for, and the sketches last drawn.
+  let planes: { planes: readonly OriginPlane[]; faces: readonly number[] } = { planes: [], faces: [] };
+  const looks: { plane: Plane; side: 1 | -1 }[] = [];
+  let drawings: readonly SketchDrawing[] = [];
   const counted: KernelCalls = {
     call: ((op: string, ...args: unknown[]) => {
       if (op === "body_build") builds++;
@@ -62,7 +66,7 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
     fit: () => null,
     setView: () => null,
     fitSelection: () => null,
-    lookAt: () => null,
+    lookAt: (plane, side = 1) => (looks.push({ plane, side }), null),
     setOverlay() {},
     clearOverlay() {},
     showSelection: (h) => void (highlight = h),
@@ -70,8 +74,8 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
     onSketchPointer: null,
     showImage() {},
     clearImage() {},
-    showSketches() {},
-    showPlanes() {},
+    showSketches: (d) => void (drawings = d),
+    showPlanes: (p, faces = []) => void (planes = { planes: p, faces }),
   };
   let view: MountedWorkspace;
   let mounting = false;
@@ -172,11 +176,24 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
       row.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }) as unknown as Event);
       await settle();
     },
+    /** The planes and faces Create sketch last offered (empty once it is done), every Look At, the sketches last drawn. */
+    planes: () => planes,
+    looks: () => looks,
+    drawings: () => drawings,
+    /** A click on the view while nothing is sketched on: a face, an edge or a plane, as the viewport hands it over. */
+    async pick(p: Partial<ViewportPick>) {
+      viewport.onPick?.({ face: null, shift: false, ...p });
+      await settle();
+    },
     /** A click on the view at sketch point (x, y), a pixel 0.1 mm wide (snaps reach 1 mm). */
     async click(x: number, y: number) {
       const pointer: SketchPointer = { kind: "click", at: [x, y], pixel: 0.1 };
       viewport.onSketchPointer?.(pointer);
       await settle();
+    },
+    /** The pointer moved or clicked over the view at sketch point (x, y), or moved off it (null), not waited for: the kernel's rounding is still out when it returns. */
+    pointer(kind: SketchPointer["kind"], at: [number, number] | null) {
+      viewport.onSketchPointer?.({ kind, at, pixel: 0.1 });
     },
     async key(id: string) {
       view.shortcut?.(id);

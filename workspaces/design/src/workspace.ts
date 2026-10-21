@@ -2,7 +2,7 @@
 // Until the sketcher (steps 21–33) it builds primitives and ready-made
 // outlines; every other workspace will refer to its bodies, faces and edges.
 
-import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
+import { latestOnly, NO_HIGHLIGHT, type SketchPointer, type SketchXY, type Command, type Framing, type Plane, type GeometryReference, type MountedWorkspace, type Selected, type SharedViewport, type WorkspaceContext, type WorkspaceId, type WorkspacePlugin } from "@fission/core";
 import { needsRefit } from "@fission/viewport";
 import type { ShapeKind } from "./profiles.ts";
 import { insertAt, isSketchItem, partFeature, partOf, readDesignDocument, type DesignDocument, type PartKind } from "./document.ts";
@@ -15,7 +15,7 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { bodyFeatures, browserTree, rowReferences, type BrowserNode } from "./browser.ts";
+import { browserTree, rowReferences, type BrowserNode } from "./browser.ts";
 import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
@@ -24,16 +24,18 @@ import { itemName } from "./timeline-edits.ts";
 import { chooseBarAction, chooseEntry, menuEntries, openAction, type MenuHost } from "./timeline-menu.ts";
 import { pickChange } from "./picking.ts";
 import { DESIGN_SHORTCUTS, designShortcut, sketchToolKey, typedSizeKey } from "./shortcuts.ts";
-import { BodyCache, rebuildTimeline, settleKept, type KeptWarning } from "./rebuild.ts";
+import { BodyCache, followedDoc, rebuildTimeline, settleKept, type TimelineBuild } from "./rebuild.ts";
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
-import { addSketch, askOutline, outlineSourceOf, planeOf, SKETCH_STEPS, sketchCurves, sketchItem } from "./sketch.ts";
+import { addFaceSketch, addSketch, askOutline, outlineSourceOf, pinNewPoints, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane, sketchSide } from "./sketch.ts";
+import { sketchEdgeTargets } from "./face-edges.ts";
+import { sketchableFaces, sketchSpot, type SketchSpot } from "./face-pick.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
 import { aimOf, anchorOf, liveValues, NO_AIM, typedFields, withLocks, type Locks } from "./typed-entry.ts";
 import { typedBoxes } from "./typed-boxes.ts";
 import { hintOf, pointerHint } from "./pointer-hint.ts";
-import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, sketchPlaneOf, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
+import { clickAt, curveCount, hoverTool, DEFAULT_GRID, DEFAULT_GRID_SNAP, drawStep, ORIGIN_PLANES, originPlanes, sketchDrawings, startTool, switchTool, toolBusy, type SketchTool, type ToolKind } from "./sketch-tool.ts";
 import { sketchPanel } from "./sketch-panel.ts";
 import { sketchToolbar } from "./sketch-toolbar.ts";
 import type { SketchPlane } from "./document.ts";
@@ -221,6 +223,15 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
   slot.replaceChildren(fold);
 }
 
+/** A warning from the rebuild (24d2's kept shape; 26e's lost plane and lost source): its item, the Timeline rows it marks, the sketch it is about, its words, and whether it is a lost plane. */
+interface Warned {
+  item: string;
+  rows: string[];
+  sketch: string;
+  words: string;
+  lost?: true;
+}
+
 function mount(ctx: WorkspaceContext): MountedWorkspace {
   const panel = propertiesPanel(ctx.properties);
   const { inputs } = panel;
@@ -323,6 +334,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   // bodies no feature holds are freed. Rebuilds run one after another, so
   // one never frees a body another is about to show.
   const bodies = new BodyCache(kernel);
+  // Its own bodies for settling a sketch edit's held placements (26c), kept between clicks so each settles without building the timeline again; clicks settle one after another.
+  const settleBodies = new BodyCache(kernel);
   let rebuilds: Promise<unknown> = Promise.resolve();
   const build = latestOnly((doc: DesignDocument) => {
     const next = rebuilds.then(() => buildPart(doc));
@@ -342,30 +355,53 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const feature = partFeature(doc);
     const build = await rebuildTimeline(doc, bodies, kernel);
     failedNow = new Set(Object.keys(build.results).filter((id) => build.results[id].status === "failed"));
+    // Where each sketch on a face was placed (26c), so it is drawn there.
+    placedNow = new Map(Object.entries(build.results).flatMap(([id, r]) => (r.status === "built" && r.placement ? [[id, r.placement.plane] as const] : [])));
     const result = feature && build.results[feature.id];
     let failure: string | undefined;
     if (result?.status === "failed") failure = result.message;
     else if (feature && result && (result.status !== "built" || result.body === undefined || result.spec === undefined)) failure = `${feature.provenance.self.label} is ${result.status}`;
     const drawn = await shownBodies(doc, build, bodies);
-    let kept: { feature: string; label: string; warning: KeptWarning } | undefined;
-    for (const f of bodyFeatures(doc)) {
-      const r = build.results[f.id];
-      if (r.status === "built" && r.warning) kept = { feature: f.id, label: f.provenance.self.label, warning: r.warning };
-    }
-    return { scene: joinBodies(drawn), kept, failure };
+    return { scene: joinBodies(drawn), warnings: warningsOf(doc, build), failure, followed: followedDoc(doc, build) };
   }
-  /** The part built from a kept shape (the owner's rule): shown on its timeline row and, once the sketch is finished, in the panel. */
-  let keptNow: { feature: string; label: string; warning: KeptWarning } | undefined;
+  /**
+   * The rebuild's warnings in timeline order: an extrude built from its kept
+   * shape (the owner's rule: on its row and its sketch's), and from 26e a
+   * sketch whose plane is lost (Q1, Q6: it stays where it was, drawn red)
+   * and an extrude built from one (its source is lost).
+   */
+  function warningsOf(doc: DesignDocument, build: TimelineBuild): Warned[] {
+    const out: Warned[] = [];
+    for (const f of doc.timeline.features) {
+      const r = build.results[f.id];
+      if (r?.status !== "built") continue;
+      const label = f.provenance.self.label;
+      if (r.plane) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.plane.message}.`, lost: true });
+      if (r.warning) out.push({ item: f.id, rows: [f.id, r.warning.sketch], sketch: r.warning.sketch, words: `${label} keeps its last shape. ${r.warning.message}.` });
+      if (r.source) out.push({ item: f.id, rows: [f.id], sketch: r.source.sketch, words: `${r.source.message}.` });
+      if (r.points) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.points.message}.` });
+    }
+    return out;
+  }
+  /** The last rebuild's warnings: shown on their timeline rows and items and, once the sketch each is about is finished, in the panel. */
+  let warningsNow: Warned[] = [];
+  /** The warnings to show now: while a sketch is being edited, none about it (the outline status says what is open; the owner's rule: a warning after Finish Sketch). */
+  const shownWarnings = () => warningsNow.filter((w) => !(mode.kind === "edit" && editingSketch?.id === w.sketch));
+  /** Each row's warning words, by row (a row with two warnings has both). */
+  function warnedRows(): Map<string, string> {
+    const rows = new Map<string, string>();
+    for (const w of shownWarnings()) for (const row of w.rows) rows.set(row, rows.has(row) ? `${rows.get(row)} ${w.words}` : w.words);
+    return rows;
+  }
   function showKept() {
-    const words = keptNow && `${keptNow.label} keeps its last shape. ${keptNow.warning.message}.`;
-    // While its sketch is being edited, no warning: the outline status says what is open (the owner's rule: a warning after Finish Sketch).
-    const drawing = mode.kind === "edit" && editingSketch?.id === keptNow?.warning.sketch;
-    panel.showWarning(drawing ? "" : (words ?? ""));
+    const shown = shownWarnings();
+    panel.showWarning(shown.map((w) => w.words).join(" "));
+    const rows = warnedRows();
     for (const row of ctx.browser.querySelectorAll<HTMLElement>(".tree-row")) {
-      const marked = keptNow !== undefined && (row.dataset.node === keptNow.feature || row.dataset.node === keptNow.warning.sketch);
-      if (marked) row.title = words!;
+      const words = rows.get(row.dataset.node!);
+      if (words !== undefined) row.title = words;
       else if (row.classList.contains("kept")) row.removeAttribute("title");
-      row.classList.toggle("kept", marked);
+      row.classList.toggle("kept", words !== undefined);
     }
   }
 
@@ -456,8 +492,19 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(START_FRESH_STEP, undefined, freshDesign());
   }
 
+  /** The sketches whose plane the last rebuild found lost (26e): drawn red where they stay. */
+  const lostSketches = () => new Set(warningsNow.flatMap((w) => (w.lost ? [w.item] : [])));
   /** The items the last rebuild failed (24f3: red in the bar and the browser's Timeline rows); the data's own failures are added by `timelineBarItems`. */
   let failedNow: ReadonlySet<string> = new Set();
+  /** Where the last rebuild placed each sketch on a face (26c), by sketch id: drawn and looked at there. */
+  let placedNow: ReadonlyMap<string, Plane> = new Map();
+  /**
+   * What a pointer on sketch `id` may snap to on its face's edges (26f):
+   * their ends, middles and centres in the plane the sketch is drawn in
+   * (the last rebuild's placement, or, for a sketch just made on a face and
+   * not rebuilt since, the frame it was made in).
+   */
+  const edgeTargets = (id: string) => sketchEdgeTargets(designDoc(), id, lastScene, sketchPlane(designDoc(), id, placedNow));
   /** The bar's item whose ⋯ shows (a click or tap picked it). */
   let picked: string | null = null;
   /** The sketch being edited, whose own Suppress and Delete are off. */
@@ -468,6 +515,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     if (!ctx.timeline) return;
     showTimelineBar(ctx.timeline, doc, {
       failed: failedNow,
+      warnings: warnedRows(),
       picked,
       onPick: (id) => {
         picked = picked === id ? null : id;
@@ -489,18 +537,29 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     });
   }
 
-  /** The bar's items and the browser's Timeline rows red for every failed item (24f3), and greyed for every item after the marker (24f5). */
+  /**
+   * The bar's items and the browser's Timeline rows red for every failed
+   * item (24f3), greyed for every item after the marker (24f5), and from 26e
+   * greyed for every item built on a suppressed one (Q3), its title saying
+   * which. Rows with a warning are `showKept`'s.
+   */
   function showFailed(doc: DesignDocument) {
     showBar(doc);
     const { items } = timelineBarItems(doc, failedNow);
     const failed = new Set(items.filter((i) => i.failed).map((i) => i.id));
     const rolledBack = new Set(items.filter((i) => i.rolledBack).map((i) => i.id));
+    const greyed = new Map(items.flatMap((i) => (i.greyed === null ? [] : [[i.id, i.greyed] as const])));
     for (const row of ctx.browser.querySelectorAll<HTMLElement>('[data-node="timeline"] .tree-row')) {
-      const red = failed.has(row.dataset.node!);
-      const grey = rolledBack.has(row.dataset.node!);
-      row.classList.toggle("timeline-menu", red || grey);
+      const id = row.dataset.node!;
+      const red = failed.has(id);
+      const grey = rolledBack.has(id);
+      const by = greyed.get(id);
+      row.classList.toggle("timeline-menu", red || grey || by !== undefined);
       row.classList.toggle("timeline-menu-failed", red);
       row.classList.toggle("timeline-menu-rolled-back", grey);
+      row.classList.toggle("timeline-menu-greyed", by !== undefined);
+      if (by !== undefined) row.title = `Greyed: ${by} is suppressed`;
+      else if (row.title.startsWith("Greyed: ")) row.removeAttribute("title");
     }
   }
 
@@ -586,9 +645,18 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!shown) return void (missed = true);
       missed = false;
       const { scene, failure } = value;
+      // Points pinned to a face's edges (26f) where this rebuild found them, taken into the edit's own undo step (the
+      // typing in a box still one step): drawn there, and held there should their edge go. Not while an undo or redo is
+      // putting a snapshot back (it was taken in when that step was made), nor once the design has changed again.
+      if (value.followed !== doc && designDoc() === doc && !ctx.history.restoring()) {
+        ctx.project.workspaces.design = value.followed;
+        if (saved?.doc === doc) saved = { ...saved, doc: value.followed };
+        if (shownDoc === doc) shownDoc = value.followed;
+        ctx.history.amend(true);
+      }
       // The rows were drawn before the rebuild said what failed: a failed item has no Body row.
       if (!sameIds(rowsFailed, failedNow)) drawBrowser(doc);
-      keptNow = value.kept;
+      warningsNow = value.warnings;
       showKept();
       showFailed(doc);
       // Built from the current inputs: the feature and the numbers are fresh. A failed part is not (its numbers stay, marked).
@@ -598,6 +666,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       }
       markStale(failure !== undefined);
       viewport.showBody(scene.mesh);
+      // A sketch on a face is drawn where this rebuild placed it (26c).
+      drawSketches();
       const empty = scene.bodies.length === 0;
       // A different shape is a new part: frame it (not when Undo or Redo put
       // it back: the camera stays unless the body no longer fits). With no
@@ -620,6 +690,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const outlines = [...doc.profiles.map((p) => p.id), ...doc.sketches.flatMap((s) => (s.curves.length > 0 ? [s.id] : []))];
       const { kept, dropped, shared } = survivors(ctx.selection.items, scene, outlines);
       lastScene = scene;
+      if (mode.kind === "pick") viewport.showPlanes(originPlanes(), sketchableFaces(scene)); // the faces offered are this scene's
       const part = partFeature(doc);
       partShown = scene.bodies.find((b) => b.feature === part?.id) ?? (failure === undefined ? null : partShown);
       note = droppedNote(dropped, shared, selectedSketches);
@@ -634,7 +705,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     } catch (e) {
       if (!shown) return void (missed = true);
       missed = false;
-      keptNow = undefined;
+      warningsNow = [];
       if (designDoc() === doc && !sameIds(rowsFailed, failedNow)) drawBrowser(doc);
       showKept();
       if (designDoc() === doc) showFailed(doc);
@@ -690,7 +761,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const locked = Object.keys(locks).length > 0;
     const aim = editing && aimOf(doc, editing.tool, editing.pointer, locks);
     // A typed arc angle goes the pointer's way round however little it went (typed-entry.ts withLocks): the preview from the tool the click will use.
-    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, tool: withLocks(editing.tool, locks, editing.pointer), pointer: aim, gridSnap }), locked ? null : (editing?.snap ?? null), editing?.pixel));
+    viewport.showSketches(withSnap(sketchDrawings(doc, editing && { ...editing, tool: withLocks(editing.tool, locks, editing.pointer), pointer: aim, gridSnap }, placedNow, lostSketches()), locked ? null : (editing?.snap ?? null), editing?.pixel));
     const anchor = editing && anchorOf(doc, editing.tool);
     if (!editing) return (typed.hide(), hint.hide());
     const width = viewport.element.clientWidth;
@@ -721,20 +792,42 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     markStale();
   }
 
-  /** Create sketch: the origin planes appear at the origin and the panel asks for one. */
+  /** Create sketch: the origin planes appear at the origin, the flat faces of the bodies on screen light under the pointer (26d), and the panel asks for one. */
   function startSketch() {
     leaveExtrude();
     leaveEdit();
     if (mode.kind === "edit") leaveSketch();
     mode = { kind: "pick" };
-    viewport.showPlanes(originPlanes());
+    viewport.showPlanes(originPlanes(), sketchableFaces(lastScene));
     sketchBox.showPick();
   }
 
   /** A plane picked: the new sketch (one undo step), looked at straight down, ready to draw on. */
   function pickPlane(plane: SketchPlane) {
-    if (mode.kind !== "pick" || !ORIGIN_PLANES.some((p) => p.id === plane && p.offered)) return;
-    const made = addSketch(designDoc(), plane);
+    if (mode.kind !== "pick" || !ORIGIN_PLANES.some((p) => p.id === plane)) return;
+    startNewSketch(addSketch(designDoc(), plane));
+  }
+
+  /**
+   * A face picked (26d, face-pick.ts): a flat one gets the new sketch on it,
+   * drawn with the frame its face gives it (rule 8) and looked at from
+   * outside the body; a curved one, or one with no name of its own, is
+   * refused in the panel's words and the planes stay offered.
+   */
+  function pickFace(spot: SketchSpot & { kind: "face" | "refused" }) {
+    if (mode.kind !== "pick") return;
+    if (spot.kind === "refused") return sketchBox.showError(spot.message);
+    let made: ReturnType<typeof addFaceSketch>;
+    try {
+      made = addFaceSketch(designDoc(), spot.face, spot.drawn);
+    } catch (e) {
+      return sketchBox.showError(e instanceof Error ? e.message : String(e));
+    }
+    startNewSketch(made);
+  }
+
+  /** A new sketch made on a plane or a face: recorded (one undo step), opened with the line tool, looked at square on. */
+  function startNewSketch(made: { doc: DesignDocument; id: string }) {
     viewport.showPlanes([]);
     applySketchEdit(made.doc, SKETCH_STEPS.create, made.id);
     editingSketch = { id: made.id, grid: DEFAULT_GRID, typed: String(DEFAULT_GRID), tool: "line" };
@@ -760,10 +853,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     lookAtSketch();
   }
 
-  /** Look At (SF2): the camera square onto the edited sketch's plane, framing the body and what is drawn. */
+  /** Look At (SF2): the camera square onto the edited sketch's plane, framing the body and what is drawn; from outside the body on a back or bottom face (26d). */
   function lookAtSketch() {
     if (mode.kind !== "edit" || !editingSketch) return;
-    viewport.lookAt(planeOf(sketchPlaneOf(designDoc(), editingSketch.id)));
+    const doc = designDoc();
+    viewport.lookAt(sketchPlane(doc, editingSketch.id, placedNow), sketchSide(doc, editingSketch.id));
   }
 
   /** Edits the sketch named in editingSketch with its tool, nothing clicked yet. */
@@ -877,7 +971,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       extrudeBox.showError("");
       void checkExtrude(id);
     },
-    ok: (typed) => void finishExtrude(typed),
+    ok: (typed, flip) => void finishExtrude(typed, flip),
     cancel: () => leaveExtrude(),
   });
 
@@ -929,7 +1023,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * recorded, as one undo step ("Replace the part with Extrude of Sketch
    * 1"). A refused distance keeps the panel open and says why.
    */
-  async function finishExtrude(typed: string) {
+  async function finishExtrude(typed: string, flip: boolean) {
     const id = extruding?.sketch;
     if (!id) return;
     const distance = Number(typed);
@@ -937,7 +1031,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const before = designDoc();
     let made: ReturnType<typeof extrudeSketch>;
     try {
-      made = extrudeSketch(before, id, distance);
+      made = extrudeSketch(before, id, distance, flip);
       await buildSpec(kernel, await featureSpec(kernel, made.doc, made.doc.timeline.features.find((f) => f.id === made.id)!));
     } catch (e) {
       if (extruding?.sketch === id) extrudeBox.showError(e instanceof Error ? e.message : String(e));
@@ -953,7 +1047,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
 
   // Edit feature (step 25a2): an earlier feature's sizes from its timeline item or browser row.
   const editBox = featureEditPanel(ctx.properties, {
-    ok: (typed) => void finishEdit(typed),
+    ok: (typed, flip) => void finishEdit(typed, flip),
     cancel: () => leaveEdit(),
   });
 
@@ -975,7 +1069,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * after it. A refused size keeps the panel open with the kernel's words
    * and records nothing; sizes that change nothing close it.
    */
-  async function finishEdit(typed: Partial<Record<SizeKey, string>>) {
+  async function finishEdit(typed: Partial<Record<SizeKey, string>>, flip?: boolean) {
     const id = editBox.editing;
     if (id === null) return;
     const before = designDoc();
@@ -987,7 +1081,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         const label = f.shape === "sketch-extrude" ? "distance" : parameterRows(f.shape).find((r) => r.key === read.bad)!.label.toLowerCase();
         return editBox.showError(`Type the ${label} in mm.`);
       }
-      next = editFeature(before, id, read.sizes);
+      next = editFeature(before, id, read.sizes, flip);
     } catch (e) {
       return editBox.showError(e instanceof Error ? e.message : String(e));
     }
@@ -1012,13 +1106,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const r = rounding(at, grid, gridSnap, pixel);
     return r.op === "snap_to_grid" ? kernel.call("snap_to_grid", ...r.args) : kernel.call("place_freely", ...r.args);
   };
-  const snapMove = latestOnly(roundPointer);
+  /** The pointer's moves counted, the pointer leaving the view among them: a move's rounding answered after a later move is dropped, so it never shows a snap where the pointer was. */
+  let moves = 0;
   /** Clicks are handled one after another, each on the document the last one left. */
   let clicks = Promise.resolve();
   const onSketchPointer = (pointer: SketchPointer) => {
     if (mode.kind !== "edit") return;
     const at = pointer.at;
     if (pointer.kind === "move") {
+      const move = ++moves;
       if (!at) {
         mode.pointer = mode.snap = null;
         return drawSketches();
@@ -1026,9 +1122,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // The centre arc follows which way the pointer goes round its centre, from every move (a reply the kernel drops as stale must not lose a turn).
       mode.tool = hoverTool(mode.tool, at);
       // A hover off the modelling range just doesn't move the preview.
-      void snapMove(at, mode.grid, pointer.pixel).then(({ current, value }) => {
-        if (!current || mode.kind !== "edit") return;
-        mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel);
+      void roundPointer(at, mode.grid, pointer.pixel).then((value) => {
+        if (move !== moves || mode.kind !== "edit") return;
+        mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel, edgeTargets(mode.tool.sketch));
         mode.pointer = mode.snap.at;
         mode.pixel = pointer.pixel;
         drawSketches();
@@ -1048,17 +1144,19 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       // The tool changed while the kernel snapped (L, R, C or Escape): the click was for the old tool, so it is dropped.
       if (mode.kind !== "edit" || toolChanges !== changes) return;
       // The click lands where the hover showed it would: where it was rounded to (free or on the grid), or on the point or line-up snap.ts finds.
-      const snapped = snapOnSketch(designDoc(), mode.tool, at, rounded, pointer.pixel).at;
+      const edges = edgeTargets(mode.tool.sketch);
+      const snapped = snapOnSketch(designDoc(), mode.tool, at, rounded, pointer.pixel, edges).at;
       // A typed size overrules the pointer for what it locks (SF4): the point goes where the locks put it, exactly.
       const aim = aimOf(designDoc(), mode.tool, snapped, locks);
       if (!aim) return sketchBox.showError(NO_AIM);
       const before = designDoc();
       const done = clickAt(before, withLocks(mode.tool, locks, snapped), aim);
       // The owner's rule (rebuild.ts): an extrude whose sketch this edit breaks keeps the sketch as it was, in the same undo step.
-      let next = done.doc;
+      // A new point on the face's edges is pinned there (26f), in the same step.
+      let next = pinNewPoints(before, done.doc, done.tool.sketch, edges);
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, done.doc);
+          next = await settleKept(kernel, before, next, settleBodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }
@@ -1068,8 +1166,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       sketchBox.showError(done.note ?? "");
       if (done.tool !== mode.tool) unlock();
       mode.tool = done.tool;
-      // The pointer is still there: what it snaps to now, with the new point and the tool's next step.
-      mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel);
+      // The pointer is still there: what it snaps to now, with the new point and the tool's next step. (A finger has
+      // left the view by now, and this keeps the hint and the boxes by the tap; sketch-hover.journey.ts.)
+      mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel, edges);
       mode.pointer = mode.snap.at;
       mode.pixel = pointer.pixel;
       if (done.drew) applySketchEdit(next, drawStep(done.tool), done.tool.sketch);
@@ -1087,11 +1186,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const changes = toolChanges;
       const before = designDoc();
       const done = clickAt(before, withLocks(mode.tool, locks, mode.pointer), aim);
-      // As a click: an extrude whose sketch this breaks keeps the sketch as it was (rebuild.ts), in the same undo step.
-      let next = done.doc;
+      // As a click: an extrude whose sketch this breaks keeps the sketch as it was (rebuild.ts), in the same undo step, and a point on the face's edges is pinned (26f).
+      let next = pinNewPoints(before, done.doc, done.tool.sketch, edgeTargets(done.tool.sketch));
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, done.doc);
+          next = await settleKept(kernel, before, next, settleBodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }
@@ -1116,8 +1215,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   const onPick: SharedViewport["onPick"] = (pick) => {
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
     if (!doc) return;
-    // Choosing a plane for Create sketch: only an offered plane counts.
-    if (mode.kind === "pick") return void (pick.plane && pickPlane(pick.plane as SketchPlane));
+    // Choosing where Create sketch puts the sketch: an origin plane, or a flat face of a body on screen (26d).
+    if (mode.kind === "pick") {
+      const spot = sketchSpot(pick, lastScene);
+      if (spot?.kind === "plane") pickPlane(spot.plane);
+      else if (spot) pickFace(spot);
+      return;
+    }
     const c = pickChange(pick, lastScene);
     if (c.change === "set") ctx.selection.set([c.item]);
     else if (c.change === "toggle") ctx.selection.toggle(c.item);
@@ -1130,7 +1234,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     viewport.onSketchPointer = onSketchPointer;
     viewport.element.addEventListener("pointermove", onViewportMove);
     viewport.element.addEventListener("pointerdown", onViewportMove); // a tap moves no pointer first
-    if (mode.kind === "pick") viewport.showPlanes(originPlanes());
+    if (mode.kind === "pick") viewport.showPlanes(originPlanes(), sketchableFaces(lastScene));
     drawSketches();
     stopWatching = ctx.selection.onChange(() => {
       // The user's next change of selection retires the note about dropped items.
@@ -1151,7 +1255,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Asleep, the sketches stay drawn as finished ones: no grid, no planes to pick.
     viewport.showPlanes([]);
     const doc = ctx.project.workspaces.design as DesignDocument | undefined;
-    viewport.showSketches(doc ? sketchDrawings(doc, null) : []);
+    viewport.showSketches(doc ? sketchDrawings(doc, null, placedNow, lostSketches()) : []);
     viewport.showSelection(NO_HIGHLIGHT);
     stopWatching();
   }
@@ -1222,6 +1326,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!putAwayByRestore) editingSketch = null;
       sleep();
       void bodies.close();
+      void settleBodies.close();
       viewport.showSketches([]);
       typed.element.remove();
       hint.element.remove();

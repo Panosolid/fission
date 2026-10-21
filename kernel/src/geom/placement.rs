@@ -59,6 +59,13 @@ impl Placement {
         Placement { rotation: (q * self.rotation).normalize(), shift: q * (self.shift - pivot) + pivot }
     }
 
+    /// This placement followed by `outer`: x → outer(self(x)), the
+    /// rotation composed and renormalised as in `turned`, the shift carried
+    /// by `outer` as a point (the matrix form, as `point` rounds).
+    pub fn then(self, outer: Placement) -> Placement {
+        Placement { rotation: (outer.rotation * self.rotation).normalize(), shift: outer.point(self.shift) }
+    }
+
     pub fn is_identity(&self) -> bool {
         *self == Self::IDENTITY
     }

@@ -10,6 +10,12 @@
 .feature-edit .feature-edit-note { color: #8b95a3; font-size: 0.9em; }
 .feature-edit .feature-edit-buttons { display: flex; gap: 6px; margin-top: 4px; }
 .feature-edit button:disabled { opacity: 0.45; cursor: default; }
+/* Flip (26c): a tick box before its word, the whole row a target for the pointer. */
+.feature-edit .feature-edit-flip { display: flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; }
+.feature-edit .feature-edit-flip input { width: 18px; height: 18px; margin: 0; }
 @media (max-width: 700px) {
   .feature-edit button, .feature-edit input { min-height: 44px; }
+  /* The row is the 44 px target; the box itself stays a box. */
+  .feature-edit .feature-edit-flip { min-height: 44px; }
+  .feature-edit .feature-edit-flip input { min-height: 0; width: 22px; height: 22px; }
 }

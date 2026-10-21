@@ -39,8 +39,25 @@
 //   again the extrude builds from it and forgets the kept shape. With no
 //   kept shape (the sketch was already broken when the extrude was made, or
 //   when it was lost) it fails with the cause; nothing is deleted silently.
-// - An item whose input is suppressed fails with "suppressed-input", kept
-//   shape or not.
+// - Suppressing an item greys every item built on it, all the way down,
+//   with no warning (Ben's Fusion answer Q3, step 26e; until 26e an
+//   extrude of a suppressed sketch failed with "suppressed-input"). A
+//   greyed item says which suppressed item greys it (`by`).
+//
+// Sketches on a face (step 26e: the timeline's rules on a face sketch,
+// the naming model's rules 6 to 9 on the faces these sessions make): a
+// sketch may be drawn on the top of a box or cylinder or the end cap of an
+// extrude, every one flat and facing +Z, so by rule 8 its frame is XY
+// lifted to the face (the nearest origin plane, turned not at all; its
+// origin the face plane's nearest point to the world's origin) and its
+// corners read in world x and y. It follows its face's height as earlier
+// items change; when its face is gone (its feature deleted, or failed) it
+// stays at the height it last had ("held", kept by `settle`, judged with
+// nothing suppressed and no marker) with "plane-lost", and an extrude of
+// it is built there saying its source is lost (rule 7). It is built on
+// its face's feature, so it can't move before it, and it is greyed while
+// that feature is suppressed or greyed. An extrude of it starts on the
+// face and goes up: its body is the XY one lifted by the face's height.
 // - New items go in just after the marker, and the marker moves onto them.
 // - Deleting the item the marker is on moves the marker to the item before
 //   it ("start" if there is none).
@@ -64,19 +81,35 @@ export type ModelShape =
 
 export type PresetKind = "box" | "cylinder" | "sphere";
 
+/** The faces a sketch can be drawn on here (26e): a box's or cylinder's top, an extrude's end cap. */
+export type CapRole = "top" | "end";
+
+/**
+ * Where a sketch on a face is (26e): the face's feature and role, the
+ * height it was drawn at, and the height it holds while its face is lost
+ * (left out while the face is there).
+ */
+export interface OnFace {
+  feature: string;
+  role: CapRole;
+  drawn: number;
+  held?: number;
+}
+
 export type ModelItem =
-  /** `curves[k]` is curve k's id, or null once it is deleted. */
-  | { id: string; kind: "sketch"; shape: ModelShape; curves: (string | null)[]; suppressed: boolean }
+  /** `curves[k]` is curve k's id, or null once it is deleted; `on` for a sketch on a face (26e). */
+  | { id: string; kind: "sketch"; shape: ModelShape; curves: (string | null)[]; suppressed: boolean; on?: OnFace }
   /** `kept`: the sketch as it was before the edit that lost it, while it is lost (the owner's rule above). */
   | { id: string; kind: "extrude"; sketch: string; distance: number; suppressed: boolean; kept?: Kept }
   | { id: string; kind: "box"; width: number; depth: number; height: number; suppressed: boolean }
   | { id: string; kind: "cylinder"; diameter: number; height: number; suppressed: boolean }
   | { id: string; kind: "sphere"; diameter: number; suppressed: boolean };
 
-/** An extrude's last shape: its sketch's shape and curve ids just before the sketch was lost. */
+/** An extrude's last shape: its sketch's shape and curve ids just before the sketch was lost, and the height it lay at when that was a face sketch (26e). */
 export interface Kept {
   shape: ModelShape;
   curves: string[];
+  lift?: number;
 }
 
 /** null: everything is built; "start": nothing is; an id: built up to and including that item. */
@@ -141,7 +174,7 @@ export interface ModelBody {
   edges: ModelEdge[];
 }
 
-export type FailCause = "deleted-input" | "suppressed-input" | "failed-input" | "open-outline" | "invalid-outline";
+export type FailCause = "deleted-input" | "failed-input" | "open-outline" | "invalid-outline";
 
 /** Why an extrude is built from its kept shape: its sketch is gone, or makes no outline. */
 export type LostCause = "deleted-input" | "open-outline" | "invalid-outline";
@@ -153,8 +186,15 @@ export interface KeptWarning {
 }
 
 export type ItemResult =
-  | { status: "built"; body?: ModelBody; warning?: KeptWarning }
+  /**
+   * A sketch on a face says the height it lies at (`lift`) and, while held
+   * there, "plane-lost"; an extrude of a held sketch names it as its lost
+   * `source` (26e).
+   */
+  | { status: "built"; body?: ModelBody; warning?: KeptWarning; lift?: number; plane?: "plane-lost"; source?: string }
   | { status: "suppressed" }
+  /** Built on a suppressed item (`by`), directly or through others: off, with no warning (Q3, 26e). */
+  | { status: "greyed"; by: string }
   | { status: "rolled-back" }
   | { status: "failed"; cause: FailCause; input?: string };
 
@@ -169,6 +209,8 @@ export type RefuseCause = "before-dependency" | "after-dependent";
 /** An edit with its targets named: what the session runner hands the model and the code under test. */
 export type ConcreteOp =
   | { op: "add-sketch"; shape: ModelShape }
+  /** A sketch drawn on a built face (26e): a box's or cylinder's top, an extrude's end. */
+  | { op: "add-face-sketch"; shape: ModelShape; face: FaceName }
   | { op: "add-extrude"; sketch: string; distance: number }
   | { op: "add-preset"; kind: PresetKind; sizes: number[] }
   | { op: "set-size"; item: string; key: SizeKey; value: number }
@@ -212,7 +254,11 @@ export type ModelFault =
   | "save-drops-kept"
   | "warning-dropped"
   | "full-replay"
-  | "body-kept-by-item";
+  | "body-kept-by-item"
+  | "suppress-fails-dependents"
+  | "greyed-warns"
+  | "lost-plane-not-held"
+  | "face-sketch-unbound";
 
 export const MODEL_FAULTS: readonly ModelFault[] = [
   "reorder-past-dependency",
@@ -239,6 +285,10 @@ export const MODEL_FAULTS: readonly ModelFault[] = [
   "warning-dropped",
   "full-replay",
   "body-kept-by-item",
+  "suppress-fails-dependents",
+  "greyed-warns",
+  "lost-plane-not-held",
+  "face-sketch-unbound",
 ];
 
 /** "item-3/side:curve-5": a face name as one string, for maps and messages. */
@@ -256,8 +306,8 @@ export function edgeName(a: FaceName, b: FaceName, ordered: boolean): EdgeName {
 /** "item-3/side:curve-5>side:curve-6", "item-3/side:curve-5+start": an edge name as one string. */
 export const edgeKey = (n: EdgeName): string => `${n.feature}/${facePart(n.faces[0])}${n.ordered ? ">" : "+"}${facePart(n.faces[1])}`;
 
-/** The ids an item reads: an extrude its sketch; nothing else yet. */
-export const dependsOn = (item: ModelItem): string[] => (item.kind === "extrude" ? [item.sketch] : []);
+/** The ids an item reads: an extrude its sketch, a sketch on a face that face's feature (26e). */
+export const dependsOn = (item: ModelItem): string[] => (item.kind === "extrude" ? [item.sketch] : item.kind === "sketch" && item.on ? [item.on.feature] : []);
 
 export const emptyDoc = (): ModelDoc => ({ nextId: 1, items: [], marker: null });
 
@@ -497,8 +547,9 @@ export function outlineProblem(s: Pick<SketchItem, "shape" | "curves">): LostCau
 
 /**
  * Rebuilds the document from scratch: every item in order, nothing after
- * the marker, suppressed items skipped, an item whose input is missing,
- * suppressed or failed failed with that cause.
+ * the marker, suppressed items skipped, an item built on a suppressed or
+ * greyed one greyed (26e), an item whose input is missing or failed failed
+ * with that cause.
  */
 export function rebuild(doc: ModelDoc, faults: ReadonlySet<ModelFault> = new Set()): Rebuild {
   const results: Record<string, ItemResult> = {};
@@ -513,30 +564,63 @@ export function rebuild(doc: ModelDoc, faults: ReadonlySet<ModelFault> = new Set
   return { order: doc.items.map((i) => i.id), results };
 }
 
+/** Greyed by what greys `input` (26e, Q3): `id` itself when it is suppressed, else whatever greys it; null when it is on. */
+const greyedBy = (input: ItemResult | undefined, id: string): string | null => (input?.status === "suppressed" ? id : input?.status === "greyed" ? input.by : null);
+
 function build(item: ModelItem, byId: Map<string, ModelItem>, done: Record<string, ItemResult>, faults: ReadonlySet<ModelFault>): ItemResult {
-  if (item.kind === "sketch") return { status: "built" };
+  if (item.kind === "sketch") return placeSketch(item, done, faults);
   if (item.kind !== "extrude") return { status: "built", body: presetBody(item, faults) };
   const sketch = byId.get(item.sketch);
   if (sketch === undefined) return lost(item, "deleted-input", faults);
   const input = done[item.sketch];
   // Only reachable with "reorder-past-dependency" planted: the sketch comes later.
   if (input === undefined) return { status: "failed", cause: "failed-input", input: item.sketch };
-  if (input.status === "suppressed") return { status: "failed", cause: "suppressed-input", input: item.sketch };
+  const by = greyedBy(input, item.sketch);
+  // Planted bug: the rule before 26e, an extrude of a suppressed sketch failing rather than greyed.
+  if (by !== null) return faults.has("suppress-fails-dependents") && input.status === "suppressed" ? { status: "failed", cause: "failed-input", input: item.sketch } : { status: "greyed", by };
   if (input.status !== "built") return { status: "failed", cause: "failed-input", input: item.sketch };
   if (sketch.kind !== "sketch") throw new Error(`${item.id} extrudes ${sketch.id}, which is not a sketch`);
+  // Rule 7: built where its held sketch lies, saying its source is lost.
+  const source = input.plane ? { source: item.sketch } : {};
   const problem = outlineProblem(sketch);
-  if (problem !== null) return lost(item, problem, faults);
+  if (problem !== null) return { ...lost(item, problem, faults), ...source };
   // Planted bug: the kept shape is used even once the sketch makes an outline again.
-  if (faults.has("kept-not-forgotten") && item.kept) return lost(item, "open-outline", faults);
-  return { status: "built", body: extrudeBody(item.id, sketch.shape, sketch.curves as string[], item.distance, faults) };
+  if (faults.has("kept-not-forgotten") && item.kept) return { ...lost(item, "open-outline", faults), ...source };
+  return { status: "built", body: lifted(extrudeBody(item.id, sketch.shape, sketch.curves as string[], item.distance, faults), input.lift), ...source };
 }
 
-/** An extrude whose sketch is lost: its kept shape with a warning, or failed with the cause when it has none. */
+/** An extrude whose sketch is lost: its kept shape (where it lay) with a warning, or failed with the cause when it has none. */
 function lost(item: Extract<ModelItem, { kind: "extrude" }>, cause: LostCause, faults: ReadonlySet<ModelFault>): ItemResult {
   if (item.kept === undefined) return { status: "failed", cause, input: item.sketch };
-  const body = extrudeBody(item.id, item.kept.shape, item.kept.curves, item.distance, faults);
+  const body = lifted(extrudeBody(item.id, item.kept.shape, item.kept.curves, item.distance, faults), item.kept.lift);
   // Planted bug: the kept shape is built, but nothing says so.
   return faults.has("warning-dropped") ? { status: "built", body } : { status: "built", body, warning: { cause, input: item.sketch } };
+}
+
+/** A body moved up by `z` (an extrude of a sketch on a face, 26e): every face's and edge's centroid; volumes, areas and lengths stay. */
+function lifted(body: ModelBody, z: number | undefined): ModelBody {
+  if (z === undefined) return body;
+  const up = (c: Vec3): Vec3 => [c[0], c[1], c[2] + z];
+  return { volume: body.volume, faces: body.faces.map((f) => ({ ...f, centroid: up(f.centroid) })), edges: body.edges.map((e) => ({ ...e, centroid: up(e.centroid) })) };
+}
+
+/**
+ * A sketch's result. On XY, built. On a face (26e): greyed while its
+ * face's feature is suppressed or greyed (Q3); else at the height of the
+ * face its name finds on that feature's body; else held at its last height
+ * (or where it was drawn, when it holds none) with "plane-lost".
+ */
+function placeSketch(item: SketchItem, done: Record<string, ItemResult>, faults: ReadonlySet<ModelFault>): ItemResult {
+  if (item.on === undefined) return { status: "built" };
+  const on = done[item.on.feature];
+  const by = greyedBy(on, item.on.feature);
+  // Planted bug ("greyed-warns"): a sketch on a suppressed feature says its plane is lost instead of being greyed.
+  if (by !== null && !faults.has("greyed-warns")) return { status: "greyed", by };
+  if (on?.status === "built" && on.body) {
+    const face = on.body.faces.find((f) => f.name.role === item.on!.role);
+    if (face) return { status: "built", lift: face.centroid[2] };
+  }
+  return { status: "built", lift: item.on.held ?? item.on.drawn, plane: "plane-lost" };
 }
 
 /**
@@ -548,6 +632,13 @@ function lost(item: Extract<ModelItem, { kind: "extrude" }>, cause: LostCause, f
  */
 function settle(before: ModelDoc, doc: ModelDoc, faults: ReadonlySet<ModelFault>): void {
   const sketchIn = (d: ModelDoc, id: string) => d.items.find((i): i is SketchItem => i.id === id && i.kind === "sketch");
+  // Where each face sketch lay in `before` with nothing suppressed and no marker (26e).
+  let was: Rebuild | undefined;
+  const liftBefore = (id: string) => {
+    was ??= rebuild(opened(before), faults);
+    const r = was.results[id];
+    return r?.status === "built" ? r.lift : undefined;
+  };
   for (const item of doc.items) {
     if (item.kind !== "extrude") continue;
     const now = sketchIn(doc, item.sketch);
@@ -555,10 +646,33 @@ function settle(before: ModelDoc, doc: ModelDoc, faults: ReadonlySet<ModelFault>
       if (!faults.has("kept-not-forgotten")) delete item.kept;
       continue;
     }
-    const was = sketchIn(before, item.sketch);
-    if (item.kept !== undefined || was === undefined || outlineProblem(was) !== null || faults.has("lost-sketch-fails")) continue;
-    item.kept = { shape: JSON.parse(JSON.stringify(was.shape)), curves: [...(was.curves as string[])] };
+    const sketch = sketchIn(before, item.sketch);
+    if (item.kept !== undefined || sketch === undefined || outlineProblem(sketch) !== null || faults.has("lost-sketch-fails")) continue;
+    const lift = sketch.on ? liftBefore(sketch.id) : undefined;
+    item.kept = { shape: JSON.parse(JSON.stringify(sketch.shape)), curves: [...(sketch.curves as string[])], ...(lift === undefined ? {} : { lift }) };
   }
+  // A face sketch whose face is gone (with nothing suppressed and no marker) holds the height it had in `before`, if it
+  // holds none yet; one whose face is there forgets it (the naming model's `settle`).
+  if (!doc.items.some((i) => i.kind === "sketch" && i.on)) return;
+  const now = rebuild(opened(doc), faults);
+  for (const item of doc.items) {
+    if (item.kind !== "sketch" || item.on === undefined) continue;
+    const r = now.results[item.id];
+    if (r?.status !== "built" || r.plane === undefined) delete item.on.held;
+    // Planted bug ("lost-plane-not-held"): nothing is held, so a lost sketch goes back to where it was drawn.
+    else if (item.on.held === undefined && !faults.has("lost-plane-not-held")) {
+      const lift = liftBefore(item.id);
+      if (lift !== undefined) item.on.held = lift;
+    }
+  }
+}
+
+/** The document with nothing suppressed and no marker: where everything would be, which is what a face sketch holds when its face goes. */
+function opened(doc: ModelDoc): ModelDoc {
+  const d = clone(doc);
+  for (const i of d.items) i.suppressed = false;
+  d.marker = null;
+  return d;
 }
 
 /**
@@ -586,9 +700,12 @@ export function bodyKeys(doc: ModelDoc, r: Rebuild): Map<string, { spec: string;
     if (item.kind === "extrude") {
       const from = res.warning ? item.kept : (byId.get(item.sketch) as SketchItem | undefined);
       if (from === undefined) throw new Error(`harness: ${id} is built from nothing`);
+      // Where it is built (26e): its kept shape's height, or its sketch's now; null on XY.
+      const sketch = r.results[item.sketch];
+      const lift = (res.warning ? item.kept?.lift : sketch?.status === "built" ? sketch.lift : undefined) ?? null;
       out.set(id, {
-        spec: JSON.stringify(["extrude", from.shape, from.curves, item.distance]),
-        shape: JSON.stringify(["extrude", solid(from.shape), item.distance]),
+        spec: JSON.stringify(["extrude", from.shape, from.curves, item.distance, lift]),
+        shape: JSON.stringify(["extrude", solid(from.shape), item.distance, lift]),
       });
     } else if (item.kind !== "sketch") {
       const { id: _, suppressed: __, ...sizes } = item;
@@ -707,6 +824,17 @@ function edit(doc: ModelDoc, op: Exclude<ConcreteOp, { op: "undo" | "redo" }>, f
       for (let k = 0; k < curveCount(op.shape); k++) item.curves.push(newId(doc, "curve", faults));
       return { kind: "done", ids: [item.id, ...(item.curves as string[])] };
     }
+    case "add-face-sketch": {
+      // Drawn at the face's height now (the session only picks a face a built body has, before where it goes in).
+      const res = rebuild(doc, faults).results[op.face.feature];
+      const face = res?.status === "built" ? res.body?.faces.find((f) => faceKey(f.name) === faceKey(op.face)) : undefined;
+      if (face === undefined || (op.face.role !== "top" && op.face.role !== "end")) throw new Error(`no flat face ${faceKey(op.face)} to sketch on`);
+      const on: OnFace = { feature: op.face.feature, role: op.face.role, drawn: face.centroid[2] };
+      const item: SketchItem = { id: newId(doc, "item", faults), kind: "sketch", shape: JSON.parse(JSON.stringify(op.shape)), curves: [], suppressed: false, on };
+      insert(doc, item);
+      for (let k = 0; k < curveCount(op.shape); k++) item.curves.push(newId(doc, "curve", faults));
+      return { kind: "done", ids: [item.id, ...(item.curves as string[])] };
+    }
     case "add-extrude": {
       const id = newId(doc, "item", faults);
       insert(doc, { id, kind: "extrude", sketch: op.sketch, distance: op.distance, suppressed: false });
@@ -769,8 +897,10 @@ function edit(doc: ModelDoc, op: Exclude<ConcreteOp, { op: "undo" | "redo" }>, f
       doc.items.splice(op.to, 0, item);
       if (!faults.has("reorder-past-dependency")) {
         const at = (id: string) => doc.items.findIndex((i) => i.id === id);
-        if (dependsOn(item).some((d) => at(d) > op.to)) return { kind: "refused", cause: "before-dependency" };
-        if (doc.items.some((i, j) => j < op.to && dependsOn(i).includes(item.id))) return { kind: "refused", cause: "after-dependent" };
+        // Planted bug ("face-sketch-unbound"): a sketch on a face isn't held to its face's feature (answer 7).
+        const deps = (i: ModelItem) => (faults.has("face-sketch-unbound") && i.kind === "sketch" ? [] : dependsOn(i));
+        if (deps(item).some((d) => at(d) > op.to)) return { kind: "refused", cause: "before-dependency" };
+        if (doc.items.some((i, j) => j < op.to && deps(i).includes(item.id))) return { kind: "refused", cause: "after-dependent" };
       }
       return { kind: "done", ids: [] };
     }

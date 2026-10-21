@@ -42,7 +42,7 @@ export interface SketchPanel {
   showTool(kind: ToolKind): void;
   /** What the sketch holds and whether it makes a closed outline, or why not. */
   showStatus(text: string): void;
-  /** A message under the grid size: a grid the kernel refused, or a point it could not place. Empty hides it. */
+  /** A message under the grid size: a grid the kernel refused, or a point it could not place; while a plane is picked, why a face can't be sketched on. Empty hides it. */
   showError(message: string): void;
   hide(): void;
 }
@@ -80,19 +80,20 @@ export function sketchPanel(slot: HTMLElement, on: SketchPanelEvents): SketchPan
       const planes = el("div", { className: "sketch-planes" });
       planes.setAttribute("role", "group");
       planes.setAttribute("aria-label", "Planes");
-      for (const p of ORIGIN_PLANES) {
-        const b = button(p.label, `sketch-plane-${p.id}`, () => on.pickPlane(p.id));
-        b.disabled = !p.offered;
-        if (!p.offered) b.title = "Sketching on the front and side planes, and on flat faces, comes with step 26.";
-        planes.append(b);
-      }
+      for (const p of ORIGIN_PLANES) planes.append(button(p.label, `sketch-plane-${p.id}`, () => on.pickPlane(p.id)));
+      // Why a face picked in the view can't be sketched on (26d: a curved one, Q5).
+      const refused = el("p", { id: "sketch-pick-error", className: "bad" });
+      refused.hidden = true;
+      refused.setAttribute("role", "alert");
       box.replaceChildren(
         el("h2", { textContent: "Create sketch" }),
-        el("p", { className: "sketch-prompt", id: "sketch-prompt", textContent: "Pick a plane: click the ground plane in the view, or choose it here." }),
+        el("p", { className: "sketch-prompt", id: "sketch-prompt", textContent: "Pick a plane or a flat face of a body: click it in the view, or choose a plane here." }),
         planes,
+        refused,
         button("Cancel", "sketch-cancel", () => on.cancel()),
       );
-      status = gridError = help = null;
+      status = help = null;
+      gridError = refused;
       box.hidden = false;
     },
     showTool,

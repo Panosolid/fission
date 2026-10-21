@@ -70,6 +70,8 @@ pub(crate) mod fixtures;
 
 use api_error::ApiError;
 use display::DisplayMesh;
+use glam::DVec3;
+use placed::Placed;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::cell::RefCell;
 use tessellate::{tessellate, TessOptions};
@@ -102,6 +104,12 @@ pub struct BodyView {
     /// (`face_mass`).
     pub face_areas: Vec<f64>,
     pub face_centroids: Vec<[f64; 3]>,
+    /// Each planar face's outward unit normal [x, y, z] in the world, by
+    /// face index; null for a curved face. With the face's centroid (which
+    /// lies on a plane face) it gives the face's plane exactly, as a sketch
+    /// on that face needs it (step 26), not as the display mesh's
+    /// single-precision normals would.
+    pub face_normals: Vec<Option<[f64; 3]>>,
     /// The two faces each edge joins, by edge index (`edge_pair`): first the
     /// face whose boundary runs along the edge's own direction (start to
     /// end), then the face running it backwards; null for an edge not used
@@ -112,6 +120,21 @@ pub struct BodyView {
     /// on the left: counter-clockwise round the outline seen from the end
     /// cap, clockwise round a hole.
     pub edge_faces: Vec<Option<[usize; 2]>>,
+    /// Each vertex's point [x, y, z] in the world, exact (placed in double
+    /// precision, like `face_centroids`): what a sketch point snapped to a
+    /// face's corner lands on and follows (step 26f), where the display
+    /// mesh's single-precision edge lines would be micrometres off.
+    pub vertex_points: Vec<[f64; 3]>,
+    /// Each edge's start and end vertex, by edge index (the edge's own
+    /// direction, as in `edge_faces`); the same vertex twice for a closed
+    /// edge (a whole circle, whose one vertex is only where its seam is).
+    pub edge_vertices: Vec<[usize; 2]>,
+    /// The point halfway along each edge's parameter, in the world: a line's
+    /// midpoint, an arc's middle (half its turn, since a circle's parameter
+    /// is its angle). Meaningless for a closed edge, which has no ends.
+    pub edge_middles: Vec<[f64; 3]>,
+    /// Each circular edge's centre in the world; null for a line.
+    pub edge_centres: Vec<Option<[f64; 3]>>,
     /// Empty when the body passed validation.
     pub errors: Vec<String>,
 }
@@ -119,21 +142,39 @@ pub struct BodyView {
 /// The view of any body, validating it first (its `errors` list what is
 /// wrong). Validation tessellates the body anyway, so its mesh is reused.
 pub fn view_body(body: &Body) -> Result<BodyView, ApiError> {
+    view_at(body, &geom::Placement::IDENTITY)
+}
+
+/// `view_body` of a placed body: its local geometry validated, the view
+/// carried into the world.
+pub fn view_placed(placed: &Placed) -> Result<BodyView, ApiError> {
+    view_at(&placed.body, &placed.placement)
+}
+
+fn view_at(body: &Body, placement: &geom::Placement) -> Result<BodyView, ApiError> {
     match validate::validate_meshed(body) {
-        Ok(mesh) => Ok(view_parts(body, &mesh, vec![])),
+        Ok(mesh) => Ok(view_parts(body, placement, &mesh, vec![])),
         Err(errs) => {
             let mesh = tessellate(body, &TessOptions::DISPLAY).map_err(|e| ApiError::internal(format!("face {}: {}", e.face, e.message)))?;
-            Ok(view_parts(body, &mesh, errs.iter().map(|e| e.to_string()).collect()))
+            Ok(view_parts(body, placement, &mesh, errs.iter().map(|e| e.to_string()).collect()))
         }
     }
 }
 
-/// The view of a body with its display mesh and validation errors.
-fn view_parts(body: &Body, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
+/// The view of a body's local geometry with its display mesh and
+/// validation errors, carried into the world by `placement`: the mesh, the
+/// face centroids and normals placed; volume, area and face areas, which a
+/// rigid motion leaves alone, measured on the local geometry (`Placed`).
+fn view_parts(body: &Body, placement: &geom::Placement, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
     let exact = mass::mass_properties(body);
-    let faces = face_mass::face_masses(body);
+    let faces = placed::placed_face_masses(body, placement);
+    // A plane's normal is the same everywhere on it, so any point will do.
+    let normal = |f: usize| match body.faces[f].surface {
+        geom::Surface::Plane { .. } => Some(placement.dir(body.face_normal_at(f, DVec3::ZERO)).to_array()),
+        _ => None,
+    };
     BodyView {
-        mesh: display::display_mesh(body, mesh),
+        mesh: display::display_mesh_placed(body, mesh, placement),
         volume: exact.volume,
         area: exact.area,
         vertices: body.vertices.len(),
@@ -144,7 +185,19 @@ fn view_parts(body: &Body, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
         face_roles: body.faces.iter().map(|f| f.role.map(FaceRoleOut::from)).collect(),
         face_areas: faces.iter().map(|m| m.area).collect(),
         face_centroids: faces.iter().map(|m| m.centroid.to_array()).collect(),
+        face_normals: (0..body.faces.len()).map(normal).collect(),
         edge_faces: edge_faces(body),
+        vertex_points: body.vertices.iter().map(|v| placement.point(v.point).to_array()).collect(),
+        edge_vertices: body.edges.iter().map(|e| [e.start, e.end]).collect(),
+        edge_middles: body.edges.iter().map(|e| placement.point(e.curve.eval(0.5 * (e.t0 + e.t1))).to_array()).collect(),
+        edge_centres: body
+            .edges
+            .iter()
+            .map(|e| match e.curve {
+                geom::Curve::Circle { center, .. } => Some(placement.point(center).to_array()),
+                geom::Curve::Line { .. } => None,
+            })
+            .collect(),
         errors,
     }
 }
@@ -299,7 +352,7 @@ pub fn profile_from_input(p: ProfileIn) -> Result<ops::extrude::Profile, ApiErro
 #[wasm_bindgen]
 pub fn make_extrude(profile: JsValue, distance: f64) -> Result<JsValue, JsValue> {
     let profile: ProfileIn = from_js(profile, "profile", "profile")?;
-    to_js(view_of(BodySpec::Extrude { profile, distance }))
+    to_js(view_of(BodySpec::Extrude { profile, distance, frame: None, flip: false }))
 }
 
 /// The nearest node of a square grid (`sketch::snap_to_grid`), as `[x, y]`.
@@ -462,29 +515,69 @@ pub fn sketch_outline(lines: JsValue, circles: JsValue, arcs: JsValue) -> Result
 /// `make_cylinder`, `make_sphere` and `make_extrude`. In JavaScript:
 /// `{ box: { width, depth, height } }`, `{ cylinder: { radius, height } }`,
 /// `{ sphere: { radius } }` or `{ extrude: { profile, distance } }`.
+///
+/// An extrude may also say where its sketch's plane is (step 26b):
+/// `frame: { origin, x, normal }` (`FrameIn`; the profile is in that
+/// frame's own coordinates and goes along its normal; refused unless the
+/// axes are unit and square, `ops::place::frame_placement`), and `flip:
+/// true` to go the other way from the same plane, its start cap still on
+/// the plane (`ops::place`). Without either it is the XY plane, going up.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BodySpec {
     Box { width: f64, depth: f64, height: f64 },
     Cylinder { radius: f64, height: f64 },
     Sphere { radius: f64 },
-    Extrude { profile: ProfileIn, distance: f64 },
+    Extrude {
+        profile: ProfileIn,
+        distance: f64,
+        #[serde(default)]
+        frame: Option<FrameIn>,
+        #[serde(default)]
+        flip: bool,
+    },
 }
+
+/// A sketch plane's frame as the app sends it: `{ origin: [x, y, z], x:
+/// [x, y, z], normal: [x, y, z] }`, in world coordinates, the axes unit and
+/// square to each other (y = normal × x).
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct FrameIn {
+    pub origin: [f64; 3],
+    pub x: [f64; 3],
+    pub normal: [f64; 3],
+}
+
+impl From<FrameIn> for ops::place::Frame {
+    fn from(f: FrameIn) -> Self {
+        ops::place::Frame { origin: f.origin.into(), x: f.x.into(), normal: f.normal.into() }
+    }
+}
+
+/// A built body (its local geometry and placement) and the display mesh of
+/// its local geometry, made by the operation's validation.
+pub type Built = (Placed, mesh::Mesh);
 
 /// Builds the body a spec describes (with the same checks as the make_*
 /// functions).
-pub fn build(spec: BodySpec) -> Result<Body, ApiError> {
-    build_meshed(spec).map(|(body, _)| body)
+pub fn build(spec: BodySpec) -> Result<Placed, ApiError> {
+    build_meshed(spec).map(|(placed, _)| placed)
 }
 
 /// `build`, also handing back the display mesh the operation's validation
-/// made (`ops::finish`).
-pub fn build_meshed(spec: BodySpec) -> Result<ops::Meshed, ApiError> {
+/// made (`ops::finish`). A body built without a frame is kept as built,
+/// unplaced, so its numbers are bit for bit what they were before frames.
+pub fn build_meshed(spec: BodySpec) -> Result<Built, ApiError> {
+    let unplaced = |made: Result<ops::Meshed, ops::KernelError>| made.map(|(body, mesh)| (Placed { body, placement: geom::Placement::IDENTITY }, mesh));
     let made = match spec {
-        BodySpec::Box { width, depth, height } => ops::primitives::make_box_meshed(width, depth, height),
-        BodySpec::Cylinder { radius, height } => ops::primitives::make_cylinder_meshed(radius, height),
-        BodySpec::Sphere { radius } => ops::primitives::make_sphere_meshed(radius),
-        BodySpec::Extrude { profile, distance } => ops::extrude::extrude_meshed(&profile_from_input(profile)?, distance),
+        BodySpec::Box { width, depth, height } => unplaced(ops::primitives::make_box_meshed(width, depth, height)),
+        BodySpec::Cylinder { radius, height } => unplaced(ops::primitives::make_cylinder_meshed(radius, height)),
+        BodySpec::Sphere { radius } => unplaced(ops::primitives::make_sphere_meshed(radius)),
+        BodySpec::Extrude { profile, distance, frame: None, flip: false } => unplaced(ops::extrude::extrude_meshed(&profile_from_input(profile)?, distance)),
+        BodySpec::Extrude { profile, distance, frame, flip } => {
+            let frame = frame.map_or(ops::place::Frame::XY, ops::place::Frame::from);
+            ops::place::extrude_in_frame(&profile_from_input(profile)?, distance, &frame, flip)
+        }
     };
     Ok(made?)
 }
@@ -495,8 +588,8 @@ pub fn build_meshed(spec: BodySpec) -> Result<ops::Meshed, ApiError> {
 /// Validated and tessellated once, by the operation: the body passed
 /// `checked`, so it has no errors to list.
 pub fn view_of(spec: BodySpec) -> Result<BodyView, ApiError> {
-    let (body, mesh) = build_meshed(spec)?;
-    Ok(view_parts(&body, &mesh, vec![]))
+    let (placed, mesh) = build_meshed(spec)?;
+    Ok(view_parts(&placed.body, &placed.placement, &mesh, vec![]))
 }
 
 /// An STL file for the app to download.
@@ -514,7 +607,8 @@ pub struct StlFile {
 /// The body as a binary STL, from its display mesh (the same triangles the
 /// viewer shows), with `name` in the file's header.
 pub fn stl_of(spec: BodySpec, name: &str) -> Result<StlFile, ApiError> {
-    let (_, mesh) = build_meshed(spec)?;
+    let (placed, mut mesh) = build_meshed(spec)?;
+    placed::mesh_into_world(&mut mesh, &placed.placement);
     let out = stl::export(&mesh, name);
     Ok(StlFile { bytes: out.bytes, rounding: out.rounding, warning: out.warning })
 }
@@ -727,14 +821,14 @@ mod tests {
         assert!(rel_eq(v.volume, 36.0 * PI, FP_REL) && v.face_types == ["sphere"; 2], "{}", v.volume);
         let outer = vec![0.0, 0.0, 10.0, 0.0, 10.0, 3.0, 3.0, 3.0, 3.0, 10.0, 0.0, 10.0];
         let l = |outer: Vec<f64>| ProfileIn { outer: BoundaryIn::Path { corners: outer, bulges: vec![] }, holes: vec![] };
-        let v = view_of(BodySpec::Extrude { profile: l(outer), distance: 2.0 }).unwrap();
+        let v = view_of(BodySpec::Extrude { profile: l(outer), distance: 2.0, frame: None, flip: false }).unwrap();
         assert!(rel_eq(v.volume, 102.0, FP_REL) && v.faces == 8, "{}", v.volume);
         // Failures carry the reason the app shows: the kernel's for a bad
         // size, the profile reader's for odd coordinates.
         let e = view_of(BodySpec::Box { width: 1.0, depth: -1.0, height: 1.0 }).err().unwrap();
         assert!(e.message.contains("must be"));
         assert_eq!(e.inputs, vec![ops::Input::Param { name: "depth" }]);
-        let odd = view_of(BodySpec::Extrude { profile: l(vec![0.0; 5]), distance: 1.0 }).err().unwrap();
+        let odd = view_of(BodySpec::Extrude { profile: l(vec![0.0; 5]), distance: 1.0, frame: None, flip: false }).err().unwrap();
         assert_eq!(odd.message, "profile coordinates must come in x, y pairs");
         assert_eq!((odd.kind, odd.inputs), (api_error::ErrorKind::BadRequest, vec![ops::Input::Loop { boundary: 0 }]));
     }
@@ -757,10 +851,12 @@ mod tests {
                 holes: vec![BoundaryIn::Circle { center: [5.0, 5.0], radius: 2.0 }],
             },
             distance: 3.0,
+            frame: None,
+            flip: false,
         };
         assert_eq!(count(&|| drop(view_of(plate()).unwrap())), 1);
         assert_eq!(count(&|| drop(stl_of(plate(), "plate").unwrap())), 1);
-        let body = build(plate()).unwrap();
+        let body = build(plate()).unwrap().body;
         assert_eq!(count(&|| drop(view_body(&body).unwrap())), 1);
         // A body that fails before the mesh checks is tessellated once, to show it.
         let mut broken = body.clone();
@@ -785,11 +881,13 @@ mod tests {
                         holes: vec![BoundaryIn::Circle { center: [3.0, 3.0], radius: 1.0 }],
                     },
                     distance: 2.0,
+                    frame: None,
+                    flip: false,
                 },
             ]
         };
         for (a, b) in specs().into_iter().zip(specs()) {
-            assert_eq!(json(view_of(a).unwrap()), json(view_body(&build(b).unwrap()).unwrap()));
+            assert_eq!(json(view_of(a).unwrap()), json(view_placed(&build(b).unwrap()).unwrap()));
         }
     }
 
@@ -1119,9 +1217,275 @@ mod tests {
             outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 4.0, 0.0, 4.0, 1.0, 1.0, 1.0, 1.0, 3.0, 0.0, 3.0], bulges: vec![] },
             holes: vec![],
         };
-        let e = stl_of(BodySpec::Extrude { profile: l, distance: 2.0 }, "L").unwrap();
+        let e = stl_of(BodySpec::Extrude { profile: l, distance: 2.0, frame: None, flip: false }, "L").unwrap();
         assert_eq!((count(&e), size(&e)), (20, 1084));
         // Bad shapes give the kernel's reason, not a file.
         assert!(stl_of(BodySpec::Box { width: -1.0, depth: 1.0, height: 1.0 }, "bad").unwrap_err().message.contains("must be"));
+    }
+
+    /// The 40 × 30 × 20 box of the step-26 plan, as the app will send it:
+    /// a rectangle sketched on the front plane, extruded 20 (`flip` as given).
+    fn front_box(flip: bool) -> BodySpec {
+        let json = format!(
+            r#"{{ "extrude": {{ "profile": {{ "outer": {{ "path": {{ "corners": [0, 0, 40, 0, 40, 30, 0, 30], "bulges": [] }} }}, "holes": [] }},
+                "distance": 20, "frame": {{ "origin": [0, 0, 0], "x": [1, 0, 0], "normal": [0, -1, 0] }}, "flip": {flip} }} }}"#
+        );
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[test]
+    fn a_box_sketched_on_the_front_plane_by_hand() {
+        // Front plane: sketch (u, v) is world (u, v·Z), the normal −Y, so
+        // local (u, v, w) → (u, −w, v): x in [0, 40], y in [−20, 0], z in
+        // [0, 30]. Volume 40·30·20 = 24000, area 2(1200 + 800 + 600) = 5200.
+        // Faces: the start cap on the sketch plane y = 0 facing +Y (away from
+        // the solid), centroid (20, 0, 15); the end cap y = −20 facing −Y; the
+        // side from piece 0 ((0, 0) → (40, 0)) the bottom z = 0 facing −Z,
+        // centroid (20, −10, 0); piece 1 ((40, 0) → (40, 30)) x = 40 facing
+        // +X, centroid (40, −10, 15).
+        let v = view_of(front_box(false)).unwrap();
+        assert!(rel_eq(v.volume, 24000.0, FP_REL) && rel_eq(v.area, 5200.0, FP_REL) && v.errors.is_empty(), "{} {}", v.volume, v.area);
+        let face = |role: &str, piece: Option<usize>| v.face_roles.iter().position(|r| r.as_ref().is_some_and(|r| r.role == role && r.piece == piece)).unwrap();
+        let near = |a: [f64; 3], b: [f64; 3]| tolerance::points_eq(a.into(), b.into());
+        for (role, piece, centroid, normal) in [
+            ("start", None, [20.0, 0.0, 15.0], [0.0, 1.0, 0.0]),
+            ("end", None, [20.0, -20.0, 15.0], [0.0, -1.0, 0.0]),
+            ("side", Some(0), [20.0, -10.0, 0.0], [0.0, 0.0, -1.0]),
+            ("side", Some(1), [40.0, -10.0, 15.0], [1.0, 0.0, 0.0]),
+        ] {
+            let f = face(role, piece);
+            assert!(near(v.face_centroids[f], centroid), "{role} {piece:?}: {:?}", v.face_centroids[f]);
+            assert!(near(v.face_normals[f].unwrap(), normal), "{role} {piece:?}: {:?}", v.face_normals[f]);
+        }
+        // The mesh the viewer draws is placed too: its box is the body's,
+        // and every start-cap triangle's normal is +Y (to the rounding of the
+        // quarter turn's quaternion, whose cos 45° = sin 45° = √½ is not a
+        // double: ~2e-16).
+        let pts = v.mesh.positions.chunks(3).map(|c| glam::DVec3::new(c[0] as f64, c[1] as f64, c[2] as f64));
+        let (lo, hi) = pts.fold((glam::DVec3::INFINITY, glam::DVec3::NEG_INFINITY), |(l, h), p| (l.min(p), h.max(p)));
+        assert!(tolerance::points_eq(lo, glam::DVec3::new(0.0, -20.0, 0.0)) && tolerance::points_eq(hi, glam::DVec3::new(40.0, 0.0, 30.0)), "{lo} {hi}");
+        let start = face("start", None) as u32;
+        for (t, &f) in v.mesh.triangle_faces.iter().enumerate() {
+            if f == start {
+                for k in 0..3 {
+                    let i = v.mesh.indices[3 * t + k] as usize * 3;
+                    let n = glam::DVec3::new(v.mesh.normals[i] as f64, v.mesh.normals[i + 1] as f64, v.mesh.normals[i + 2] as f64);
+                    assert!(n.distance(glam::DVec3::Y) <= 4.0 * f64::EPSILON, "triangle {t}: {n}");
+                }
+            }
+        }
+        // Edge lines too: every one within the body's box (to that rounding).
+        let inside = |c: &[f32]| glam::DVec3::new(c[0] as f64, c[1] as f64, c[2] as f64).clamp(lo, hi).distance(glam::DVec3::new(c[0] as f64, c[1] as f64, c[2] as f64)) <= tolerance::LINEAR;
+        assert!(v.mesh.edge_lines.chunks(3).all(inside));
+        assert!(tolerance::points_eq(lo, glam::DVec3::new(0.0, -20.0, 0.0)));
+        // Flipped, it goes away from the viewer (y in [0, 20]), the start cap
+        // still on the plane, now facing −Y; the end cap y = 20 facing +Y.
+        let f = view_of(front_box(true)).unwrap();
+        let start = f.face_roles.iter().position(|r| r.as_ref().is_some_and(|r| r.role == "start")).unwrap();
+        let end = f.face_roles.iter().position(|r| r.as_ref().is_some_and(|r| r.role == "end")).unwrap();
+        assert!(near(f.face_centroids[start], [20.0, 0.0, 15.0]) && near(f.face_normals[start].unwrap(), [0.0, -1.0, 0.0]), "{:?}", f.face_normals[start]);
+        assert!(near(f.face_centroids[end], [20.0, 20.0, 15.0]) && near(f.face_normals[end].unwrap(), [0.0, 1.0, 0.0]));
+        assert!(rel_eq(f.volume, 24000.0, FP_REL));
+    }
+
+    #[test]
+    fn a_spec_without_a_frame_is_read_as_before() {
+        // The app's specs from before frames: no frame, not flipped, built
+        // unplaced, so the view is exactly what it was (the JSON the app gets
+        // is make_extrude's).
+        let json = r#"{ "extrude": { "profile": { "outer": { "circle": { "center": [1, 2], "radius": 3 } }, "holes": [] }, "distance": 4 } }"#;
+        let spec: BodySpec = serde_json::from_str(json).unwrap();
+        assert!(matches!(&spec, BodySpec::Extrude { frame: None, flip: false, .. }));
+        let built = build(spec).unwrap();
+        assert!(built.placement.is_identity());
+        // Flip alone flips from the XY plane: z in [−4, 0], volume 36π.
+        let flipped: BodySpec = serde_json::from_str(&json.replace(r#""distance": 4"#, r#""distance": 4, "flip": true"#)).unwrap();
+        let (lo, hi) = build(flipped).unwrap().bounds();
+        assert!(tolerance::points_eq(lo, glam::DVec3::new(-2.0, -1.0, -4.0)) && tolerance::points_eq(hi, glam::DVec3::new(4.0, 5.0, 0.0)), "{lo} {hi}");
+        // A bad frame is refused with the part named, as the app reads it.
+        let bad: BodySpec = serde_json::from_str(&json.replace(r#""distance": 4"#, r#""distance": 4, "frame": { "origin": [0, 0, 0], "x": [1, 0, 0], "normal": [1, 0, 0] }"#)).unwrap();
+        let e = view_of(bad).unwrap_err();
+        assert_eq!((e.kind, e.inputs), (api_error::ErrorKind::InvalidInput, vec![ops::Input::Param { name: "x" }, ops::Input::Param { name: "normal" }]));
+    }
+
+    #[test]
+    fn face_normals_by_hand() {
+        // A box's six faces are planes facing out along ±X, ±Y, ±Z; a
+        // cylinder's caps face ∓Z and its side is curved (null); a sphere
+        // has no plane face.
+        let v = view_of(BodySpec::Box { width: 1.0, depth: 2.0, height: 3.0 }).unwrap();
+        let by_role = |role: &str| v.face_normals[v.face_roles.iter().position(|r| r.as_ref().unwrap().role == role).unwrap()].unwrap();
+        for (role, n) in [("top", [0.0, 0.0, 1.0]), ("bottom", [0.0, 0.0, -1.0]), ("front", [0.0, -1.0, 0.0]), ("back", [0.0, 1.0, 0.0]), ("left", [-1.0, 0.0, 0.0]), ("right", [1.0, 0.0, 0.0])] {
+            assert_eq!(by_role(role), n, "{role}");
+        }
+        let c = view_of(BodySpec::Cylinder { radius: 1.0, height: 2.0 }).unwrap();
+        let normals: Vec<_> = c.face_types.iter().zip(&c.face_normals).map(|(t, n)| (*t, *n)).collect();
+        assert!(normals.contains(&("plane", Some([0.0, 0.0, 1.0]))) && normals.contains(&("plane", Some([0.0, 0.0, -1.0]))) && normals.contains(&("cylinder", None)), "{normals:?}");
+        assert!(view_of(BodySpec::Sphere { radius: 1.0 }).unwrap().face_normals.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn corners_middles_and_centres_by_hand() {
+        // Step 26f. The front-plane box (sketch (u, v) → world (u, −w, v),
+        // x in [0, 40], y in [−20, 0], z in [0, 30]) has the eight corners
+        // of that range, exactly: every coordinate is a whole number and
+        // the quarter turn's rounding (~2e-16 of the size, so ~1e-14 mm)
+        // is far below LINEAR. Every edge is a line, so its middle is the
+        // average of its two corners and it has no centre; its two ends
+        // are two different corners.
+        let v = view_of(front_box(false)).unwrap();
+        let near = |a: [f64; 3], b: [f64; 3]| tolerance::points_eq(a.into(), b.into());
+        assert_eq!((v.vertex_points.len(), v.edge_vertices.len(), v.edge_middles.len(), v.edge_centres.len()), (8, 12, 12, 12));
+        for x in [0.0, 40.0] {
+            for y in [-20.0, 0.0] {
+                for z in [0.0, 30.0] {
+                    assert_eq!(v.vertex_points.iter().filter(|p| near(**p, [x, y, z])).count(), 1, "corner {x} {y} {z}: {:?}", v.vertex_points);
+                }
+            }
+        }
+        for (e, [a, b]) in v.edge_vertices.iter().enumerate() {
+            let (pa, pb) = (glam::DVec3::from(v.vertex_points[*a]), glam::DVec3::from(v.vertex_points[*b]));
+            assert!(a != b && near(v.edge_middles[e], ((pa + pb) / 2.0).to_array()) && v.edge_centres[e].is_none(), "edge {e}");
+        }
+        // The edge between the start cap (y = 0) and piece 0's side (z = 0)
+        // runs from (0, 0, 0) to (40, 0, 0) one way or the other: its middle
+        // is (20, 0, 0).
+        let face = |role: &str, piece: Option<usize>| v.face_roles.iter().position(|r| r.as_ref().is_some_and(|r| r.role == role && r.piece == piece)).unwrap();
+        let (start, bottom) = (face("start", None), face("side", Some(0)));
+        let e = v.edge_faces.iter().position(|p| p.is_some_and(|[a, b]| (a, b) == (start, bottom) || (a, b) == (bottom, start))).unwrap();
+        assert!(near(v.edge_middles[e], [20.0, 0.0, 0.0]), "{:?}", v.edge_middles[e]);
+
+        // A half disc of radius 10 on XY extruded 5: corners (10, 0) and
+        // (−10, 0), the arc from (10, 0) to (−10, 0) with bulge 1 (a half
+        // turn counter-clockwise, through (0, 10)), the line back. Each
+        // cap's arc edge: centre (0, 0, z), middle (0, 10, z) (half of a
+        // half turn from angle 0 is angle π/2: (10 cos π/2, 10 sin π/2)),
+        // ends (±10, 0, z); z = 0 and 5.
+        let half = BodySpec::Extrude {
+            profile: ProfileIn { outer: BoundaryIn::Path { corners: vec![10.0, 0.0, -10.0, 0.0], bulges: vec![1.0, 0.0] }, holes: vec![] },
+            distance: 5.0,
+            frame: None,
+            flip: false,
+        };
+        let h = view_of(half).unwrap();
+        let arcs: Vec<usize> = (0..h.edges).filter(|&e| h.edge_types[e] == "circle").collect();
+        assert_eq!(arcs.len(), 2, "{:?}", h.edge_types);
+        for z in [0.0, 5.0] {
+            let e = *arcs.iter().find(|&&e| (h.edge_centres[e].unwrap()[2] - z).abs() <= tolerance::LINEAR).unwrap();
+            assert!(near(h.edge_centres[e].unwrap(), [0.0, 0.0, z]) && near(h.edge_middles[e], [0.0, 10.0, z]), "z {z}: {:?} {:?}", h.edge_centres[e], h.edge_middles[e]);
+            let ends = h.edge_vertices[e].map(|k| h.vertex_points[k]);
+            assert!(ends.iter().any(|p| near(*p, [10.0, 0.0, z])) && ends.iter().any(|p| near(*p, [-10.0, 0.0, z])), "z {z}: {ends:?}");
+        }
+        // A cylinder r 1, h 2: its two cap circles are closed (one vertex,
+        // at the seam (1, 0, z)), centred (0, 0, 0) and (0, 0, 2).
+        let c = view_of(BodySpec::Cylinder { radius: 1.0, height: 2.0 }).unwrap();
+        let circles: Vec<usize> = (0..c.edges).filter(|&e| c.edge_types[e] == "circle").collect();
+        assert_eq!(circles.len(), 2);
+        for (e, z) in circles.iter().zip([0.0, 2.0]) {
+            let [a, b] = c.edge_vertices[*e];
+            assert!(a == b && near(c.vertex_points[a], [1.0, 0.0, z]) && near(c.edge_centres[*e].unwrap(), [0.0, 0.0, z]), "edge {e}");
+        }
+    }
+
+    #[test]
+    fn a_placed_view_s_corners_are_the_baked_body_s() {
+        // A slanted 3-4-5 frame far from the origin, flipped: the placed
+        // view's corners, middles and centres against the baked body's, to
+        // rounding at that reach (they are the same geometry, placed once
+        // or baked once).
+        let spec = || BodySpec::Extrude {
+            profile: ProfileIn {
+                outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 30.0, 0.0, 30.0, 20.0, 0.0, 20.0], bulges: vec![0.0, 0.4, 0.0, 0.0] },
+                holes: vec![BoundaryIn::Circle { center: [10.0, 10.0], radius: 4.0 }],
+            },
+            distance: 7.0,
+            frame: Some(FrameIn { origin: [5e4, -3e3, 7.5], x: [0.0, 0.6, 0.8], normal: [1.0, 0.0, 0.0] }),
+            flip: true,
+        };
+        let a = view_of(spec()).unwrap();
+        let b = view_body(&build(spec()).unwrap().baked()).unwrap();
+        let slack = 1e3 * tolerance::rounding_slack(5.1e4);
+        let close = |p: [f64; 3], q: [f64; 3]| glam::DVec3::from(p).distance(q.into()) <= slack;
+        assert_eq!((&a.edge_vertices, a.vertex_points.len()), (&b.edge_vertices, b.vertex_points.len()));
+        assert!(a.vertex_points.iter().zip(&b.vertex_points).all(|(p, q)| close(*p, *q)));
+        assert!(a.edge_middles.iter().zip(&b.edge_middles).all(|(p, q)| close(*p, *q)));
+        assert!(a.edge_centres.iter().zip(&b.edge_centres).all(|(p, q)| match (p, q) {
+            (Some(p), Some(q)) => close(*p, *q),
+            (None, None) => true,
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn a_placed_view_is_the_baked_body_s_view() {
+        // Seeded frames (slanted, far, flipped): the placed view, made from
+        // the local geometry, against the view of the same body baked into
+        // world coordinates and validated afresh. Volume, area and face
+        // areas to rounding at the part's size; centroids and normals to
+        // rounding at its reach; both pass validation.
+        let frames = [
+            ([0.0, 0.0, 0.0], [0.0, 0.6, 0.8], [1.0, 0.0, 0.0], false),
+            ([5e4, -3e3, 7.5], [0.0, 0.0, 1.0], [0.6, -0.8, 0.0], true),
+            ([-2.5e6, 1e6, 3e6], [0.36, 0.48, -0.8], [0.8, -0.6, 0.0], false),
+            ([1.0, 2.0, 3.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0], true),
+        ];
+        for (origin, x, normal, flip) in frames {
+            let x = glam::DVec3::from(x).normalize().to_array();
+            let normal = glam::DVec3::from(normal).normalize().to_array();
+            let spec = || BodySpec::Extrude {
+                // A 30 × 20 plate with one bowed side and a round hole.
+                profile: ProfileIn {
+                    outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 30.0, 0.0, 30.0, 20.0, 0.0, 20.0], bulges: vec![0.0, 0.4, 0.0, 0.0] },
+                    holes: vec![BoundaryIn::Circle { center: [10.0, 10.0], radius: 4.0 }],
+                },
+                distance: 7.0,
+                frame: Some(FrameIn { origin, x, normal }),
+                flip,
+            };
+            let placed = build(spec()).unwrap();
+            let a = view_of(spec()).unwrap();
+            let b = view_body(&placed.baked()).unwrap();
+            assert!(a.errors.is_empty() && b.errors.is_empty(), "{:?}", b.errors);
+            let reach = glam::DVec3::from(origin).abs().max_element() + 60.0;
+            let slack = tolerance::rounding_slack(reach);
+            assert!(tolerance::measure_eq(a.volume, b.volume, a.area * slack) && tolerance::measure_eq(a.area, b.area, a.area * slack), "{origin:?}: {} {} vs {} {}", a.volume, a.area, b.volume, b.area);
+            assert_eq!((a.faces, a.edges, a.vertices, &a.face_types, &a.edge_faces), (b.faces, b.edges, b.vertices, &b.face_types, &b.edge_faces));
+            for f in 0..a.faces {
+                assert!(tolerance::measure_eq(a.face_areas[f], b.face_areas[f], a.area * slack), "face {f}");
+                let off = glam::DVec3::from(a.face_centroids[f]).distance(b.face_centroids[f].into());
+                assert!(off <= 1e3 * slack, "{origin:?} face {f}: centroid {off:e} off");
+                match (a.face_normals[f], b.face_normals[f]) {
+                    (Some(n), Some(m)) => assert!(glam::DVec3::from(n).distance(m.into()) <= tolerance::ANGULAR, "face {f}: {n:?} vs {m:?}"),
+                    (None, None) => {}
+                    other => panic!("face {f}: {other:?}"),
+                }
+            }
+            // The meshes' boxes agree to single precision (the viewer's).
+            let bounds = |v: &BodyView| v.mesh.positions.chunks(3).fold(([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]), |(mut l, mut h), c| {
+                (0..3).for_each(|k| { l[k] = l[k].min(c[k]); h[k] = h[k].max(c[k]); });
+                (l, h)
+            });
+            let ((al, ah), (bl, bh)) = (bounds(&a), bounds(&b));
+            for k in 0..3 {
+                let f32_slack = (reach * tolerance::F32_REL) as f32;
+                assert!((al[k] - bl[k]).abs() <= f32_slack && (ah[k] - bh[k]).abs() <= f32_slack, "{origin:?} axis {k}: {al:?} {ah:?} vs {bl:?} {bh:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_placed_body_s_stl_is_placed() {
+        // The front-plane box as STL: 12 triangles (684 bytes), read back
+        // with its corners where the view has them (whole millimetres, up to
+        // the quarter turn's ~1e-14 rounding, far below what single
+        // precision rounds: no warning), welded volume 24000.
+        let f = stl_of(front_box(false), "front").unwrap();
+        assert_eq!((f.bytes.len(), f.warning), (684, None));
+        assert!(f.rounding <= tolerance::rounding_slack(40.0), "{}", f.rounding);
+        let read = stl::read(&f.bytes).unwrap();
+        let mesh = read.welded();
+        let (lo, hi) = mesh.positions.iter().fold((glam::DVec3::INFINITY, glam::DVec3::NEG_INFINITY), |(l, h), p| (l.min(*p), h.max(*p)));
+        assert!(tolerance::points_eq(lo, glam::DVec3::new(0.0, -20.0, 0.0)) && tolerance::points_eq(hi, glam::DVec3::new(40.0, 0.0, 30.0)), "{lo} {hi}");
+        assert!(rel_eq(mesh.signed_volume(), 24000.0, FP_REL), "{}", mesh.signed_volume());
     }
 }

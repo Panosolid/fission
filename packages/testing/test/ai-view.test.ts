@@ -19,8 +19,21 @@ const isExtrudedSketch = (d: DesignDocument, id: string) => {
   return f.intent.type === "extrude" && Object.hasOwn(f.intent.parameters, "sketch");
 };
 
+/** The label of the first suppressed item `id` is built on, following what each item depends on that is still in the timeline; null when none is. */
+function suppressedUnder(d: DesignDocument, id: string): string | null {
+  const byId = new Map(d.timeline.features.map((f) => [f.id, f]));
+  for (const dep of byId.get(id)!.dependsOn) {
+    const on = byId.get(dep);
+    if (on === undefined) continue;
+    if (on.suppressed) return on.provenance.self.label;
+    const deeper = suppressedUnder(d, dep);
+    if (deeper !== null) return deeper;
+  }
+  return null;
+}
+
 test("seeded: on 300 random timelines the AI is told each item's state, and set_part does what it is told it does", () => {
-  const reached = { change: 0, addStart: 0, addMiddle: 0, addEnd: 0, noBody: 0, suppressed: 0, afterMarker: 0, failed: 0, kept: 0, sketch: 0 };
+  const reached = { change: 0, addStart: 0, addMiddle: 0, addEnd: 0, noBody: 0, suppressed: 0, afterMarker: 0, failed: 0, greyed: 0, kept: 0, sketch: 0 };
   for (let seed = 1n; seed <= 300n; seed++) {
     const r = seeded(seed);
     const doc = timelineEdits(r, partDocument("box", 40, 30, 20));
@@ -52,7 +65,12 @@ test("seeded: on 300 random timelines the AI is told each item's state, and set_
         reached.kept += kept ? 1 : 0;
         const part = f.id === model.part && !adds;
         assert.equal(state, `Builds Body ${body}.${kept ? " Its sketch is lost (deleted, or no longer a closed outline), so it builds from the shape it kept." : ""}${part ? " This is the part set_part changes." : ""}`, where);
-      } else (reached.failed++, assert.equal(state, "Failed: builds no body (its sketch is suppressed or gone).", where));
+      } else {
+        // 26e (Q3): built on a suppressed item, through its sketch (and that sketch's face), greyed naming that item; else its sketch is gone.
+        const by = suppressedUnder(doc, f.id);
+        if (by !== null) (reached.greyed++, assert.equal(state, `Greyed: builds nothing while ${by}, which it is built on, is suppressed.`, where));
+        else (reached.failed++, assert.equal(state, "Failed: builds no body (its sketch is gone).", where));
+      }
     }
     const marker = view.notes[items.length + 1];
     if (end === items.length && doc.timeline.marker === undefined) assert.equal(marker, "The timeline marker is at the end: every item is built.", where);

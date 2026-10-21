@@ -28,6 +28,7 @@ import {
   type NamingItem,
   type NamingModel,
   type NamingOp,
+  pinAt,
 } from "../src/naming-model.ts";
 import { BEN, randomOutline, setupOps } from "../src/naming-session.ts";
 
@@ -400,4 +401,58 @@ test("the model refuses what step 26 doesn't model: a cut from a side, suppressi
   // A face that is off can't be sketched on.
   run(m, { op: "suppress", item: "extrude-2", on: true });
   assert.throws(() => run(m, { op: "add-face-sketch", face: { feature: "extrude-2", role: "end" }, centre: [0, 0], radius: 1 }), /no single face/);
+});
+
+test("hand-worked: a pin finds its cap's corner by the two lines it sits between, and a side's middle by its line (rule 10, Q4)", () => {
+  const m = createNamingModel();
+  for (const op of setupOps(BEN, false)) applyNaming(m, op);
+  const top = { feature: "extrude-2", role: "end" as const };
+  // Ben's rectangle (0, 0), (40, 0), (40, 30), (0, 30): line k + 1 runs
+  // from corner k to corner k + 1, so corner 2, (40, 30), is where line 2
+  // ends and line 3 starts; corner 0, (0, 0), where line 4 ends and line 1
+  // starts (round the end). Line 2's middle is ((40 + 40) / 2, (0 + 30) / 2).
+  assert.deepEqual(pinAt(m.doc, top, { at: "corner", before: "line-2", after: "line-3" }), [40, 30]);
+  assert.deepEqual(pinAt(m.doc, top, { at: "corner", before: "line-4", after: "line-1" }), [0, 0]);
+  assert.deepEqual(pinAt(m.doc, top, { at: "middle", line: "line-2" }), [40, 15]);
+  // The order matters: no corner has line 3 ending and line 2 starting.
+  assert.equal(pinAt(m.doc, top, { at: "corner", before: "line-3", after: "line-2" }), null);
+  // Lines that never met, a line not there, a side face: nothing.
+  assert.equal(pinAt(m.doc, top, { at: "corner", before: "line-1", after: "line-3" }), null);
+  assert.equal(pinAt(m.doc, top, { at: "middle", line: "line-9" }), null);
+  assert.equal(pinAt(m.doc, { feature: "extrude-2", role: "side", line: "line-2" }, { at: "middle", line: "line-2" }), null);
+  // The bottom cap's corner is the same (x, y): a cap's frame is the world's XY (rule 8).
+  assert.deepEqual(pinAt(m.doc, { feature: "extrude-2", role: "start" }, { at: "corner", before: "line-2", after: "line-3" }), [40, 30]);
+  // Planted: the corner at the other end of line 3, (0, 30).
+  assert.deepEqual(pinAt(m.doc, top, { at: "corner", before: "line-2", after: "line-3" }, new Set(["pin-wrong-end"])), [0, 30]);
+  // With the outline's sketch deleted, the extrude keeps its shape and its lines, so the pin still finds its corner.
+  applyNaming(m, { op: "delete", item: "sketch-1" });
+  assert.deepEqual(pinAt(m.doc, top, { at: "corner", before: "line-2", after: "line-3" }), [40, 30]);
+});
+
+test("hand-worked: a pinned centre goes with its corner, stays when the corner is gone, and is let go when the circle is moved (rule 10)", () => {
+  const m = createNamingModel();
+  const pin = { at: "corner" as const, before: "line-2", after: "line-3" };
+  for (const op of setupOps({ ...BEN, pin }, false)) applyNaming(m, op);
+  const circle = () => m.doc.items.find((i) => i.id === "sketch-3") as Extract<NamingItem, { kind: "face-sketch" }>;
+  // Snapped on: the centre is the corner whatever the op's centre said.
+  assert.deepEqual(circle().centre, [40, 30]);
+  // Corner 2 moved to (55, 35): the centre with it, no warning.
+  applyNaming(m, { op: "move-corner", sketch: "sketch-1", corner: 2, to: [55, 35] });
+  assert.deepEqual(circle().centre, [55, 35]);
+  assert.equal(rebuildNaming(m.doc).results["sketch-3"].warning, undefined);
+  // A triangle is a new outline (lines 5, 6, 7): the corner is gone, the centre stays at (55, 35), the sketch says so.
+  applyNaming(m, { op: "set-corners", sketch: "sketch-1", corners: [[0, 0], [40, 0], [0, 30]] });
+  assert.deepEqual(circle().centre, [55, 35]);
+  assert.deepEqual(rebuildNaming(m.doc).results["sketch-3"].warning, { cause: "point-lost", pin });
+  // Planted: silent, or sent back to the origin.
+  assert.equal(rebuildNaming(m.doc, new Set(["lost-pin-silent"])).results["sketch-3"].warning, undefined);
+  applyNaming(m, { op: "undo" });
+  assert.deepEqual(circle().centre, [55, 35]);
+  // Moved by hand, the pin goes: the corner's next move leaves the circle alone.
+  applyNaming(m, { op: "set-circle", sketch: "sketch-3", centre: [10, 10], radius: 5 });
+  assert.equal(circle().pin, undefined);
+  applyNaming(m, { op: "move-corner", sketch: "sketch-1", corner: 2, to: [40, 30] });
+  assert.deepEqual(circle().centre, [10, 10]);
+  // A pin asked for where there is no such corner is refused, not guessed.
+  assert.throws(() => applyNaming(m, { op: "add-face-sketch", face: { feature: "extrude-2", role: "end" }, centre: [0, 0], radius: 1, pin: { at: "corner", before: "line-1", after: "line-3" } }), /no corner:line-1>line-3/);
 });

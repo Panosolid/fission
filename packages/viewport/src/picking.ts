@@ -101,3 +101,16 @@ export function edgeOfSegment(segmentEdges: ArrayLike<number>, segment: number):
 export function unhidden(pointDistance: number, firstHit: number | null): boolean {
   return firstHit === null || firstHit >= pointDistance * (1 - EDGE_DEPTH_SLACK);
 }
+
+/**
+ * What a click picks while origin planes are offered for a sketch (step
+ * 26d), from whether the pointer's ray hit a face of the body and an
+ * offered plane: the face whenever there is one, else the plane; null when
+ * both missed. The planes are drawn behind the body (viewer.ts), so this
+ * is what is seen: a face in front of a plane, behind it or lying in it is
+ * what the pointer is on (from the home view the front plane's square
+ * stands in front of the default box's top, which must stay pickable).
+ */
+export function planeOrFace(plane: boolean, face: boolean): "plane" | "face" | null {
+  return face ? "face" : plane ? "plane" : null;
+}

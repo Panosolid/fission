@@ -261,6 +261,46 @@ test("amend ends a merge: the next edit with the same key is a step of its own",
   assert.deepEqual(restores, [41, 40]);
 });
 
+test("hand-worked (26f): amend keeping the merge folds a change that follows from the edit into its step, and the typing goes on merging", () => {
+  // Typing 41 then 42 in one box within the merge time, a point pinned to
+  // the box's edge following each (p = 31, then 32): one step, from
+  // {40, 30} to {42, 32}, the point where it followed to. Without keeping
+  // the merge (the test above) the same keys would be two steps.
+  const doc = { w: 40, p: 30 };
+  let t = 0;
+  const restores: string[] = [];
+  const h = createHistory({
+    capture: () => JSON.stringify(doc),
+    restore: (s) => (Object.assign(doc, JSON.parse(s)), restores.push(s)),
+    now: () => t,
+  });
+  doc.w = 41;
+  h.record("Change width", "width");
+  doc.p = 31;
+  assert.equal(h.amend(true), true);
+  t += MERGE_MS * 0.1;
+  doc.w = 42;
+  h.record("Change width", "width");
+  doc.p = 32;
+  assert.equal(h.amend(true), true);
+  assert.equal(h.undo(), "Change width");
+  assert.equal(h.canUndo(), false, "one step");
+  assert.equal(h.redo(), "Change width");
+  assert.deepEqual(restores, ['{"w":40,"p":30}', '{"w":42,"p":32}']);
+});
+
+test("amend keeping the merge still removes a step amended back to the state before it", () => {
+  // 40 → 41, the follow-up putting it back to 40 (d dropped again): nothing to undo, and the next 41 is a step again.
+  const { h, doc, edit } = rig();
+  const d = doc as { w: number; d?: number };
+  edit(41, "Change width", "width");
+  d.w = 40;
+  assert.equal(h.amend(true), true);
+  assert.equal(h.canUndo(), false);
+  assert.equal(edit(41, "Change width", "width"), true);
+  assert.equal(h.undoLabel(), "Change width");
+});
+
 test("amend during a restore does nothing", () => {
   let h!: ReturnType<typeof createHistory>;
   const doc = { w: 40 };

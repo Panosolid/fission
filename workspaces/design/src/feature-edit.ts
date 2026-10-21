@@ -3,7 +3,8 @@
 // depth and height, or diameter; an extrude of a sketch's distance) in its
 // own panel (feature-edit-panel.ts), whichever item it is, not only the
 // part. OK checks the sizes with the kernel and records the change as one
-// undo step ("Edit Extrude 1"); the rebuild then builds that feature again
+// undo step ("Edit Extrude 1"), an extrude's Flip with it (26c); the
+// rebuild then builds that feature again
 // and everything after it (rebuild.ts). A size the kernel refuses records
 // nothing and keeps the panel open with the kernel's words, as the
 // reference app refuses a typed 0 (the owner's answer, 2026-10-19).
@@ -11,19 +12,20 @@
 
 import { KernelError, type BodySpec, type Feature, type KernelCalls } from "@fission/core";
 import { changePreset, isSketchExtrude, isSketchItem, shapeOf, shown, specOf, type DesignDocument, type PartKind, type PartSizes } from "./document.ts";
-import { featureSpec, setExtrudeDistance } from "./extrude.ts";
+import { featureSpec, isFlipped, setExtrudeDistance, setExtrudeFlip } from "./extrude.ts";
 import type { Outline } from "./profiles.ts";
 import { parameterRows, SIZE_KEYS, type SizeKey } from "./properties.ts";
 import { buildSpec } from "./spec.ts";
 import { itemName, TIMELINE_STEPS } from "./timeline-edits.ts";
 
-/** What the Edit feature panel shows for an item: its shape, the sizes it has now, and the boxes it uses. */
+/** What the Edit feature panel shows for an item: its shape, the sizes it has now, the boxes it uses, and an extrude's Flip (26c). */
 export interface EditableFeature {
   id: string;
   name: string;
   shape: PartKind;
   sizes: PartSizes;
   keys: SizeKey[];
+  flip?: boolean;
 }
 
 function featureIn(doc: DesignDocument, id: string): Feature {
@@ -41,7 +43,7 @@ export function editableFeature(doc: DesignDocument, id: string): EditableFeatur
   if (!canEditFeature(f)) throw new Error(`${itemName(f)} is a sketch: it has no sizes to edit`);
   const { shape, sizes } = shapeOf(doc, f);
   const keys = parameterRows(shape).filter((r) => r.shown).map((r) => r.key);
-  return { id, name: itemName(f), shape, sizes, keys };
+  return isSketchExtrude(f) ? { id, name: itemName(f), shape, sizes, keys, flip: isFlipped(f) } : { id, name: itemName(f), shape, sizes, keys };
 }
 
 /** OK's words when the design changed while the kernel checked the sizes (another edit, Undo): nothing was recorded. */
@@ -54,12 +56,17 @@ export const editStep = (doc: DesignDocument, id: string) => TIMELINE_STEPS.edit
  * The document with item `id` given these sizes: the same feature, keeping
  * its id, its place, its suppressed flag and what it is built from; only
  * the sizes its shape uses are read (a size left out keeps its value). An
- * extrude of a sketch takes its distance from `height`. The document
+ * extrude of a sketch takes its distance from `height`, and its Flip from
+ * `flip` (left out keeps it; a preset has none to set). The document
  * itself comes back when nothing changes, so nothing is recorded. Every
  * other item is left as it was (the "edit-leaks" plant breaks this).
  */
-export function editFeature(doc: DesignDocument, id: string, typed: PartSizes): DesignDocument {
+export function editFeature(doc: DesignDocument, id: string, typed: PartSizes, flip?: boolean): DesignDocument {
   const now = editableFeature(doc, id);
+  if (flip !== undefined && now.flip === undefined) throw new Error(`${now.name} has no Flip: only an extrude of a sketch goes either way`);
+  if (flip !== undefined && typeof flip !== "boolean") throw new Error(`${now.name}: Flip must be true or false, not ${shown(flip)}`);
+  const flipped = flip === undefined || flip === now.flip ? doc : setExtrudeFlip(doc, flip, id);
+  if (flipped !== doc) return editFeature(flipped, id, typed);
   const sizes: PartSizes = { ...now.sizes };
   for (const key of now.keys) {
     const v = typed[key];

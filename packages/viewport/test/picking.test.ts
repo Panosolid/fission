@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLICK_SLOP_PX, EDGE_DEPTH_SLACK, EDGE_PICK_PX, clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, segmentsNear, unhidden } from "../src/picking.ts";
+import { CLICK_SLOP_PX, EDGE_DEPTH_SLACK, EDGE_PICK_PX, clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, planeOrFace, segmentsNear, unhidden } from "../src/picking.ts";
 
 test("a press and release under the slop is a click, over it is a camera drag", () => {
   const at = { x: 100, y: 200 };
@@ -118,4 +118,13 @@ test("device coordinates back to the screen undo clientToNdc (self-consistency)"
   }
   // Hand-worked: (0, 0) is the centre (37 + 320, 12 + 180) = (357, 192).
   assert.deepEqual(ndcToClient({ x: 0, y: 0 }, rect), { x: 357, y: 192 });
+});
+
+test("hand-worked (26d): picking a plane for a sketch takes a face under the pointer over any plane, else the plane", () => {
+  // From the home view (in front, above) the front plane's square rises in front of the box's top: the top, a
+  // face, is picked. Beside the box only the ground plane is hit: the plane. Nothing under the pointer: nothing.
+  assert.equal(planeOrFace(true, true), "face");
+  assert.equal(planeOrFace(false, true), "face");
+  assert.equal(planeOrFace(true, false), "plane");
+  assert.equal(planeOrFace(false, false), null);
 });

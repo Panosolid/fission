@@ -56,6 +56,24 @@ export const CYLINDER_VIEW = {
   ],
 } as BodyView;
 
+/**
+ * BOX_VIEW of a w × d × h box with its corners, edge ends, middles and
+ * centres (step 26f), as make_box gives them (checked against the kernel's
+ * view of a 40 × 30 × 20 box): corner k at (k & 1 ? w : 0, k & 2 ? d : 0,
+ * k & 4 ? h : 0), the edges' corners as BOX_VIEW's comment lists them.
+ */
+export function boxView(w: number, d: number, h: number): BodyView {
+  const vertex_points = Array.from({ length: 8 }, (_, k): [number, number, number] => [k & 1 ? w : 0, k & 2 ? d : 0, k & 4 ? h : 0]);
+  const edge_vertices: [number, number][] = [[0, 2], [2, 3], [1, 3], [0, 1], [4, 5], [5, 7], [6, 7], [4, 6], [1, 5], [0, 4], [2, 6], [3, 7]];
+  const mid = ([a, b]: [number, number]): [number, number, number] => [(vertex_points[a][0] + vertex_points[b][0]) / 2, (vertex_points[a][1] + vertex_points[b][1]) / 2, (vertex_points[a][2] + vertex_points[b][2]) / 2];
+  return { ...BOX_VIEW, vertex_points, edge_vertices, edge_middles: edge_vertices.map(mid), edge_centres: edge_vertices.map(() => null) };
+}
+
+/** CYLINDER_VIEW of radius r and height h with its points (26f): each rim closed on its one vertex (r, 0, z), centred on the axis. */
+export function cylinderView(r: number, h: number): BodyView {
+  return { ...CYLINDER_VIEW, vertex_points: [[r, 0, 0], [r, 0, h]], edge_vertices: [[0, 0], [1, 1]], edge_middles: [[-r, 0, 0], [-r, 0, h]], edge_centres: [[0, 0, 0], [0, 0, h]] };
+}
+
 /** A scene of one body, as `joinBodies` gives it, without its mesh (these views have none): numbering as the kernel's. */
 export function onlyBody(view: BodyView, names: BodyNames): Scene {
   return { bodies: [{ feature: names.feature, place: 1, view, names }], mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [], edge_line_edges: [] }, faceStart: [0], edgeStart: [0] };

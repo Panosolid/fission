@@ -22,12 +22,15 @@
 
 import { emptyProject, projectFromJson, projectToJson } from "@fission/core";
 import {
+  addFaceSketch,
   addSketch,
   changePreset,
   drawArc,
   drawCircle,
   drawLine,
   extrudeSketch,
+  faceFeature,
+  facePlane,
   idNumber,
   insertPreset,
   isSketchExtrude,
@@ -101,7 +104,9 @@ const modelRow = (doc: ModelDoc, i: number): Row => {
   const item = doc.items[i];
   const what =
     item.kind === "sketch"
-      ? "sketch"
+      ? item.on
+        ? `sketch on ${item.on.feature}/${item.on.role}`
+        : "sketch"
       : item.kind === "extrude"
         ? `extrude ${item.sketch} by ${item.distance}`
         : item.kind === "box"
@@ -173,10 +178,19 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
   };
 
   /** The edit on Design's side: the new document and the ids it made for the model's (item first). */
-  function edit(doc: DesignDocument, op: Exclude<ConcreteOp, { op: "undo" | "redo" }>): { doc: DesignDocument; made: string[] } {
+  function edit(doc: DesignDocument, op: Exclude<ConcreteOp, { op: "undo" | "redo" }>, modelIds: readonly string[]): { doc: DesignDocument; made: string[] } {
     switch (op.op) {
       case "add-sketch": {
         const s = addSketch(doc);
+        return { doc: last(drawShape(s.doc, s.id, op.shape), s.id), made: [s.id] };
+      }
+      case "add-face-sketch": {
+        // 26e: on the face's plane, XY lifted to the height the model drew it at (a top or an end, facing +Z; rule 8).
+        const drawn = model.doc.items.find((x) => x.id === modelIds[0]);
+        if (drawn?.kind !== "sketch" || drawn.on === undefined) throw new Error("harness: the model made no sketch on a face");
+        const z = drawn.on.drawn;
+        const feature = to(op.face.feature);
+        const s = addFaceSketch(doc, { plane: facePlane(encodeURIComponent(feature), op.face.role), feature }, { plane: { origin: [0, 0, z], xAxis: [1, 0, 0], normal: [0, 0, 1] }, side: 1 });
         return { doc: last(drawShape(s.doc, s.id, op.shape), s.id), made: [s.id] };
       }
       case "add-extrude": {
@@ -261,7 +275,7 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
           side.doc = JSON.parse(t);
         }
       } else {
-        const r = edit(side.doc, op);
+        const r = edit(side.doc, op, want.kind === "done" ? want.ids : []);
         made = r.made;
         if (canonical(r.doc) !== was) {
           side.undo.push(before);
@@ -287,8 +301,11 @@ export function runDataSession(steps: readonly SessionOp[], faults: Iterable<Dat
     const name = (id: string) => rev.get(id) ?? `Design's ${id}`;
     const design = side.doc.timeline.features.map((f): Row => {
       const p = f.intent.parameters;
+      const plane = isSketchItem(f) ? faceFeature(String(p.plane)) : null;
       const what = isSketchItem(f)
-        ? "sketch"
+        ? plane !== null
+          ? `sketch on ${name(plane)}/${String(p.plane).split("/").pop()}`
+          : "sketch"
         : isSketchExtrude(f)
           ? `extrude ${name(p.sketch as string)} by ${p.distance}`
           : f.intent.type === "box"

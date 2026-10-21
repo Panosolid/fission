@@ -43,7 +43,7 @@ pub fn rotate(placed: &Placed, pivot: DVec3, axis: DVec3, angle: f64) -> Result<
 
 /// The geometry is unchanged (and was valid), so only where it now is needs
 /// checking.
-fn checked_place(placed: Placed) -> Result<Placed, KernelError> {
+pub(crate) fn checked_place(placed: Placed) -> Result<Placed, KernelError> {
     let (lo, hi) = placed.bounds();
     check_reach(lo, hi)?;
     Ok(placed)
