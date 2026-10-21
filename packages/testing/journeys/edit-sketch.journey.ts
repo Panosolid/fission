@@ -359,14 +359,15 @@ async function runSession(seed: number, steps: Step[], plugin: WorkspacePlugin =
     const want = volumeOf(specs, shown);
     if (!close(a.volume(), want)) return `${what}: the view holds ${a.volume()} mm³, the model ${want}`;
     if (a.sketching() !== (editing !== null)) return `${what}: ${a.sketching() ? "a sketch is open" : "no sketch is open"}, the model says ${editing === null ? "none" : `Sketch ${editing + 1}`}`;
-    // The warning: the last extrude, in build order, built from a kept shape at the last rebuild; hidden while its own sketch is open.
-    let last: number | null = null;
+    // The warnings (26e: every one, in build order; before, only the last): each extrude built from a kept shape at the last rebuild, but not the one whose sketch is open.
+    const kept: number[] = [];
     shown.forEach((s, i) => {
-      if (!closes(s) && s.kept !== null) last = i;
+      if (!closes(s) && s.kept !== null && i !== editing) kept.push(i);
     });
-    const wantWarning = last === null || last === editing ? null : `Extrude ${(last as number) + 1} keeps its last shape. Sketch ${(last as number) + 1}`;
     const warning = a.warning();
-    if (wantWarning === null ? warning !== null : !warning?.startsWith(wantWarning)) return `${what}: the warning is ${JSON.stringify(warning)}, the model's ${JSON.stringify(wantWarning)}`;
+    const parts = warning === null ? [] : warning.split(/(?=Extrude \d+ keeps its last shape\. )/);
+    const wantWarning = kept.map((i) => `Extrude ${i + 1} keeps its last shape. Sketch ${i + 1}`);
+    if (parts.length !== wantWarning.length || parts.some((p, k) => !p.startsWith(wantWarning[k]))) return `${what}: the warning is ${JSON.stringify(warning)}, the model's ${JSON.stringify(wantWarning)}`;
     if (a.error() !== errorLine) return `${what}: the error line says ${JSON.stringify(a.error())}, the model ${JSON.stringify(errorLine)}`;
     if (a.history.undoLabel() !== (labels.at(-1) ?? null)) return `${what}: Undo is ${JSON.stringify(a.history.undoLabel())}, the model's ${JSON.stringify(labels.at(-1) ?? null)}`;
     return null;
