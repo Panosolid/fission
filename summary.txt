@@ -1,10 +1,10 @@
-Panosolid random testing, all runs so far (updated 2026-10-20 22:40 UTC)
+Panosolid random testing, all runs so far (updated 2026-10-21 08:13 UTC)
 
-hours of testing:                 698.4
-rounds:                           11904
-random operation chains:          23808000
+hours of testing:                 701.8
+rounds:                           11960
+random operation chains:          23920000
 rounds where the harness failed:  579
-bodies compared with OpenCascade: 47854658
+bodies compared with OpenCascade: 48086851
 OpenCascade disagreements:        346
 last problem found:               2026-10-19 21:40:59 (seed 219387905932970, commit ad542f5 on main)
 
@@ -22,8 +22,8 @@ Latest mutation run (whole kernel, lib tests), 2026-10-20 22:40 UTC, commit 1893
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 18935c4 on main, 2026-10-20 22:40 UTC (https://github.com/Panosolid/fission/actions/runs/39501547702)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.30 s (baseline 1.23 s)
+  tested commit ec32820 on claude/project-thread-rcb028, 2026-10-21 08:13 UTC (https://github.com/Panosolid/fission/actions/runs/39560955630)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.14 s (baseline 1.23 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
