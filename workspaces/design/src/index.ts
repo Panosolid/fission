@@ -10,7 +10,7 @@ export { buildSpec, specFor } from "./spec.ts";
 export { builds, buildingItems, changePreset, curvePoints, idNumber, keptOf, type KeptShape, insertAt, insertItem, insertPreset, isSketchExtrude, isSketchItem, lastFeature, partFeature, migrateDesignV1, migrateDesignV2, partDocument, partOf, shapeOf, profileLabel, readDesignDocument, SKETCH_PLANES, specOf, withPart, type DesignDocument, type Marker, type PartKind, type PartSizes, type ReadyProfile, type Sketch, type SketchArcCurve, type SketchCircleCurve, type SketchCurve, type SketchLineCurve, type SketchPlane, type SketchPoint } from "./document.ts";
 export { addSketch, askOutline, deleteCurve, drawArc, drawCircle, drawLine, drawRectangle, movePoint, planeOf, pointAt, SKETCH_STEPS, sketchCurves, sketchItem, sketchLines, sketchOutline, type LineEnd } from "./sketch.ts";
 export { clickAt, hoverTool, SAME_LINE, SKETCH_TOOLS, startTool, switchTool, toolBusy, type LineTool, type RectangleTool, type SketchTool, type ToolKind } from "./sketch-tool.ts";
-export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureSpec, setExtrudeDistance } from "./extrude.ts";
+export { DEFAULT_DISTANCE, DISTANCE_STEP, extrudeSketch, extrudeStep, featureBuild, featureSpec, setExtrudeDistance } from "./extrude.ts";
 export { PART_VIEW, syncGraph } from "./graph.ts";
 export { designLookup, designObjects, outlineProducer, registerDesign, type FeatureHandle, type OutlineSource } from "./representations.ts";
 export { bodyReference, designReference, NAME_NOTE, profileReference, readDesignReference, readProfileReference, resolveReference, sharedBy } from "./references.ts";
