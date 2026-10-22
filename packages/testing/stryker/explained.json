@@ -117,5 +117,159 @@
     "original": "!profiles.has(p.id)",
     "replacement": "true",
     "why": "Which of two profiles sharing an id the Map keeps can't matter: the id check above already refused any file with a repeated id before the sizes are read."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "ConditionalExpression",
+    "original": "journal?.getItem(key) != null",
+    "replacement": "true",
+    "why": "Autosave's start-up read only ever matters as 'an entry is there, remove it once something is stored': counting an absent entry as present only removes a key that isn't there, and leaving() compares journalVersion with a version that is at least 1 by then."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "BlockStatement",
+    "original": "{ return journal?.getItem(key) != null ? 0 : null; }",
+    "replacement": "{}",
+    "why": "Autosave's start-up read only ever matters as 'an entry is there, remove it once something is stored': undefined behaves exactly like 0 in `journalVersion === null || journalVersion > v` (removes on the first store) and never equals a version in leaving()."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "BlockStatement",
+    "original": "{ try { return journal?.getItem(key) != null ? 0 : null; } catch { return null; } }",
+    "replacement": "{}",
+    "why": "Autosave's start-up read only ever matters as 'an entry is there, remove it once something is stored': undefined behaves exactly like 0 (see the mutant above); the entry is removed on the first store either way."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "OptionalChaining",
+    "original": "journal?.getItem",
+    "replacement": "journal.getItem",
+    "why": "With no journal the call throws inside the try, whose catch gives the same null."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "BlockStatement",
+    "original": "{ return null; }",
+    "replacement": "{}",
+    "why": "The catch's undefined acts as 0: an unreadable entry is then removed on the first store, which is what is wanted anyway (removeItem is in its own try)."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "ConditionalExpression",
+    "original": "journalVersion === null",
+    "replacement": "false",
+    "why": "With no entry, `null > v` is false too, so the only change is a removeItem of a key that isn't there."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "OptionalChaining",
+    "original": "journal?.removeItem",
+    "replacement": "journal.removeItem",
+    "why": "journalVersion is null whenever there is no journal, so this line is never reached without one."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "BooleanLiteral",
+    "original": "false",
+    "replacement": "true",
+    "why": "Leaving `again` set gives one extra pass after the follow-up save; it reads the same text as just written, writes nothing and reports saved, as the real code does."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "ConditionalExpression",
+    "original": "timer !== null",
+    "replacement": "true",
+    "why": "stop(): clearTimeout(null) does nothing."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "ConditionalExpression",
+    "original": "!inFlight",
+    "replacement": "true",
+    "why": "leaving() with no timer waiting: a save started during a save in flight only asks for one more, which finds the text just written and writes nothing."
+  },
+  {
+    "file": "packages/storage/src/reopen.ts",
+    "mutator": "OptionalChaining",
+    "original": "storage?.getItem",
+    "replacement": "storage.getItem",
+    "why": "With no storage the call throws inside read()'s try, whose catch gives the same null."
+  },
+  {
+    "file": "packages/storage/src/reopen.ts",
+    "mutator": "BlockStatement",
+    "original": "{ return null; }",
+    "replacement": "{}",
+    "why": "read()'s undefined is compared with === against an id string, as null is: never equal."
+  },
+  {
+    "file": "packages/storage/src/reopen.ts",
+    "mutator": "OptionalChaining",
+    "original": "storage?.removeItem",
+    "replacement": "storage.removeItem",
+    "why": "With no storage the call throws inside write()'s try, whose catch does nothing, as ?. does."
+  },
+  {
+    "file": "packages/storage/src/reopen.ts",
+    "mutator": "OptionalChaining",
+    "original": "storage?.setItem",
+    "replacement": "storage.setItem",
+    "why": "With no storage the call throws inside write()'s try, whose catch does nothing, as ?. does."
+  },
+  {
+    "file": "packages/storage/src/reopen.ts",
+    "mutator": "ConditionalExpression",
+    "original": "pending !== null",
+    "replacement": "true",
+    "why": "finished(): clearTimeout(null) does nothing."
+  },
+  {
+    "file": "packages/storage/src/store.ts",
+    "mutator": "EqualityOperator",
+    "original": "a.id < b.id",
+    "replacement": "a.id <= b.id",
+    "why": "Stored ids are distinct keys, so the tie-break never compares an id with itself."
+  },
+  {
+    "file": "packages/storage/src/store.ts",
+    "mutator": "ConditionalExpression",
+    "original": "a.id > b.id",
+    "replacement": "true",
+    "why": "Ids are distinct, so when a.id < b.id is false a.id > b.id is true: the same answer."
+  },
+  {
+    "file": "packages/storage/src/store.ts",
+    "mutator": "EqualityOperator",
+    "original": "a.id > b.id",
+    "replacement": "a.id >= b.id",
+    "why": "Stored ids are distinct keys, so the tie-break never compares an id with itself."
+  },
+  {
+    "file": "packages/storage/src/store.ts",
+    "mutator": "EqualityOperator",
+    "original": "a.id > b.id",
+    "replacement": "a.id <= b.id",
+    "why": "Gives 0 instead of 1 for a pair already out of order; V8's sort only asks whether the comparator is below 0, so 0 and 1 sort the same."
+  },
+  {
+    "file": "packages/storage/src/store.ts",
+    "mutator": "ConditionalExpression",
+    "original": "a.id > b.id",
+    "replacement": "false",
+    "why": "Gives 0 instead of 1; V8's sort only asks whether the comparator is below 0, so 0 and 1 sort the same."
+  },
+  {
+    "file": "packages/storage/src/unsaved.ts",
+    "mutator": "ConditionalExpression",
+    "original": "!journal",
+    "replacement": "false",
+    "why": "With no journal, journal.length throws inside the try, whose catch returns the same empty list."
+  },
+  {
+    "file": "packages/storage/src/unsaved.ts",
+    "mutator": "EqualityOperator",
+    "original": "i < journal.length",
+    "replacement": "i <= journal.length",
+    "why": "localStorage.key(length) is null by the standard, and null keys are passed over."
   }
 ]
