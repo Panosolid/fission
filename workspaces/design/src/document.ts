@@ -16,6 +16,7 @@ import type { BodySpec, Feature, Plane } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
 import { faceFeature, isFacePlane, squared, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
 import type { SketchPin } from "./face-edges.ts";
+import type { SketchProjection } from "./projection.ts";
 import { outline, type ProfileKind, type ShapeKind } from "./profiles.ts";
 
 /** A ready-made outline on a plane (until the sketcher, step 21, adds sketches next to these). */
@@ -91,6 +92,12 @@ export interface Sketch {
    * once; left out when none are.
    */
   pins?: SketchPin[];
+  /**
+   * Edges of bodies before it projected into it (step 27d,
+   * projection.ts), each with the curve or point it made in `curves` or
+   * `points`, in the order they were projected; left out when none are.
+   */
+  projected?: SketchProjection[];
 }
 
 /**
@@ -517,6 +524,47 @@ function checkPins(f: Feature, content: Sketch, byId: ReadonlyMap<string, { item
   }
 }
 
+/**
+ * A sketch's projections, checked (step 27d): a list of at least one, each
+ * with an id shaped as Design's are (counted with every other id below),
+ * the feature whose body its edge is on (a solid item before the sketch,
+ * or gone: deleted, the projection is held; depended on, as a pin's), the
+ * edge's name (no "/"), and what it made: one of the sketch's curves, or
+ * one of its points that no curve is drawn from, never another
+ * projection's. No edge is projected twice, no point is made by two
+ * projections, and none is pinned too (it follows its edge already).
+ */
+function checkProjections(f: Feature, content: Sketch, byId: ReadonlyMap<string, { item: Feature; at: number }>): void {
+  const at = `Design sketch ${f.id}`;
+  const list = content.projected as unknown;
+  if (!Array.isArray(list) || list.length === 0) throw new Error(`${at}'s projections must be a list of at least one, or left out`);
+  const points = new Set(content.points.map((p) => p.id));
+  const curves = new Map(content.curves.map((c) => [c.id, c]));
+  const drawnFrom = new Set(content.curves.flatMap(curvePoints));
+  const edges = new Set<string>();
+  const owned = new Set<string>();
+  const pinned = new Set((content.pins ?? []).map((p) => p.point));
+  for (const [j, p] of list.entries()) {
+    if (!isRecord(p) || typeof p.id !== "string") throw new Error(`${at}'s projection ${j + 1} has no id`);
+    const name = `${at}'s projection ${p.id}`;
+    if (typeof p.feature !== "string" || p.feature.length === 0) throw new Error(`${name} names no feature`);
+    const there = byId.get(p.feature);
+    if (there !== undefined && (there.at > byId.get(f.id)!.at || isSketchItem(there.item))) throw new Error(`${name} is of ${shown(p.feature)}, which is not a solid item before it in the timeline`);
+    if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(p.feature)) throw new Error(`${at} projects an edge of ${p.feature} but does not depend on it`);
+    if (typeof p.edge !== "string" || p.edge.length === 0 || p.edge.includes("/")) throw new Error(`${name} has no edge name`);
+    if (edges.has(`${p.feature}/${p.edge}`)) throw new Error(`${at} projects the edge ${p.edge} of ${p.feature} twice`);
+    edges.add(`${p.feature}/${p.edge}`);
+    if (typeof p.made !== "string") throw new Error(`${name} made nothing`);
+    const curve = curves.get(p.made);
+    if (curve === undefined && !(points.has(p.made) && !drawnFrom.has(p.made))) throw new Error(`${name} made ${shown(p.made)}, which is not one of the sketch's curves, or a point no curve is drawn from`);
+    for (const q of [p.made, ...(curve ? curvePoints(curve) : [])]) {
+      if (owned.has(q)) throw new Error(`${at}: ${q} is made by two projections`);
+      if (pinned.has(q)) throw new Error(`${at}: ${q} is projected, so it can't be pinned too`);
+      owned.add(q);
+    }
+  }
+}
+
 /** An extrude's kept shape, checked: a sketch's points and curves (checkContent), each id once, and where it lay if not on XY. */
 function checkKept(kept: unknown, feature: string): void {
   const at = `Design feature ${feature}'s kept shape`;
@@ -584,6 +632,8 @@ export function readDesignDocument(data: unknown): DesignDocument {
     else if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Panosolid knows (XY, XZ, YZ or a face)`);
     // Any sketch's points may be pinned to an earlier body's edges (27c), checked once its plane is.
     if (Object.hasOwn(content, "pins")) checkPins(f, content, byId);
+    // And its projections (27d).
+    if (Object.hasOwn(content, "projected")) checkProjections(f, content, byId);
   }
   const itemIds = new Set(items.map((f) => f.id));
   for (const s of d.sketches) if (!itemIds.has(s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
@@ -615,7 +665,7 @@ export function readDesignDocument(data: unknown): DesignDocument {
   const ids = [
     ...d.profiles.map((p) => p.id),
     ...d.timeline.features.map((f) => f.id),
-    ...d.sketches.flatMap((s) => [...s.points.map((p) => p.id), ...s.curves.map((c) => c.id)]),
+    ...d.sketches.flatMap((s) => [...s.points.map((p) => p.id), ...s.curves.map((c) => c.id), ...(s.projected ?? []).map((p) => p.id)]),
   ];
   // A kept shape holds a sketch's old ids (some may still be in the sketch): never repeated by a new id, so the counter is above them too.
   const kept = Object.values(d.kept ?? {}).flatMap((k) => [...k.points.map((p) => p.id), ...k.curves.map((c) => c.id)]);
@@ -642,12 +692,13 @@ export function readDesignDocument(data: unknown): DesignDocument {
 /**
  * What a sketch is built on, by id, each once: the feature whose face it is
  * drawn on (26c), then each feature its points are pinned to (27c, the
- * naming model's rule 13); none on an origin plane with no pins.
+ * naming model's rule 13), then each an edge is projected from (27d); none
+ * on an origin plane with no pins or projections.
  */
-function sketchInputs(f: Feature, content: Sketch | undefined): string[] {
+export function sketchInputs(f: Feature, content: Pick<Sketch, "pins" | "projected"> | undefined): string[] {
   const plane = f.intent.parameters.plane;
   const face = isFacePlane(plane) ? faceFeature(plane) : null;
-  return [...new Set([...(face === null ? [] : [face]), ...(content?.pins ?? []).flatMap((p) => p.feature ?? [])])];
+  return [...new Set([...(face === null ? [] : [face]), ...(content?.pins ?? []).flatMap((p) => p.feature ?? []), ...(content?.projected ?? []).map((p) => p.feature)])];
 }
 
 /** What an item is built on, of the items in the timeline: a sketch's (`sketchInputs`); an extrude of a sketch, the sketch; else nothing. */
@@ -712,7 +763,7 @@ function walk(document: DesignDocument): { building: Set<Feature>; greyed: Map<F
   const greyed = new Map<Feature, string>();
   // In timeline order, so what an item is built on (always before it; a file that puts it later is refused when opened) is decided first.
   for (const f of open) {
-    // A sketch: its face's feature, then each feature a pin names (27c), as `inputsOf` (one lookup each, audit S2).
+    // A sketch: its face's feature, then each feature a pin (27c) or a projection (27d) names, as `inputsOf` (one lookup each, audit S2).
     const sketch = isSketchExtrude(f) ? sketches.get(f.intent.parameters.sketch) : undefined;
     const inputs = isSketchItem(f) ? sketchInputs(f, contents.get(f.id)).flatMap((id) => byId.get(id) ?? []) : sketch === undefined ? [] : [sketch];
     const input = inputs[0];

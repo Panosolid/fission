@@ -22,6 +22,8 @@ export function hintOf(tool: SketchTool): string {
       return tool.centre === null ? "Place centre point" : tool.start === null ? "Place start point" : "Place end point";
     case "tangent":
       return tool.from === null ? "Click the free end of a line or arc" : "Specify next point";
+    case "project":
+      return "Click an edge or a face to project";
   }
 }
 

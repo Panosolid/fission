@@ -55,8 +55,13 @@ export function deleteWords(before: DesignDocument, after: DesignDocument, id: s
   const keeps = users.filter((f) => isSketchExtrude(f) && after.kept !== undefined && Object.hasOwn(after.kept, f.id)).map(itemName);
   const staying = users.filter((f) => isFaceSketch(f) && faceFeature(f.intent.parameters.plane as string) === id);
   const stays = staying.map(itemName);
-  // 27c (rule 13): a sketch only pinned to its edges keeps those points where they are.
-  const holds = users.filter((f) => isSketchItem(f) && !staying.includes(f)).map(itemName);
+  // 27c and 27d (rule 13): a sketch only pinned to its edges, or projecting them, keeps those points and edges where they are.
+  const holding = users.filter((f) => isSketchItem(f) && !staying.includes(f));
+  const holds = holding.map(itemName);
+  const content = (f: { id: string }) => before.sketches.find((s) => s.id === f.id);
+  const pins = holding.some((f) => content(f)?.pins?.some((p) => p.feature === id));
+  const projects = holding.some((f) => content(f)?.projected?.some((p) => p.feature === id));
+  const held = pins && projects ? "snapped points and projected edges" : projects ? "projected edges" : "snapped points";
   // 26e (Q1): what is built from a sketch that stays stays with it, saying its source is lost.
   const built = before.timeline.features.filter((f) => isSketchExtrude(f) && staying.some((s) => f.dependsOn.includes(s.id))).map(itemName);
   const fails = users.map(itemName).filter((n) => !keeps.includes(n) && !stays.includes(n) && !holds.includes(n));
@@ -65,7 +70,7 @@ export function deleteWords(before: DesignDocument, after: DesignDocument, id: s
     ...(keeps.length > 0 ? [`${listWords(keeps)} ${one(keeps) ? "keeps its last shape and shows a warning" : "keep their last shapes and show a warning"}`] : []),
     ...(stays.length > 0 ? [`${listWords(stays)} ${one(stays) ? "stays where it is and shows its plane is lost" : "stay where they are and show their planes are lost"}`] : []),
     ...(built.length > 0 ? [`what is built from ${one(stays) ? "it" : "them"}, ${listWords(built)}, ${one(built) ? "stays where it is and shows its source is lost" : "stay where they are and show their sources are lost"}`] : []),
-    ...(holds.length > 0 ? [`${listWords(holds)} ${one(holds) ? "keeps its snapped points where they are and shows they are lost" : "keep their snapped points where they are and show they are lost"}`] : []),
+    ...(holds.length > 0 ? [`${listWords(holds)} ${one(holds) ? `keeps its ${held} where they are and shows they are lost` : `keep their ${held} where they are and show they are lost`}`] : []),
     ...(fails.length > 0 ? [`${listWords(fails)} ${one(fails) ? "has no shape to keep and fails" : "have no shapes to keep and fail"}`] : []),
   ].join(", and ");
   const on =
@@ -75,8 +80,12 @@ export function deleteWords(before: DesignDocument, after: DesignDocument, id: s
         : "are drawn on faces of"
       : holds.length === users.length
         ? one(users)
-          ? "is snapped to an edge of"
-          : "are snapped to edges of"
+          ? projects && !pins
+            ? "projects an edge of"
+            : "is snapped to an edge of"
+          : projects && !pins
+            ? "project edges of"
+            : "are snapped to edges of"
         : one(users)
           ? "is built from"
           : "are built from";

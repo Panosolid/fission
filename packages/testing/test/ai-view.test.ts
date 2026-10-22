@@ -33,7 +33,7 @@ function suppressedUnder(d: DesignDocument, id: string): string | null {
 }
 
 test("seeded: on 300 random timelines the AI is told each item's state, and set_part does what it is told it does", () => {
-  const reached = { change: 0, addStart: 0, addMiddle: 0, addEnd: 0, noBody: 0, suppressed: 0, afterMarker: 0, failed: 0, greyed: 0, kept: 0, sketch: 0 };
+  const reached = { change: 0, addStart: 0, addMiddle: 0, addEnd: 0, noBody: 0, suppressed: 0, afterMarker: 0, failed: 0, greyed: 0, greyedSketch: 0, kept: 0, sketch: 0 };
   for (let seed = 1n; seed <= 300n; seed++) {
     const r = seeded(seed);
     const doc = timelineEdits(r, partDocument("box", 40, 30, 20));
@@ -58,7 +58,12 @@ test("seeded: on 300 random timelines the AI is told each item's state, and set_
       const state = line.slice(head.length);
       if (f.suppressed) (reached.suppressed++, assert.equal(state, "Suppressed: builds nothing.", where));
       else if (i >= end) (reached.afterMarker++, assert.equal(state, "After the timeline marker: not built.", where));
-      else if (f.intent.type === "sketch") (reached.sketch++, assert.equal(state, "A sketch: builds no body.", where));
+      else if (f.intent.type === "sketch") {
+        // 27d (rule 13): a sketch projecting an edge of a suppressed item is greyed by it (`dependsOn` names it).
+        const by = suppressedUnder(doc, f.id);
+        if (by !== null) (reached.greyedSketch++, assert.equal(state, `Greyed: builds nothing while ${by}, which it is built on, is suppressed.`, where));
+        else (reached.sketch++, assert.equal(state, "A sketch: builds no body.", where));
+      }
       else if (building.has(f.id)) {
         body++;
         const kept = doc.kept !== undefined && Object.hasOwn(doc.kept, f.id);

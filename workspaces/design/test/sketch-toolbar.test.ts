@@ -6,9 +6,9 @@ import type { ToolKind } from "../src/sketch-tool.ts";
 
 test("the Create menu lists every tool with its key, in the tools' order, the three arcs under one Arc row", () => {
   // Written out by hand: Line L, Rectangle R, Circle C, then Arc opening
-  // 3-point arc A, Centre arc (no key) and Tangent arc T.
+  // 3-point arc A, Centre arc (no key) and Tangent arc T, then (27d) Project P.
   const show = (e: MenuEntry): string => ("group" in e ? `${e.group} ▸ [${e.rows.map(show).join(", ")}]` : `${e.label}${e.key ? ` ${e.key}` : ""}`);
-  assert.deepEqual(createMenuRows().map(show), ["Line L", "Rectangle R", "Circle C", "Arc ▸ [3-point arc A, Centre arc, Tangent arc T]"]);
+  assert.deepEqual(createMenuRows().map(show), ["Line L", "Rectangle R", "Circle C", "Arc ▸ [3-point arc A, Centre arc, Tangent arc T]", "Project P"]);
 });
 
 test("menu keys by hand: Down and Up wrap round five rows, Home and End jump, other keys don't move", () => {
@@ -137,10 +137,14 @@ test("the menu by keys: Down moves the focus, Escape closes it without reaching 
     (doc.activeElement as HTMLElement).dispatchEvent(ev);
     return ev;
   };
-  // Arc is top row 3 of 0 to 3: Down wraps to row 0, Line.
+  // Arc is top row 3 of 0 to 4: Down is row 4, Project (27d), and Down again wraps to row 0, Line.
   assert.equal(press("ArrowDown").defaultPrevented, true);
+  assert.equal(doc.activeElement?.id, "sketch-menu-project");
+  press("ArrowDown");
   assert.equal(doc.activeElement?.id, "sketch-menu-line");
   press("End");
+  assert.equal(doc.activeElement?.id, "sketch-menu-project");
+  press("ArrowUp");
   assert.equal(doc.activeElement?.id, "sketch-menu-group-arc");
   // Right opens the arcs on the ticked one, Tangent arc (row 2 of 0 to 2);
   // Down wraps to 3-point arc, Down again is Centre arc; Left goes back.

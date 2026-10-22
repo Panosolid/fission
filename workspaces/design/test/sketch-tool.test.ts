@@ -348,7 +348,7 @@ test("hand-worked: the sketch status counts lines and circles apart", () => {
   assert.equal(curveCount(sketch(clicks(f.doc, { kind: "rectangle", sketch: f.tool.sketch, corner: null } as RectangleTool, [[20, 20], [40, 40]]).doc)), "4 lines");
 });
 
-test("tools: Escape ends what is part way, switching starts afresh, L, R, C and A choose them", () => {
+test("tools: Escape ends what is part way, switching starts afresh, L, R, C, A, T and P choose them", () => {
   const f = freshRectangle();
   assert.equal(toolBusy(f.tool), false);
   assert.equal(toolBusy(clickAt(f.doc, f.tool, [0, 0]).tool), true, "a first corner down");
@@ -360,7 +360,10 @@ test("tools: Escape ends what is part way, switching starts afresh, L, R, C and 
   assert.equal(toolBusy(freshCircle().tool), false);
   assert.equal(toolBusy(clickAt(freshCircle().doc, freshCircle().tool, [0, 0]).tool), true, "a centre down");
   assert.deepEqual(startTool("arc", "sketch-2"), { kind: "arc", sketch: "sketch-2", start: null, end: null });
-  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"], ["centre", undefined], ["tangent", "T"]]);
+  assert.deepEqual(SKETCH_TOOLS.map((t) => [t.kind, t.key]), [["line", "L"], ["rectangle", "R"], ["circle", "C"], ["arc", "A"], ["centre", undefined], ["tangent", "T"], ["project", "P"]]);
+  // 27d: the Project tool places nothing, so nothing is ever part way.
+  assert.deepEqual(startTool("project", "sketch-2"), { kind: "project", sketch: "sketch-2" });
+  assert.equal(toolBusy(startTool("project", "sketch-2")), false);
   assert.deepEqual(startTool("tangent", "sketch-2"), { kind: "tangent", sketch: "sketch-2", from: null });
   assert.deepEqual(startTool("centre", "sketch-2"), { kind: "centre", sketch: "sketch-2", centre: null, start: null, swept: 0 });
   // The keys in Design's table are the ones the panel's buttons name, and they choose those tools (the centre arc has none).

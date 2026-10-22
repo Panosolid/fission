@@ -873,5 +873,19 @@
     "original": "b > 0",
     "replacement": "b >= 0",
     "why": "A bulge of 0 is drawn straight and never reaches the arc, so b is never 0 here."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "EqualityOperator",
+    "original": "there.at > byId.get(f.id)!.at",
+    "replacement": "there.at >= byId.get(f.id)!.at",
+    "why": "In a face sketch's, a pin's or a projection's check, the named feature at the sketch's own place is the sketch itself (ids are unique by then, and `byId` keeps the first), a sketch item, which `isSketchItem(there.item)` refuses on the same line with the same words."
+  },
+  {
+    "file": "workspaces/design/src/document.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof pin.point !== \"string\"",
+    "replacement": "false",
+    "why": "A pin's point that is not a string is never one of the sketch's point ids (all strings, checked before the pins), so `!points.has(pin.point)` on the same line refuses it with the same words; a pin that is not a record (null) is caught by `!isRecord(pin)` before `pin.point` is read."
   }
 ]

@@ -202,10 +202,11 @@ test("hand-worked: the outline's sketch deleted, its extrude keeps the sketch's 
 
 // ---------------------------------------------------------------- Ben's answers
 
-test("every one of Ben's Fusion answers that holds without a cut holds on Design (1, 2, 5, 7, Q1, Q2, Q3, Q4, and from step 27c R11 and R13)", async () => {
-  // Step 27's cases (rules 11 to 13) join as Design gains them: 27c's pins now, 27d's projections with the Project tool (`from`).
-  const cases = FUSION_CASES.filter((c) => !c.cuts && (c.from === undefined || c.from === "27c"));
-  assert.deepEqual([...new Set(cases.map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3", "Q4", "R11", "R13"]);
+test("every one of Ben's Fusion answers that holds without a cut holds on Design (1, 2, 5, 7, Q1, Q2, Q3, Q4, and from step 27 R11 to R13)", async () => {
+  // Step 27's cases (rules 11 to 13), each from the substep that gave Design what it needs (`from`): 27c's pins and 27d's projections.
+  const cases = FUSION_CASES.filter((c) => !c.cuts && (c.from === undefined || c.from === "27c" || c.from === "27d"));
+  assert.equal(cases.filter((c) => c.from === "27d").length, 6, "every projection case of 27a's plan");
+  assert.deepEqual([...new Set(cases.map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3", "Q4", "R11", "R12", "R13"]);
   const start = await kernel.call("body_count");
   for (const c of cases) {
     const subject = namingDesignSubject(kernel);
@@ -232,8 +233,8 @@ test(`seeded: ${SEEDS} sessions × ${STEPS} steps on Design agree with the model
   const total: NamingCounts = {};
   for (let k = 0; k < SEEDS; k++) {
     const seed = BigInt(2500 + k);
-    // From step 27c with a second body and pins on any earlier extrude's edges (rules 11 and 13; "pins", no projections until 27d).
-    const session = randomNamingSession(seed, STEPS, false, "pins");
+    // From step 27c with a second body and pins on any earlier extrude's edges, and from 27d edges projected (rules 11 to 13; "all").
+    const session = randomNamingSession(seed, STEPS, false, "all");
     const subject = namingDesignSubject(kernel);
     try {
       const counts = await runNamingSession(subject, session);
@@ -291,6 +292,15 @@ test(`seeded: ${SEEDS} sessions × ${STEPS} steps on Design agree with the model
     "reorder:refused-by-ref",
     "delete:ask-by-ref",
     "off:greyed-by-ref",
+    // Step 27d (rule 12): lines and points, from another extrude, followed somewhere new, lost and held; projected twice; removed.
+    "projection:line",
+    "projection:point",
+    "projection:other-feature",
+    "projection:moved",
+    "sketch:projection-lost",
+    "op:project:done",
+    "op:project:unchanged",
+    "op:unproject:done",
   ];
   if (SEEDS >= 12) for (const key of reached) assert.ok((total[key] ?? 0) >= 3, `${key} reached ${total[key] ?? 0} times: ${JSON.stringify(total)}`);
 });
@@ -313,7 +323,7 @@ test("saved regressions replay on Design", { skip: !existsSync(REGRESSIONS) && "
 /** The first seeded session (of the sessions above) a subject with `fault` fails, shrunk. */
 async function caught(fault: NamingDesignFault): Promise<{ session: NamingSession; failure: NamingFailure } | null> {
   for (let k = 0; k < SEEDS; k++) {
-    const session = randomNamingSession(BigInt(2500 + k), STEPS, false, "pins");
+    const session = randomNamingSession(BigInt(2500 + k), STEPS, false, "all");
     const subjects: { dispose(): Promise<void> }[] = [];
     const make = () => {
       const s = namingDesignSubject(kernel, [fault]);

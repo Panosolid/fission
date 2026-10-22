@@ -73,13 +73,16 @@ export function deleteItem(doc: DesignDocument, id: string): DesignDocument {
 
 /**
  * How `f` hangs on `on`, one of the items it depends on: a sketch is drawn
- * on a face of its face's feature (step 26e) and has a point snapped to an
- * edge of any other (27c, a pin); anything else is built from its inputs.
+ * on a face of its face's feature (step 26e), has a point snapped to an
+ * edge of another (27c, a pin), or else holds an edge projected from it
+ * (27d); anything else is built from its inputs.
  */
-function link(f: Feature, on: Feature): string {
+function link(doc: DesignDocument, f: Feature, on: Feature): string {
   if (!isSketchItem(f)) return "built from";
   const plane = f.intent.parameters.plane;
-  return isFacePlane(plane) && faceFeature(plane) === on.id ? "drawn on a face of" : "snapped to an edge of";
+  if (isFacePlane(plane) && faceFeature(plane) === on.id) return "drawn on a face of";
+  const pinned = doc.sketches.find((s) => s.id === f.id)?.pins?.some((p) => p.feature === on.id) ?? false;
+  return pinned ? "snapped to an edge of" : "projecting an edge of";
 }
 
 /**
@@ -87,8 +90,8 @@ function link(f: Feature, on: Feature): string {
  * order; the marker stays on the item it names. The same document back
  * when it is already there. Refused, with the message the app shows, when
  * the item would come before an item it is built from, or after one built
- * from it; a sketch's words name the face it is drawn on (answer 7), or
- * the body it has a point snapped to (27c).
+ * from it; a sketch's words name the face it is drawn on (answer 7), the
+ * body it has a point snapped to (27c), or the one it projects (27d).
  */
 export function reorderItem(doc: DesignDocument, id: string, to: number): Reordered {
   const item = itemIn(doc, id);
@@ -97,9 +100,9 @@ export function reorderItem(doc: DesignDocument, id: string, to: number): Reorde
   features.splice(to, 0, item);
   const place = (x: string) => features.findIndex((f) => f.id === x);
   const from = features.find((f) => item.dependsOn.includes(f.id) && place(f.id) > to);
-  if (from) return { refused: "before-dependency", message: `${itemName(item)} can't go before ${itemName(from)}: it is ${link(item, from)} ${itemName(from)}` };
+  if (from) return { refused: "before-dependency", message: `${itemName(item)} can't go before ${itemName(from)}: it is ${link(doc, item, from)} ${itemName(from)}` };
   const user = features.find((f, j) => j < to && f.dependsOn.includes(id));
-  if (user) return { refused: "after-dependent", message: `${itemName(item)} can't go after ${itemName(user)}: ${itemName(user)} is ${link(user, item)} it` };
+  if (user) return { refused: "after-dependent", message: `${itemName(item)} can't go after ${itemName(user)}: ${itemName(user)} is ${link(doc, user, item)} it` };
   if (doc.timeline.features.indexOf(item) === to) return { doc };
   return { doc: withTimeline(doc, features, doc.timeline.marker) };
 }

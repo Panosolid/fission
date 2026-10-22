@@ -186,7 +186,7 @@ export function anchorOf(doc: DesignDocument, tool: SketchTool): SketchXY | null
   if (tool.kind === "rectangle") return tool.corner;
   if (tool.kind === "arc") return tool.end === null ? tool.start : null;
   if (tool.kind === "centre") return tool.centre;
-  if (tool.kind === "circle" || tool.from === null) return null;
+  if (tool.kind === "circle" || tool.kind === "project" || tool.from === null) return null;
   return typeof tool.from === "string" ? pointOf(doc, tool.sketch, tool.from) : tool.from;
 }
 

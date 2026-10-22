@@ -9,15 +9,16 @@
 // from 23a) from the curves rebuilt from point ids, every time it is asked
 // for.
 
-import type { Feature, KernelCalls, Outline, Plane, SketchArc, SketchCircle, SketchLine } from "@fission/core";
+import type { Feature, KernelCalls, Outline, Plane, SketchArc, SketchCircle, SketchLine, SketchXY } from "@fission/core";
 import { XY_PLANE } from "@fission/core";
 import { faceFeature, isFacePlane, squared, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
 import type { EdgeTarget, SketchPin } from "./face-edges.ts";
-import { curvePoints, insertAt, insertItem, isSketchItem, profileLabel, shown, type DesignDocument, type ReadyProfile, type Sketch, type SketchLineCurve, type SketchPlane } from "./document.ts";
+import { curvePoints, insertAt, insertItem, isSketchItem, profileLabel, shown, type DesignDocument, type ReadyProfile, type Sketch, type SketchCurve, type SketchLineCurve, type SketchPlane, type SketchPoint } from "./document.ts";
+import { madePoints, profileCurves, type EdgeShape, type SketchProjection } from "./projection.ts";
 import { readProfileReference } from "./references.ts";
 
 /** The undo step each sketch edit is recorded as. */
-export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", centre: "Draw centre arc", tangent: "Draw tangent arc", delete: "Delete line", move: "Move point" } as const;
+export const SKETCH_STEPS = { create: "Create sketch", draw: "Draw line", rectangle: "Draw rectangle", circle: "Draw circle", arc: "Draw arc", centre: "Draw centre arc", tangent: "Draw tangent arc", project: "Project", unproject: "Remove projection", delete: "Delete line", move: "Move point" } as const;
 
 /**
  * Each origin plane's frame: the sketch's x along `xAxis`, its y along
@@ -243,31 +244,46 @@ export function drawRectangle(doc: DesignDocument, sketchId: string, a: readonly
   return { doc: next, ids };
 }
 
-/** The sketch without this curve, and without the points only it used (and their pins, 26f). The counter stays where it is. */
+/**
+ * The sketch without this curve, and without the points only it used (and
+ * their pins, 26f). A projected curve goes with its projection, whole
+ * (27d, `unproject`); a projected point another curve shared stays. The
+ * counter stays where it is.
+ */
 export function deleteCurve(doc: DesignDocument, sketchId: string, curveId: string): DesignDocument {
   const sketch = sketchIn(doc, sketchId);
   if (!sketch.curves.some((c) => c.id === curveId)) throw new Error(`sketch ${sketchId} has no curve ${curveId}`);
+  const projection = sketch.projected?.find((p) => p.made === curveId);
+  if (projection) return unproject(doc, sketchId, projection.id);
   const curves = sketch.curves.filter((c) => c.id !== curveId);
-  const used = new Set(curves.flatMap(curvePoints));
-  return withPins(doc, { ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) }, (sketch.pins ?? []).filter((p) => used.has(p.point)));
+  const used = usedPoints(curves, sketch.projected);
+  return withRefs(doc, { ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) }, (sketch.pins ?? []).filter((p) => used.has(p.point)));
+}
+
+/** The points a sketch keeps: those its curves are drawn from, and every point a projection made (27d: an edge seen end on is a point with no curve). */
+function usedPoints(curves: readonly SketchCurve[], projected: readonly SketchProjection[] | undefined): Set<string> {
+  return new Set([...curves.flatMap(curvePoints), ...(projected ?? []).map((p) => p.made)]);
 }
 
 /**
- * The document with `sketch` holding these pins, or without the list when
- * there are none (26f: a file never holds an empty one), and its timeline
- * item depending on what it is built on (27c): the feature whose face it
- * is on, then each feature a pin names, each once, so the item can't be
- * dragged before any of them (timeline-edits.ts) and deleting one asks.
+ * The document with `sketch` holding these pins and these projections
+ * (27d; `sketch`'s own when left out), each list left out when empty (26f:
+ * a file never holds an empty one), and its timeline item depending on
+ * what it is built on (27c): the feature whose face it is on, then each
+ * feature a pin names, then each a projection names (27d), each once, so
+ * the item can't be dragged before any of them (timeline-edits.ts) and
+ * deleting one asks.
  */
-function withPins(doc: DesignDocument, sketch: Sketch, pins: SketchPin[]): DesignDocument {
+function withRefs(doc: DesignDocument, sketch: Sketch, pins: SketchPin[], projected: SketchProjection[] = sketch.projected ?? []): DesignDocument {
   const rest: Sketch = { ...sketch };
   delete rest.pins;
-  const next = withSketch(doc, pins.length === 0 ? rest : { ...rest, pins });
+  delete rest.projected;
+  const next = withSketch(doc, { ...rest, ...(pins.length === 0 ? {} : { pins }), ...(projected.length === 0 ? {} : { projected }) });
   const item = doc.timeline.features.find((f) => f.id === sketch.id);
   if (item === undefined) return next;
   const plane = item.intent.parameters.plane;
   const face = isFacePlane(plane) ? faceFeature(plane) : null;
-  const dependsOn = [...new Set([...(face === null ? [] : [face]), ...pins.flatMap((p) => p.feature ?? [])])];
+  const dependsOn = [...new Set([...(face === null ? [] : [face]), ...pins.flatMap((p) => p.feature ?? []), ...projected.map((p) => p.feature)])];
   if (dependsOn.length === item.dependsOn.length && dependsOn.every((d, k) => d === item.dependsOn[k])) return next;
   const features = doc.timeline.features.map((f) => (f === item ? { ...f, dependsOn } : f));
   return { ...next, timeline: { ...doc.timeline, features } };
@@ -290,12 +306,14 @@ export function pinNewPoints(before: DesignDocument, after: DesignDocument, sket
   const plane = after.timeline.features.find((f) => f.id === sketchId)?.intent.parameters.plane;
   const own = isFacePlane(plane) ? faceFeature(plane) : null;
   const pins = [...(sketch.pins ?? [])];
+  // A projected point (27d) follows its edge already, and is never pinned too.
+  const projected = new Set((sketch.projected ?? []).flatMap((p) => madePoints(sketch, p)));
   for (const p of sketch.points) {
-    if (had.has(p.id) || pins.some((x) => x.point === p.id)) continue;
+    if (had.has(p.id) || projected.has(p.id) || pins.some((x) => x.point === p.id)) continue;
     const t = targets.find((x) => x.at[0] === p.x && x.at[1] === p.y);
       if (t) pins.push(pinOf(p.id, t, own));
   }
-  return pins.length === (sketch.pins?.length ?? 0) ? after : withPins(after, sketch, pins);
+  return pins.length === (sketch.pins?.length ?? 0) ? after : withRefs(after, sketch, pins);
 }
 
 /** Point `point` pinned to target `t`, its feature named unless it is `own`, the feature whose face the sketch is on (as 0.26 wrote pins). */
@@ -316,7 +334,7 @@ export function movePointOnto(doc: DesignDocument, sketchId: string, pointId: st
   const was = sketchIn(doc, sketchId).pins ?? [];
   const k = was.findIndex((p) => p.point === pointId);
   const pins = k < 0 ? [...(sketch.pins ?? []), pin] : was.map((p, j) => (j === k ? pin : p));
-  const next = withPins(moved, sketch, pins);
+  const next = withRefs(moved, sketch, pins);
   return JSON.stringify(next) === JSON.stringify(doc) ? doc : next;
 }
 
@@ -326,15 +344,96 @@ export function movePointOnto(doc: DesignDocument, sketchId: string, pointId: st
  * nothing else moves with it, so moving one end of an arc leaves its
  * centre off the midway line and the kernel then says so. A point pinned
  * to a body's edge (26f) is moved off it, so its pin goes (and, 27c, what
- * only that pin made the sketch built on).
+ * only that pin made the sketch built on). A projected point (27d) is
+ * never moved by hand: it follows its edge.
  */
 export function movePoint(doc: DesignDocument, sketchId: string, pointId: string, x: number, y: number): DesignDocument {
   const sketch = sketchIn(doc, sketchId);
   if (!sketch.points.some((p) => p.id === pointId)) throw new Error(`sketch ${sketchId} has no point ${pointId}`);
+  if ((sketch.projected ?? []).some((p) => madePoints(sketch, p).includes(pointId))) throw new Error(PROJECTED_POINT);
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`a sketch point needs x and y in mm, not ${x}, ${y}`);
   // Moved off the edge it was pinned to (26f), it is pinned no longer.
   const moved = { ...sketch, points: sketch.points.map((p) => (p.id === pointId ? { ...p, x, y } : p)) };
-  return sketch.pins ? withPins(doc, moved, sketch.pins.filter((p) => p.point !== pointId)) : withSketch(doc, moved);
+  return sketch.pins ? withRefs(doc, moved, sketch.pins.filter((p) => p.point !== pointId)) : withSketch(doc, moved);
+}
+
+/** Why a projected point can't be moved by hand. */
+export const PROJECTED_POINT = "This point is projected from a body's edge and follows it: it can't be moved by hand.";
+
+/** An edge to project into a sketch (27d): the feature whose body it is on, its name there, and what it is seen as from the sketch now. */
+export interface EdgeToProject {
+  feature: string;
+  edge: string;
+  shape: EdgeShape;
+}
+
+/**
+ * The document with these edges projected into sketch `sketchId` (27d, the
+ * naming model's rule 12), in order, one undo step "Project": each a
+ * projection with an id from the counter, then its points (a line's start
+ * and end, a circle's centre, an arc's start, end and centre, or the one
+ * point of an edge seen end on) and its curve, all new, never shared, the
+ * edge's feature one more the sketch depends on (rule 13). An edge the
+ * sketch already holds (by feature and name) adds nothing, so neither does
+ * the same edge twice in one call (`ids` lists the projections made). Only
+ * a solid item before the sketch can be projected from.
+ */
+export function projectEdges(doc: DesignDocument, sketchId: string, edges: readonly EdgeToProject[]): { doc: DesignDocument; ids: string[] } {
+  const sketch = sketchIn(doc, sketchId);
+  const features = doc.timeline.features;
+  const at = features.findIndex((f) => f.id === sketchId);
+  const ids: string[] = [];
+  let next = doc;
+  let points: SketchPoint[] = [...sketch.points];
+  let curves: SketchCurve[] = [...sketch.curves];
+  const projected: SketchProjection[] = [...(sketch.projected ?? [])];
+  const point = (xy: SketchXY): string => {
+    const [id, after] = take(next, "point");
+    next = after;
+    points = [...points, { id, x: xy[0], y: xy[1] }];
+    return id;
+  };
+  for (const e of edges) {
+    const on = features.findIndex((f) => f.id === e.feature);
+    if (on < 0 || on > at || isSketchItem(features[on])) throw new Error(`${shown(e.feature)} is not a solid item before ${sketchItem(doc, sketchId).provenance.self.label} in the timeline, so its edges can't be projected into it`);
+    if (projected.some((p) => p.feature === e.feature && p.edge === e.edge)) continue;
+    const [id, after] = take(next, "projection");
+    next = after;
+    const s = e.shape;
+    let made: string;
+    if (s.kind === "point") made = point(s.at);
+    else {
+      // Its points first, then the curve, as drawCircle and drawArc take ids.
+      const ends = s.kind === "line" ? [point(s.a), point(s.b)] : s.kind === "circle" ? [point(s.centre)] : [point(s.start), point(s.end), point(s.centre)];
+      const [curveId, taken] = take(next, s.kind);
+      next = taken;
+      const curve: SketchCurve =
+        s.kind === "line" ? { id: curveId, kind: "line", start: ends[0], end: ends[1] } : s.kind === "circle" ? { id: curveId, kind: "circle", centre: ends[0], radius: s.radius } : { id: curveId, kind: "arc", start: ends[0], end: ends[1], centre: ends[2] };
+      curves = [...curves, curve];
+      made = curveId;
+    }
+    projected.push({ id, feature: e.feature, edge: e.edge, made });
+    ids.push(id);
+  }
+  if (ids.length === 0) return { doc, ids };
+  return { doc: withRefs(next, { ...sketch, points, curves }, sketch.pins ?? [], projected), ids };
+}
+
+/**
+ * The document without projection `projectionId` of sketch `sketchId`
+ * (27d: deleted whole): its curve, and its points no other curve shares
+ * (a line drawn from a projected corner keeps that corner, now an
+ * ordinary point); its feature no longer depended on when nothing else
+ * names it.
+ */
+export function unproject(doc: DesignDocument, sketchId: string, projectionId: string): DesignDocument {
+  const sketch = sketchIn(doc, sketchId);
+  const p = sketch.projected?.find((x) => x.id === projectionId);
+  if (!p) throw new Error(`sketch ${sketchId} holds no projection ${shown(projectionId)}`);
+  const projected = sketch.projected!.filter((x) => x !== p);
+  const curves = sketch.curves.filter((c) => c.id !== p.made);
+  const used = usedPoints(curves, projected);
+  return withRefs(doc, { ...sketch, curves, points: sketch.points.filter((q) => used.has(q.id)) }, sketch.pins ?? [], projected);
 }
 
 /** The sketch's lines as the kernel takes them, rebuilt from point ids (its circles and arcs are in `sketchCurves`). */
@@ -342,13 +441,23 @@ export function sketchLines(sketch: Sketch): SketchLine[] {
   return sketchCurves(sketch).lines;
 }
 
-/** The sketch's lines, circles and arcs as the kernel's sketch_outline takes them, rebuilt from point ids, each in the sketch's order. */
-export function sketchCurves(sketch: Sketch): { lines: SketchLine[]; circles: SketchCircle[]; arcs: SketchArc[] } {
-  const at = new Map(sketch.points.map((p) => [p.id, [p.x, p.y] as [number, number]]));
+/**
+ * The sketch's outline curves (from 27d without a projected edge that
+ * joins none: projection.ts `profileCurves`) as the kernel's
+ * sketch_outline takes them, rebuilt from point ids, each in the sketch's
+ * order.
+ */
+export function sketchCurves(sketch: Pick<Sketch, "points" | "curves" | "projected">): { lines: SketchLine[]; circles: SketchCircle[]; arcs: SketchArc[] } {
+  return curvesOf(sketch.points, profileCurves(sketch));
+}
+
+/** These curves as the kernel takes them, their points looked up by id in `points`. */
+export function curvesOf(points: readonly SketchPoint[], curves: readonly SketchCurve[]): { lines: SketchLine[]; circles: SketchCircle[]; arcs: SketchArc[] } {
+  const at = new Map(points.map((p) => [p.id, [p.x, p.y] as [number, number]]));
   const lines: SketchLine[] = [];
   const circles: SketchCircle[] = [];
   const arcs: SketchArc[] = [];
-  for (const c of sketch.curves) {
+  for (const c of curves) {
     if (c.kind === "line") lines.push({ a: at.get(c.start)!, b: at.get(c.end)! });
     else if (c.kind === "circle") circles.push({ centre: at.get(c.centre)!, radius: c.radius });
     else arcs.push({ start: at.get(c.start)!, end: at.get(c.end)!, centre: at.get(c.centre)! });

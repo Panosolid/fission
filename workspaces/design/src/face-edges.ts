@@ -95,14 +95,14 @@ export function inSketch(p: Vec3, plane: Plane): SketchXY {
 const closed = (view: BodyView, e: number) => view.edge_vertices[e][0] === view.edge_vertices[e][1];
 
 /** An edge's name without the order between two sides: "A>B" as "A+B", its two faces sorted (26f's names). */
-function unordered(name: string | null): string | null {
+export function unordered(name: string | null): string | null {
   if (name === null || !name.includes(">")) return name;
   const [a, b] = name.split(">");
   return a <= b ? `${a}+${b}` : `${b}+${a}`;
 }
 
-/** Edge `e`'s name in a vertex's name or a middle's pin: which ends of its two sides' curves meet there when known (27b), else its name with no order. */
-function partName(names: BodyNames, e: number): string | null {
+/** Edge `e`'s name in a vertex's name (and, from 27d, a projection's): which ends of its two sides' curves meet there when known (27b), else its name with no order. */
+export function partName(names: BodyNames, e: number): string | null {
   return names.edges[e] === null ? null : (names.ends?.[e] ?? unordered(names.edges[e]));
 }
 

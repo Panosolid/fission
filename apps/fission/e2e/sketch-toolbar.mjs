@@ -132,7 +132,7 @@ await check("the Create menu: every tool with its key, the tool in use ticked an
     assert.equal(await page.getAttribute("#sketch-create", "aria-expanded"), "true");
     const rows = await page.$$eval("#sketch-create-menu [role=menuitemradio]", (els) => els.map((e) => [e.querySelector("span").textContent, e.querySelector("kbd").textContent, e.getAttribute("aria-checked")]));
     // The three arcs sit in the Arc row's own menu (centre-arc.mjs checks it opening).
-    assert.deepEqual(rows, [["Line", "L", "true"], ["Rectangle", "R", "false"], ["Circle", "C", "false"], ["3-point arc", "A", "false"], ["Centre arc", "", "false"], ["Tangent arc", "T", "false"]]);
+    assert.deepEqual(rows, [["Line", "L", "true"], ["Rectangle", "R", "false"], ["Circle", "C", "false"], ["3-point arc", "A", "false"], ["Centre arc", "", "false"], ["Tangent arc", "T", "false"], ["Project", "P", "false"]]);
     assert.equal(await page.evaluate(() => document.activeElement.id), "sketch-menu-line");
     // The menu hangs under its button, over the view.
     const button = await rect(page, "#sketch-create");

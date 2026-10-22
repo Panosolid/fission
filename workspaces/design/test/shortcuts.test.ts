@@ -6,7 +6,7 @@ import { DESIGN_SHORTCUTS, designShortcut } from "../src/shortcuts.ts";
 const profile: Selected = { kind: "outline", id: "outline:feature-1/profile-1" };
 const face: Selected = { kind: "face", id: "face:feature-1/1" };
 
-test("Design's keys: Escape clears (also in a size field), Copy is Mod+C, L, R, C, A and T choose sketch tools, the last six only in the page", () => {
+test("Design's keys: Escape clears (also in a size field), Copy is Mod+C, L, R, C, A, T and P choose sketch tools, the last seven only in the page", () => {
   assert.deepEqual(DESIGN_SHORTCUTS.map((s) => [s.id, parseChord(s.keys), s.inText ?? false]), [
     ["clear-selection", "Escape", true],
     ["copy-svg", "Mod+C", false],
@@ -15,6 +15,8 @@ test("Design's keys: Escape clears (also in a size field), Copy is Mod+C, L, R, 
     ["sketch-circle", "C", false],
     ["sketch-arc", "A", false],
     ["sketch-tangent", "T", false],
+    // 27d: Project, Fusion's key.
+    ["sketch-project", "P", false],
     // SF4: the keys that start typing a size, never inside a text box (there they type).
     ...[..."0123456789.-"].map((k) => [`type-size-${k}`, k, false]),
   ]);
