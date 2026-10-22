@@ -240,6 +240,12 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
       await settle();
       return label;
     },
+    /** Design put away and mounted again on the same project, as the shell does when Design moves to the other pane. */
+    async remount() {
+      view.unmount();
+      mount();
+      await settle();
+    },
     /** Puts Design away (as a page closed) and says whether every body it kept was freed. */
     async close() {
       if (previous === a) previous = null;

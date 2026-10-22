@@ -241,9 +241,12 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   const held = ctx.project.workspaces.design as DesignDocument | undefined;
   /** A document the project holds that this panel did not make (an opened file): shown as it is, and framed. */
   let loaded: DesignDocument | undefined;
+  /** The document this panel last made, mounted again (Design moved to the other pane): shown as it is, never remade from the size boxes (daily hunt 2026-10-23: a design with no body got a new box). */
+  let remounted: DesignDocument | undefined;
   if (saved && held === saved.doc) {
     shape = saved.shape;
     inputs.forEach((input, i) => (input.value = saved!.sizes[i]));
+    remounted = held;
   } else if (held) {
     const part = partOf(held); // readDesignDocument checked it when the file was opened; null when it has no body (24f4)
     if (part) {
@@ -493,13 +496,14 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // project holds it. An opened file's document is kept as it is until the
     // first edit. An extrude of a sketch has one size, its distance (the height box).
     const current = ctx.project.workspaces.design as DesignDocument | undefined;
-    const doc = next ?? loaded ?? (kind === "sketch-extrude" && current ? setExtrudeDistance(current, Number(inputs[2].value)) : documentFor(partCommand(), current));
+    const doc = next ?? loaded ?? remounted ?? (kind === "sketch-extrude" && current ? setExtrudeDistance(current, Number(inputs[2].value)) : documentFor(partCommand(), current));
     // No shape is pressed while the design has no body (24f4).
     const pressed = partFeature(doc) === null ? null : kind;
     for (const [b, el] of buttons) if (b.command.op === "set_part") el.setAttribute("aria-pressed", String(b.command.shape === pressed));
     // An opened document is all new to the graph: out of date until it builds.
     const before = loaded ? null : (current ?? null);
     loaded = undefined;
+    remounted = undefined;
     saved = { doc, shape, sizes: inputs.map((i) => i.value) };
     syncGraph(ctx.graph, doc, before, ctx.changeNotes);
     const changed = ctx.project.workspaces.design !== doc;

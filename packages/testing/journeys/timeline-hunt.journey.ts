@@ -10,12 +10,16 @@
 // 2. The Extrude panel offered sketches after the rollback marker and
 //    suppressed ones, said "makes a closed outline", and its OK then did
 //    nothing at all (the refusal was thrown where nothing showed it).
+// 3. (Daily hunt, 2026-10-23.) Design mounted again on the same project
+//    (Split, then the panes swapped from the switcher) took the "made here"
+//    branch and remade the document from the size boxes, so a design that
+//    builds no body gained a new box at the marker, with no undo step.
 //
 // Run with `npm run journeys`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addSketch, drawRectangle, moveMarker, partDocument, suppressItem, type DesignDocument } from "@fission/design";
+import { addSketch, deleteItem, drawRectangle, moveMarker, partDocument, suppressItem, type DesignDocument } from "@fission/design";
 import { app, close } from "./design-app.ts";
 
 type App = Awaited<ReturnType<typeof app>>;
@@ -125,4 +129,28 @@ test("regression (hunt 2026-10-21): the Extrude panel no longer says an extrude 
   assert.doesNotMatch(a.$("#extrude-panel")!.textContent ?? "", /replaces the part/);
   assert.doesNotMatch(a.$("#extrude")!.title, /replaces the part/);
   assert.ok(await a.close(), "every body freed");
+});
+
+test("regression (daily hunt 2026-10-23): Design mounted again on the same project (moved to the other pane) keeps the document as it is, and records nothing", async () => {
+  const box = partDocument("box", 40, 30, 20);
+  const id = box.timeline.features[0].id;
+  const cases: [string, DesignDocument, number][] = [
+    // 40 × 30 × 20 = 24,000 mm³ while the box builds; 0 mm³ when nothing does.
+    ["the box built", box, 24000],
+    ["the box suppressed", suppressItem(box, id, true), 0],
+    ["the marker at the start", moveMarker(box, "start"), 0],
+    ["everything deleted", deleteItem(box, id), 0],
+  ];
+  for (const [name, doc, volume] of cases) {
+    const a = await app(doc);
+    const before = a.doc();
+    const undo = a.history.undoLabel();
+    await a.remount();
+    assert.deepEqual(a.doc(), before, `${name}: the document as it was, not remade`);
+    assert.deepEqual(items(a.doc()), items(doc), `${name}: the timeline as it was`);
+    assert.equal(a.doc().timeline.marker, doc.timeline.marker, `${name}: the marker where it was`);
+    assert.equal(a.history.undoLabel(), undo, `${name}: no undo step`);
+    assert.ok(close(a.volume(), volume), `${name}: ${volume} mm³ drawn, got ${a.volume()}`);
+    assert.ok(await a.close(), `${name}: every body freed`);
+  }
 });
