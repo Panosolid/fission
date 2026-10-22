@@ -139,6 +139,58 @@ test("1c. an Enter whose turn comes after another tool was chosen is dropped, as
   assert.ok(await a.close(), "every body freed");
 });
 
+/** A line sketch on XY of a fresh box design, its chain started at (0, 0), the pointer then at `p` (answered). */
+async function lineFrom00(p: [number, number]) {
+  const a = await app(partDocument("box", 40, 30, 20));
+  a.$("#create-sketch")!.click();
+  await a.settle();
+  await a.pick({ plane: "XY" });
+  await a.click(0, 0);
+  a.pointer("move", p);
+  await a.settle();
+  return a;
+}
+
+test("1d. a length typed while a slow click is placed stays in its box for the next side", async () => {
+  const a = await lineFrom00([18.7, 31.2]);
+  a.hold();
+  a.pointer("click", [10, 0]);
+  await turns();
+  await type(a, "7");
+  await a.release();
+  assert.deepEqual(lines(a), ["0,0>10,0"], "the click placed where it was clicked (nothing was typed as it was made)");
+  assert.equal((a.$("#typed-length") as HTMLInputElement).value, "7", "the 7 typed since is kept");
+  assert.ok(await a.close(), "every body freed");
+});
+
+test("1e. an Enter places from where the pointer was as it was pressed, not where it went after", async () => {
+  // The pointer at (18.7, 31.2), then (kernel slow) moved to (0, 10), 5 typed and Enter, then moved to (10, 0) before
+  // the kernel answers any of it. By hand: 5 from (0, 0) toward (0, 10) is (0, 5).
+  const a = await lineFrom00([18.7, 31.2]);
+  a.hold();
+  a.pointer("move", [0, 10]);
+  await type(a, "5");
+  await press(a, "Enter");
+  a.pointer("move", [10, 0]);
+  await a.release();
+  assert.deepEqual(lines(a), ["0,0>0,5"]);
+  assert.ok(await a.close(), "every body freed");
+});
+
+test("1f. an Enter after a tap (no move since) goes from the tap, not from a hover before it", async () => {
+  // A hover at (0, 10), then a tap at (10, 0) with no move (a finger): the line to (10, 0) is drawn and the next one
+  // starts there with the pointer on it, so a length alone has no way to go: refused, nothing drawn. (Taken from the
+  // hover before the tap, it would have gone toward (0, 10).)
+  const a = await lineFrom00([0, 10]);
+  await a.click(10, 0);
+  await type(a, "5");
+  await press(a, "Enter");
+  await a.settle();
+  assert.deepEqual(lines(a), ["0,0>10,0"]);
+  assert.match(a.$("#sketch-grid-error")!.textContent ?? "", /Move the pointer/);
+  assert.ok(await a.close(), "every body freed");
+});
+
 /** The open sketch's preview segments, as "x,y>x,y" each. */
 const preview = (a: App) => (a.drawings().find((d) => d.editing)?.editing?.preview ?? []).map(([p, q]) => `${p}>${q}`);
 
@@ -160,6 +212,16 @@ test("2. a hover answered while a slow click waited its turn is where the previe
   // By hand: the chain goes on from (10, 10) toward the pointer, at (3, 4) (a 0.1 mm pixel, so no snap reaches it:
   // the nearest point, (0, 0), is 5 mm away).
   assert.deepEqual(preview(a), ["10,10>3,4"]);
+  assert.ok(await a.close(), "every body freed");
+});
+
+test("2b. a tap with no move since a hover goes on from the tap", async () => {
+  // A hover at (3, 4), answered; then a tap at (10, 10), no move: the line to (10, 10) is drawn, and the preview goes
+  // on from the tap, where the finger was (nothing to draw yet), never back toward the old hover.
+  const a = await lineFrom00([3, 4]);
+  await a.click(10, 10);
+  assert.deepEqual(lines(a), ["0,0>10,10"]);
+  assert.deepEqual(preview(a), ["10,10>10,10"]);
   assert.ok(await a.close(), "every body freed");
 });
 
