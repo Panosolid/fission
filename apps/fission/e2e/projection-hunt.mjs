@@ -33,11 +33,11 @@ async function fresh(width = 1280, touch = false) {
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
-  // A store of its own, emptied once, so a reload later finds what autosave kept.
+  // A new context is a store of its own, empty, kept across a reload. No clearing and reloading here: WebKit
+  // reports the kernel's fetch a reload cuts off as a page error ("Load failed").
   await page.goto(url + "#design");
-  await page.evaluate(() => new Promise((r) => { localStorage.clear(); const q = indexedDB.deleteDatabase("fission"); q.onsuccess = q.onerror = q.onblocked = () => r(); }));
-  await page.reload();
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await until(page, () => document.querySelector("#save-status").dataset.state === "saved", null, "the box stored");
   return page;
 }
 
