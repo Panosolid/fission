@@ -1,9 +1,26 @@
-// A face's edges in a sketch drawn on it (step 26f; the owner's answer Q4,
+// A body's edges in a sketch (step 26f; the owner's answer Q4,
 // docs/progress/cad.md): they are not drawn into the sketch, but the
 // pointer snaps onto their ends, their middles and the centres of round
 // ones, and a sketch point that lands on one is pinned there, so it follows
 // that edge when an earlier feature changes, and is held where it was, with
-// a warning, when the edge is gone.
+// a warning, when the edge is gone. 26f offered only the edges of the face
+// a sketch is on; from step 27c (the naming model's rules 11 and 13) a
+// sketch on any plane or face is offered every edge of every body built
+// before it in the timeline, its own body's other faces included, seen
+// straight along the sketch's normal (`inSketch` drops the part along it).
+// Bodies after the sketch offer nothing, as Fusion shows only what is
+// before a sketch while it is edited. A pin names its body's feature
+// (`SketchPin.feature`; left out for the face's own, as 0.26's pins are),
+// and that feature is one more thing the sketch is built on (document.ts:
+// it can't be dragged after the sketch, suppressing it greys the sketch,
+// deleting it asks first and holds the point).
+//
+// Several points can land on one place: seen from a box's top, a top
+// corner, the bottom corner under it and the middle of the upright between
+// them are one point. The one on the sketch's plane is offered first, then
+// the nearest the plane, then by name (`sketchEdgeTargets`), and the snap
+// takes the first listed of those at one place (snap.ts), so a click there
+// pins the point on the face it is drawn on.
 //
 // Names, like the faces' and edges' of naming.ts, never the kernel's
 // indices: an edge's end is a vertex, named by every edge that meets there
@@ -35,29 +52,33 @@ import type { DesignDocument } from "./document.ts";
 import { faceReference, isFacePlane } from "./face-sketch.ts";
 import type { BodyNames } from "./naming.ts";
 import { sharedBy } from "./references.ts";
-import { findInScene, sceneHit, type Scene } from "./scene.ts";
+import { findInScene, type Scene } from "./scene.ts";
 
 /** What a face's edge offers: an end (a vertex), the middle of a line or arc, the centre of an arc or circle. The words match snap.ts's kinds. */
 export type EdgeKind = "endpoint" | "midpoint" | "centre";
 
 /**
- * A sketch point pinned to its face's edge (kept in the sketch's content,
- * document.ts `Sketch.pins`): which point, what on the edge, and the name
- * of the vertex (an endpoint) or the edge (a middle or centre), the part
- * after "<feature>/", the feature being the one whose face the sketch is on.
+ * A sketch point pinned to a body's edge (kept in the sketch's content,
+ * document.ts `Sketch.pins`): which point, what on the edge, the name of
+ * the vertex (an endpoint) or the edge (a middle or centre), the part
+ * after "<feature>/", and the feature whose body it is on (step 27c), left
+ * out for the feature whose face the sketch is on (as 0.26 wrote every pin).
  */
 export interface SketchPin {
   point: string;
   kind: EdgeKind;
   name: string;
+  feature?: string;
 }
 
-/** A point a sketch can snap to on its face's edges: where in the sketch, and the pin a point landing there gets. */
+/** A point a sketch can snap to on a body's edges: where in the sketch, and the pin a point landing there gets (on feature `feature`'s body). */
 export interface EdgeTarget {
   at: SketchXY;
   kind: EdgeKind;
   name: string;
+  feature: string;
 }
+
 
 type Vec3 = readonly [number, number, number];
 
@@ -112,34 +133,50 @@ export function vertexNames(view: BodyView, names: BodyNames): { vertices: (stri
   return { vertices: given.map((n) => (n !== null && counts.get(n) === 1 ? n : null)), shared: new Map([...counts].filter(([, k]) => k > 1)) };
 }
 
-/**
- * Every point a sketch on face `face` of this body can snap to, in the
- * sketch's (x, y) through `plane` (the frame it lies in now): each end of
- * each of the face's edges that is not a whole circle (each vertex once),
- * each such edge's middle, and each round edge's centre, in edge order;
- * none without a name.
- */
-export function faceEdgeTargets(view: BodyView, names: BodyNames, face: number, plane: Plane): EdgeTarget[] {
+/** A target with how far its point is from the sketch's plane, along the normal (for the order of points at one place). */
+type Placed = EdgeTarget & { off: number };
+
+/** `edgeTargets` with each point's distance from the plane. */
+function placedTargets(view: BodyView, names: BodyNames, plane: Plane, face?: number): Placed[] {
   const { vertices } = vertexNames(view, names);
-  const out: EdgeTarget[] = [];
+  const out: Placed[] = [];
   const seen = new Set<number>();
+  const feature = names.feature;
+  const off = (p: Vec3) => Math.abs(dot([p[0] - plane.origin[0], p[1] - plane.origin[1], p[2] - plane.origin[2]], plane.normal));
+  const put = (p: Vec3, kind: EdgeKind, name: string) => out.push({ at: inSketch(p, plane), kind, name, feature, off: off(p) });
   view.edge_faces.forEach((pair, e) => {
-    if (pair === null || (pair[0] !== face && pair[1] !== face)) return;
+    if (face !== undefined && (pair === null || (pair[0] !== face && pair[1] !== face))) return;
     const edge = names.edges[e];
     if (!closed(view, e)) {
       for (const v of view.edge_vertices[e]) {
         const name = vertices[v];
         if (seen.has(v) || name === null) continue;
         seen.add(v);
-        out.push({ at: inSketch(view.vertex_points[v], plane), kind: "endpoint", name });
+        put(view.vertex_points[v], "endpoint", name);
       }
       const middle = edge === null ? null : (names.ends?.[e] ?? edge);
-      if (middle !== null) out.push({ at: inSketch(view.edge_middles[e], plane), kind: "midpoint", name: middle });
+      if (middle !== null) put(view.edge_middles[e], "midpoint", middle);
     }
     const centre = view.edge_centres[e];
-    if (centre && edge !== null) out.push({ at: inSketch(centre, plane), kind: "centre", name: edge });
+    if (centre && edge !== null) put(centre, "centre", edge);
   });
   return out;
+}
+
+/**
+ * Every point a sketch through `plane` (the frame it lies in now) can snap
+ * to on this body, in the sketch's (x, y): each end of each edge that is
+ * not a whole circle (each vertex once), each such edge's middle, and each
+ * round edge's centre, in edge order; none without a name. With `face`,
+ * only that face's edges (26f's targets).
+ */
+export function edgeTargets(view: BodyView, names: BodyNames, plane: Plane, face?: number): EdgeTarget[] {
+  return placedTargets(view, names, plane, face).map(({ off: _, ...t }) => t);
+}
+
+/** The points on face `face`'s edges (26f): `edgeTargets` of that face. */
+export function faceEdgeTargets(view: BodyView, names: BodyNames, face: number, plane: Plane): EdgeTarget[] {
+  return edgeTargets(view, names, plane, face);
 }
 
 /**
@@ -169,8 +206,8 @@ function reversed(pin: SketchPin): string | null {
 export type PinNow = { at: SketchXY } | { cause: "point-lost" | "point-ambiguous" };
 
 /**
- * Where `pin` lies on this body now, the body of the feature whose face
- * the sketch is on: its vertex or edge found by name, through `plane` (a
+ * Where `pin` lies on this body now, the body of the pin's feature (its
+ * `feature`, or the sketch's face's): its vertex or edge found by name, through `plane` (a
  * vertex's name from 0.26, its uprights unordered, found when exactly one
  * vertex has it, ambiguous when more do);
  * "point-ambiguous" when the name (or one of the edges a vertex is named
@@ -209,26 +246,31 @@ export interface PointWarning {
 /** The words for a sketch whose `n` pinned points are held. */
 export function pointWords(cause: PointWarning["cause"], n: number, sketchLabel: string): string {
   const one = n === 1;
-  const what = one ? "a point snapped to an edge of its face" : `${n} points snapped to edges of its face`;
+  const what = one ? "a point snapped to an edge" : `${n} points snapped to edges`;
   const why = cause === "point-lost" ? (one ? "has lost that edge" : "have lost their edges") : one ? "is on an edge that is now more than one edge" : "are on edges that are now more than one edge";
   const stay = one ? "it stays where it was" : "they stay where they were";
   return `${sketchLabel}: ${what} ${why}, so ${stay}${cause === "point-ambiguous" ? " rather than guess" : ""}`;
 }
 
 /**
- * What the pointer may snap to on sketch `sketchId`'s face (`faceEdgeTargets`)
- * as the app shows it: the face found by its name on the bodies shown,
- * through `plane`, the frame the last rebuild placed the sketch in. None
- * for a sketch on an origin plane, or whose face is gone or shared (its
- * plane is lost or ambiguous: there is no edge to follow).
+ * What the pointer may snap to on sketch `sketchId` as the app shows it
+ * (step 27c): the points of every body shown (`scene`) whose feature is
+ * before the sketch in the timeline, through `plane`, the frame the last
+ * rebuild placed the sketch in; ordered so that, of points at one place,
+ * the one on the sketch's plane comes first, then the nearest the plane,
+ * then by feature and name. None for a sketch on a face that is gone or
+ * shared (its plane is lost or ambiguous: it follows nothing while held,
+ * so a pin made there would be judged against a body it isn't on).
  */
 export function sketchEdgeTargets(doc: DesignDocument, sketchId: string, scene: Scene | null, plane: Plane | undefined): EdgeTarget[] {
-  const item = doc.timeline.features.find((f) => f.id === sketchId);
-  const facePlane = item?.intent.parameters.plane;
-  if (scene === null || plane === undefined || !isFacePlane(facePlane)) return [];
-  const found = findInScene(faceReference(facePlane), scene);
-  if (found.status !== "found") return [];
-  const hit = sceneHit(scene, "face", found.index)!;
-  const body = scene.bodies[hit.body];
-  return faceEdgeTargets(body.view, body.names, hit.index, plane);
+  const features = doc.timeline.features;
+  const at = features.findIndex((f) => f.id === sketchId);
+  const facePlane = features[at]?.intent.parameters.plane;
+  if (scene === null || plane === undefined || at < 0) return [];
+  if (isFacePlane(facePlane) && findInScene(faceReference(facePlane), scene).status !== "found") return [];
+  const before = new Set(features.slice(0, at).map((f) => f.id));
+  const all = scene.bodies.filter((b) => before.has(b.feature)).flatMap((b) => placedTargets(b.view, b.names, plane));
+  const key = (t: Placed) => `${t.feature}/${t.name}`;
+  all.sort((a, b) => a.off - b.off || (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  return all.map(({ off: _, ...t }) => t);
 }

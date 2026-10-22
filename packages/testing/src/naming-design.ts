@@ -40,8 +40,10 @@ import {
   faceFeature,
   facePlane,
   findInScene,
+  greyedItems,
   joinBodies,
   movePoint,
+  movePointOnto,
   pinNewPoints,
   planDelete,
   readDesignDocument,
@@ -117,17 +119,25 @@ export function faceNameOf(plane: string): FaceName {
 const planeOfFace = (f: FaceName) => facePlane(encodeURIComponent(f.feature), f.role === "side" ? `side:${encodeURIComponent(f.line)}` : f.role);
 
 /**
- * Whether target `t` is the model's pin on cap `face` (rule 10): a corner's
- * vertex is named by the edges meeting there, among them the cap's edges
- * along both lines; a side's middle by the cap's edge along its line
- * (face-edges.ts; an edge between a cap and a side is "<cap>+side:<line>"
- * or "side:<line>+<cap>", sorted).
+ * Whether target `t` is the model's pin seen from a sketch on `face`
+ * (rules 10 and 11): on extrude `pin.feature` (else the face's own) and its
+ * cap `pin.cap` (else the face's), a corner's vertex is named by the edges
+ * meeting there, among them the cap's edges along both lines; a cap edge's
+ * middle by that edge (face-edges.ts; an edge between a cap and a side is
+ * "<cap>+side:<line>" or "side:<line>+<cap>", sorted); an upright's middle
+ * by which end of each side's line meets there (27b: line `before` ends at
+ * the corner, `after` starts there, as drawOutline draws them).
  */
 function pinMatches(t: EdgeTarget, face: FaceName, pin: PinName): boolean {
-  // Step 27 (rules 11 to 13): other faces' and other bodies' points come with 27c; until then a session that names one is the harness's mistake.
-  if (pin.at === "upright" || (pin.feature !== undefined && (pin.feature !== face.feature || pin.cap !== face.role))) throw new Error(`harness: Design pins only to its own face's edges until step 27c (${JSON.stringify(pin)})`);
-  if (face.role === "side") return false;
-  const capEdge = (line: string) => [face.role, `side:${encodeURIComponent(line)}`].sort().join("+");
+  if (t.feature !== (pin.feature ?? face.feature)) return false;
+  const side = (line: string) => `side:${encodeURIComponent(line)}`;
+  if (pin.at === "upright") {
+    const parts = t.name.split("+");
+    return t.kind === "midpoint" && parts.length === 2 && parts.includes(`${side(pin.before)}@end`) && parts.includes(`${side(pin.after)}@start`);
+  }
+  const cap = pin.cap ?? (face.role === "side" ? null : face.role);
+  if (cap === null) return false;
+  const capEdge = (line: string) => [cap, side(line)].sort().join("+");
   if (pin.at === "middle") return t.kind === "midpoint" && t.name === capEdge(pin.line);
   const parts = t.name.split("&");
   return t.kind === "endpoint" && parts.includes(capEdge(pin.before)) && parts.includes(capEdge(pin.after));
@@ -231,8 +241,14 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
       case "set-circle": {
         const m = meta[op.sketch];
         if (!("circle" in m)) throw new Error(`harness: ${op.sketch} has no circle`);
-        if (op.pin) throw new Error("harness: Design pins a moved circle only from step 27c");
-        doc = movePoint(doc, op.sketch, m.centre, op.centre[0], op.centre[1]);
+        if (op.pin) {
+          // Step 27c: the centre moved exactly onto the point the app offers, and pinned there (Design's movePointOnto).
+          const face = faceNameOf(doc.timeline.features.find((f) => f.id === op.sketch)!.intent.parameters.plane as string);
+          const targets = await edgeTargetsOf(doc, op.sketch);
+          const target = targets.find((t) => pinMatches(t, face, op.pin!));
+          if (target === undefined) throw new Error(`harness: Design offers no ${JSON.stringify(op.pin)} to ${op.sketch}`);
+          doc = movePointOnto(doc, op.sketch, m.centre, target);
+        } else doc = movePoint(doc, op.sketch, m.centre, op.centre[0], op.centre[1]);
         // A circle's radius has no edit yet: written into the data, as a later Panosolid would.
         const sketches = doc.sketches.map((x) => (x.id === op.sketch ? { ...x, curves: x.curves.map((c) => (c.id === m.circle && c.kind === "circle" ? { ...c, radius: op.radius } : c)) } : x));
         return { state: { doc: { ...doc, sketches }, meta }, made: [] };
@@ -261,6 +277,14 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
   async function read(): Promise<NamingRebuild> {
     const doc = state.doc;
     const b = await build(doc);
+    // Design reads what is greyed twice: from the data alone (document.ts, for the timeline bar, the browser and which
+    // bodies are shown) and in the rebuild; the two must agree on every item (step 27c: pins grey a sketch too).
+    const greyed = new Map([...greyedItems(doc)].map(([f, by]) => [f.id, by]));
+    for (const id of b.order) {
+      const r = b.results[id];
+      const by = r.status === "greyed" ? r.by : undefined;
+      if (by !== greyed.get(id)) throw new Error(`harness: Design's data says ${id} is ${greyed.has(id) ? `greyed by ${greyed.get(id)}` : "not greyed"}, its rebuild ${by ? `greyed by ${by}` : r.status}`);
+    }
     const views = new Map((await shownBodies(doc, b, cache)).map((s) => [s.feature, s.view]));
     const results: Record<string, NamingResult> = {};
     const bodies: Record<string, number> = {};

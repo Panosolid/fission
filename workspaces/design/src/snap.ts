@@ -19,14 +19,20 @@
 // From step 26f a sketch on a face snaps in the same way (1 only) to the
 // ends, middles and centres of that face's edges (face-edges.ts), which are
 // not drawn into the sketch; a point that lands on one is pinned to it
-// (sketch.ts `pinNewPoints`) and follows it.
+// (sketch.ts `pinNewPoints`) and follows it. From step 27c a sketch on any
+// plane or face snaps to every edge of every body before it, seen along its
+// normal, so several points can land on one place (a box's top corner, the
+// bottom corner under it, the upright's middle between): of the points
+// within SAME_PLACE of the nearest, the first listed is taken (the sketch's
+// own, then the one on the sketch's plane: face-edges.ts orders them), so
+// which one a click pins never turns on the last bit of rounding.
 //
 // Snapping is only where the click lands: nothing is remembered as a rule
 // (a line drawn horizontal is not kept horizontal); that is what the
 // constraints of step 29 add. The reach is in screen pixels, turned into mm
 // by the size of a pixel on the plane at the pointer (SketchPointer.pixel),
 // so it feels the same at any zoom. It is a pick radius, not a geometric
-// tolerance: nothing is judged equal by it.
+// tolerance: nothing is judged equal by it (SAME_PLACE is what is).
 
 import type { SketchDrawing, SketchXY } from "@fission/core";
 import type { DesignDocument, Sketch } from "./document.ts";
@@ -36,13 +42,22 @@ import type { SketchTool } from "./sketch-tool.ts";
 /** How near on screen (px) the pointer must come to a point, or to a point's column or row, to snap to it. */
 export const SNAP_PIXELS = 10;
 
+/**
+ * Points this close (mm) are one place for snapping (step 27c): the
+ * kernel's linear tolerance (kernel/src/tolerance.rs LINEAR, 10 nm), the
+ * distance below which it takes two points to be one. A body's points
+ * seen along a sketch's normal that differ by less are one point rounded
+ * two ways (an upright edge seen end on from a slanted face).
+ */
+export const SAME_PLACE = 1e-5;
+
 /** What a snapped-to point is: an end of a line or arc, a line's midpoint, or the centre of a circle or arc (and no line's or arc's end). */
 export type PointKind = "endpoint" | "midpoint" | "centre";
 
 export interface SnapTarget {
   at: SketchXY;
   kind: PointKind;
-  /** On the sketch's face's edges, not the sketch's own (26f): a point landing here is pinned to it (`pin`). */
+  /** On a body's edges, not the sketch's own (26f; any body before the sketch from 27c): a point landing here is pinned to it (`pin`). */
   pin?: EdgeTarget;
 }
 
@@ -142,6 +157,8 @@ function nearest(refs: readonly SketchXY[], off: (r: SketchXY) => number, reach:
  * (unknown) snaps to the grid only. Lining up with one point's column and
  * row both lands on that point, and is called that point; lining up onto
  * one of the tool's own clicks (not a target) gives the grid point instead.
+ * Of the points within SAME_PLACE of the nearest, the first listed is the
+ * one taken (27c).
  */
 export function snapPointer(raw: SketchXY, grid: SketchXY, targets: SnapTargets, pixel: number | undefined): Snap {
   if (pixel === undefined || !(pixel > 0) || !Number.isFinite(pixel)) return { kind: "grid", at: grid };
@@ -153,7 +170,11 @@ export function snapPointer(raw: SketchXY, grid: SketchXY, targets: SnapTargets,
     if (d <= reach && d < best) [point, best] = [t, d];
   }
   const found = (t: SnapTarget): Snap => (t.pin ? { kind: t.kind, at: t.at, edge: true } : { kind: t.kind, at: t.at });
-  if (point) return found(point);
+  // Of the points at one place as the nearest, the first listed (27c): the sketch's own, then the one on its plane.
+  if (point) {
+    const near = point.at;
+    return found(targets.points.find((t) => Math.sqrt((t.at[0] - near[0]) ** 2 + (t.at[1] - near[1]) ** 2) <= SAME_PLACE)!);
+  }
   const column = nearest(targets.columns, (r) => Math.abs(r[0] - raw[0]), reach);
   const row = nearest(targets.rows, (r) => Math.abs(r[1] - raw[1]), reach);
   if (!column && !row) return { kind: "grid", at: grid };
