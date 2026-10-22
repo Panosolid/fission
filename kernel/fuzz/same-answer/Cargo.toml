@@ -14,7 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 fission-kernel = { path = "../.." }
-glam = "0.29"
+glam = "0.34"
 
 # Keep this crate out of any parent workspace.
 [workspace]
