@@ -232,10 +232,22 @@ Manufacture workspace (starts after CAD step 50, booleans and full topological n
 - [ ] M3. Toolpath simulation in the viewport
 - [ ] M4. G-code through post-processors for different machines; 3D strategies
 
-Slice workspace (starts after CAD step 73, STL and 3MF export)
-- [ ] P1. Printer profiles for any printer; plates with design bodies by reference that update when the design changes
-- [ ] P2. Slicing: walls, infill, supports; layer preview
-- [ ] P3. G-code export; several plates per project
+Slice workspace (3D printing; starts right after CAD step 33, ahead of Render or taking turns with it, since both use the "everything else" pull request slot; owner's decision, 2026-10-22). It slices a triangle mesh made from each design body at the printer's resolution, so it needs no kernel step past 33. Decisions, substeps and test plans: `docs/progress/slice.md`. The first printer is the owner's Bambu Lab P2S with an AMS (four spools).
+- [ ] P0. Test harness before any slicing code: a G-code reader that replays our output and checks it (plastic laid down matches the part's volume, nothing leaves the bed, no travel crosses a wall, no move outside the printer's limits), PrusaSlicer's command line as the oracle in `prototypes/oracle/`, hand-worked parts (a 20 mm cube, a cylinder, a bridge, an overhang ramp)
+- [ ] P1. Plate and printer: design bodies by reference on a plate that updates when the design changes, move, turn and lay flat on a picked face, a check that every body fits the bed, a basic printer profile (bed size, nozzle size, G-code flavour), the mesh made from each body at the printer's resolution
+- [ ] P2. Layers: the mesh cut into closed outlines at each layer height (holes kept as holes), and a layer slider preview in the shared viewport from the start so every later step can be seen
+- [ ] P3. Walls and skins: walls by offsetting each outline inward one line width at a time (offsets from K1, shared with Laser kerf), solid top and bottom layers
+- [ ] P4. Infill: lines, grid and gyroid at a chosen percentage, joined to the walls
+- [ ] P5. Supports and adhesion: overhangs found by angle (also shown as a printability overlay in Design), plain grid supports, skirt and brim
+- [ ] P6. G-code out: extrusion amounts, temperatures, fan, retraction, start and end code; Bambu's flavour first, written as the `.gcode.3mf` file Bambu Studio and the printer's SD card take, then plain Marlin and Klipper; a time and weight estimate that becomes Design's "Print: time · weight" chip (X4) and the first real change note (X5). File only: nothing is sent to a printer
+- [ ] P7. Profiles and settings: printer, filament and quality presets; a beginner view with four choices (quality, strength, supports on or off, filament) and an Advanced view with everything; PrusaSlicer profile import
+- [ ] P8. Multi-colour with the AMS: a colour per body or per face, tool changes, a purge tower
+- [ ] P9. Exact slicing: section the exact body instead of its mesh, so holes and curves print as true arcs (G2/G3) and round holes come out round (after kernel steps 41–46; removes the mesh-first compromise)
+- [ ] P10. Feature-aware printing: Slice reads each feature's intent (I11), so a hole knows its size and is grown to make up for the plastic's shrink, and a face can be marked as mating (fine layers, accurate size) or cosmetic; bolts and pins fit first time
+- [ ] P11. Settings stick to faces through edits: painted supports, seams, per-face settings and AMS colours are tied to each face's stable name (24, then 50), so changing the design keeps them, where other slicers lose them on re-import; a face that splits or vanishes warns, never guesses
+- [ ] P12. Printing feedback while designing: the print time and weight chip, overhangs and walls too thin for the nozzle shown live in Design as the part is modelled
+- [ ] P13. Calibration that feeds the design: print a small test piece, type in what you measure, and the printer and filament's shrink and fit allowances flow back into every hole and fit in the project (through P10)
+- [ ] P14. Later: tree supports, variable-width walls (Arachne), adaptive layer heights, seam placement, ironing, several plates per project; sending a job to a printer only much later and only behind the confirmation screen (I15)
 
 Circuit workspace (PCB / electronics; starts after CAD step 75: full topological naming at 50, assemblies and joints at 74–75)
 - [ ] E1. Schematic capture and a component library
