@@ -609,8 +609,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "an edge projected twice into the same sketch is added twice",
     edits: [{ file: SKETCH, find: "    if (projected.some((p) => p.feature === e.feature && p.edge === e.edge)) continue;", replace: "" }],
     run: ["naming"],
-    caught: "seeded",
-    why: "no hand-worked case projects one edge twice; the seeded sessions' project steps do",
+    caught: "Fusion answers",
   },
   "projection-not-settled": {
     what: "neither the settle nor the app writes a projection's new place into the sketch, so what is drawn and saved stays behind what is built",
@@ -622,7 +621,8 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "a straight edge is projected by dropping its world z, which is right only for a sketch on XY",
     edits: [{ file: PROJECTION, find: "    const [a, b] = [inSketch(s3, plane), inSketch(e3, plane)];", replace: "    const [a, b] = [[s3[0], s3[1]] as SketchXY, [e3[0], e3[1]] as SketchXY];" }],
     run: ["naming"],
-    caught: "Fusion answers",
+    caught: "projection: hand-worked",
+    why: "the naming sessions project lines only into a sketch on a cap, where the model's (x, y) and the world's agree; the projection journey's XZ sketch tells them apart",
   },
   "projections-in-outline": {
     what: "every projected curve is part of the sketch's outline, so a projected edge snapped to (not closed by the sketch's own lines) breaks the outline",
