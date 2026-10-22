@@ -86,6 +86,14 @@ add_run() {
     echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"$'\n'"no report: the journeys job stopped before the walk" >journeys/latest.txt
   fi
 
+  # TypeScript mutation testing: the latest run's survivor lines.
+  mkdir -p ts-mutants
+  if [ -s "$IN/ts-mutants/report.txt" ]; then
+    { echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"; cat "$IN/ts-mutants/report.txt"; } >ts-mutants/latest.txt
+  else
+    echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"$'\n'"no report: the ts-mutants job stopped before the check" >ts-mutants/latest.txt
+  fi
+
   awk -F, -v now="$today UTC" 'NR > 1 {
       rounds++; cases += $3; fails += ($4 == "FAIL"); bodies += $5; dis += $6; secs += $7
       if ($4 == "FAIL" || $6 > 0) last = $1 " (seed " $2 ($9 ? ", commit " $9 " on " $10 : "") ")"
@@ -121,6 +129,9 @@ add_run() {
   fi
   if [ -f journeys/latest.txt ]; then
     { echo ""; echo "Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):"; sed 's/^/  /' journeys/latest.txt; echo "journeys/flags.txt lists every FLAG line so far."; } >>summary.txt
+  fi
+  if [ -f ts-mutants/latest.txt ]; then
+    { echo ""; echo "Latest TypeScript mutation run (packages/testing/stryker, survivors must be killed or explained):"; sed 's/^/  /' ts-mutants/latest.txt; } >>summary.txt
   fi
   if [ -f summary.txt.fuzz ]; then cat summary.txt.fuzz >>summary.txt; rm summary.txt.fuzz; fi
 }

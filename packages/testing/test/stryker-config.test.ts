@@ -59,3 +59,55 @@ test("a range one line off at either end is caught, with which end and where it 
   assert.equal(rangeProblem(source, "src/document.ts"), '"src/document.ts" is not src/document.ts:first-last');
   assert.equal(rangeProblem("nothing", "src/document.ts:2-6"), "document.ts no longer has shapeOf and readDesignDocument");
 });
+
+type Read = (path: string) => string | null;
+const readReal: Read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
+
+/** What is wrong with the Stryker targets in `dir`: run.sh and check.mjs must name the same targets and folders, run.sh must run all of them by default, and each needs a config whose mutated files and tests exist. */
+function targetProblems(dir: string, read: Read): string[] {
+  const runSh = read(join(dir, "run.sh")) ?? "";
+  const checkMjs = read(join(dir, "check.mjs")) ?? "";
+  const pairs = (text: string, re: RegExp) => Object.fromEntries([...text.matchAll(re)].map((m) => [m[1], m[2]]));
+  const shDirs = pairs(/declare -A dirs=\((.*)\)/.exec(runSh)?.[1] ?? "", /\[(\w+)\]=([\w/]+)/g);
+  const jsDirs = pairs(/const dirs = \{(.*)\};/.exec(checkMjs)?.[1] ?? "", /(\w+): "([\w/]+)"/g);
+  const defaults = /targets=\(([\w ]+)\)$/m.exec(runSh)?.[1] ?? "";
+  const problems: string[] = [];
+  if (JSON.stringify(shDirs) !== JSON.stringify(jsDirs)) problems.push(`run.sh's targets ${JSON.stringify(shDirs)} differ from check.mjs's ${JSON.stringify(jsDirs)}`);
+  if (defaults !== Object.keys(shDirs).join(" ")) problems.push(`run.sh runs "${defaults}" by default, not every target`);
+  for (const [target, folder] of Object.entries(shDirs)) {
+    const text = read(join(dir, `${target}.json`));
+    if (text === null) {
+      problems.push(`${target}.json is missing`);
+      continue;
+    }
+    const c = JSON.parse(text) as { mutate: string[]; commandRunner: { command: string }; jsonReporter: { fileName: string } };
+    if (!c.jsonReporter.fileName.endsWith(`/stryker/${target}.json`)) problems.push(`${target}.json reports to ${c.jsonReporter.fileName}, where check.mjs won't look`);
+    for (const m of c.mutate) if (read(join(root, folder, m.replace(/:\d+-\d+$/, ""))) === null) problems.push(`${target}.json mutates ${m}, which is not in ${folder}`);
+    const tests = c.commandRunner.command.split(" ").filter((w) => w.startsWith("test/"));
+    if (tests.length === 0) problems.push(`${target}.json runs no tests`);
+    for (const t of tests) if (!t.includes("*") && read(join(root, folder, t)) === null) problems.push(`${target}.json runs ${t}, which is not in ${folder}`);
+  }
+  return problems;
+}
+
+const stryker = join(root, "packages/testing/stryker");
+
+test("every Stryker target named in run.sh has a config whose mutated files and tests exist, and check.mjs reads the same ones", () => {
+  assert.deepEqual(targetProblems(stryker, readReal), []);
+});
+
+test("a missing config, a renamed source file or test, a target check.mjs doesn't know and one left out of the default run are each caught", () => {
+  const without = (bad: string): Read => (p) => (p.endsWith(bad) ? null : readReal(p));
+  const edited = (file: string, from: string, to: string): Read => (p) => {
+    const text = readReal(p);
+    if (!p.endsWith(file) || text === null) return text;
+    assert.ok(text.includes(from), `${file} no longer has ${from}`);
+    return text.replace(from, to);
+  };
+  assert.deepEqual(targetProblems(stryker, without("stryker/storage.json")), ["storage.json is missing"]);
+  assert.deepEqual(targetProblems(stryker, without("packages/storage/src/reopen.ts")), ["storage.json mutates src/reopen.ts, which is not in packages/storage"]);
+  assert.deepEqual(targetProblems(stryker, without("packages/core/test/links.test.ts")), ["model.json runs test/links.test.ts, which is not in packages/core"]);
+  const [problem] = targetProblems(stryker, edited("check.mjs", ', svg: "packages/core"', ""));
+  assert.match(problem, /^run\.sh's targets .* differ from check\.mjs's /);
+  assert.deepEqual(targetProblems(stryker, edited("run.sh", "targets=(core design storage model svg viewport ai)", "targets=(core design)")), ['run.sh runs "core design" by default, not every target']);
+});

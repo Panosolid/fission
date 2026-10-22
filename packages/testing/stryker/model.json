@@ -1,0 +1,41 @@
+{
+  "$comment": "Mutation testing of the rest of core's model: links, ownership, the dependency graph, downstream changes, commands, actions, files, change notes, shortcuts, sessions. Run through run.sh, from packages/core. SVG has its own target (svg.json): its test takes 4 s, which would make every mutant here wait for it.",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --experimental-strip-types --no-warnings --test test/actions.test.ts test/change-notes.test.ts test/commands.test.ts test/downstream.test.ts test/files.test.ts test/graph.test.ts test/graph-scale.test.ts test/links.test.ts test/ownership.test.ts test/placeholders.test.ts test/selection.test.ts test/shortcuts.test.ts test/representation.test.ts test/project.test.ts"
+  },
+  "mutate": [
+    "src/model/links.ts",
+    "src/model/ownership.ts",
+    "src/model/graph.ts",
+    "src/model/downstream.ts",
+    "src/model/commands.ts",
+    "src/model/actions.ts",
+    "src/model/files.ts",
+    "src/model/change-notes.ts",
+    "src/model/shortcuts.ts",
+    "src/model/session.ts",
+    "src/model/machines.ts",
+    "src/model/material.ts",
+    "src/model/parameters.ts",
+    "src/model/references.ts",
+    "src/model/search.ts"
+  ],
+  "reporters": [
+    "clear-text",
+    "json"
+  ],
+  "jsonReporter": {
+    "fileName": "../../node_modules/.cache/stryker/model.json"
+  },
+  "clearTextReporter": {
+    "allowColor": false,
+    "logTests": false,
+    "reportMutants": false
+  },
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [
+    "node_modules"
+  ],
+  "timeoutMS": 30000
+}

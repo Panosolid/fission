@@ -1,0 +1,34 @@
+{
+  "$comment": "Mutation testing of the viewport's maths: picking, navigation, standard views, the sketch view, highlights, panes and the image sheet (framing.ts and viewer.ts are left to the e2e checks: viewer.ts is three.js drawing). Run through run.sh, from packages/viewport.",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+  },
+  "mutate": [
+    "src/picking.ts",
+    "src/navigation.ts",
+    "src/views.ts",
+    "src/sketch-view.ts",
+    "src/highlight.ts",
+    "src/pane.ts",
+    "src/image-sheet.ts",
+    "src/framing.ts"
+  ],
+  "reporters": [
+    "clear-text",
+    "json"
+  ],
+  "jsonReporter": {
+    "fileName": "../../node_modules/.cache/stryker/viewport.json"
+  },
+  "clearTextReporter": {
+    "allowColor": false,
+    "logTests": false,
+    "reportMutants": false
+  },
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [
+    "node_modules"
+  ],
+  "timeoutMS": 30000
+}
