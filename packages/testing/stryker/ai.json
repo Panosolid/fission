@@ -1,0 +1,38 @@
+{
+  "$comment": "Mutation testing of the AI assistant: API keys, HTTP, providers, the local and hosted models, Ollama, prompts, context and the actions it may propose. Run through run.sh, from packages/ai.",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+  },
+  "mutate": [
+    "src/keys.ts",
+    "src/http.ts",
+    "src/providers.ts",
+    "src/local.ts",
+    "src/hosted.ts",
+    "src/ollama.ts",
+    "src/prompt.ts",
+    "src/context.ts",
+    "src/commands.ts",
+    "src/actions.ts",
+    "src/features.ts",
+    "src/specialists.ts"
+  ],
+  "reporters": [
+    "clear-text",
+    "json"
+  ],
+  "jsonReporter": {
+    "fileName": "../../node_modules/.cache/stryker/ai.json"
+  },
+  "clearTextReporter": {
+    "allowColor": false,
+    "logTests": false,
+    "reportMutants": false
+  },
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [
+    "node_modules"
+  ],
+  "timeoutMS": 30000
+}

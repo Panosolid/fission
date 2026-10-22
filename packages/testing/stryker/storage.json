@@ -1,0 +1,12 @@
+{
+  "$comment": "Mutation testing of saving: autosave, reopen, the unsaved-work guard and the store. Run through run.sh, from packages/storage.",
+  "testRunner": "command",
+  "commandRunner": { "command": "node --experimental-strip-types --no-warnings --test test/*.test.ts" },
+  "mutate": ["src/autosave.ts", "src/reopen.ts", "src/unsaved.ts", "src/store.ts", "src/key-value.ts"],
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "../../node_modules/.cache/stryker/storage.json" },
+  "clearTextReporter": { "allowColor": false, "logTests": false, "reportMutants": false },
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": ["node_modules"],
+  "timeoutMS": 30000
+}
