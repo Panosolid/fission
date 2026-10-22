@@ -37,7 +37,7 @@ export const JUNK = ["12", "3.5", "40", "0.5", "", " ", "0", "-0", "-5", "-1e3",
 /** How a typed value is finished. */
 export const FINISH = ["Enter", "Tab", "Escape", "none"];
 /** Keys pressed on their own (the sketch tools, Escape, undo and redo, the shortcut list…). */
-export const KEYS = ["l", "r", "c", "a", "t", "Escape", "Escape", "Enter", "Delete", "Backspace", "Control+z", "Control+Shift+z", "Control+y", "?", "Control+c", "Tab", "f", "h"];
+export const KEYS = ["l", "r", "c", "a", "t", "Escape", "Escape", "Enter", "Delete", "Backspace", "Control+z", "Control+Shift+z", "Control+y", "?", "Control+c", "Tab", "f", "h", "p", "p"];
 /** Window sizes: desktop, phone, and one in between. */
 export const SIZES = [
   [1280, 800],
@@ -238,8 +238,9 @@ export function kernelVerdict(f) {
   return null;
 }
 
-/** The area inside a sketch's curves when they are one circle or one closed loop of lines (shoelace), else null. */
+/** The area inside a sketch's curves when they are one circle or one closed loop of lines (shoelace), else null: also with projected edges (27d), which join the outline by Design's rules, not this model's. */
 export function outlineArea(content) {
+  if (content.projected?.length) return null;
   const points = new Map((content.points ?? []).map((p) => [p.id, p]));
   const curves = content.curves ?? [];
   if (curves.length === 1 && curves[0].kind === "circle") return Math.PI * curves[0].radius ** 2;
@@ -258,6 +259,8 @@ export function outlineArea(content) {
     twice += a.x * b.y - b.x * a.y;
     at = next;
     line = ends.get(at).find((c) => c !== line);
+    // Back at the start with lines left over: two loops or more, not one outline (27e).
+    if (at === curves[0].start && used < curves.length - 1) return null;
   }
   return at === curves[0].start ? Math.abs(twice) / 2 : null;
 }
@@ -293,7 +296,7 @@ export function documentRules(design) {
   const ids = [
     ...features.filter((f) => f.intent.type !== "sketch").map((f) => f.id),
     ...(design.profiles ?? []).map((p) => p.id),
-    ...sketches.flatMap((s) => [s.id, ...(s.points ?? []).map((p) => p.id), ...(s.curves ?? []).map((c) => c.id)]),
+    ...sketches.flatMap((s) => [s.id, ...(s.points ?? []).map((p) => p.id), ...(s.curves ?? []).map((c) => c.id), ...(s.projected ?? []).map((p) => p.id)]),
   ];
   const seen = new Set();
   for (const id of ids) {
@@ -305,6 +308,8 @@ export function documentRules(design) {
   for (const s of sketches) {
     const items = features.filter((f) => f.intent.type === "sketch" && f.id === s.id).length;
     if (items !== 1) broken.push(`sketch ${s.id} has ${items} timeline items`);
+    // 27e: what a projection made (a curve, or a point for an edge seen end on) is in its sketch.
+    for (const p of s.projected ?? []) if (![...(s.curves ?? []), ...(s.points ?? [])].some((x) => x.id === p.made)) broken.push(`projection ${p.id} names ${p.made}, which is not in sketch ${s.id}`);
   }
   for (const f of features) if (f.intent.type === "sketch" && !sketches.some((s) => s.id === f.id)) broken.push(`timeline item ${f.id} names no sketch`);
   const marker = design.timeline.marker;
@@ -318,12 +323,12 @@ export function documentRules(design) {
   return broken;
 }
 
-/** Every id a Design document hands out (features, profiles, sketches and their points and curves; a sketch's timeline item shares its sketch's id). */
+/** Every id a Design document hands out (features, profiles, sketches and their points, curves and projections; a sketch's timeline item shares its sketch's id). */
 function idsOf(design) {
   return new Set([
     ...design.timeline.features.map((f) => f.id),
     ...(design.profiles ?? []).map((p) => p.id),
-    ...(design.sketches ?? []).flatMap((s) => [s.id, ...(s.points ?? []).map((p) => p.id), ...(s.curves ?? []).map((c) => c.id)]),
+    ...(design.sketches ?? []).flatMap((s) => [s.id, ...(s.points ?? []).map((p) => p.id), ...(s.curves ?? []).map((c) => c.id), ...(s.projected ?? []).map((p) => p.id)]),
   ]);
 }
 

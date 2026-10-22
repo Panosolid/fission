@@ -418,10 +418,16 @@ test("projections survive save and open, and every way a file can break them is 
     [[{ ...line, edge: "a/b" }], /has no edge name/],
     [[line, { ...point, edge: line.edge }], /projects the edge front\+top of feature-1 twice/],
     [[{ ...line, made: 4 }], /made nothing/],
-    [[{ ...line, made: "line-99" }], /made line-99, which is not one of the sketch's curves, or a point no curve is drawn from/],
-    [[{ ...line, made: lineCurve.start }], /which is not one of the sketch's curves, or a point no curve is drawn from/],
+    [[{ ...line, made: "line-99" }], /made line-99, which is not one of the sketch's curves or points/],
     [[line, { ...point, made: line.made }], /line-\d+ is made by two projections/],
   ] as const) assert.throws(() => open(withList(list)), words, JSON.stringify(list));
+  // 27e: a line drawn from a projected point (an upright seen end on; the sketch tool shares a point it lands on) opens: the
+  // file was refused ("made point-n, which is not … a point no curve is drawn from"), so the project could not be reopened.
+  const drawnFrom = drawLine(made, id, point.made, [60, 10]).doc;
+  assert.equal((sketchOf(drawnFrom, id).curves.at(-1) as { start: string }).start, point.made);
+  assert.deepEqual(open(drawnFrom), drawnFrom);
+  // So is a projection naming a point an own line is drawn from: the same file, as far as it can tell.
+  assert.doesNotThrow(() => open(withList([{ ...line, made: lineCurve.start }])));
   // A deleted feature (still depended on) opens: the projection is held, "projection lost".
   const deleted = { ...withList([{ ...line, feature: "feature-77" }]), timeline: { features: made.timeline.features.map((f) => (f.id === id ? { ...f, dependsOn: ["feature-1", "feature-77"] } : f)) } };
   assert.doesNotThrow(() => open(deleted));

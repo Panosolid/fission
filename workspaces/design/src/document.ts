@@ -530,8 +530,8 @@ function checkPins(f: Feature, content: Sketch, byId: ReadonlyMap<string, { item
  * the feature whose body its edge is on (a solid item before the sketch,
  * or gone: deleted, the projection is held; depended on, as a pin's), the
  * edge's name (no "/"), and what it made: one of the sketch's curves, or
- * one of its points that no curve is drawn from, never another
- * projection's. No edge is projected twice, no point is made by two
+ * one of its points (27e: curves may be drawn from it, as from a projected
+ * line's end), never another projection's. No edge is projected twice, no point is made by two
  * projections, and none is pinned too (it follows its edge already).
  */
 function checkProjections(f: Feature, content: Sketch, byId: ReadonlyMap<string, { item: Feature; at: number }>): void {
@@ -540,7 +540,6 @@ function checkProjections(f: Feature, content: Sketch, byId: ReadonlyMap<string,
   if (!Array.isArray(list) || list.length === 0) throw new Error(`${at}'s projections must be a list of at least one, or left out`);
   const points = new Set(content.points.map((p) => p.id));
   const curves = new Map(content.curves.map((c) => [c.id, c]));
-  const drawnFrom = new Set(content.curves.flatMap(curvePoints));
   const edges = new Set<string>();
   const owned = new Set<string>();
   const pinned = new Set((content.pins ?? []).map((p) => p.point));
@@ -556,7 +555,8 @@ function checkProjections(f: Feature, content: Sketch, byId: ReadonlyMap<string,
     edges.add(`${p.feature}/${p.edge}`);
     if (typeof p.made !== "string") throw new Error(`${name} made nothing`);
     const curve = curves.get(p.made);
-    if (curve === undefined && !(points.has(p.made) && !drawnFrom.has(p.made))) throw new Error(`${name} made ${shown(p.made)}, which is not one of the sketch's curves, or a point no curve is drawn from`);
+    // A point (an edge seen end on) may be one a curve is drawn from: the sketch tool shares a point it lands on (27e).
+    if (curve === undefined && !points.has(p.made)) throw new Error(`${name} made ${shown(p.made)}, which is not one of the sketch's curves or points`);
     for (const q of [p.made, ...(curve ? curvePoints(curve) : [])]) {
       if (owned.has(q)) throw new Error(`${at}: ${q} is made by two projections`);
       if (pinned.has(q)) throw new Error(`${at}: ${q} is projected, so it can't be pinned too`);

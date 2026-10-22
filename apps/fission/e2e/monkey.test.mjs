@@ -120,6 +120,14 @@ test("volumes from the file, worked by hand", () => {
   // One line short of a loop, or an arc in it: the model can't say.
   assert.equal(outlineArea({ ...tri, curves: tri.curves.slice(0, 2) }), null);
   assert.equal(outlineArea({ ...tri, curves: [...tri.curves.slice(0, 2), { kind: "arc", start: "c", end: "a" }] }), null);
+  // Two loops (27e: a projected face beside a drawn one): not one outline, so null, not the first loop walked twice (12).
+  const two = {
+    points: [...tri.points, { id: "d", x: 10, y: 0 }, { id: "e", x: 13, y: 0 }, { id: "f", x: 10, y: 4 }],
+    curves: [...tri.curves, { kind: "line", start: "d", end: "e" }, { kind: "line", start: "e", end: "f" }, { kind: "line", start: "f", end: "d" }],
+  };
+  assert.equal(outlineArea(two), null);
+  // Projected edges (27d) join the outline by Design's own rules: the model doesn't say.
+  assert.equal(outlineArea({ ...tri, projected: [{ id: "projection-9", feature: "feature-1", edge: "front+top", made: "x" }] }), null);
   near(modelVolume(d, { intent: { type: "cylinder", parameters: { diameter: 10, height: 2 } } }), 50 * Math.PI); // π·5²·2
   near(modelVolume(d, { intent: { type: "sphere", parameters: { diameter: 6 } } }), 36 * Math.PI); // (4/3)π·3³
   // The sketch gone: the kept shape's area counts.
@@ -157,6 +165,13 @@ test("a good file keeps every rule, and each broken rule is named", () => {
   const lost = design();
   lost.timeline.features.splice(1, 1);
   assert.deepEqual(documentRules(lost), ["sketch sketch-2 has 0 timeline items"]);
+  // 27e: a projection's id is one of the counter's too, and it names what it made in its sketch.
+  const projected = design();
+  projected.sketches[0].projected = [{ id: "point-4", feature: "feature-1", edge: "front+top", made: "circle-5" }];
+  assert.deepEqual(documentRules(projected), ["id point-4 is used twice"]);
+  projected.sketches[0].projected = [{ id: "projection-6", feature: "feature-1", edge: "front+top", made: "line-9" }];
+  projected.nextId = 7;
+  assert.deepEqual(documentRules(projected), ["projection projection-6 names line-9, which is not in sketch sketch-2"]);
 });
 
 test("a new id comes from the counter, worked by hand (25a5)", () => {

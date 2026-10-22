@@ -668,6 +668,6 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "a projected curve lying on another is kept in the outline, so tracing a projected face (or projecting the face under it) makes four ends meet at each corner",
     edits: [{ file: PROJECTION, find: "  for (const c of sketch.curves) if (projected.has(c.id) && !kept.some((k) => onCurve(c, k, where))) kept.push(c);", replace: "  for (const c of sketch.curves) if (projected.has(c.id)) kept.push(c);" }],
     run: ["naming"],
-    caught: "projection-hunt: B:",
+    caught: "projection-hunt: A:",
   },
 };
