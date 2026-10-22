@@ -389,3 +389,52 @@ test("an ASCII STL starts with 'solid' (after spaces only); a DXF with 0 then SE
   assert.deepEqual(identifyFile(fileOf("plan.dxf", "\n  0\nSECTION\n")), is("dxf"));
   assert.deepEqual(identifyFile(fileOf("plan.dxf", "1\nSECTION\n")), renamed("dxf"));
 });
+
+// ---------- leftovers from the second run ----------
+
+test("an id whose verb holds a second dot is refused, though its end alone looks like an id", () => {
+  // Kills ID's `^` anchor removed in both files: /[a-z]+\.[a-z0-9-]+$/ finds "download.stl"
+  // at the end of "design.download.stl" and would accept it, while the whole id has a second
+  // dot that [a-z0-9-]+ after the first one can't take.
+  const verb: Action = { id: "design.download.stl", workspace: "design", label: "x", title: "", kinds: ["body"], uses: "mesh", count: "one", run: async () => ({ message: "", bad: false }) };
+  assert.throws(() => new ActionRegistry().register(verb), /must be "design\.<verb>" in lower case/);
+  const summary: DownstreamSource = { id: "slice.print.time", workspace: "slice", node: "n", label: "Print time", value: () => "1 h", preview: () => "" };
+  assert.throws(() => new DownstreamRegistry().register(summary), /must be "slice\.<name>" in lower case/);
+});
+
+test("'<!-->' does not close the comment it opens, so what follows is still inside it", () => {
+  // Kills `indexOf("-->", i + 4)` => `i - 4`: searching from before the opening finds the
+  // "-->" made by the opening's own "--" and the ">" after it (characters 2-4), and would
+  // read "<svg/>" as the first element. In XML a comment's "--" must come after "<!--".
+  assert.deepEqual(identifyFile(fileOf("a.svg", "<!--><svg/>")), renamed("svg"));
+  // The same text closed properly a little later is an SVG.
+  assert.deepEqual(identifyFile(fileOf("a", "<!-->--><svg/>")), is("svg"));
+});
+
+test("the hand-over command's words, which the assistant reads to know what it does", () => {
+  // Kills each of the three strings => "": the summary and both parameter descriptions are
+  // the only explanation the model gets of transfer_ownership.
+  assert.equal(TRANSFER_OWNERSHIP.summary, "Hand one linked value to another workspace, which then owns it: only the owner changes it, the other side suggests changes.");
+  assert.equal(TRANSFER_OWNERSHIP.params.value.description, "id of the linked value");
+  assert.equal(TRANSFER_OWNERSHIP.params.to.description, "the workspace that will own it");
+});
+
+test("what a node reads after its input was removed is just that dangling id", () => {
+  // Kills `this.inputs.get(x) ?? []` => `?? ["Stryker was here"]` in upstreamOf: the removed
+  // "a" has no inputs of its own, so the walk must stop there. Worked by hand: b reads a, a
+  // goes, so b's upstream is {a}; an id the graph never had reads nothing.
+  const g = new DependencyGraph();
+  g.set(node("a"));
+  g.set(node("b"), ["a"]);
+  g.remove("a");
+  assert.deepEqual([...g.upstreamOf("b")], ["a"]);
+  assert.deepEqual([...g.upstreamOf("never-added")], []);
+});
+
+test("an unclosed comment after a declaration ends the sniffing, it doesn't start it again", () => {
+  // Kills the comment's `end < 0` => false: indexOf gives -1, so i would become -1 + 3 = 2,
+  // which in "<?<??><!--" is the start of "<??>": that closes again at 4, the unclosed
+  // comment at 6 is met again, and the loop never ends. Worked by hand: "<?" at 0 closes
+  // at the "?>" at 4, i = 6, "<!--" there has no "-->", so the first element isn't <svg.
+  assert.deepEqual(identifyFile(fileOf("a.svg", "<?<??><!--")), renamed("svg"));
+});

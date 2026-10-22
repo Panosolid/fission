@@ -271,5 +271,264 @@
     "original": "i < journal.length",
     "replacement": "i <= journal.length",
     "why": "localStorage.key(length) is null by the standard, and null keys are passed over."
+  },
+  {
+    "file": "packages/core/src/model/commands.ts",
+    "mutator": "ConditionalExpression",
+    "original": "s === undefined",
+    "replacement": "false",
+    "why": "JSON.stringify gives undefined only for undefined, functions and symbols; without the check s.length throws a TypeError, which the catch below turns into the same String(v)."
+  },
+  {
+    "file": "packages/core/src/model/commands.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof v === \"number\"",
+    "replacement": "true",
+    "why": "Number.isFinite is false for anything that is not a number (it never converts), so the typeof check adds nothing to the answer."
+  },
+  {
+    "file": "packages/core/src/model/commands.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof v !== \"number\"",
+    "replacement": "false",
+    "why": "!Number.isFinite(v) is already true for anything that is not a number, so the same message comes back."
+  },
+  {
+    "file": "packages/core/src/model/commands.ts",
+    "mutator": "ConditionalExpression",
+    "original": "p.min !== undefined",
+    "replacement": "true",
+    "why": "With no min, v < undefined is false for every number, so skipping the undefined check changes nothing."
+  },
+  {
+    "file": "packages/core/src/model/commands.ts",
+    "mutator": "ConditionalExpression",
+    "original": "p.max !== undefined",
+    "replacement": "true",
+    "why": "With no max, v > undefined is false for every number, so skipping the undefined check changes nothing."
+  },
+  {
+    "file": "packages/core/src/model/commands.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof v === \"string\"",
+    "replacement": "true",
+    "why": "A choice's values are all strings and includes() never converts, so a non-string is refused by includes() all the same."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ConditionalExpression",
+    "original": "bytes.length >= at + prefix.length",
+    "replacement": "true",
+    "why": "Past the end bytes[at + i] is undefined, which equals no byte value, so prefix.every is false for a head too short anyway."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ArithmeticOperator",
+    "original": "at + prefix.length",
+    "replacement": "at - prefix.length",
+    "why": "The length check only short-cuts the compare: past the end bytes[at + i] is undefined and never equals a prefix byte."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ConditionalExpression",
+    "original": "i < t.length",
+    "replacement": "true",
+    "why": "Past the end t[i] is undefined; /\\s/.test(undefined) tests the text \"undefined\", which has no space, so the loop stops at the same place."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "EqualityOperator",
+    "original": "i < t.length",
+    "replacement": "i <= t.length",
+    "why": "At i === t.length t[i] is undefined and /\\s/.test(\"undefined\") is false, so the loop stops there either way."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ConditionalExpression",
+    "original": "end < 0",
+    "replacement": "false",
+    "why": "The '<?' check (the comment's is killed by a test that would loop for ever): an unclosed '<?' makes i = -1 + 2 = 1, and t[1] is always the second character of the first element ('?' or '!'), so no branch matches there, the loop breaks and t.startsWith(\"<svg\", 1) is false, the same false."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "EqualityOperator",
+    "original": "end < 0",
+    "replacement": "end <= 0",
+    "why": "Every indexOf here starts past the text that opened the part ('<?' at i searches from i + 2, '<!--' from i + 4, '<!DOCTYPE' from i), so a found end is at least 2 and never 0."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ConditionalExpression",
+    "original": "file.size < 84",
+    "replacement": "false",
+    "why": "A size under 84 can never equal 84 + 50 * count, so the final size check refuses it anyway (the head-length half still keeps DataView in bounds)."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ConditionalExpression",
+    "original": "format === \"dxf\"",
+    "replacement": "true",
+    "why": "weakMatches is only called for stl or dxf, and stl returns above, so this branch is always dxf."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ConditionalExpression",
+    "original": "lines.length > 0",
+    "replacement": "true",
+    "why": "lines[0] of an empty array is undefined, which is not \"\", so the loop stops without the length check."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "EqualityOperator",
+    "original": "lines.length > 0",
+    "replacement": "lines.length >= 0",
+    "why": "lines[0] of an empty array is undefined, which is not \"\", so the loop stops without the length check."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "BooleanLiteral",
+    "original": "false",
+    "replacement": "true",
+    "why": "Unreachable: weakMatches is only called for stl or dxf, which both return above."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "ConditionalExpression",
+    "original": "claimed === \"stl\" || claimed === \"dxf\"",
+    "replacement": "true",
+    "why": "weakMatches returns false for any other format, so calling it for them gives the same renamed answer."
+  },
+  {
+    "file": "packages/core/src/model/files.ts",
+    "mutator": "StringLiteral",
+    "original": "\"\"",
+    "replacement": "\"Stryker was here!\"",
+    "why": "andList is never given an empty list: routeFiles checks opens.length and planned.workspaces.length before calling it."
+  },
+  {
+    "file": "packages/core/src/model/graph.ts",
+    "mutator": "ArrayDeclaration",
+    "original": "[]",
+    "replacement": "[\"Stryker was here\"]",
+    "why": "unlink only takes id out of its inputs' reader sets; for an id with no inputs the made-up input has no readers entry, so nothing changes."
+  },
+  {
+    "file": "packages/core/src/model/graph.ts",
+    "mutator": "ConditionalExpression",
+    "original": "r?.size === 0",
+    "replacement": "false",
+    "why": "An empty reader set left behind reads the same as a missing one everywhere: downstreamOf spreads it to nothing, and set() only uses readers.has to skip a cycle walk that then finds nothing."
+  },
+  {
+    "file": "packages/core/src/model/graph.ts",
+    "mutator": "ConditionalExpression",
+    "original": "from === to",
+    "replacement": "false",
+    "why": "With from === to the search skips d === to, so it never finds from and returns undefined at the end, the same answer."
+  },
+  {
+    "file": "packages/core/src/model/graph.ts",
+    "mutator": "EqualityOperator",
+    "original": "i < queue.length",
+    "replacement": "i <= queue.length",
+    "why": "queue[queue.length] is undefined, inputs.get(undefined) is undefined, so the extra round finds nothing and the loop ends."
+  },
+  {
+    "file": "packages/core/src/model/graph.ts",
+    "mutator": "ConditionalExpression",
+    "original": "d === to",
+    "replacement": "false",
+    "why": "d === to means `to` reads itself through a loop, which set() refuses, so it never happens."
+  },
+  {
+    "file": "packages/core/src/model/ownership.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof x === \"string\"",
+    "replacement": "true",
+    "why": "WORKSPACES holds only strings and includes() never converts, so a non-string is refused all the same."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "StringLiteral",
+    "original": "\"Space\"",
+    "replacement": "\"\"",
+    "why": "canonicalKey turns ' ' and any case of 'space' into Space before it looks in NAMED_KEYS, so this entry is never reached (it is kept so the set lists every named key)."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "ConditionalExpression",
+    "original": "key.length === 1",
+    "replacement": "true",
+    "why": "Every named key (Tab, F1, Space…) contains a capital letter, so !/[A-Z]/.test(key) already makes the condition false for them."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "EqualityOperator",
+    "original": "parts.length > 1",
+    "replacement": "parts.length >= 1",
+    "why": "With one part parts.at(-2) is undefined, not \"\", so the condition is false either way."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "ConditionalExpression",
+    "original": "parts.length > 1",
+    "replacement": "true",
+    "why": "With one part parts.at(-2) is undefined, not \"\", so the condition is false either way."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "ConditionalExpression",
+    "original": "raw.toLowerCase() === \"space\"",
+    "replacement": "false",
+    "why": "Any case of 'space' then reaches NAMED_KEYS, which holds Space and compares ignoring case, giving the same Space."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "StringLiteral",
+    "original": "\"space\"",
+    "replacement": "\"\"",
+    "why": "Any case of 'space' then reaches NAMED_KEYS, which holds Space and compares ignoring case, giving the same Space."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "MethodExpression",
+    "original": "raw.toLowerCase()",
+    "replacement": "raw.toUpperCase()",
+    "why": "Any case of 'space' then reaches NAMED_KEYS, which holds Space and compares ignoring case, giving the same Space."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "StringLiteral",
+    "original": "\"\"",
+    "replacement": "\"Stryker was here!\"",
+    "why": "With no code the regex must fail; \"Stryker was here!\" is neither KeyX nor DigitN, so it fails the same way."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "ConditionalExpression",
+    "original": "scope !== \"app\"",
+    "replacement": "true",
+    "why": "onScreen holds only workspace ids and \"app\" is never one, so includes() is false for app anyway."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "StringLiteral",
+    "original": "\"app\"",
+    "replacement": "\"\"",
+    "why": "onScreen holds only workspace ids and \"app\" is never one, so includes() is false for app anyway."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "ConditionalExpression",
+    "original": "chord === \"+\"",
+    "replacement": "false",
+    "why": "\"+\".split(/\\+(?!$)/) is [\"+\"] too: its only + is at the end, where the lookahead refuses to split."
+  },
+  {
+    "file": "packages/core/src/model/shortcuts.ts",
+    "mutator": "StringLiteral",
+    "original": "\"+\"",
+    "replacement": "\"\"",
+    "why": "\"+\".split(/\\+(?!$)/) is [\"+\"] too: its only + is at the end, where the lookahead refuses to split."
   }
 ]
