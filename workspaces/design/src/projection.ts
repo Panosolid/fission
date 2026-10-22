@@ -42,7 +42,7 @@
 
 import type { BodyView, Plane, SketchXY, StableId } from "@fission/core";
 import type { DesignDocument, Sketch, SketchCurve, SketchPoint } from "./document.ts";
-import { inSketch, partName, unordered } from "./face-edges.ts";
+import { inSketch, partName, unordered, vertexNames } from "./face-edges.ts";
 import { faceReference, isFacePlane } from "./face-sketch.ts";
 import type { BodyNames } from "./naming.ts";
 import { sharedBy } from "./references.ts";
@@ -145,15 +145,33 @@ function turn(from: number, to: number): number {
 }
 
 /**
+ * Straight edge `e`'s two vertices in the order of their names (`corners`,
+ * face-edges.ts `vertexNames`: a corner's name, as a pin names it), the
+ * first name first; null when it is not straight, a name is unknown or
+ * both are one. The kernel runs an edge whichever way its face's loop
+ * goes, which a flipped extrude turns over, so its own order would swap a
+ * projected line's ends, and a line drawn from one end would jump to the
+ * other (found by 27e); the names don't change with it.
+ */
+export function cornerOrder(view: BodyView, e: number, corners: readonly (string | null)[] | undefined): readonly [number, number] | null {
+  const [v0, v1] = view.edge_vertices[e];
+  const [n0, n1] = [corners?.[v0], corners?.[v1]];
+  if (view.edge_types[e] !== "line" || !n0 || !n1 || n0 === n1) return null;
+  return n0 < n1 ? [v0, v1] : [v1, v0];
+}
+
+/**
  * Edge `e` of a body (its kernel view) seen straight along the normal of a
  * sketch through `plane`, in the sketch's (x, y), or why it can't be
  * projected (the module comment's rules). Ends, middles and centres come
  * from the kernel's exact vertex_points, edge_middles and edge_centres,
  * placed through the frame by `inSketch`, as a pin's are, so a projected
- * corner is exactly where a snap onto that corner lands.
+ * corner is exactly where a snap onto that corner lands. A straight edge's
+ * line runs from the end whose corner's name (`corners`) comes first
+ * (`cornerOrder`), the kernel's order when those aren't known.
  */
-export function edgeShape(view: BodyView, e: number, plane: Plane): EdgeShape | EdgeRefusal {
-  const [v0, v1] = view.edge_vertices[e];
+export function edgeShape(view: BodyView, e: number, plane: Plane, corners?: readonly (string | null)[]): EdgeShape | EdgeRefusal {
+  const [v0, v1] = cornerOrder(view, e, corners) ?? view.edge_vertices[e];
   const s3 = view.vertex_points[v0];
   const e3 = view.vertex_points[v1];
   const type = view.edge_types[e];
@@ -232,11 +250,26 @@ export function madePoints(sketch: Pick<Sketch, "curves">, p: SketchProjection):
   return c.kind === "line" ? [c.start, c.end] : c.kind === "circle" ? [c.centre] : [c.start, c.end, c.centre];
 }
 
-/** Where a projection's points go for `shape`, by id, and a circle's radius: in the order its curve names them. */
-export function placesOf(sketch: Pick<Sketch, "curves">, p: SketchProjection, shape: EdgeShape): { points: { point: string; at: SketchXY }[]; radius?: number } {
+/**
+ * Where a projection's points go for `shape`, by id, and a circle's
+ * radius: in the order its curve names them. A line's ends go in the
+ * shape's order when it is by its corners' names (`named`, `cornerOrder`);
+ * else (a round edge seen edge on, whose ends are no corners, or corners
+ * with no names) each end goes to whichever of the two places moves the
+ * line's points less, the sum of their squared moves (a line slid along
+ * itself keeps its order, since (t + L)² + (t − L)² > 2t²; the shape's
+ * order on a tie), so a line drawn from one end is never swung onto the
+ * other because the kernel runs the edge the other way now.
+ */
+export function placesOf(sketch: Pick<Sketch, "points" | "curves">, p: SketchProjection, shape: EdgeShape, named = false): { points: { point: string; at: SketchXY }[]; radius?: number } {
   const c = sketch.curves.find((x) => x.id === p.made);
   if (shape.kind === "point" || !c) return { points: shape.kind === "point" ? [{ point: p.made, at: shape.at }] : [] };
-  if (shape.kind === "line" && c.kind === "line") return { points: [{ point: c.start, at: shape.a }, { point: c.end, at: shape.b }] };
+  if (shape.kind === "line" && c.kind === "line") {
+    const [s, t] = [c.start, c.end].map((id) => sketch.points.find((q) => q.id === id));
+    const moved = (a: SketchXY, b: SketchXY) => (s && t ? (s.x - a[0]) ** 2 + (s.y - a[1]) ** 2 + (t.x - b[0]) ** 2 + (t.y - b[1]) ** 2 : 0);
+    const [a, b] = named || moved(shape.a, shape.b) <= moved(shape.b, shape.a) ? [shape.a, shape.b] : [shape.b, shape.a];
+    return { points: [{ point: c.start, at: a }, { point: c.end, at: b }] };
+  }
   if (shape.kind === "circle" && c.kind === "circle") return { points: [{ point: c.centre, at: shape.centre }], radius: shape.radius };
   if (shape.kind === "arc" && c.kind === "arc") return { points: [{ point: c.start, at: shape.start }, { point: c.end, at: shape.end }, { point: c.centre, at: shape.centre }] };
   return { points: [] };
@@ -250,15 +283,20 @@ export function placesOf(sketch: Pick<Sketch, "curves">, p: SketchProjection, sh
  * its own, its projected ones. Then, again and again, a projected line or
  * arc with an end that meets no other curve's end is left out: a
  * projected edge used to snap to, or one of a face's edges a drawn line
- * doesn't close, never breaks the outline. A projected circle joins only a
+ * doesn't close, never breaks the outline. Before all that, a projected
+ * curve lying on one kept already (`onCurve`; the sketch's own first) is
+ * left out (27e). A projected circle joins only a
  * sketch with no curves of its own (it has no ends to join by). In the
  * sketch's order. The sketch's own curves when it has no projections.
  */
 export function profileCurves(sketch: { points: readonly SketchPoint[]; curves: readonly SketchCurve[]; projected?: readonly SketchProjection[] }): SketchCurve[] {
   if (!sketch.projected || sketch.projected.length === 0) return [...sketch.curves];
   const projected = new Set(sketch.projected.map((p) => p.made));
-  const curves = sketch.curves;
   const where = new Map(sketch.points.map((p) => [p.id, [p.x, p.y] as const]));
+  // A projected curve on one already kept (the sketch's own first, then the projected in order) adds nothing (27e).
+  const kept: SketchCurve[] = sketch.curves.filter((c) => !projected.has(c.id));
+  for (const c of sketch.curves) if (projected.has(c.id) && !kept.some((k) => onCurve(c, k, where))) kept.push(c);
+  const curves = sketch.curves.filter((c) => kept.includes(c));
   // Each line's and arc's two ends (end 2k, 2k + 1 of curve k), joined where they are within SAME_PLACE.
   const ends: { curve: number; at: readonly [number, number] }[] = [];
   curves.forEach((c, k) => {
@@ -304,6 +342,34 @@ export function profileCurves(sketch: { points: readonly SketchPoint[]; curves: 
       }
   }
   return curves.filter((_, k) => joined.has(k));
+}
+
+/**
+ * Whether curve `c` lies on curve `k` (27e): the same kind, and each of its
+ * points within SAME_PLACE of the matching one of `k` (a line's ends
+ * either way round; an arc's start, end and centre, since one with its
+ * ends the other way round is the rest of the circle; a circle's centre,
+ * and its radius within SAME_PLACE). The kernel joins ends within LINEAR,
+ * so two such curves would be one edge drawn twice: a sketch's own line
+ * traced over a projected one, a face projected with the one under it, or
+ * a face seen edge on (its top and bottom edges one line), which made
+ * every corner of the outline four ends and the kernel refuse it.
+ */
+function onCurve(c: SketchCurve, k: SketchCurve, where: ReadonlyMap<string, readonly [number, number]>): boolean {
+  const at = (p: string) => where.get(p)!;
+  const same = (p: string, q: string) => Math.hypot(at(p)[0] - at(q)[0], at(p)[1] - at(q)[1]) <= SAME_PLACE;
+  if (c.kind === "line" && k.kind === "line") return (same(c.start, k.start) && same(c.end, k.end)) || (same(c.start, k.end) && same(c.end, k.start));
+  if (c.kind === "arc" && k.kind === "arc") return same(c.start, k.start) && same(c.end, k.end) && same(c.centre, k.centre);
+  if (c.kind === "circle" && k.kind === "circle") return same(c.centre, k.centre) && Math.abs(c.radius - k.radius) <= SAME_PLACE;
+  return false;
+}
+
+/** Why a sketch of only projected curves has no outline (27e: the kernel, asked about no curves at all, said the sketch had none yet). */
+export const PROJECTED_OPEN = "its projected edges don't close an outline (a projected line or arc counts only where both its ends meet another curve), and it has no curves of its own";
+
+/** The words for a sketch whose curves are all projected and none joins the outline (`profileCurves` empty), else null: the kernel judges. */
+export function projectedOpen(sketch: { points: readonly SketchPoint[]; curves: readonly SketchCurve[]; projected?: readonly SketchProjection[] }): string | null {
+  return sketch.curves.length > 0 && profileCurves(sketch).length === 0 ? PROJECTED_OPEN : null;
 }
 
 /** Why a projection is held where it was: its edge is gone, now seen as something else (or slanted), or its name is now two edges'. */
@@ -375,9 +441,10 @@ export function projectPick(doc: DesignDocument, sketchId: string, scene: Scene 
   const picked = kind === "edge" ? [hit.index] : body.view.edge_faces.flatMap((pair, e) => (pair !== null && (pair[0] === hit.index || pair[1] === hit.index) ? [e] : []));
   const edges: EdgeToProject[] = [];
   const refused: string[] = [];
+  const corners = vertexNames(body.view, body.names).vertices;
   for (const e of picked) {
     const name = edgeName(body.names, e);
-    const shape = edgeShape(body.view, e, plane);
+    const shape = edgeShape(body.view, e, plane, corners);
     if (name === null) refused.push(PROJECT_UNNAMED);
     else if ("refused" in shape) refused.push(shape.message);
     else edges.push({ feature: body.feature, edge: name, shape });

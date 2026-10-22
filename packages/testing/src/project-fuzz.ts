@@ -32,6 +32,7 @@ import {
   drawArc,
   drawCircle,
   drawLine,
+  madePoints,
   drawRectangle,
   editFeature,
   extrudeSketch,
@@ -242,6 +243,14 @@ function projectSome(r: SeededRandom, doc: DesignDocument): DesignDocument {
   });
   let next = projectEdges(doc, s.id, edges).doc;
   const held = next.sketches.find((x) => x.id === s.id)?.projected;
+  // 27e: a line drawn from a projected point (a line's end, a circle's centre, or an edge seen end on), sharing it as the
+  // sketch tool does when it lands there; a file holding one was refused before 27e.
+  if (held && r.next() < 0.4) {
+    const sketch = next.sketches.find((x) => x.id === s.id)!;
+    const from = pick(r, madePoints(sketch, pick(r, held)));
+    const p = sketch.points.find((q) => q.id === from)!;
+    next = drawLine(next, s.id, from, [p.x + 1 + below(r, 20), p.y + 1 + below(r, 20)]).doc;
+  }
   if (held && r.next() < 0.2) next = unproject(next, s.id, pick(r, held).id);
   return next;
 }

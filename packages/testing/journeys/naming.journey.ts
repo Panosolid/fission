@@ -226,13 +226,15 @@ test("every one of Ben's Fusion answers that holds without a cut holds on Design
 /** 100 seeds (FISSION_SESSIONS): a session takes about 60 ms, and the rarest path (a face redrawn away while greyed, then back on) comes about once in 18 sessions. */
 const SEEDS = Number(process.env.FISSION_SESSIONS ?? 100);
 const STEPS = Number(process.env.FISSION_SESSION_STEPS ?? 150);
+/** The first seed (FISSION_SESSION_FROM, 2500 by default): long hunts run other seeds than every run's. */
+const FROM = Number(process.env.FISSION_SESSION_FROM ?? 2500);
 const REGRESSIONS = new URL("../test/regressions/naming/", import.meta.url);
 
 test(`seeded: ${SEEDS} sessions × ${STEPS} steps on Design agree with the model at every step and reach every case`, async () => {
   const start = await kernel.call("body_count");
   const total: NamingCounts = {};
   for (let k = 0; k < SEEDS; k++) {
-    const seed = BigInt(2500 + k);
+    const seed = BigInt(FROM + k);
     // From step 27c with a second body and pins on any earlier extrude's edges, and from 27d edges projected (rules 11 to 13; "all").
     const session = randomNamingSession(seed, STEPS, false, "all");
     const subject = namingDesignSubject(kernel);

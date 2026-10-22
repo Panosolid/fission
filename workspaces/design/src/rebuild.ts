@@ -30,9 +30,9 @@
 import { KernelError, type BodyHandle, type BodySpec, type BodyView, type Feature, type KernelCalls, type KernelInput, type Outline, type Plane, type SketchXY } from "@fission/core";
 import { buildingItems, isSketchExtrude, isSketchItem, keptOf, sketchInputs, specOf, type DesignDocument, type KeptShape, type Sketch, type SketchPlane } from "./document.ts";
 import { faceFeature, faceReference, frameNow, frameOf, isFaceSketch, planeWords, squared, type PlaneWarning, type SketchPlacement } from "./face-sketch.ts";
-import { pinNow, pointWords, type PointWarning } from "./face-edges.ts";
+import { pinNow, pointWords, vertexNames, type PointWarning } from "./face-edges.ts";
 import { featureNames, type BodyNames } from "./naming.ts";
-import { edgeNamed, edgeShape, madeKind, profileCurves, placesOf, projectionWords, type HeldCause, type ProjectionWarning } from "./projection.ts";
+import { cornerOrder, edgeNamed, edgeShape, madeKind, profileCurves, placesOf, projectedOpen, projectionWords, type HeldCause, type ProjectionWarning } from "./projection.ts";
 import { resolveReference, sharedBy } from "./references.ts";
 import { planeOf, sketchCurves } from "./sketch.ts";
 
@@ -219,6 +219,8 @@ const namedCurves = (inputs: readonly KernelInput[], ids: CurveIds): string[] =>
 /** What a sketch's points and curves make (its projected ones only where they join, 27d): the outline, or why there is none, from the kernel's fields. */
 async function outlineOf(kernel: KernelCalls, content: KeptShape & Pick<Sketch, "projected">): Promise<{ outline: Outline } | { lost: "open-outline" | "invalid-outline"; message: string; curves: string[]; refused?: true }> {
   const ids = idsOf(content);
+  const none = projectedOpen(content);
+  if (none !== null) return { lost: "open-outline", message: none, curves: [] };
   const c = sketchCurves(content);
   try {
     const out = await kernel.call("sketch_outline", c.lines, c.circles, c.arcs);
@@ -603,6 +605,7 @@ async function follow(f: Feature, index: DocIndex, done: Record<string, FeatureR
   // Step 27d (rule 12): each projection where its edge is seen now, when it is still seen as what it made; else held.
   const projected: { id: string; points: { point: string; at: SketchXY }[]; radius?: number }[] = [];
   const lost: { id: string; cause: HeldCause }[] = [];
+  const cornersOf = new Map<string, (string | null)[]>();
   for (const q of content.projected ?? []) {
     const body = await bodyOf(q.feature);
     const found = body === null ? ({ cause: "projection-lost" } as const) : edgeNamed(body.names, body.view.edges, q.edge);
@@ -610,12 +613,14 @@ async function follow(f: Feature, index: DocIndex, done: Record<string, FeatureR
       lost.push({ id: q.id, cause: found.cause });
       continue;
     }
-    const shape = edgeShape(body!.view, found.edge, plane);
+    if (!cornersOf.has(q.feature)) cornersOf.set(q.feature, vertexNames(body!.view, body!.names).vertices);
+    const corners = cornersOf.get(q.feature)!;
+    const shape = edgeShape(body!.view, found.edge, plane, corners);
     if ("refused" in shape || shape.kind !== madeKind(content, q)) {
       lost.push({ id: q.id, cause: "projection-changed" });
       continue;
     }
-    projected.push({ id: q.id, ...placesOf(content, q, shape) });
+    projected.push({ id: q.id, ...placesOf(content, q, shape, cornerOrder(body!.view, found.edge, corners) !== null) });
   }
   const label = f.provenance.self.label;
   const followed = movedTo(content, [...pinned, ...projected.flatMap((q) => q.points)], projected.flatMap((q) => (q.radius === undefined ? [] : [{ projection: q.id, radius: q.radius }])));

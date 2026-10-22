@@ -5,9 +5,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { emptyProject, projectToJson, type DataReader } from "@fission/core";
-import { addSketch, deleteItem, designWorkspace, drawRectangle, extrudeSketch, insertPreset, isSketchItem, moveMarker, partDocument, suppressItem, type DesignDocument } from "@fission/design";
-import { buildModel, checkText, DESIGN_RULES, fuzzRound, outerModel, READERS, shrink, type BuildRules } from "../src/project-fuzz.ts";
+import { emptyProject, projectFromJson, projectToJson, type DataReader } from "@fission/core";
+import { addSketch, deleteItem, designWorkspace, drawRectangle, extrudeSketch, insertPreset, isSketchItem, madePoints, moveMarker, partDocument, suppressItem, type DesignDocument } from "@fission/design";
+import { buildModel, checkText, DESIGN_RULES, fuzzRound, outerModel, READERS, shrink, timelineEdits, type BuildRules } from "../src/project-fuzz.ts";
+import { seeded } from "../src/index.ts";
 
 const SEEDS = [0x5eedn, 1n, 2n];
 const CASES = 1500;
@@ -169,4 +170,19 @@ test("each build check can fail: on the hand-made timeline, and found by the fuz
     assert.ok(found, `${name}: the fuzzer did not find it (${failures.map((f) => f.kind).join("; ")})`);
     assert.equal(checkText(found.input, READERS, rules)?.kind, kind, name);
   }
+});
+
+test("every timeline Design's own edits leave opens again as it was saved (27e: a file Design makes is never refused)", () => {
+  // The fuzzer above only asks that the loader never crashes or lets a broken file in; it never asked that a file Design
+  // made itself opens. A line drawn from a projected point was refused on opening (27e), and nothing here saw it.
+  let shared = 0;
+  for (let k = 0; k < 600; k++) {
+    const doc = timelineEdits(seeded(BigInt(7000 + k)), partDocument("box", 40, 30, 20));
+    const text = projectToJson({ ...emptyProject("Round trip"), workspaces: { design: doc } });
+    // Saved again it is the same text (−0 and 0 are one number in a file).
+    assert.equal(projectToJson(projectFromJson(text, READERS)), text, `seed ${7000 + k}`);
+    if (doc.sketches.some((s) => (s.projected ?? []).some((p) => madePoints(s, p).some((q) => s.curves.some((c) => !s.projected!.some((x) => x.made === c.id) && JSON.stringify(c).includes(`"${q}"`)))))) shared++;
+  }
+  // Lines drawn from projected points came up, or this proves nothing about them.
+  assert.ok(shared >= 10, `${shared} timelines with a line drawn from a projected point`);
 });

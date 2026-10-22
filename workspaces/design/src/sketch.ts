@@ -14,7 +14,7 @@ import { XY_PLANE } from "@fission/core";
 import { faceFeature, isFacePlane, squared, type SketchFace, type SketchPlacement } from "./face-sketch.ts";
 import type { EdgeTarget, SketchPin } from "./face-edges.ts";
 import { curvePoints, insertAt, insertItem, isSketchItem, profileLabel, shown, type DesignDocument, type ReadyProfile, type Sketch, type SketchCurve, type SketchLineCurve, type SketchPlane, type SketchPoint } from "./document.ts";
-import { madePoints, profileCurves, type EdgeShape, type SketchProjection } from "./projection.ts";
+import { madePoints, profileCurves, projectedOpen, type EdgeShape, type SketchProjection } from "./projection.ts";
 import { readProfileReference } from "./references.ts";
 
 /** The undo step each sketch edit is recorded as. */
@@ -473,6 +473,8 @@ export function askOutline(kernel: KernelCalls, curves: ReturnType<typeof sketch
 /** The sketch's one closed outline, from the kernel; a sketch that makes none is refused with the kernel's reason. */
 export async function sketchOutline(kernel: KernelCalls, doc: DesignDocument, sketchId: string): Promise<Outline> {
   const sketch = sketchIn(doc, sketchId);
+  const none = projectedOpen(sketch);
+  if (none !== null) throw new Error(`${sketchItem(doc, sketchId).provenance.self.label} has no closed outline: ${none}`);
   const result = await askOutline(kernel, sketchCurves(sketch));
   if ("open" in result) throw new Error(`${sketchItem(doc, sketchId).provenance.self.label} has no closed outline: ${result.open}`);
   return result.closed;
