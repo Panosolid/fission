@@ -9,7 +9,7 @@ repository = "https://github.com/benpy28/fission"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-glam = { version = "0.29", features = ["serde", "libm"] }
+glam = { version = "0.34", features = ["serde", "libm"] }
 libm = "0.2"
 robust = "1"
 serde = { version = "1", features = ["derive"] }

@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-glam = "0.29"
+glam = "0.34"
 fission-kernel = { path = ".." }
 
 # Keep the fuzz crate out of any parent workspace.
