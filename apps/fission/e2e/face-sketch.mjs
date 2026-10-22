@@ -113,6 +113,9 @@ async function lineNear(page, img, p) {
   return false;
 }
 
+/** Waits until the page has drawn a whole frame since now (two animation frames: the first may already be under way). */
+const nextFrame = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
 /** Waits until the camera holds still (two reads 100 ms apart within a nanometre). */
 async function settle(page) {
   let last = null;
@@ -453,6 +456,9 @@ try {
       assert.deepEqual(await flags(), all);
       assert.equal(await page.isVisible("#kept-warning"), false);
       assert.equal(await lostLines(), "0");
+      // The page notes the lines at once but draws them on the next frame,
+      // which a busy machine can be slow to reach: read the pixels after it.
+      await nextFrame(page);
       assert.equal(await lostRed(), 0, "no red once the box is back");
       await press(page, "#redo", tap);
       await until(page, () => document.querySelectorAll("#timeline [data-item][data-warned]").length === 2, null, "deleted again");
