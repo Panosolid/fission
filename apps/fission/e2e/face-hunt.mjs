@@ -12,6 +12,8 @@
 //   - the circle extruded 10 (the extrude is the part, "Extrude by 10"),
 //     then the marker at the start: nothing builds, and the size boxes are
 //     a fresh box's 40, 30, 20, not 10 as a height.
+// And (26h) the height box typed 0, -5 and emptied: each refused in words,
+// nothing recorded or saved, and 20 back once the box is left.
 // Points on screen come from the app's own camera (?test-hooks) through
 // the pinhole sums face-sketch.mjs works out. Screenshots go to E2E_SHOTS
 // when set. Run with `npm run e2e` (after `npm run build`); Firefox and
@@ -32,7 +34,13 @@ if (shots) mkdirSync(shots, { recursive: true });
 async function fresh(width = 1280, touch = false) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
-  await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
+  // A fresh project on the page's first load only, so a reload opens what was saved.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("face-hunt-wiped")) return;
+    sessionStorage.setItem("face-hunt-wiped", "1");
+    indexedDB.deleteDatabase("fission");
+    localStorage.clear();
+  });
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
@@ -204,6 +212,36 @@ try {
       await until(page, () => !document.querySelector("#no-part").hidden, null, "no body");
       assert.deepEqual(await page.$$eval("#width, #depth, #height", (els) => els.map((e) => e.value)), ["40", "30", "20"]);
       await shot(page, `face-hunt-no-body-${width}`);
+      await page.context().close();
+    });
+    await check(`${width} px${tap ? " with taps" : ""}: a size box emptied, 0 or -5 is refused, records and saves nothing, and its last size comes back when left (26h)`, async () => {
+      const page = await fresh(width, tap);
+      const undoTitle = () => page.getAttribute("#undo", "title");
+      const before = await undoTitle();
+      const height = page.locator("#height");
+      await height.scrollIntoViewIfNeeded();
+      // Typed as a person types: into the box, its text selected, key by key ("-" alone reads as empty in a number box).
+      await (tap ? height.tap() : height.click());
+      for (const [typed, words] of [["0", "The height must be more than 0 mm."], ["-5", "The height must be more than 0 mm."]]) {
+        await height.selectText();
+        await page.keyboard.type(typed);
+        await until(page, (w) => document.querySelector("#error")?.textContent === w, words, `"${typed}" says why`);
+      }
+      await height.selectText();
+      await page.keyboard.press("Backspace");
+      await until(page, () => document.querySelector("#error")?.textContent === "Type the height in mm.", null, "an empty box says what to type");
+      await shot(page, `face-hunt-size-refused-${width}`);
+      assert.equal(await page.textContent("#volume"), "24,000 mm³", "the box is still 40 × 30 × 20");
+      assert.equal(await undoTitle(), before, "no undo step");
+      // Leaving the box (Tab, or a tap on the panel's heading at 375 px): 20 comes back, and the words go.
+      if (tap) await page.locator("#volume").tap();
+      else await page.keyboard.press("Tab");
+      await until(page, () => document.querySelector("#height").value === "20" && document.querySelector("#error").textContent === "", null, "20 back, no words");
+      // Nothing was saved either: the page reloaded opens the 20 high box.
+      await page.waitForTimeout(1500);
+      await page.reload();
+      await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      assert.equal(await page.inputValue("#height"), "20");
       await page.context().close();
     });
   }

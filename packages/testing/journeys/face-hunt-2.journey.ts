@@ -11,13 +11,17 @@
 //      0 are not accepted and the value returns);
 //   5. a pin on the middle of an edge between two sides follows that edge
 //      when the outline turns over (a corner dragged across: every such
-//      edge's name then reads the other way round), as a corner's pin does.
+//      edge's name then reads the other way round), as a corner's pin does;
+//   6. nasty faces worked by hand: a face at exactly 45° between XZ and YZ
+//      (the frame rule's tie), and a side turned exactly a right angle and
+//      just past it, placed by the rebuild and opened in the app.
 // Run with `npm run journeys` after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addSketch, BodyCache, drawArc, drawLine, extrudeSketch, joinBodies, movePoint, partDocument, pinNow, rebuildTimeline, shownBodies, sketchCurves, sketchLines, type DesignDocument } from "@fission/design";
-import type { Plane } from "@fission/core";
+import { addFaceSketch, addSketch, BodyCache, drawArc, drawCircle, drawLine, drawnOnFace, facePlane, settleKept, extrudeSketch, joinBodies, movePoint, partDocument, pinNow, rebuildTimeline, shownBodies, sketchCurves, sketchLines, type DesignDocument } from "@fission/design";
+import { emptyProject, projectFromJson, projectToJson, type Plane } from "@fission/core";
 import { app, kernel } from "./design-app.ts";
+import { designWorkspace } from "@fission/design";
 
 type App = Awaited<ReturnType<typeof app>>;
 
@@ -108,6 +112,30 @@ test("1b. an Enter that places nothing gives back the size it took, and never ov
   box.dispatchEvent(new a.window.Event("input", { bubbles: true }) as unknown as Event);
   await a.settle();
   assert.equal(box.value, "7", "what was typed since is kept");
+  assert.ok(await a.close(), "every body freed");
+});
+
+test("1c. an Enter whose turn comes after another tool was chosen is dropped, as a click is", async () => {
+  const a = await app(partDocument("box", 40, 30, 20));
+  a.$("#create-sketch")!.click();
+  await a.settle();
+  await a.pick({ plane: "XY" });
+  await a.click(0, 0);
+  // The kernel slow: a click at (10, 0) waits for its rounding; 5 at 90° typed and entered meanwhile (its turn after
+  // the click's); then R, the rectangle tool, before the kernel answers.
+  a.hold();
+  a.pointer("click", [10, 0]);
+  await turns();
+  await type(a, "5");
+  await press(a, "Tab");
+  await type(a, "90");
+  await press(a, "Enter");
+  a.press("sketch-rectangle");
+  await a.release();
+  // The click was for the line tool too, so it is dropped (the tool changed while the kernel snapped it); so is the
+  // Enter: nothing is drawn, and the rectangle tool has no corner yet.
+  assert.deepEqual(lines(a), []);
+  assert.deepEqual(a.drawings().find((d) => d.editing)?.editing?.points ?? [], [], "no corner placed by the Enter");
   assert.ok(await a.close(), "every body freed");
 });
 
@@ -206,6 +234,8 @@ test("4. a size box emptied or typed 0 or -5 records nothing, says why, and gets
   assert.ok(await a.close(), "every body freed");
 });
 
+const reopen = (doc: DesignDocument) => projectFromJson(projectToJson({ ...emptyProject("Hunt"), workspaces: { design: doc } }), [designWorkspace]).workspaces.design as DesignDocument;
+
 /** The extrude's body as the app shows it (the last body), on the real kernel. */
 async function extruded(doc: DesignDocument) {
   const cache = new BodyCache(kernel);
@@ -261,4 +291,108 @@ test("5b. on a half disc, whose two upright edges are each named both ways round
   const after = await extruded(swapped);
   assert.equal(edgeAt(after, [20, 0, 5]), name, "the name went with P");
   assert.deepEqual(pinNow({ point: "p", kind: "midpoint", name }, after.view, after.names, FRONT), { at: [20, 5] });
+});
+
+/** A triangle (corners in order) drawn on a new XY sketch of `doc` and extruded `d`; its sketch and point ids. */
+function triangle(doc: DesignDocument, corners: [number, number][], d: number) {
+  const made = addSketch(doc);
+  let next = drawLine(made.doc, made.id, corners[0], corners[1]).doc;
+  let pts = next.sketches.at(-1)!.points;
+  next = drawLine(next, made.id, pts[1].id, corners[2]).doc;
+  pts = next.sketches.at(-1)!.points;
+  next = drawLine(next, made.id, pts[2].id, pts[0].id).doc;
+  return { doc: extrudeSketch(next, made.id, d).doc, sketch: made.id, points: pts.map((p) => p.id) };
+}
+/** The last body's face whose outward normal is `n` (to 1e-12), its name and where a sketch drawn there lies. */
+async function faceAlong(doc: DesignDocument, n: number[]) {
+  const body = await extruded(doc);
+  const f = body.view.face_normals.findIndex((m) => m !== null && m.every((c, k) => Math.abs(c - n[k]) < 1e-12));
+  assert.ok(f >= 0, `a face along ${n}`);
+  return { body, f, drawn: drawnOnFace(body.view, f)!, plane: facePlane(body.names.feature, body.names.faces[f]!) };
+}
+const near = (got: readonly number[], want: readonly number[], what: string) => assert.ok(got.every((g, k) => Math.abs(g - want[k]) < 1e-12), `${what}: ${got} is not ${want}`);
+/** Where sketch point (s, t) lies in the world through `p`: origin + s · x + t · (normal × x). */
+function world(p: Plane, s: number, t: number): number[] {
+  const [n, x] = [p.normal, p.xAxis];
+  const y = [n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2], n[0] * x[1] - n[1] * x[0]];
+  return [0, 1, 2].map((k) => p.origin[k] + s * x[k] + t * y[k]);
+}
+/** Sketch `id`'s placement as the rebuild places it now (a face sketch's frame, turned with its face). */
+async function placed(doc: DesignDocument, id: string) {
+  const cache = new BodyCache(kernel);
+  const r = (await rebuildTimeline(doc, cache, kernel)).results[id];
+  await cache.clear();
+  assert.equal(r?.status, "built", `${id} placed: ${JSON.stringify(r)}`);
+  return (r as { placement: { plane: Plane; side: 1 | -1 } }).placement;
+}
+
+test("6a. a face at exactly 45° between the XZ and YZ planes takes XZ's frame (the tie goes to the first), worked by hand", async () => {
+  // The right triangle (100, 0), (140, 0), (100, 40): its long side runs from (140, 0) to (100, 40), outward normal
+  // (1, 1, 0)/√2, as near XZ's normal (0, −1, 0) as YZ's (1, 0, 0): |n · (0, −1, 0)| = |n · (1, 0, 0)| = 1/√2. The tie
+  // goes to XZ. Its side is −1 (the face looks against (0, −1, 0)), so the frame's normal is −outward = (−1, −1, 0)/√2;
+  // x is XZ's (1, 0, 0) turned the shortest way from (0, −1, 0) onto it: with c = 1/√2 and w = (0, −1, 0) × n =
+  // (0, 0, −1/√2), x = c (1, 0, 0) + w × (1, 0, 0) = (1/√2, −1/√2, 0). Its origin is the plane's nearest point to the
+  // world's: n (n · (140, 0, 0)) = (−a, −a, 0)(−140 a) with a = 1/√2, so (70, 70, 0).
+  const a = Math.SQRT1_2;
+  const t = triangle(partDocument("box", 40, 30, 20), [[100, 0], [140, 0], [100, 40]], 20);
+  const { body, drawn, plane } = await faceAlong(t.doc, [a, a, 0]);
+  assert.equal(drawn.side, -1);
+  near(drawn.plane.normal, [-a, -a, 0], "normal");
+  near(drawn.plane.xAxis, [a, -a, 0], "x");
+  near(drawn.plane.origin, [70, 70, 0], "origin");
+  // Sketch y is normal × x = (0, 0, 1): sketch (s, t) is (70 + s/√2, 70 − s/√2, t). The face's middle, (120, 20, 10),
+  // is s = 50√2, t = 10. A circle there, extruded 5 into the triangle (side −1: away from the frame's normal).
+  const made = addFaceSketch(t.doc, { plane, feature: body.feature }, drawn);
+  let doc = drawCircle(made.doc, made.id, [50 * Math.SQRT2, 10], 2).doc;
+  near(world(drawn.plane, 50 * Math.SQRT2, 10), [120, 20, 10], "the middle by hand");
+  doc = extrudeSketch(doc, made.id, 5).doc;
+  // Placed by the rebuild where it was drawn, and the same after a save and open (the frame read back bit for bit).
+  near((await placed(doc, made.id)).plane.xAxis, [a, -a, 0], "placed x");
+  assert.deepEqual(reopen(doc), doc, "the file reads back the same");
+  // Opened in the app: the 45° sketch drawn where it was placed, not lost.
+  const app1 = await app(doc);
+  const drawnNow = app1.drawings().find((d) => d.plane.normal[0] < 0 && d.plane.normal[1] < 0)!;
+  assert.ok(drawnNow && !drawnNow.lost, "the 45° sketch drawn, not lost");
+  near(drawnNow.plane.origin, [70, 70, 0], "drawn at its origin");
+  assert.ok(await app1.close(), "every body freed");
+});
+
+test("6b. a side turned exactly a right angle, and just past it, carries its sketch round, worked by hand", async () => {
+  // The right triangle A (100, 0), B (120, 0), C (100, 20): side AB faces (0, −1, 0), so a sketch there takes XZ's frame
+  // as it is: origin (0, 0, 0), x (1, 0, 0), y = z; sketch (110, 10) is the world's (110, 0, 10). A circle there.
+  const t = triangle(partDocument("box", 40, 30, 20), [[100, 0], [120, 0], [100, 20]], 20);
+  const { body, drawn, plane } = await faceAlong(t.doc, [0, -1, 0]);
+  near(drawn.plane.origin, [0, 0, 0], "origin");
+  near(drawn.plane.xAxis, [1, 0, 0], "x");
+  const made = addFaceSketch(t.doc, { plane, feature: body.feature }, drawn);
+  const doc = drawCircle(made.doc, made.id, [110, 10], 2).doc;
+  // B to (100, −20) and C to (120, 0): the triangle turned a right angle clockwise about A, AB now faces (−1, 0, 0).
+  // frameNow: n · outward = 0, so the sketch keeps the outward side, n = (−1, 0, 0); x turned the shortest way from
+  // (0, −1, 0) to (−1, 0, 0), with c = 0 and w = (0, 0, −1): x = w × (1, 0, 0) = (0, −1, 0); the origin n (n · A) =
+  // (100, 0, 0). Sketch (110, 10) is then (100, 0, 0) + 110 (0, −1, 0) + 10 (0, 0, 1) = (100, −110, 10): the frame
+  // turns about the plane's point nearest the world's origin, as Fusion's sketch on a face does (its origin the
+  // world's origin seen square onto the face), so a point not pinned to the face swings round with it.
+  let turned = movePoint(movePoint(doc, t.sketch, t.points[1], 100, -20), t.sketch, t.points[2], 120, 0);
+  turned = await settleKept(kernel, doc, turned);
+  const now = await placed(turned, made.id);
+  near(now.plane.normal, [-1, 0, 0], "normal");
+  near(now.plane.xAxis, [0, -1, 0], "x");
+  near(now.plane.origin, [100, 0, 0], "origin");
+  near(world(now.plane, 110, 10), [100, -110, 10], "the circle's centre");
+  // Just past it, 91° clockwise about A: B (100 − 20 sin 1°, −20 cos 1°) and C (100 + 20 cos 1°, −20 sin 1°). AB runs
+  // along (−sin 1°, −cos 1°) with the inside on its left, (cos 1°, −sin 1°), so it faces outward (−cos 1°, sin 1°, 0):
+  // a little against its drawn normal (n · outward = −sin 1° < 0), so the frame takes −outward = (cos 1°, −sin 1°, 0)
+  // (it stays on the side it was drawn, facing into the body) and turns 89° rather than 91°: still placed, square and
+  // unit (the kernel would refuse a frame that isn't).
+  const [s1, c1] = [Math.sin(Math.PI / 180), Math.cos(Math.PI / 180)];
+  const past = movePoint(movePoint(doc, t.sketch, t.points[1], 100 - 20 * s1, -20 * c1), t.sketch, t.points[2], 100 + 20 * c1, -20 * s1);
+  const p91 = (await placed(await settleKept(kernel, doc, past), made.id)).plane;
+  near(p91.normal, [c1, -s1, 0], "the normal against the outward one");
+  const dot = (u: readonly number[], v: readonly number[]) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  assert.ok(Math.abs(dot(p91.xAxis, p91.xAxis) - 1) < 1e-15 && Math.abs(dot(p91.xAxis, p91.normal)) < 1e-15, "square and unit");
+  // The turned design opened in the app: the sketch drawn on the turned face, not lost.
+  const a = await app(turned);
+  const d = a.drawings().find((x) => Math.abs(x.plane.normal[0] + 1) < 1e-12);
+  assert.ok(d && !d.lost, "drawn on the turned face, not lost");
+  assert.ok(await a.close(), "every body freed");
 });

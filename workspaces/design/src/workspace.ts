@@ -1289,22 +1289,23 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const took = locks;
     const texts = typed.texts();
     const from = lastMove;
+    const changes = toolChanges;
     unlock(true);
     drawSketches();
     const giveBack = () => void (mode.kind === "edit" && typed.restore(texts));
     clicks = clicks.then(async () => {
-      if (mode.kind !== "edit") return;
+      // A tool chosen (or Escape) since: the sizes were for the old tool, so the Enter is dropped, as a click is.
+      if (mode.kind !== "edit" || toolChanges !== changes) return;
       // Where the pointer was as Enter was pressed: its last move, rounded and snapped on the sketch as it is now (the
       // points placed before this one in), else where the last click or hover left it.
       let pointer = mode.pointer;
       if (from) {
         const rounded = await from.rounded.catch(() => null);
-        if (mode.kind !== "edit") return;
+        if (mode.kind !== "edit" || toolChanges !== changes) return;
         if (rounded) pointer = snapOnSketch(designDoc(), mode.tool, from.at, rounded, from.pixel, edgeTargets(mode.tool.sketch)).at;
       }
       const aim = aimOf(designDoc(), mode.tool, pointer, took);
       if (!aim) return (sketchBox.showError(NO_AIM), giveBack());
-      const changes = toolChanges;
       const before = designDoc();
       const done = clickAt(before, withLocks(mode.tool, took, pointer), aim);
       // As a click: an extrude whose sketch this breaks keeps the sketch as it was (rebuild.ts), in the same undo step, and a point on the face's edges is pinned (26f).
