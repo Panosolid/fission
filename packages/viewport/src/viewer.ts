@@ -4,7 +4,7 @@ import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, 
 import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, planeOrFace, segmentsNear, unhidden } from "./picking.ts";
 import { fitDistance, orbitSafeOffset, planeViewBasis, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
-import { lookAtFraming, selectionFraming } from "./framing.ts";
+import { lookAtFraming, partFraming, selectionFraming } from "./framing.ts";
 import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
 import { pixelSize, rayOnPlane, sketchGrid, toWorld } from "./sketch-view.ts";
 import { clampZoom, cubeDragAngles, dragAction, orbitBy, dragZoomFactor, panBy, wheelFactor, zoomAt, type CameraPose, type NavMode } from "./navigation.ts";
@@ -671,6 +671,8 @@ export class Viewer implements SharedViewport {
   private minorMaterial: THREE.LineBasicMaterial | null = null;
   /** The edited sketch's ends in model space, for Look At. */
   private editedWorld: number[][] = [];
+  /** Every finished sketch's line ends in world space (lost ones too), framed with the body (partFraming). */
+  private finishedWorld: number[][] = [];
   /** The sketches drawn (showSketches) and the plane of the one being edited. */
   private sketches = new THREE.Group();
   private editedPlane: Plane | null = null;
@@ -822,6 +824,7 @@ export class Viewer implements SharedViewport {
     this.editedSide = 1;
     this.gridFor = null;
     this.editedWorld = [];
+    this.finishedWorld = [];
     let lines = 0;
     let lost = 0;
     for (const d of drawings) {
@@ -837,6 +840,7 @@ export class Viewer implements SharedViewport {
       };
       lines += d.lines.length;
       if (!d.editing) {
+        this.finishedWorld.push(...d.lines.flatMap(([a, b]) => [at(a), at(b)]));
         // 26e: a sketch whose plane is lost red, where it stays.
         if (d.lost) segments(d.lines, SKETCH_COLOURS.lost, LOST_SKETCH_ORDER);
         else segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
@@ -1056,12 +1060,10 @@ export class Viewer implements SharedViewport {
     this.edges.setAttribute("color", new THREE.BufferAttribute(lineColours, 3));
   }
 
-  /** Sphere around the current body's bounding box (radius 0 if none). */
+  /** Sphere around the current body's bounding box and the finished sketches drawn, lost ones too (partFraming; radius 0 if none). */
   bodyFraming(): Framing {
     const box = new THREE.Box3().setFromObject(this.body);
-    if (box.isEmpty()) return { centre: [0, 0, 0], radius: 0 };
-    const c = box.getCenter(new THREE.Vector3());
-    return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
+    return partFraming([...(box.isEmpty() ? [] : [box.min.toArray(), box.max.toArray()]), ...this.finishedWorld]);
   }
 
   /** Frames the current body from the home view in the main view; returns what it framed (null if none). */

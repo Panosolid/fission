@@ -5,7 +5,8 @@
 //   - Sphere: the box has no flat face now, so the circle's plane is lost
 //     and it is drawn red where it last was, z = 40, not where it was
 //     first drawn, z = 20 (pixel probes on the rim at both heights, from
-//     the front view); one Undo brings the box back;
+//     the front view), and framed with the sphere (26h); one Undo brings
+//     the box back;
 //   - the marker stepped back onto the box: the sketch is after it, so it
 //     is not drawn at all (no lines), and forward again it is;
 //   - the circle extruded 10 (the extrude is the part, "Extrude by 10"),
@@ -152,6 +153,14 @@ try {
       await top(page);
       await shapeButton(page, "Sphere", tap);
       await until(page, () => Number(document.querySelector("#viewport").dataset.sketchLost) > 0, null, "the circle drawn lost");
+      // A new part is framed with the lost circle in (hunt 26h; before, the body alone, and at 375 px the circle sat under the view
+      // cube): the box round the sphere (−20..20 each way) and the circle (5 round c at z = 40) is, for c = (20, 15), 45 × 40 × 60,
+      // so the radius is √(45² + 40² + 60²) / 2 = 85 / 2 = 42.5, not the sphere's own √(3 · 40²) / 2 ≈ 34.6 (to within the
+      // sphere's mesh, whose extremes may fall between its vertices).
+      const lo = [Math.min(-20, c[0] - 5), Math.min(-20, c[1] - 5), -20];
+      const hi = [Math.max(20, c[0] + 5), Math.max(20, c[1] + 5), 40];
+      const want = Math.hypot(...hi.map((h, k) => h - lo[k])) / 2;
+      await until(page, (w) => Math.abs(Number(document.querySelector("#viewport").dataset.framedRadius) - w) < 0.5, want, `the lost circle framed with the sphere (radius ${want})`);
       // The front view: the sphere (⌀40 round the origin) in the middle, the circle at z = 40 an ellipse above it (the camera is
       // level with the sphere's centre), at z = 20 one level with the sphere's top.
       await press(page, '[data-view="front"]', tap);

@@ -74,3 +74,26 @@ export function lookAtFraming(points: readonly (readonly number[])[], fallback: 
   const radius = Math.sqrt(hi.reduce((s, h, k) => s + (h - lo[k]) ** 2, 0)) / 2;
   return { centre, radius: radius > 0 ? radius : LOOK_AT_EMPTY_RADIUS };
 }
+
+/**
+ * What the home view and the standard views frame (Fit, and the camera a
+ * new part gets): the box round the body's box corners and every finished
+ * sketch's line ends, lost ones too, its half diagonal the radius (hunt
+ * 26h: a sketch whose face a shape change took away was left out, and at
+ * 375 px sat under the view cube). Points that aren't numbers are skipped;
+ * radius 0 with nothing to frame.
+ */
+export function partFraming(points: readonly (readonly number[])[]): Framing {
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (const p of points) {
+    if (p.length !== 3 || !p.every(Number.isFinite)) continue;
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k], p[k]);
+      hi[k] = Math.max(hi[k], p[k]);
+    }
+  }
+  if (!(lo[0] <= hi[0])) return { centre: [0, 0, 0], radius: 0 };
+  const centre = lo.map((l, k) => (l + hi[k]) / 2) as [number, number, number];
+  return { centre, radius: Math.sqrt(hi.reduce((s, h, k) => s + (h - lo[k]) ** 2, 0)) / 2 };
+}
