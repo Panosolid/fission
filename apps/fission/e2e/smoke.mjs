@@ -1091,6 +1091,19 @@ try {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    // Undo and Redo are tab stops only while there is a step to undo. A goto
+    // to the address the page already has keeps the page, and the steps the
+    // checks above made, in Chromium; in WebKit on CI both buttons were
+    // disabled when Tab reached them, as after a fresh start, so Tab skipped
+    // the pair (browsers (webkit) on #230 and #238). So make a step first: the
+    // width 41, once the app is quiet (the stored project open and written
+    // back, "Saved"; an edit typed while it is still opening can be lost to
+    // that opening's own rebuild). Not 41 and straight back to 40: edits to
+    // one box close together merge into one step, and one that changes
+    // nothing drops out of the history, leaving nothing to undo again.
+    await page.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
+    await setSize("width", 41);
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,600 mm³" && !document.querySelector("#undo").disabled); // 41·30·20
     // Tab from the top and note each region and how far down the page it is drawn.
     const tabRegions = async () => {
       // Start on the page's first focusable element (in the top bar), whatever was clicked last.
@@ -1119,6 +1132,9 @@ try {
     assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "browser", "undo-redo", "view-controls", "timeline", "properties"]);
     assert.ok(downward(regions), JSON.stringify(regions));
     await page.click("#browser-toggle");
+    // The box as it was, stored, for the checks that reload below.
+    await setSize("width", 40);
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³" && document.querySelector("#save-status")?.dataset.state === "saved");
     await page.setViewportSize({ width: 1000, height: 640 });
   });
 
