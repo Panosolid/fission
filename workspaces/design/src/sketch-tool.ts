@@ -573,7 +573,6 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
   });
 }
 
-
 /** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", "2 lines, 1 arc and 1 circle", "1 circle and 2 projected edges" (27d), or "Nothing drawn yet" when empty. */
 export function curveCount(sketch: Sketch): string {
   const made = new Set((sketch.projected ?? []).map((p) => p.made));

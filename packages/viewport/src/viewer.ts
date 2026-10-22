@@ -318,7 +318,6 @@ export class ViewportView {
     return rayOnPlane(origin.toArray(), direction.toArray(), plane);
   }
 
-  /** Where a point on screen meets a sketch plane and the size of a pixel there (sketch-view's pixelSize). */
   /** While the edited sketch asks for picks (27d): the body edge under a point on screen, else its face; nothing otherwise. */
   private sketchPick(clientX: number, clientY: number): { edge?: number | null; face?: number | null } {
     if (!this.host.sketchPicks()) return {};
@@ -326,6 +325,7 @@ export class ViewportView {
     return { edge, face: edge === null ? this.faceAt(clientX, clientY) : null };
   }
 
+  /** Where a point on screen meets a sketch plane and the size of a pixel there (sketch-view's pixelSize). */
   private pointerOn(clientX: number, clientY: number, plane: Plane): { at: SketchXY | null; pixel?: number } {
     const at = this.onPlane(clientX, clientY, plane);
     const pixel = at ? pixelSize(at, this.onPlane(clientX + 1, clientY, plane), this.onPlane(clientX, clientY + 1, plane)) : undefined;
