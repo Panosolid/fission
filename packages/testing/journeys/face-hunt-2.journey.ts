@@ -8,12 +8,16 @@
 //      preview goes on from;
 //   4. a size box emptied, or typed 0 or -5, takes nothing into the design
 //      and gets its last size back once left (Ben's Fusion answer 8: -5 and
-//      0 are not accepted and the value returns).
+//      0 are not accepted and the value returns);
+//   5. a pin on the middle of an edge between two sides follows that edge
+//      when the outline turns over (a corner dragged across: every such
+//      edge's name then reads the other way round), as a corner's pin does.
 // Run with `npm run journeys` after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { partDocument, sketchCurves, sketchLines } from "@fission/design";
-import { app } from "./design-app.ts";
+import { addSketch, BodyCache, drawArc, drawLine, extrudeSketch, joinBodies, movePoint, partDocument, pinNow, rebuildTimeline, shownBodies, sketchCurves, sketchLines, type DesignDocument } from "@fission/design";
+import type { Plane } from "@fission/core";
+import { app, kernel } from "./design-app.ts";
 
 type App = Awaited<ReturnType<typeof app>>;
 
@@ -200,4 +204,61 @@ test("4. a size box emptied or typed 0 or -5 records nothing, says why, and gets
   assert.equal(await a.undo(), "Change height");
   assert.deepEqual(sizes(), { width: 40, depth: 30, height: 20 }, "typing in one box is one step: 25 and 0.5 merged");
   assert.ok(await a.close(), "every body freed");
+});
+
+/** The extrude's body as the app shows it (the last body), on the real kernel. */
+async function extruded(doc: DesignDocument) {
+  const cache = new BodyCache(kernel);
+  const body = joinBodies(await shownBodies(doc, await rebuildTimeline(doc, cache, kernel), cache)).bodies.at(-1)!;
+  await cache.clear();
+  return body;
+}
+/** The name of the edge whose middle is at `p`. */
+const edgeAt = (body: Awaited<ReturnType<typeof extruded>>, p: number[]) => body.names.edges[body.view.edge_middles.findIndex((m) => m.every((c, k) => Math.abs(c - p[k]) < 1e-9))];
+/** The plane y = 0 seen from the front: sketch x is world x, sketch y is world z (normal −y, so y = normal × x = +z). */
+const FRONT: Plane = { origin: [0, 0, 0], xAxis: [1, 0, 0], normal: [0, -1, 0] };
+
+test("5. a pin on the middle of an edge between two sides follows it when the outline turns over, as a corner's pin does", async () => {
+  // A triangle A (0, 0), B (20, 0), C (10, 10) on XY, extruded 10. The upright edge at A, between the sides from CA and
+  // AB, has its middle at (0, 0, 5): in the front plane, sketch (0, 5).
+  let { doc, id } = addSketch(partDocument("box", 40, 30, 20));
+  doc = drawLine(doc, id, [0, 0], [20, 0]).doc;
+  let pts = doc.sketches.at(-1)!.points;
+  doc = drawLine(doc, id, pts[1].id, [10, 10]).doc;
+  pts = doc.sketches.at(-1)!.points;
+  doc = drawLine(doc, id, pts[2].id, pts[0].id).doc;
+  doc = extrudeSketch(doc, id, 10).doc;
+  const before = await extruded(doc);
+  const name = edgeAt(before, [0, 0, 5]);
+  assert.match(name ?? "", /^side:.+>side:.+$/, "an edge between two sides, named in order");
+  const pin = { point: "p", kind: "midpoint" as const, name: name! };
+  assert.deepEqual(pinNow(pin, before.view, before.names, FRONT), { at: [0, 5] }, "the control: found where it is");
+  // C dragged to (10, −10), across AB: the outline turns the other way round, A and its edge stay where they were.
+  const turned = movePoint(doc, id, pts[2].id, 10, -10);
+  const after = await extruded(turned);
+  const [a, b] = name!.split(">");
+  assert.equal(edgeAt(after, [0, 0, 5]), `${b}>${a}`, "the same edge, its name now the other way round");
+  assert.deepEqual(pinNow(pin, after.view, after.names, FRONT), { at: [0, 5] }, "the pin follows its edge (before: point-lost)");
+  // A corner's pin there already did: its name leaves the order out.
+});
+
+test("5b. on a half disc, whose two upright edges are each named both ways round, a middle's pin keeps to its own edge", async () => {
+  // The line from P (0, 0) to Q (20, 0), the arc from Q round (10, 0) back to P: two upright edges, at P and at Q, named
+  // "arc>line" and "line>arc". The pin on the one at P, (0, 0, 5), is found there, never on the one at Q.
+  let { doc, id } = addSketch(partDocument("box", 40, 30, 20));
+  doc = drawLine(doc, id, [0, 0], [20, 0]).doc;
+  const [p, q] = doc.sketches.at(-1)!.points;
+  doc = drawArc(doc, id, q.id, p.id, [10, 0]).doc;
+  doc = extrudeSketch(doc, id, 10).doc;
+  const body = await extruded(doc);
+  const name = edgeAt(body, [0, 0, 5])!;
+  const [a, b] = name.split(">");
+  assert.equal(edgeAt(body, [20, 0, 5]), `${b}>${a}`, "the other upright edge is its name the other way round");
+  assert.deepEqual(pinNow({ point: "p", kind: "midpoint", name }, body.view, body.names, FRONT), { at: [0, 5] });
+  // P and Q swapped: the line now runs from (20, 0) to (0, 0), the arc below it. P's edge went with P, to (20, 0, 5),
+  // and its name with it: the pin follows P.
+  const swapped = movePoint(movePoint(doc, id, p.id, 20, 0), id, q.id, 0, 0);
+  const after = await extruded(swapped);
+  assert.equal(edgeAt(after, [20, 0, 5]), name, "the name went with P");
+  assert.deepEqual(pinNow({ point: "p", kind: "midpoint", name }, after.view, after.names, FRONT), { at: [20, 5] });
 });

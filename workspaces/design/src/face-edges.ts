@@ -124,6 +124,27 @@ export function faceEdgeTargets(view: BodyView, names: BodyNames, face: number, 
   return out;
 }
 
+/**
+ * The edge a middle's or centre's pin names: by its name, or for a middle on
+ * an edge between two sides ("A>B") whose name finds nothing, the edge named
+ * the other way round ("B>A"), the same edge once the outline turned over
+ * (a corner dragged across it turns every such name round; hunt 26h: the
+ * corners' pins followed, the middles' were lost). Never in place of an
+ * edge the name itself finds: a half disc's two upright edges are "A>B"
+ * and "B>A", and each name goes with its own end of the line. -1 for none.
+ */
+function edgeIndex(pin: SketchPin, names: BodyNames): number {
+  const e = names.edges.indexOf(pin.name);
+  const other = reversed(pin);
+  return e >= 0 || other === null ? e : names.edges.indexOf(other);
+}
+/** A middle's pin on an edge between two sides, "A>B", as "B>A"; null for any other pin. */
+function reversed(pin: SketchPin): string | null {
+  if (pin.kind !== "midpoint" || !pin.name.includes(">")) return null;
+  const [a, b] = pin.name.split(">");
+  return `${b}>${a}`;
+}
+
 /** Where a pin is now: found (in the sketch, through `plane`), or why not: its vertex or edge is gone, or its name is now more than one's. */
 export type PinNow = { at: SketchXY } | { cause: "point-lost" | "point-ambiguous" };
 
@@ -144,8 +165,8 @@ export function pinNow(pin: SketchPin, view: BodyView, names: BodyNames, plane: 
     const ambiguous = (shared.get(pin.name) ?? 0) > 1 || pin.name.split("&").some((part) => edgeShared(part) > 1);
     return { cause: ambiguous ? "point-ambiguous" : "point-lost" };
   }
-  const e = names.edges.indexOf(pin.name);
-  if (e < 0) return { cause: edgeShared(pin.name) > 1 ? "point-ambiguous" : "point-lost" };
+  const e = edgeIndex(pin, names);
+  if (e < 0) return { cause: edgeShared(pin.name) > 1 || (reversed(pin) !== null && edgeShared(reversed(pin)!) > 1) ? "point-ambiguous" : "point-lost" };
   if (pin.kind === "midpoint") return closed(view, e) ? { cause: "point-lost" } : { at: inSketch(view.edge_middles[e], plane) };
   const centre = view.edge_centres[e];
   return centre ? { at: inSketch(centre, plane) } : { cause: "point-lost" };
