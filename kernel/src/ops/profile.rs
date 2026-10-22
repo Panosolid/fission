@@ -248,11 +248,17 @@ fn crossing(s: &Seg, t: &Seg, shared: &[DVec2]) -> bool {
                     s_other > LINEAR && s_other <= len && other.spans_point(x)
                 }
                 [] => {
+                    // |w + s·u|² = r², w = a − c: s = −u·w ± √(r² − d²),
+                    // d = u × w the centre's distance from the line, taken
+                    // directly. (|w|² − (u·w)² for d² cancels two terms as
+                    // big as the line is long, squared: a 1 µm circle 1.1
+                    // µm beside a 1 km line read as crossing it, hunt 3c.)
                     let len = a.distance(b);
                     let u = (b - a) / len;
                     let w = a - c;
                     let half_b = u.dot(w);
-                    let disc = half_b * half_b - (w.length_squared() - r * r);
+                    let d = u.perp_dot(w).abs();
+                    let disc = (r - d) * (r + d);
                     disc >= 0.0
                         && [-half_b - disc.sqrt(), -half_b + disc.sqrt()]
                             .into_iter()
@@ -1353,6 +1359,46 @@ mod tests {
         assert_crossing(&narrow, &seg(-0.5, 1.5), &[], true);
         // …while one meeting the circle at 60° misses it.
         assert_crossing(&narrow, &Seg::Line { a: p(0.5, 0.0), b: p(0.5, 2.0) }, &[], false);
+    }
+
+    #[test]
+    fn a_small_circle_beside_a_long_line_is_not_taken_for_a_crossing() {
+        // Testing hunt 3c found this: a 1 km square's side, (0, 1e6) →
+        // (0, 0), and a hole of radius r = 1 µm centred at (2.1 µm, 5) were
+        // refused as crossing ("0 mm apart"). By hand the circle is
+        // 2.1e-3 − 1e-3 = 1.1e-3 mm from the line (its centre is 2.1 µm
+        // from x = 0, the nearest point (0, 5) inside the side), so they
+        // don't meet. The old test took |w|² − (u·w)² for the squared
+        // distance from the line, w = a − c ≈ 1e6 long: both terms ≈ 1e12,
+        // each rounded by ~1e-4, swamping the true 4.41e-6 − 1e-6.
+        let r = 1e-3;
+        let circle = Seg::Circle { center: p(2.1e-3, 5.0), radius: r, ccw: true };
+        for (a, b) in [(p(0.0, 1e6), p(0.0, 0.0)), (p(0.0, 0.0), p(0.0, 1e6)), (p(0.0, 3e5), p(0.0, -3e5))] {
+            let side = Seg::Line { a, b };
+            assert!(!crossing(&side, &circle, &[]), "{a} → {b}");
+            assert!(!crossing(&circle, &side, &[]), "{a} → {b}, the other way round");
+            let c = clearance(&side, &circle, &[]);
+            assert!((c - 1.1e-3).abs() <= LINEAR, "{a} → {b}: clearance {c}");
+        }
+        // At 0.9 and 1.1 × MIN_FEATURE from the side (centre r + g from it):
+        // too close and refused, naming the side (piece 3) and the hole,
+        // then accepted.
+        for (k, ok) in [(0.9, false), (1.1, true)] {
+            let g = k * MIN_FEATURE;
+            let square = vec![p(0.0, 0.0), p(1e6, 0.0), p(1e6, 1e6), p(0.0, 1e6)];
+            let hole = Boundary::Circle { center: p(r + g, 5.0), radius: r };
+            let got = check_profile(&Profile { outer: Boundary::polygon(square), holes: vec![hole] });
+            match got {
+                Ok(_) => assert!(ok, "{k}: accepted"),
+                Err(KernelError::InvalidInput { inputs, message }) => {
+                    assert!(!ok, "{k}: refused: {message}");
+                    assert_eq!(inputs, vec![Input::Piece { boundary: 0, piece: 3 }, Input::Piece { boundary: 1, piece: 0 }], "{message}");
+                    // The gap measured, not 0 (a crossing).
+                    assert!(message.contains("apart") && !message.contains(" 0e0 mm"), "{message}");
+                }
+                Err(e) => panic!("{k}: {e:?}"),
+            }
+        }
     }
 
     #[test]

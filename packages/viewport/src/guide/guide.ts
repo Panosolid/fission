@@ -78,6 +78,7 @@ export function openGuide(opener?: HTMLElement | null): GuideDialog {
     </div>
     <header class="guide-bar">
       <h1 id="guide-title" class="guide-title">How Panosolid works</h1>
+      <a class="guide-privacy" href="privacy.html" target="_blank" rel="noopener" title="What Panosolid keeps, what leaves your device, and the terms of use">Privacy</a>
       <a class="guide-licences" href="third-party-licences.txt" target="_blank" rel="noopener" title="The licences of the free code Panosolid is built with, and their notices">Licences</a>
       <button type="button" class="guide-close">Close</button>
       <div class="guide-progress" aria-hidden="true"><i></i></div>
