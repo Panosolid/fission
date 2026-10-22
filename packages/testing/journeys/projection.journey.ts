@@ -5,7 +5,9 @@
 // changes each follows, and what is extruded from the projected circle
 // grows with it; when the circle is redrawn as a rectangle the rim is gone,
 // so each projection stays where it was and its sketch says "projection
-// lost"; suppressing the cylinder greys every sketch projecting it. Against
+// lost"; suppressing the cylinder greys every sketch projecting it. A box's
+// front face picked from XZ projects its four edges, which extrude; from XY
+// its uprights are points. Against
 // the naming model (rule 12, R12): naming.journey.ts. Run with
 // `npm run journeys` after the app build.
 import { test } from "node:test";
@@ -192,4 +194,26 @@ test("the cylinder's circle redrawn as a rectangle: its rim is gone, so each pro
     assert.deepEqual(greyed.build.results[id], { status: "greyed", by: s.cylinder });
     assert.equal(greyedBy(off, off.timeline.features.find((f) => f.id === id)!), s.cylinder);
   }
+});
+
+test("hand-worked: the box's front face picked from XZ projects its four edges, a closed rectangle (0, 0) to (40, 20) that extrudes; from XY its uprights are points", async () => {
+  const s = start();
+  const { build, scene } = await built(s.doc);
+  const k = scene.bodies.findIndex((b) => b.feature === "feature-1");
+  const view = scene.bodies[k].view;
+  // The front is the face whose every corner has y = 0; seen from XZ (x = X, y = Z) its corners are (0, 0), (40, 0), (0, 20), (40, 20).
+  const front = view.face_roles.findIndex((_, f) => view.edge_faces.every((pair, e) => !pair.includes(f) || view.edge_vertices[e].every((v) => view.vertex_points[v][1] === 0)) && view.edge_faces.some((pair) => pair.includes(f)));
+  assert.ok(front >= 0, "the box has a front at y = 0");
+  const pick = projectPick(s.doc, s.xz, scene, frameOf(build, s.xz), { face: scene.faceStart[k] + front });
+  assert.equal(pick.note, null);
+  const ends = (sh: (typeof pick.edges)[number]["shape"]) => (sh.kind === "line" ? [sh.a, sh.b].map((p) => `${p}`).sort().join(" ") : sh.kind);
+  assert.deepEqual(pick.edges.map((e) => ends(e.shape)).sort(), ["0,0 0,20", "0,0 40,0", "0,20 40,20", "40,0 40,20"]);
+  const made = projectEdges(s.doc, s.xz, pick.edges).doc;
+  const up = extrudeSketch(made, s.xz, 5);
+  const r = (await built(up.doc)).build.results[up.id];
+  assert.ok(r?.status === "built" && r.body !== undefined, JSON.stringify(r));
+  // From XY the same face is seen edge on: its top and bottom edges both as (0, 0) to (40, 0), its uprights as the points
+  // (0, 0) and (40, 0), each the end on the ground (z = 0).
+  const flat = projectPick(s.doc, s.xy, scene, frameOf(build, s.xy), { face: scene.faceStart[k] + front });
+  assert.deepEqual(flat.edges.map((e) => (e.shape.kind === "point" ? `point ${e.shape.at}` : ends(e.shape))).sort(), ["0,0 40,0", "0,0 40,0", "point 0,0", "point 40,0"]);
 });
