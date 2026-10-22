@@ -74,9 +74,38 @@
 //    sketch warns "point lost". A sketch whose plane is lost or ambiguous
 //    is not judged (the plane's warning says it all). Moving the circle
 //    takes the pin away.
-// Not here: curved faces (refused by Design, Q5), pins on a side face
-// (Design's own tests have them; the model's numbers stay whole only on
-// caps), a sketch on a cut's floor (Q6) and a split face
+// Step 27 (projected edges; Fusion's projected geometry, the harness's
+// reading, not yet tried by Ben: docs/progress/cad.md, "Projected edges
+// test plan (27a)"):
+// 11. A circle on a cap may also have its centre pinned to a point of any
+//    other face's edges, of its own body or of another extrude's: a corner
+//    of either cap (named by the feature, the cap and the two lines it sits
+//    between), the middle of either cap's edge along a line, or the middle
+//    of the upright edge at a corner (named by the feature and the two
+//    lines whose sides meet there). It lands where that point is seen
+//    straight along the sketch's normal; on a cap that is the point's
+//    world (x, y) (rule 8), so an upright's middle lands on its corner. It
+//    follows, and is lost and held, as rule 10 says.
+// 12. A sketch on a cap may hold projected edges: an edge of any extrude
+//    (a cap's edge along a line, or the upright at a corner) seen straight
+//    along the sketch's normal, so a cap's edge is the segment between its
+//    two corners' (x, y) and an upright, which runs along the normal, is a
+//    single point. After every edit each goes where its edge is now, judged
+//    as rule 10's pins are; one whose edge is gone stays where it was and
+//    the sketch warns "projection lost", naming every one held. Projecting
+//    an edge the sketch already holds changes nothing (no copy, no undo
+//    step); removing a projection takes only it.
+// 13. A feature a pin or a projection names is one more thing the sketch
+//    is built on (rules 4, 5 and 9): only a feature before the sketch can
+//    be named (as Fusion shows only what is before a sketch while it is
+//    edited), the sketch never moves before it nor it after the sketch,
+//    suppressing it greys the sketch and what is built from it, and
+//    deleting it asks first and leaves the sketch with that pin or those
+//    projections held where they were.
+// Not here: curved faces (refused by Design, Q5), pins and projections on
+// a side face or an origin plane (Design's own tests have them; the
+// model's numbers stay whole only on caps), round edges (a cylinder's
+// circles; Design's own tests), a sketch on a cut's floor (Q6) and a split face
 // (the piece holding the sketch's origin, else the largest, always warned),
 // which need booleans' cut.
 //
@@ -114,11 +143,31 @@ export interface Placement {
 /**
  * What a face sketch's circle centre is pinned to (rule 10): the cap's
  * corner between line `before` (ending there) and line `after` (starting
- * there), or the middle of the cap's edge along line `line`.
+ * there), or the middle of the cap's edge along line `line`. From step 27
+ * (rule 11), on extrude `feature` and its cap `cap` when given (else the
+ * sketch's own face's), or the middle of the upright edge at the corner
+ * between `before` and `after`.
  */
-export type PinName = { at: "corner"; before: string; after: string } | { at: "middle"; line: string };
+export type PinName =
+  | { at: "corner"; before: string; after: string; feature?: string; cap?: Cap }
+  | { at: "middle"; line: string; feature?: string; cap?: Cap }
+  | { at: "upright"; before: string; after: string; feature: string };
 
-export const pinKeyOf = (p: PinName): string => (p.at === "corner" ? `corner:${p.before}>${p.after}` : `middle:${p.line}`);
+const onKey = (p: { feature?: string; cap?: Cap }) => (p.feature === undefined ? "" : `${p.feature}/${p.cap ?? ""}`);
+export const pinKeyOf = (p: PinName): string =>
+  p.at === "corner" ? `${onKey(p)}corner:${p.before}>${p.after}` : p.at === "middle" ? `${onKey(p)}middle:${p.line}` : `${onKey(p)}upright:${p.before}>${p.after}`;
+
+/** An edge a sketch can project (rule 12): extrude `feature`'s cap edge along line `line`, or its upright at the corner between `before` and `after`. */
+export type EdgeName = { feature: string; at: "cap-edge"; cap: Cap; line: string } | { feature: string; at: "upright"; before: string; after: string };
+
+export const edgeKeyOf = (e: EdgeName): string => (e.at === "cap-edge" ? `${e.feature}/${e.cap}:${e.line}` : `${e.feature}/upright:${e.before}>${e.after}`);
+
+/** An edge projected into a sketch (rule 12): its id, its edge, and where it lies in the sketch now (two ends, or one point for an upright), held there while the edge is gone. */
+export interface Projection {
+  id: string;
+  edge: EdgeName;
+  at: Point[];
+}
 
 /** A face sketch's circle, as a feature kept it when its sketch was deleted. */
 export interface Tool {
@@ -145,7 +194,7 @@ export type NamingItem =
   /** `lines`: each side's line id, the k-th from corner k to corner k + 1. */
   | { id: string; kind: "sketch"; corners: Point[]; lines: string[] }
   /** `kept`: the last placement, while the face is lost or ambiguous. */
-  | { id: string; kind: "face-sketch"; face: FaceName; side: 1 | -1; centre: Point; radius: number; drawn: Drawn; kept?: Placement; pin?: PinName }
+  | { id: string; kind: "face-sketch"; face: FaceName; side: 1 | -1; centre: Point; radius: number; drawn: Drawn; kept?: Placement; pin?: PinName; projections?: Projection[] }
   /** `kept`, `keptLines`: the sketch's corners and line ids just before it was deleted, so its sides keep their names. */
   | { id: string; kind: "extrude"; sketch: string; distance: number; suppressed?: true; kept?: Point[]; keptLines?: string[] }
   | { id: string; kind: "face-extrude"; sketch: string; distance: number; suppressed?: true; kept?: Tool }
@@ -162,10 +211,13 @@ export type NamingWarning =
   | { cause: "plane-lost" | "plane-ambiguous"; face: FaceName }
   /** Rule 10: a pinned centre whose corner or middle is gone, held where it was. */
   | { cause: "point-lost"; pin: PinName }
+  /** Rule 12: projected edges whose edge is gone, held where they were, by id in the sketch's order. */
+  | { cause: "projection-lost"; projections: string[] }
   | { cause: "deleted-input" | "source-lost"; input: string };
 
 export type NamingResult =
-  | { kind: "sketch"; placement: Placement; warning?: NamingWarning }
+  /** `projected`: each projected edge's place in the sketch, in its order (rule 12); absent with none. */
+  | { kind: "sketch"; placement: Placement; warning?: NamingWarning; projected?: { id: string; at: Point[] }[] }
   /** An extrude or a face extrude: the volume and centroid of the body it made, before any cut. */
   | { kind: "solid"; volume: number; centroid: Vec3; warning?: NamingWarning }
   | { kind: "cut"; status: "built"; removed: number; warning?: NamingWarning }
@@ -193,7 +245,11 @@ export type NamingOp =
   | { op: "set-corners"; sketch: string; corners: Point[] }
   | { op: "move-corner"; sketch: string; corner: number; to: Point }
   | { op: "set-distance"; item: string; value: number }
-  | { op: "set-circle"; sketch: string; centre: Point; radius: number }
+  /** With `pin` (step 27), the centre is snapped onto that point (`centre` is not used) and pinned there, as `add-face-sketch`'s. */
+  | { op: "set-circle"; sketch: string; centre: Point; radius: number; pin?: PinName }
+  /** Rule 12: an edge projected into a sketch on a cap; `unproject` removes one by its id. */
+  | { op: "project"; sketch: string; edge: EdgeName }
+  | { op: "unproject"; sketch: string; projection: string }
   | { op: "set-depth"; item: string; value: number }
   | { op: "suppress"; item: string; on: boolean }
   | { op: "delete"; item: string }
@@ -239,7 +295,15 @@ export type NamingFault =
   | "lost-pin-silent"
   | "lost-pin-moves"
   | "pin-wrong-end"
-  | "pin-survives-move";
+  | "pin-survives-move"
+  // Step 27:
+  | "pin-own-feature-only"
+  | "ref-not-dependency"
+  | "projection-stays-put"
+  | "lost-projection-silent"
+  | "lost-projection-moves"
+  | "projection-wrong-line"
+  | "projection-doubled";
 
 export const NAMING_FAULTS: readonly NamingFault[] = [
   "frame-follows-face",
@@ -267,6 +331,13 @@ export const NAMING_FAULTS: readonly NamingFault[] = [
   "lost-pin-moves",
   "pin-wrong-end",
   "pin-survives-move",
+  "pin-own-feature-only",
+  "ref-not-dependency",
+  "projection-stays-put",
+  "lost-projection-silent",
+  "lost-projection-moves",
+  "projection-wrong-line",
+  "projection-doubled",
 ];
 
 export const faceKeyOf = (f: FaceName): string => (f.role === "side" ? `${f.feature}/side:${f.line}` : `${f.feature}/${f.role}`);
@@ -576,20 +647,34 @@ function extrudeFaces(feature: string, corners: readonly Point[], lines: readonl
   return faces;
 }
 
-/**
- * Where a pin on a cap of feature `face.feature` is now (rule 10): the
- * corner of its outline (the sketch's, or the shape kept when the sketch
- * was deleted) between line `before` and line `after`, or the middle of
- * line `line`'s side; null when its lines are gone (or the feature is, or
- * the face is a side). On a cap, sketch (x, y) is world (x, y) (rule 8),
- * so these are whole or half millimetres.
- */
-export function pinAt(doc: NamingDoc, face: FaceName, pin: PinName, faults: ReadonlySet<NamingFault> = new Set()): Point | null {
-  const f = doc.items.find((i) => i.id === face.feature);
-  if (face.role === "side" || f?.kind !== "extrude") return null;
+/** Extrude `feature`'s outline: its sketch's corners and line ids, or the shape kept when the sketch was deleted; null for anything else or with nothing kept. */
+function outlineOf(doc: NamingDoc, feature: string): { corners: readonly Point[]; lines: readonly string[] } | null {
+  const f = doc.items.find((i) => i.id === feature);
+  if (f?.kind !== "extrude") return null;
   const s = doc.items.find((i) => i.id === f.sketch);
   const [corners, lines] = s?.kind === "sketch" ? [s.corners, s.lines] : [f.kept, f.keptLines];
-  if (corners === undefined || lines === undefined) return null;
+  return corners === undefined || lines === undefined ? null : { corners, lines };
+}
+
+/** The corner where line `before` ends and line `after` starts (corner k is where line k − 1 ends and line k starts); -1 for none. */
+const cornerOf = (lines: readonly string[], before: string, after: string) => lines.findIndex((l, j) => l === after && lines[(j + lines.length - 1) % lines.length] === before);
+
+/**
+ * Where a pin on a cap sketch on `face` is now (rules 10 and 11): on its
+ * extrude (`pin.feature`, else the face's own), the corner of its outline
+ * (the sketch's, or the shape kept when the sketch was deleted) between
+ * line `before` and line `after`, the middle of line `line`'s edge, or the
+ * upright's middle at a corner; null when its lines are gone (or the
+ * feature is, or the face is a side). Seen along a cap's normal, sketch
+ * (x, y) is world (x, y) (rule 8), so these are whole or half
+ * millimetres, the same on either cap, and an upright's middle is its
+ * corner.
+ */
+export function pinAt(doc: NamingDoc, face: FaceName, pin: PinName, faults: ReadonlySet<NamingFault> = new Set()): Point | null {
+  if (face.role === "side") return null;
+  const outline = outlineOf(doc, pin.feature === undefined || faults.has("pin-own-feature-only") ? face.feature : pin.feature);
+  if (outline === null) return null;
+  const { corners, lines } = outline;
   const n = corners.length;
   if (pin.at === "middle") {
     const k = lines.indexOf(pin.line);
@@ -597,12 +682,33 @@ export function pinAt(doc: NamingDoc, face: FaceName, pin: PinName, faults: Read
     const [a, b] = [corners[k], corners[(k + 1) % n]];
     return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   }
-  // Corner k is where line k − 1 ends and line k starts.
-  const k = lines.findIndex((l, j) => l === pin.after && lines[(j + n - 1) % n] === pin.before);
+  const k = cornerOf(lines, pin.before, pin.after);
   if (k < 0) return null;
   const c = corners[faults.has("pin-wrong-end") ? (k + 1) % n : k];
   return [c[0], c[1]];
 }
+
+/**
+ * Where a projected edge lies in a sketch on a cap now (rule 12): a cap's
+ * edge along line `line` as its two ends' (x, y), from the corner the line
+ * starts at; an upright as its corner's (x, y), one point, since it runs
+ * along the cap's normal. Null when its feature or lines are gone.
+ */
+export function edgeAt(doc: NamingDoc, edge: EdgeName, faults: ReadonlySet<NamingFault> = new Set()): Point[] | null {
+  const outline = outlineOf(doc, edge.feature);
+  if (outline === null) return null;
+  const { corners, lines } = outline;
+  const n = corners.length;
+  const k = edge.at === "cap-edge" ? lines.indexOf(edge.line) : cornerOf(lines, edge.before, edge.after);
+  if (k < 0) return null;
+  const at = (j: number): Point => [corners[j % n][0], corners[j % n][1]];
+  if (edge.at === "upright") return [at(k)];
+  const j = faults.has("projection-wrong-line") ? k + 1 : k;
+  return [at(j), at(j + 1)];
+}
+
+/** The features a face sketch's pin and projections name (rule 13), apart from its face's. */
+const namedFeatures = (s: FaceSketch): string[] => [...(s.pin?.feature === undefined ? [] : [s.pin.feature]), ...(s.projections ?? []).map((p) => p.edge.feature)];
 
 const isFeature = (i: NamingItem): i is Extract<NamingItem, { kind: "extrude" | "face-extrude" | "cut" }> => i.kind === "extrude" || i.kind === "face-extrude" || i.kind === "cut";
 
@@ -658,8 +764,12 @@ function evaluate(doc: NamingDoc, faults: ReadonlySet<NamingFault>): Evaluated {
         matches[item.id] = p.matches;
         // Rule 10: a pin judged only on a face found; one whose corner or middle is gone warns.
         const lostPin = p.warning === undefined && item.pin !== undefined && pinAt(doc, item.face, item.pin, faults) === null && !faults.has("lost-pin-silent");
-        const warning: NamingWarning | undefined = p.warning ?? (lostPin ? { cause: "point-lost", pin: { ...item.pin! } } : undefined);
-        results[item.id] = { kind: "sketch", placement: p.placement, ...(warning ? { warning } : {}) };
+        // Rule 12: judged the same way; the plane's warning first, then the pin's, then the projections'.
+        const held = p.warning === undefined && !faults.has("lost-projection-silent") ? (item.projections ?? []).filter((q) => edgeAt(doc, q.edge, faults) === null).map((q) => q.id) : [];
+        const warning: NamingWarning | undefined =
+          p.warning ?? (lostPin ? { cause: "point-lost", pin: { ...item.pin! } } : held.length > 0 ? { cause: "projection-lost", projections: held } : undefined);
+        const projected = item.projections?.length ? { projected: item.projections.map((q) => ({ id: q.id, at: q.at.map((c): Point => [c[0], c[1]]) })) } : {};
+        results[item.id] = { kind: "sketch", placement: p.placement, ...(warning ? { warning } : {}), ...projected };
         break;
       }
       case "face-extrude": {
@@ -713,7 +823,8 @@ export function namingDeps(doc: NamingDoc, item: NamingItem, faults: ReadonlySet
     case "sketch":
       return [];
     case "face-sketch":
-      return faults.has("reorder-ignores-plane") ? [] : here([item.face.feature]);
+      // Rule 13: the features its pin and projections name too, each once.
+      return faults.has("reorder-ignores-plane") ? [] : here([...new Set([item.face.feature, ...(faults.has("ref-not-dependency") ? [] : namedFeatures(item))])]);
     case "extrude":
     case "face-extrude":
       return here([item.sketch]);
@@ -812,7 +923,22 @@ function settle(before: NamingDoc, doc: NamingDoc, faults: ReadonlySet<NamingFau
     if (at !== null && !faults.has("pin-stays-put")) item.centre = at;
     if (at === null && faults.has("lost-pin-moves")) item.centre = [0, 0];
   }
+  // Rule 12: each projected edge goes where its edge is now, on a face found; else it stays (planted: to the origin).
+  for (const item of doc.items) {
+    if (item.kind !== "face-sketch" || item.projections === undefined || now.rebuild.results[item.id]?.kind !== "sketch" || now.matches[item.id] !== 1) continue;
+    for (const q of item.projections) {
+      const at = edgeAt(doc, q.edge, faults);
+      if (at !== null && !faults.has("projection-stays-put")) q.at = at;
+      if (at === null && faults.has("lost-projection-moves")) q.at = q.at.map((): Point => [0, 0]);
+    }
+  }
 }
+
+/** Whether extrude `feature` is before sketch `s` in the timeline (rule 13). */
+const before = (doc: NamingDoc, s: NamingItem, feature: string) => {
+  const k = doc.items.findIndex((i) => i.id === feature);
+  return k >= 0 && k < doc.items.indexOf(s);
+};
 
 function find(doc: NamingDoc, id: string): NamingItem {
   const item = doc.items.find((i) => i.id === id);
@@ -879,10 +1005,32 @@ function edit(doc: NamingDoc, op: Exclude<NamingOp, { op: "undo" | "redo" }>, fa
     case "set-circle": {
       const s = find(doc, op.sketch);
       if (s.kind !== "face-sketch" || op.radius <= 0) throw new Error(`${op.sketch}: no circle of radius ${op.radius}`);
-      s.centre = [op.centre[0], op.centre[1]];
+      // Snapped onto a point (step 27), the centre lands there and is pinned to it; only what is before the sketch can be named (rule 13).
+      const pinned = op.pin ? before(doc, s, op.pin.feature ?? s.face.feature) && pinAt(doc, s.face, op.pin) : null;
+      if (op.pin && !pinned) throw new Error(`no ${pinKeyOf(op.pin)} before ${s.id} to pin to`);
+      s.centre = pinned || [op.centre[0], op.centre[1]];
       s.radius = op.radius;
-      // Moved, the centre is pinned no longer (rule 10).
-      if (!faults.has("pin-survives-move")) delete s.pin;
+      // Moved, the centre is pinned no longer (rule 10), unless it was moved onto a point.
+      if (op.pin) s.pin = { ...op.pin };
+      else if (!faults.has("pin-survives-move")) delete s.pin;
+      return { kind: "done", ids: [] };
+    }
+    case "project": {
+      const s = find(doc, op.sketch);
+      if (s.kind !== "face-sketch" || s.face.role === "side") throw new Error(`${op.sketch}: projections are modelled on caps only`);
+      const at = before(doc, s, op.edge.feature) ? edgeAt(doc, op.edge) : null;
+      if (at === null) throw new Error(`no edge ${edgeKeyOf(op.edge)} before ${s.id} to project`);
+      // Rule 12: an edge already held is not projected again.
+      if (!faults.has("projection-doubled") && s.projections?.some((q) => edgeKeyOf(q.edge) === edgeKeyOf(op.edge))) return { kind: "done", ids: [] };
+      const id = `projection-${doc.nextLine++}`;
+      s.projections = [...(s.projections ?? []), { id, edge: { ...op.edge }, at }];
+      return { kind: "done", ids: [id] };
+    }
+    case "unproject": {
+      const s = find(doc, op.sketch);
+      if (s.kind !== "face-sketch" || !s.projections?.some((q) => q.id === op.projection)) throw new Error(`${op.sketch} holds no ${op.projection}`);
+      s.projections = s.projections.filter((q) => q.id !== op.projection);
+      if (s.projections.length === 0) delete s.projections;
       return { kind: "done", ids: [] };
     }
     case "set-depth": {
