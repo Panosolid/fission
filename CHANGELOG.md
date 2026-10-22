@@ -10,9 +10,13 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
-## 0.26.4 (2026-10-22)
+## 0.26.5 (2026-10-22)
 
 - Fix (security, development tools only): the app is now built with Vite 8.3.5 (was 5.4.21) and its browser checks run on Playwright 1.64.1 (was 1.49.1), which closes GitHub's 18 open Dependabot alerts (all in the development server, the old esbuild and Playwright's browser download; nothing in the app people use was affected, `npm audit --omit=dev` was already clean). The built app is the same: same files, same kernel worker and WebAssembly, same strict Content-Security-Policy with no eval; its CSS is 1 kB smaller from Vite 8's new CSS tool. The licence check learned one thing: that CSS tool (lightningcss) is under MPL-2.0, a file-level copyleft that only covers changes to the tool itself, so a new short list `ALLOWED_DEV_ONLY` lets development-only tools be under it, while everything that ships is still held to the strict list (a test puts an MPL package in the run-time tree and sees it refused). Checked by all 211 browser checks in Chromium on the Vite 8 build (the framing check under the real policy and the app journeys among them, well inside the baseline), CI's Firefox and WebKit runs, the development server loading the app in Chromium under the policy, and two deliberate breaks of the licence plugin (an unlisted copyright holder in the main bundle, an unlisted package in the kernel worker), each failing the Vite 8 build as it should. Also fixed on the way (a failing check): the smoke check of phone-width keyboard focus expected Undo to be a tab stop but never made a step to undo, so in WebKit, where the page started fresh, Tab skipped the disabled buttons and the check failed (as it did on #230 before this change); it now makes a width edit first and puts it back after. The old check fails and the new one passes when a fresh start is forced in Chromium.
+
+## 0.26.4 (2026-10-22)
+
+- Fix (found by the daily bug hunt's sweep of every size from 1 µm to 1 km): a small hole or curve close to a long straight side, away from its ends, was refused as crossing it ("0 mm apart") once the side was a few hundred metres long, for example a 1 µm hole 1.1 µm in from the side of a 1 km plate. The check worked out the distance from the line as the difference of two numbers as big as the line's length squared, and their rounding swamped a gap that small; it now measures the distance directly. A new kernel test builds about 6,400 bodies across the whole size range, up to 90 km from the origin, and 4,300 nearly touching holes, checking each one's exact volume and area, where it lands and its STL file; it found nothing else wrong.
 
 ## 0.26.3 (2026-10-22)
 
