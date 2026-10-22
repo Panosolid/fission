@@ -845,5 +845,33 @@
     "original": "\"other\"",
     "replacement": "\"\"",
     "why": "DEFAULT_MODELS has no entry for 'other', so looking it up gives the same undefined."
+  },
+  {
+    "file": "packages/core/src/model/svg.ts",
+    "mutator": "EqualityOperator",
+    "original": "q < 4",
+    "replacement": "q <= 4",
+    "why": "q = 4 is the angle 2π, the same east point as q = 0 up to cos/sin rounding (sin 2π is about -2.4e-16), so it moves the box by at most r × 2.5e-16, about 2.5e-10 mm at the kernel's 1 km limit, far under svgNumber's 6 decimals (200,000 random arcs from 1 mm to 1 km wrote the same text)."
+  },
+  {
+    "file": "packages/core/src/model/svg.ts",
+    "mutator": "EqualityOperator",
+    "original": "sweep > 0",
+    "replacement": "sweep >= 0",
+    "why": "sweep = 4 atan(b) is 0 only for b = 0, and a bulge of 0 is drawn straight and skips this loop."
+  },
+  {
+    "file": "packages/core/src/model/svg.ts",
+    "mutator": "EqualityOperator",
+    "original": "along <= Math.abs(sweep)",
+    "replacement": "along < Math.abs(sweep)",
+    "why": "along equals the sweep only when the arc ends exactly on a compass point, and then that point is the next corner, which grows the box anyway; the two differ only by rounding, far under svgNumber's 6 decimals (200,000 random arcs from 1 mm to 1 km wrote the same text)."
+  },
+  {
+    "file": "packages/core/src/model/svg.ts",
+    "mutator": "EqualityOperator",
+    "original": "b > 0",
+    "replacement": "b >= 0",
+    "why": "A bulge of 0 is drawn straight and never reaches the arc, so b is never 0 here."
   }
 ]
