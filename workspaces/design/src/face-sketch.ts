@@ -82,12 +82,18 @@ export function turned(v: readonly number[], from: readonly number[], to: readon
 }
 
 /**
- * The frame squared up in doubles: the normal made unit, x made square to
- * it (its part along the normal taken off) and unit. Null when the normal
- * is nothing or x lies along it, so no frame can be made (a hand-edited
- * file); anything else comes out within a few ulps of unit and square.
+ * How far squaring a frame already square moves its unit axes, at most, in
+ * each part: its rounding, a few ulps of 1 (well inside the kernel's
+ * FRAME_SQUARE, 64 ulps). Not a tolerance on geometry: only what tells a
+ * frame squared before from one that isn't.
  */
-export function squared(p: Plane): Plane | null {
+const SQUARING_ROUNDING = 8 * Number.EPSILON;
+
+/** At most this many squarings after the first: each takes an x nearly along the normal closer to square. */
+const SQUARING_PASSES = 8;
+
+/** One squaring: the normal made unit, x made square to it (its part along the normal taken off) and unit; null when it can't be. */
+function squaredOnce(p: Plane): Plane | null {
   const nn = dot(p.normal, p.normal);
   if (!(nn > 0) || !Number.isFinite(nn)) return null;
   const n = unit(p.normal);
@@ -95,6 +101,37 @@ export function squared(p: Plane): Plane | null {
   const xx = dot(x, x);
   if (!(xx > 0) || !Number.isFinite(xx)) return null;
   return { origin: [p.origin[0] + 0, p.origin[1] + 0, p.origin[2] + 0], xAxis: unit(x), normal: n };
+}
+
+/** Whether frame `q`'s axes are within a squaring's rounding of `p`'s, part by part. */
+const roundingApart = (p: Plane, q: Plane): boolean =>
+  [0, 1, 2].every((k) => Math.abs(p.xAxis[k] - q.xAxis[k]) <= SQUARING_ROUNDING && Math.abs(p.normal[k] - q.normal[k]) <= SQUARING_ROUNDING);
+
+/**
+ * The frame squared up in doubles: the normal made unit, x made square to
+ * it (its part along the normal taken off) and unit. Null when the normal
+ * is nothing or x lies along it, so no frame can be made (a hand-edited
+ * file); anything else comes out within a few ulps of unit and square.
+ * A frame square already (to a squaring's rounding) comes back with its
+ * very axes, and any other is squared until it is, so squaring twice gives
+ * what squaring once did: squared in doubles again, a frame can move an
+ * ulp each time (four frames in ten from slanted faces do), and a sketch
+ * held at a squared frame was drawn an ulp from where it was (face-chaos
+ * seed 61, 27c). An x nearly along the normal takes a few squarings, each
+ * leaving it less off square.
+ */
+export function squared(p: Plane): Plane | null {
+  const q = squaredOnce(p);
+  if (q === null) return null;
+  if (roundingApart(p, q)) return { origin: q.origin, xAxis: [p.xAxis[0], p.xAxis[1], p.xAxis[2]], normal: [p.normal[0], p.normal[1], p.normal[2]] };
+  // Each squaring leaves the last a little less off square; one that moves nothing past its rounding is square.
+  let now = q;
+  for (let pass = 0; pass < SQUARING_PASSES; pass++) {
+    const again = squaredOnce(now)!;
+    if (roundingApart(now, again)) return now;
+    now = again;
+  }
+  return now;
 }
 
 /**

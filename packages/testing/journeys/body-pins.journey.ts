@@ -25,6 +25,7 @@
 // journeys` after the app build.
 
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson } from "@fission/core";
 import type { KernelCalls } from "@fission/core";
@@ -262,4 +263,30 @@ test("hand-worked: a rebuild asks the kernel once for each body: an extrude of a
   } finally {
     await cache.clear();
   }
+});
+
+test("regression (face-chaos seed 61, 27c): a sketch whose slanted face is lost stays exactly where it was drawn, not an ulp off", async () => {
+  // A point of Sketch 61 pinned to another body's corner slants Extrude 70's side; Sketch 123 is on that side. Feature 50 edited
+  // to 32 × 20 × 42 loses the side, so Sketch 123 is held at its last placement: drawn at the very numbers it was drawn at.
+  // It was drawn at the held frame squared once more, which moved its x axis's z by an ulp (3.3787286706361985e-18 to
+  // 3.378728670636199e-18): squaring a frame in doubles twice doesn't always give the same frame.
+  const saved = JSON.parse(readFileSync(new URL("../test/regressions/held/chaos-seed-61.json", import.meta.url), "utf8"));
+  const before = saved.before as DesignDocument;
+  const after = structuredClone(before);
+  const item = after.timeline.features.find((f) => f.id === saved.edit.feature)!;
+  item.intent = { ...item.intent, parameters: { ...item.intent.parameters, ...saved.edit.parameters } };
+  const cache = new BodyCache(kernel);
+  const was = (await rebuildTimeline(before, cache, kernel)).results[saved.sketch];
+  assert.equal(was.status, "built");
+  const settled = await settleKept(kernel, before, after, cache);
+  const now = (await rebuildTimeline(settled, cache, kernel)).results[saved.sketch];
+  assert.ok(now.status === "built" && was.status === "built");
+  assert.equal(now.plane?.cause, "plane-lost", "its face is gone");
+  assert.deepEqual(now.placement, was.placement, "held exactly where it was drawn");
+  // Settled, and settling again changes nothing; opened from the file, it is drawn at the same numbers.
+  assert.deepEqual(await settleKept(kernel, settled, settled, cache), settled);
+  const opened = (await rebuildTimeline(reopened(settled), cache, kernel)).results[saved.sketch];
+  assert.ok(opened.status === "built");
+  assert.deepEqual(opened.placement, was.placement);
+  await cache.keepOnly([]);
 });

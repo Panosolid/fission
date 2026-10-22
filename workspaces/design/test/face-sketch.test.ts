@@ -62,6 +62,46 @@ test("hunt 26g: squared refuses a normal too long to square, and writes every �
   assert.ok(p.origin.every((x) => Object.is(x, 0)), `[${p.origin.map((x) => (Object.is(x, -0) ? "-0" : x))}]`);
 });
 
+test("regression (face-chaos seed 61, 27c): squaring a squared frame gives it back exactly, so a held sketch is drawn where it was", () => {
+  // The frame Sketch 123 was drawn at, on a side slanted by a pin on another body: squared once more, before the fix, its
+  // x axis's z went from 3.3787286706361985e-18 to 3.378728670636199e-18, an ulp.
+  const drawn = squared(plane([-3.5939597315436274, -1.4082694741889582e-16, 0.6342281879194638], [-3.8588095809599134e-17, 1, 3.3787286706361978e-18], [0.9847835588179369, 3.858809580959914e-17, -0.1737853339090477]))!;
+  assert.deepEqual(squared(drawn), drawn);
+  assert.deepEqual(squared(squared(drawn)!), drawn);
+});
+
+test("boundary: a frame within a squaring's rounding (8 ulps of 1) of square keeps its axes, and one past it is squared", () => {
+  // x (1, 0, z) on normal z: taking off its part along the normal leaves (1, 0, 0), z away from x. With z 0.9 × 8ε that is
+  // within the rounding, so x comes back as it was; with z 1.1 × 8ε, x is squared to (1, 0, 0).
+  const e = 8 * Number.EPSILON;
+  assert.deepEqual(squared(plane([0, 0, 0], [1, 0, 0.9 * e], [0, 0, 1]))!.xAxis, [1, 0, 0.9 * e]);
+  assert.deepEqual(squared(plane([0, 0, 0], [1, 0, 1.1 * e], [0, 0, 1]))!.xAxis, [1, 0, 0]);
+  // The same along the normal: (0, 0, 1 + d) made unit is (0, 0, 1), d away. Just above 1 the doubles are ε apart, so the
+  // nearest to 0.9 × 8ε and 1.1 × 8ε are 7ε (0.875×) and 9ε (1.125×): the first normal is kept, the second made (0, 0, 1).
+  assert.deepEqual(squared(plane([0, 0, 0], [1, 0, 0], [0, 0, 1 + 7 * Number.EPSILON]))!.normal, [0, 0, 1 + 7 * Number.EPSILON]);
+  assert.deepEqual(squared(plane([0, 0, 0], [1, 0, 0], [0, 0, 1 + 9 * Number.EPSILON]))!.normal, [0, 0, 1]);
+});
+
+test("seeded: 40,000 frames from 1e-50 to 1e50 long, x nearly along the normal one in four, squared twice give what squaring once did, square to the kernel's 64 ulps", () => {
+  let s = 2027;
+  const r = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648) * 2 - 1;
+  const dot = (a: readonly number[], b: readonly number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  let tried = 0;
+  for (let i = 0; i < 40000; i++) {
+    const [sn, sx] = [10 ** (r() * 50), 10 ** (r() * 50)];
+    const n = [r() * sn, r() * sn, r() * sn];
+    const t = 10 ** (-1 - 15 * Math.abs(r()));
+    const x = i % 4 === 0 ? n.map((c) => c * (1 + t * r())) : [r() * sx, r() * sx, r() * sx];
+    const p = squared(plane([r() * 100, -0, r() * 100], x, n));
+    if (p === null) continue;
+    tried++;
+    assert.deepEqual(squared(p), p, `frame ${i}: ${JSON.stringify(p)}`);
+    for (const [what, v] of [["x · normal", dot(p.xAxis, p.normal)], ["|x|² − 1", dot(p.xAxis, p.xAxis) - 1], ["|normal|² − 1", dot(p.normal, p.normal) - 1]] as const)
+      assert.ok(Math.abs(v) <= 64 * Number.EPSILON, `frame ${i}: ${what} is ${v / Number.EPSILON} ulps`);
+  }
+  assert.ok(tried > 39000, `${tried} frames could be squared`);
+});
+
 test("hunt 26g: face planes and face sketches told apart, a broken escape names no feature, a frame for the kernel, the plane warnings' words", () => {
   assert.equal(isFacePlane("face:feature-1/top"), true);
   for (const p of [undefined, null, 7, "XY", "edge:feature-1/a+b"]) assert.equal(isFacePlane(p), false, String(p));
