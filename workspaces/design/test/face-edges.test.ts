@@ -257,6 +257,9 @@ test("hand-worked: a rebuild's followed points are taken into the document, and 
   const points = (d: DesignDocument) => d.sketches.find((s) => s.id === id)!.points.map((p) => [p.id, p.x, p.y]);
   assert.deepEqual(points(moved), points(pinned).map(([p, x, y]) => (p === centre ? [p, 60, 30] : [p, x, y])));
   assert.deepEqual(moved.sketches.find((s) => s.id === id)!.pins, sketch.pins, "still pinned");
+  // Moved along y only (the box made deeper: the corner at (40, 45)): taken in too.
+  const deeper = followedDoc(pinned, build({ [id]: { status: "built", pinned: [{ point: centre, at: [40, 45] }] } }));
+  assert.deepEqual(points(deeper), points(pinned).map(([p, x, y]) => (p === centre ? [p, 40, 45] : [p, x, y])));
   // Found where it is: nothing to take in, the same document.
   assert.equal(followedDoc(pinned, build({ [id]: { status: "built", pinned: [{ point: centre, at: [40, 30] }] } })), pinned);
   // Lost (no place found), greyed, or not built: held where it is.
