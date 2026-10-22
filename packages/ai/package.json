@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "@fission/core": "*",
-    "@mlc-ai/web-llm": "0.2.85"
+    "@mlc-ai/web-llm": "0.2.86"
   }
 }
