@@ -1385,7 +1385,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   // Typing in one box is one undo step (the merge key), named for the box.
   inputs.forEach((input, i) => {
     input.addEventListener("input", () => update(shape === "sketch-extrude" && SIZE_KEYS[i] === "height" ? DISTANCE_STEP : `Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i]));
+    // Left (or Enter): a refused size gives way to the last one. Blur too: Firefox gives no change for a number box
+    // left empty after 0 and -5 (hunt 26h, CI's browsers job).
     input.addEventListener("change", () => restoreRefused(i));
+    input.addEventListener("blur", () => restoreRefused(i));
   });
   listen();
   const first = update();

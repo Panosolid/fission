@@ -279,6 +279,14 @@ test("4. a size box emptied or typed 0 or -5 records nothing, says why, and gets
   await a.settle();
   assert.equal(height.value, "20");
   assert.equal(a.error(), "");
+  // Left with no change event (Firefox in CI's browsers job gave none for a number box left empty after 0 and -5):
+  // losing the keys alone brings the size back.
+  await typeIn("-5");
+  assert.equal(a.error(), "The height must be more than 0 mm.");
+  height.dispatchEvent(new a.window.FocusEvent("blur") as unknown as Event);
+  await a.settle();
+  assert.equal(height.value, "20", "blur alone");
+  assert.equal(a.error(), "");
   // A good size after: taken. Then 0.5 typed through "0" and "0.": the 0 is refused on the way, 0.5 is taken, and
   // leaving keeps it.
   await typeIn("25");

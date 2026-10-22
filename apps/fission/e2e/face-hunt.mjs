@@ -233,8 +233,9 @@ try {
       await shot(page, `face-hunt-size-refused-${width}`);
       assert.equal(await page.textContent("#volume"), "24,000 mm³", "the box is still 40 × 30 × 20");
       assert.equal(await undoTitle(), before, "no undo step");
-      // Leaving the box (Tab, or a tap on the panel's heading at 375 px): 20 comes back, and the words go.
-      if (tap) await page.locator("#volume").tap();
+      // Leaving the box (Tab, or at 375 px a tap on the next box: WebKit keeps focus in a box when the tap lands on
+      // plain text): 20 comes back, and the words go.
+      if (tap) await page.locator("#width").tap();
       else await page.keyboard.press("Tab");
       await until(page, () => document.querySelector("#height").value === "20" && document.querySelector("#error").textContent === "", null, "20 back, no words");
       // Nothing was saved either: the page reloaded opens the 20 high box.
