@@ -20,11 +20,14 @@ const server = await preview({ preview: { port: 4234, strictPort: true }, logLev
 const url = "http://localhost:4234/?test-hooks";
 const browser = await launch();
 const errors = [];
+/** Every context a check opened, closed when it ends, passed or failed, so a failed one's page can't go on erroring into the next. */
+const contexts = [];
 const shots = process.env.E2E_SHOTS;
 if (shots) mkdirSync(shots, { recursive: true });
 
 async function fresh(width = 1280, touch = false) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
+  contexts.push(context);
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
@@ -173,6 +176,7 @@ async function check(name, fn) {
     failed++;
     console.log(`not ok - ${name}\n  ${e.message.split("\n").join("\n  ")}`);
   }
+  for (const c of contexts.splice(0)) await c.close().catch(() => {});
 }
 const shot = async (page, name) => shots && page.screenshot({ path: `${shots}/${name}.png` });
 const status = (page) => page.evaluate(() => document.querySelector("#sketch-status")?.textContent ?? "");
@@ -215,7 +219,10 @@ try {
       await at(page, [40, 0, 0], tap);
       await at(page, [20, 10, 0], tap);
       await shown(page, "sketchLines", "1");
-      assert.deepEqual((await data(page, "sketchPoints")).split(" ").sort(), ["20,10", "40,0"], "the line starts on the projected point itself");
+      // Two points, not three: the line's start is the projected point itself, not a new one on top of it. (Its free end is
+      // where the click landed, which in WebKit is not always the whole pixel asked for, so only the shared one is checked.)
+      const points = (await data(page, "sketchPoints")).split(" ");
+      assert.ok(points.length === 2 && points.includes("40,0"), `the line starts on the projected point itself: ${points}`);
       await shot(page, `projection-hunt-point-${width}`);
       await finish(page, tap);
       // Undo the line and Redo it: the project goes through save and open each time.
@@ -223,13 +230,14 @@ try {
       await page.keyboard.press("Control+Shift+z");
       await until(page, () => document.querySelector("#undo").title.startsWith("Undo"), null, "redone");
       assert.equal(await page.evaluate(() => document.querySelector("#error")?.textContent ?? ""), "", "no error after Redo");
+      // Reloaded once autosave has kept it and the kernel is idle (WebKit reports fetches a reload cuts off as page errors).
+      await until(page, () => document.querySelector("#viewport").dataset.rebuilding !== "true", null, "rebuilt");
       await page.waitForTimeout(1500);
       await page.reload();
       await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       await reopen(page, tap);
       assert.equal(await data(page, "sketchProjected"), "1", "the projection back after the reload");
       assert.equal(await data(page, "sketchLines"), "1", "the line back after the reload");
-      await page.context().close();
     });
     await check(`${width} px${tap ? " with taps" : ""}: a rectangle traced over the box's top projected into a sketch on it is a closed outline, and extrudes`, async () => {
       const page = await fresh(width, tap);
@@ -256,7 +264,6 @@ try {
       await until(page, () => /makes a closed outline/.test(document.querySelector("#extrude-status")?.textContent ?? ""), null, "the extrude panel says it closes");
       await page.press("#extrude-distance", "Enter");
       await until(page, () => document.querySelector("#volume")?.textContent === "12,000 mm³", null, "the traced rectangle extruded 10: 12,000 mm³").catch(async (e) => assert.fail(`${e.message} (shown: ${await page.textContent("#volume")})`));
-      await page.context().close();
     });
   }
   assert.deepEqual(errors, [], "no page errors");
