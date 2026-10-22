@@ -312,29 +312,38 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
     const { kept: old, ...rest } = after;
     let doc = after;
     if (JSON.stringify(old ?? {}) !== JSON.stringify(next)) doc = Object.keys(next).length === 0 ? rest : { ...rest, kept: next };
-    if (!doc.timeline.features.some(isFaceSketch)) return doc;
-    // Held placements, decided on the document with its kept shapes settled.
-    const now = await placed(doc);
-    let changed = false;
-    const sketches: Sketch[] = [];
-    for (const content of doc.sketches) {
-      const r = now[content.id];
-      if (content.face === undefined || r?.status !== "built") {
-        sketches.push(content);
-        continue;
+    const faces = doc.timeline.features.filter(isFaceSketch).length;
+    if (faces === 0) return doc;
+    // Held placements and followed points, decided on the document with its kept shapes settled, pass after pass on the
+    // design the last pass made, until nothing changes: a sketch held, or a point followed, moves what is built on it, so
+    // a sketch on that (and its points) is placed right only on the next pass (hunt 26g: one pass placed them on the
+    // body built at the held sketch's first-drawn frame). Each pass settles one more sketch of a chain, so at most one
+    // per face sketch, and a last to see nothing change.
+    for (let pass = 0; pass <= faces; pass++) {
+      const now = await placed(doc);
+      let changed = false;
+      const sketches: Sketch[] = [];
+      for (const content of doc.sketches) {
+        const r = now[content.id];
+        if (content.face === undefined || r?.status !== "built") {
+          sketches.push(content);
+          continue;
+        }
+        const { held, ...face } = content.face;
+        let keep = held;
+        if (r.plane === undefined) keep = undefined;
+        else if (held === undefined) keep = (await wasAt(content.id))?.plane;
+        changed ||= keep !== held;
+        const settled = keep === held ? content : { ...content, face: keep ? { ...face, held: keep } : face };
+        // Step 26f: each pinned point that found its edge goes where the edge is now; one that didn't stays where it was.
+        const followed = followedSketch(settled, r);
+        changed ||= followed !== settled;
+        sketches.push(followed);
       }
-      const { held, ...face } = content.face;
-      let keep = held;
-      if (r.plane === undefined) keep = undefined;
-      else if (held === undefined) keep = (await wasAt(content.id))?.plane;
-      changed ||= keep !== held;
-      const settled = keep === held ? content : { ...content, face: keep ? { ...face, held: keep } : face };
-      // Step 26f: each pinned point that found its edge goes where the edge is now; one that didn't stays where it was.
-      const followed = followedSketch(settled, r);
-      changed ||= followed !== settled;
-      sketches.push(followed);
+      if (!changed) return doc;
+      doc = { ...doc, sketches };
     }
-    return changed ? { ...doc, sketches } : doc;
+    return doc;
   } finally {
     if (cache === undefined) await bodies.clear();
     else await bodies.keepOnly(used);

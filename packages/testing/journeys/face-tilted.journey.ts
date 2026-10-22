@@ -19,6 +19,7 @@
 // seeds) is a fair failure and skipped; any other refusal fails. Planting a frame origin 1e-6 off
 // (frameNow's `dot(point, n)` times 1 + 1e-6) is caught at seed 2.
 // FISSION_TILTED_SEEDS (30) sets the seeds. Run with `npm run journeys`.
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { BodyView } from "@fission/core";
@@ -129,7 +130,15 @@ async function session(seed: number): Promise<string | null> {
         const [a, b] = [edited, doc].map((d) => d.sketches.find((x) => x.id === sk.id)?.points.find((x) => x.id === pin.point));
         if (a && b && (a.x !== b.x || a.y !== b.y)) bump("pin-moved");
       }
+      // Settled is settled: settling again from itself gives the same object.
+      if ((await settleKept(kernel, doc, doc)) !== doc) {
+        // Saved so it replays (FISSION_TILTED_OUT, a folder): the design before the edit and after it, unsettled.
+        if (process.env.FISSION_TILTED_OUT) writeFileSync(`${process.env.FISSION_TILTED_OUT}/tilted-seed-${seed}.json`, JSON.stringify({ before, after: edited }));
+        return `settling a settled design changed it after ${log.at(-1)}\n${log.join("\n")}`;
+      }
       const { b } = await sceneOf(doc, cache);
+      // Settled already, a failed item or not: following again changes nothing.
+      if (followedDoc(doc, b) !== doc) return `settling left pins to follow after ${log.at(-1)}\n${log.join("\n")}`;
       const failed = Object.entries(b.results).filter(([, x]) => x.status === "failed");
       if (failed.length > 0) {
         bump("failed");
@@ -140,8 +149,6 @@ async function session(seed: number): Promise<string | null> {
         if (msgs.some((m) => !/no closed outline|not a valid outline/i.test(m))) return `refused: ${msgs.join("; ")}\n${log.join("\n")}`;
         continue;
       }
-      // Settled already: following again changes nothing, now or after another build.
-      if (followedDoc(doc, b) !== doc) return `settling left pins to follow after ${log.at(-1)}\n${log.join("\n")}`;
       bump("fixed");
       const again = await sceneOf(doc, cache);
       if (followedDoc(doc, again.b) !== doc) return `following is not a fixed point after ${log.at(-1)}\n${log.join("\n")}`;
@@ -183,4 +190,22 @@ test("seeded chains of pinned sketches on slanted faces: only spoiled outlines r
   // Reached: pins on slanted faces, pins that moved with an edit, and corners checked.
   for (const k of ["pinned", "pin-moved", "fixed", "corner-on-corner"]) assert.ok((stats[k] ?? 0) > 0, `${k} reached (${JSON.stringify(stats)})`);
   assert.ok(stats["corner-on-corner"] >= 10 * N, `corners checked: ${stats["corner-on-corner"]}`);
+});
+
+const SAVED = new URL("../test/regressions/settle/", import.meta.url);
+
+test("saved: each edit a session found unsettled settles in one go (settled again, the same object; rebuilt, no pin to follow)", async () => {
+  const files = readdirSync(SAVED).filter((f) => f.endsWith(".json"));
+  assert.ok(files.length > 0);
+  for (const file of files) {
+    const { before, after } = JSON.parse(readFileSync(new URL(file, SAVED), "utf8")) as { before: DesignDocument; after: DesignDocument };
+    const once = await settleKept(kernel, before, after);
+    assert.equal(await settleKept(kernel, once, once), once, `${file}: settled again, it changed`);
+    const cache = new BodyCache(kernel);
+    try {
+      assert.equal(followedDoc(once, await rebuildTimeline(once, cache, kernel)), once, `${file}: rebuilt, a pinned point moved`);
+    } finally {
+      await cache.clear();
+    }
+  }
 });
