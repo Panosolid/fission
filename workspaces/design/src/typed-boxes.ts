@@ -34,6 +34,14 @@ export interface TypedBoxes {
   start(text: string): void;
   /** Empties every box (a point was placed, the tool changed, Escape); keeps the keys in the first box when `keepFocus` and a box had them. */
   clear(keepFocus?: boolean): void;
+  /** What each box shown holds, as typed. */
+  texts(): Partial<Record<TypedField, string>>;
+  /**
+   * Puts `texts` back in the boxes, as `texts` read them, while every box
+   * is still empty (an Enter that placed nothing gives back what it took);
+   * returns whether it did. Nothing typed since is ever overwritten.
+   */
+  restore(texts: Partial<Record<TypedField, string>>): boolean;
   hide(): void;
   readonly element: HTMLElement;
 }
@@ -172,6 +180,20 @@ export function typedBoxes(host: HTMLElement, on: TypedBoxEvents): TypedBoxes {
       }
       if (had && keepFocus && fields.length) boxes.get(fields[0])!.input.focus();
       else if (had) (document.activeElement as HTMLElement | null)?.blur();
+    },
+    texts() {
+      return Object.fromEntries(fields.map((f) => [f, boxes.get(f)!.input.value]));
+    },
+    restore(texts) {
+      if (fields.some((f) => boxes.get(f)!.input.value !== "")) return false;
+      const back = fields.filter((f) => (texts[f] ?? "") !== "");
+      if (back.length === 0) return false;
+      for (const f of back) {
+        boxes.get(f)!.input.value = texts[f]!;
+        mark(f);
+      }
+      on.locks(locks());
+      return true;
     },
     hide() {
       if (api.focused) (document.activeElement as HTMLElement | null)?.blur();

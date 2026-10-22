@@ -354,6 +354,29 @@ test("boxes: a new tool's fields replace the old and keep the keys; clear can ke
   assert.equal(input("width").value, "");
 });
 
+test("boxes: what Enter took is given back only into boxes still all empty (hunt 26h)", () => {
+  const { b, input, type, last } = boxes();
+  b.show(["length", "angle"], {}, 0, 0);
+  type("length", "12.5");
+  type("angle", "north");
+  const took = b.texts();
+  assert.deepEqual(took, { length: "12.5", angle: "north" }, "as typed, junk too");
+  b.clear(true);
+  assert.equal(b.restore(took), true);
+  assert.equal(input("length").value, "12.5");
+  assert.equal(input("angle").value, "north");
+  assert.deepEqual(last(), { length: 12.5 }, "the locks told again: the length locks, the junk angle doesn't");
+  // Something typed since in any box: nothing is put back, not even into the other box.
+  b.clear(true);
+  type("angle", "7");
+  assert.equal(b.restore(took), false);
+  assert.equal(input("length").value, "");
+  assert.equal(input("angle").value, "7");
+  // Nothing taken: nothing to give back.
+  b.clear(true);
+  assert.equal(b.restore({}), false);
+});
+
 test("only a digit, a point or a minus starts typing, through the one shortcut table", () => {
   for (const k of [..."0123456789", ".", "-"]) {
     const entry = DESIGN_SHORTCUTS.find((e) => parseChord(e.keys) === k);
