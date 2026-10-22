@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { BodySpec, BodyView, KernelCalls, Outline } from "@fission/core";
 import { lastFeature, partDocument, type DesignDocument } from "../src/document.ts";
 import { extrudeSketch, featureBuild } from "../src/extrude.ts";
-import { featureNames, nameBody, outlineCurves } from "../src/naming.ts";
+import { featureNames, nameBody, outlineCurves, pieceWays, twiceArea } from "../src/naming.ts";
 import { addSketch, deleteCurve, drawRectangle } from "../src/sketch.ts";
 import { BOX_VIEW, CYLINDER_VIEW } from "./views.ts";
 
@@ -141,4 +141,47 @@ test("regression (hunt 2026-10-21): an extrude built from its kept shape names i
   const n = featureNames(lastFeature(doc).id, built, extrudeView(4));
   // Piece k is the kept shape's line k, so the sides are lines 0..3 as drawn; the sketch's three lines now would name piece 0 by line 1.
   assert.deepEqual(n.faces.slice(2), lines.map((id) => `side:${id}`));
+});
+
+test("27b, hand-worked: twiceArea is twice the signed area a loop of corners and bulges encloses", () => {
+  // The square (0, 0), (2, 0), (2, 2), (0, 2) counter-clockwise: area 4, so 8; clockwise −8.
+  assert.equal(twiceArea({ corners: [0, 0, 2, 0, 2, 2, 0, 2], bulges: [] }), 8);
+  assert.equal(twiceArea({ corners: [0, 2, 2, 2, 2, 0, 0, 0], bulges: [] }), -8);
+  // A half disc of radius 5: the line (−5, 0) → (5, 0), then the arc on to (−5, 0) with bulge tan(π/4) = 1 (half a turn).
+  // Shoelace: (−5)(0) − (5)(0) + (5)(0) − (−5)(0) = 0. The arc: c = 10, r = 10 (1 + 1) / 4 = 5, σ = 4 atan(1) = π, so
+  // r² (σ − sin σ) = 25π: twice the half disc's area, 12.5π.
+  assert.ok(Math.abs(twiceArea({ corners: [-5, 0, 5, 0], bulges: [0, 1] }) - 25 * Math.PI) < 1e-12);
+  // The arc the other way (bulge −1, under the line): −25π.
+  assert.ok(Math.abs(twiceArea({ corners: [-5, 0, 5, 0], bulges: [0, -1] }) + 25 * Math.PI) < 1e-12);
+  // Two corners' shoelace is a × b + b × a, and the two rounded products cancel exactly however awkward the numbers, so a
+  // two-piece loop's sign is its arcs' alone (what naming.ts relies on): 0 to the bit with no arcs.
+  assert.ok(Object.is(twiceArea({ corners: [1e5 + 0.1, 0.7, -3.3, 1e5 / 3], bulges: [] }), 0));
+});
+
+test("27b, hand-worked: a corner between two sides is named by the ends of their curves, read off the kernel's order put right", () => {
+  // extrudeView(3): uprights at corner k are edges 6 + k, walked forwards by side k − 1 (the piece before) and backwards by side k.
+  const three: Outline = { outer: { path: { corners: [0, 0, 4, 0, 0, 3], bulges: [] } }, holes: [], pieces: [0, 1, 2].map((index) => ({ curve: "line" as const, index, reversed: false })) };
+  const curves = (_: number, p: number) => ["a", "b", "c"][p];
+  const n = nameBody("f", extrudeView(3), curves, pieceWays(three, false));
+  // Corner 0 is where line c (piece 2) ends and line a (piece 0) starts; corner 1 where a ends and b starts.
+  assert.deepEqual(n.ends!.slice(6), ["side:a@start+side:c@end", "side:a@end+side:b@start", "side:b@end+side:c@start"]);
+  assert.deepEqual(n.ends!.slice(0, 6), [null, null, null, null, null, null], "no ends for an edge on a cap");
+  // The kernel turned the loop round (every upright's faces the other way): read off the body, the corners are the same.
+  const turned = { ...extrudeView(3), edge_faces: extrudeView(3).edge_faces.map((p, e) => (e >= 6 ? ([p[1], p[0]] as [number, number]) : p)) } as BodyView;
+  assert.deepEqual(nameBody("f", turned, curves, pieceWays(three, false)).ends!.slice(6), n.ends!.slice(6));
+  // Every line run backwards: corner 0 is where c starts (run backwards it ends there) and a ends.
+  const back: Outline = { ...three, pieces: three.pieces!.map((p) => ({ ...p, reversed: true })) };
+  assert.deepEqual(nameBody("f", extrudeView(3), curves, pieceWays(back, false)).ends!.slice(6), ["side:a@end+side:c@start", "side:a@start+side:b@end", "side:b@start+side:c@end"]);
+  // No ways (a ready-made profile, or none given): no ends.
+  assert.equal(nameBody("f", extrudeView(3), curves).ends, undefined);
+  assert.equal(pieceWays({ ...three, pieces: undefined }, false), undefined);
+
+  // Two pieces, line L then arc A over it counter-clockwise (twice the area 25π > 0): extrudeView(2)'s upright at corner 0
+  // (edge 4) is walked forwards by side 1, A, ending there, and backwards by side 0, L, starting there; corner 1 (edge 5) the other
+  // way. The body can't say which order is the outline's (each pair meets at both corners), so the area and Flip do.
+  const half: Outline = { outer: { path: { corners: [-5, 0, 5, 0], bulges: [0, 1] } }, holes: [], pieces: [{ curve: "line", index: 0, reversed: false }, { curve: "arc", index: 0, reversed: false }] };
+  const two = (_: number, p: number) => ["L", "A"][p];
+  assert.deepEqual(nameBody("f", extrudeView(2), two, pieceWays(half, false)).ends!.slice(4), ["side:A@end+side:L@start", "side:A@start+side:L@end"]);
+  // Flipped, the kernel builds from the outline mirrored and turns it round: the same order on the body reads the other way.
+  assert.deepEqual(nameBody("f", extrudeView(2), two, pieceWays(half, true)).ends!.slice(4), ["side:A@start+side:L@end", "side:A@end+side:L@start"]);
 });

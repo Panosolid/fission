@@ -4,7 +4,7 @@ import { NO_HIGHLIGHT, triangleColours, type AnalysisOverlay, type DisplayMesh, 
 import { clientToNdc, edgeOfSegment, faceOfTriangle, isClick, ndcToClient, planeOrFace, segmentsNear, unhidden } from "./picking.ts";
 import { fitDistance, orbitSafeOffset, planeViewBasis, viewBasis, type ViewName } from "./views.ts";
 import { ViewCube } from "./viewcube.ts";
-import { lookAtFraming, selectionFraming } from "./framing.ts";
+import { lookAtFraming, partFraming, selectionFraming } from "./framing.ts";
 import { checkTextureSize, imageSheet, imageZoomRange, topDownDistance } from "./image-sheet.ts";
 import { pixelSize, rayOnPlane, sketchGrid, toWorld } from "./sketch-view.ts";
 import { clampZoom, cubeDragAngles, dragAction, orbitBy, dragZoomFactor, panBy, wheelFactor, zoomAt, type CameraPose, type NavMode } from "./navigation.ts";
@@ -28,6 +28,8 @@ interface ViewHost {
   pick(pick: ViewportPick): void;
   setHover(face: number | null, edge: number | null): void;
   bodyFraming(): Framing;
+  /** The body and the finished sketches drawn: what Fit and the standard views frame. */
+  fitFraming(): Framing;
   /** The plane of the sketch being edited, while a workspace listens to the pointer on it; else null. */
   sketchPlane(): Plane | null;
   /** Which way the edited sketch faces against its plane's normal (SketchDrawing.side), for Look At. */
@@ -415,7 +417,7 @@ export class ViewportView {
   /** Turns this view's camera to a standard view, framing the current body; while this view shows an image every view frames it from above. Returns what it framed (null if none). */
   setView(name: ViewName): Framing | null {
     if (this.image) return this.frameImage();
-    const framing = this.host.bodyFraming();
+    const framing = this.host.fitFraming();
     if (!(framing.radius > 0)) return null;
     const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
     this.place(position, target, up);
@@ -671,6 +673,8 @@ export class Viewer implements SharedViewport {
   private minorMaterial: THREE.LineBasicMaterial | null = null;
   /** The edited sketch's ends in model space, for Look At. */
   private editedWorld: number[][] = [];
+  /** Every finished sketch's line ends in world space (lost ones too), framed with the body by Fit (fitFraming). */
+  private finishedWorld: number[][] = [];
   /** The sketches drawn (showSketches) and the plane of the one being edited. */
   private sketches = new THREE.Group();
   private editedPlane: Plane | null = null;
@@ -711,6 +715,7 @@ export class Viewer implements SharedViewport {
       pick: (pick) => this.picker?.(pick),
       setHover: (face, edge) => this.setHover(face, edge),
       bodyFraming: () => this.bodyFraming(),
+      fitFraming: () => this.fitFraming(),
       sketchPlane: () => (this.sketchHandler ? this.editedPlane : null),
       sketchSide: () => this.editedSide,
       sketchPointer: (pointer) => this.sketchHandler?.(pointer),
@@ -822,6 +827,7 @@ export class Viewer implements SharedViewport {
     this.editedSide = 1;
     this.gridFor = null;
     this.editedWorld = [];
+    this.finishedWorld = [];
     let lines = 0;
     let lost = 0;
     for (const d of drawings) {
@@ -837,6 +843,7 @@ export class Viewer implements SharedViewport {
       };
       lines += d.lines.length;
       if (!d.editing) {
+        this.finishedWorld.push(...d.lines.flatMap(([a, b]) => [at(a), at(b)]));
         // 26e: a sketch whose plane is lost red, where it stays.
         if (d.lost) segments(d.lines, SKETCH_COLOURS.lost, LOST_SKETCH_ORDER);
         else segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
@@ -1058,10 +1065,23 @@ export class Viewer implements SharedViewport {
 
   /** Sphere around the current body's bounding box (radius 0 if none). */
   bodyFraming(): Framing {
+    return partFraming(this.bodyCorners());
+  }
+
+  /**
+   * Sphere around the current body and the finished sketches drawn, lost
+   * ones too (partFraming; radius 0 if none): what Fit and the standard
+   * views frame, so a sketch whose face went is never left out of view
+   * (hunt 26h). Not what a change must keep in view (bodyFraming): finishing
+   * a sketch never moves the camera.
+   */
+  fitFraming(): Framing {
+    return partFraming([...this.bodyCorners(), ...this.finishedWorld]);
+  }
+
+  private bodyCorners(): number[][] {
     const box = new THREE.Box3().setFromObject(this.body);
-    if (box.isEmpty()) return { centre: [0, 0, 0], radius: 0 };
-    const c = box.getCenter(new THREE.Vector3());
-    return { centre: [c.x, c.y, c.z], radius: box.getSize(new THREE.Vector3()).length() / 2 };
+    return box.isEmpty() ? [] : [box.min.toArray(), box.max.toArray()];
   }
 
   /** Frames the current body from the home view in the main view; returns what it framed (null if none). */

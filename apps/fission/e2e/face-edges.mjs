@@ -11,11 +11,16 @@
 // face-sketch.mjs does. 1280 px with a mouse (hover, then click) and
 // 375 px with taps (the tap itself snaps; the circle is probed after the
 // sketch is finished and opened again, which clears the tap's marks in
-// every engine). Screenshots go to E2E_SHOTS
-// when set. Run with `npm run e2e` (after `npm run build`); Firefox and
+// every engine). Step 27b: a half disc (a file opened, its line (50, 0)
+// to (70, 0) and the arc over it round (60, 0), extruded 10) has both
+// its top corners offered, "edge endpoint 70,0" and "edge endpoint 50,0"
+// (26f offered neither: they shared a name), each with a circle centred
+// there and pinned; saved, its radius made 14 in the file and opened
+// again, the circles are centred on (74, 0) and (46, 0), each on its own
+// corner. Screenshots go to E2E_SHOTS when set. Run with `npm run e2e` (after `npm run build`); Firefox and
 // WebKit in CI (`e2e:engines`).
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { launch } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
@@ -138,9 +143,12 @@ async function finish(page, tap) {
   await press(page, "#finish-sketch", tap);
   await until(page, () => document.querySelector("#viewport").dataset.sketching !== "true", null, "the sketch finished");
 }
-/** Sketch 1 opened again from its timeline row (a double click, or two taps), the camera still. */
-async function reopen(page, tap) {
-  const item = page.locator('#timeline [data-item="sketch-2"]');
+/** Sketch 1 (or the sketch `id`) opened again from its timeline row (a double click, or two taps), the camera still. */
+async function reopen(page, tap, id = "sketch-2") {
+  // The rebuild done and a frame drawn first: the timeline is drawn again with new elements when a rebuild comes back (0.26.11).
+  await until(page, () => document.querySelector("#viewport").dataset.rebuilding !== "true", null, "rebuilt");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const item = page.locator(`#timeline [data-item="${id}"]`);
   await item.scrollIntoViewIfNeeded();
   if (tap) {
     const b = await item.boundingBox();
@@ -151,9 +159,9 @@ async function reopen(page, tap) {
   await settle(page);
 }
 /** A tap's marks gone with the sketch: finished, opened again, nothing marked (the circle is drawn blue only while open). */
-async function closeAndReopen(page) {
+async function closeAndReopen(page, id = "sketch-2") {
   await finish(page, true);
-  await reopen(page, true);
+  await reopen(page, true, id);
   await unmarked(page);
 }
 /** The canvas colours in the 3 × 3 square round the world point `p`, for a failure's message. */
@@ -197,6 +205,18 @@ async function settle(page) {
   }
   throw new Error("the camera never settled");
 }
+
+/** Feature 1, the 40 × 30 × 20 box; Sketch 1 on XY, the line (50, 0) → (70, 0) and the arc from (70, 0) counter-clockwise round (60, 0) back; Extrude 1 by 10. */
+/** The project saved (Save, behind Menu at 375 px), as JSON. */
+async function saveFile(page, tap) {
+  if (!(await page.isVisible("#save"))) await press(page, "#menu-toggle", tap);
+  const [download] = await Promise.all([page.waitForEvent("download"), press(page, "#save", tap)]);
+  return JSON.parse(readFileSync(await download.path(), "utf8"));
+}
+/** Waits for the part's volume to read like `pattern`, saying what it read on failure. */
+const volumeLike = (page, pattern, what) =>
+  until(page, (p) => new RegExp(p).test(document.querySelector("#volume")?.textContent ?? ""), pattern.source, what).catch(async (e) => assert.fail(`${e.message} (volume: "${await page.textContent("#volume")}")`));
+const HALF_DISC = {"version":3,"nextId":9,"profiles":[],"sketches":[{"id":"sketch-2","points":[{"id":"point-3","x":50,"y":0},{"id":"point-4","x":70,"y":0},{"id":"point-6","x":60,"y":0}],"curves":[{"id":"line-5","kind":"line","start":"point-3","end":"point-4"},{"id":"arc-7","kind":"arc","start":"point-4","end":"point-3","centre":"point-6"}],"constraints":[]}],"timeline":{"features":[{"id":"feature-1","intent":{"type":"box","parameters":{"width":40,"depth":30,"height":20},"summary":"Box: 40 × 30 × 20 mm"},"provenance":{"self":{"workspace":"design","id":"feature-1","label":"Feature 1 (box)"},"from":[]},"dependsOn":[],"suppressed":false},{"id":"sketch-2","intent":{"type":"sketch","parameters":{"plane":"XY"},"summary":"Sketch 1 on the XY plane"},"provenance":{"self":{"workspace":"design","id":"sketch-2","label":"Sketch 1"},"from":[]},"dependsOn":[],"suppressed":false},{"id":"feature-8","intent":{"type":"extrude","parameters":{"sketch":"sketch-2","distance":10},"summary":"Extrude Sketch 1 by 10 mm"},"provenance":{"self":{"workspace":"design","id":"feature-8","label":"Extrude 1"},"from":[{"workspace":"design","id":"sketch-2","label":"Sketch 1"}]},"dependsOn":["sketch-2"],"suppressed":false}]}};
 
 let failed = 0;
 async function check(name, fn) {
@@ -261,6 +281,60 @@ try {
       const img = await canvasImage(page);
       for (const p of [[43, 34, 20], [37, 26, 20]]) assert.equal(await lineNear(page, img, p), false, `no rim left at [${p}]`);
       await shot(page, `face-edges-followed-${width}`);
+      await page.context().close();
+    });
+  }
+  for (const [width, tap] of [[1280, false], [375, true]]) {
+    await check(`${width} px${tap ? " with taps" : ""}: a half disc's two top corners are both offered and each pinned, and each circle follows its own corner when the radius is made 14 (27b)`, async () => {
+      const page = await fresh(width, tap);
+      const project = await saveFile(page, tap);
+      project.workspaces.design = structuredClone(HALF_DISC);
+      const open = (p) => page.setInputFiles("#open-file", { name: "half-disc.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(p)) });
+      await open(project);
+      // The part is the half disc, its volume worked from the exact body: ½ π 10² · 10 = 500π = 1,570.796327 mm³.
+      await volumeLike(page, /^1,570\.796327 mm³$/, "the half disc");
+      await press(page, '[data-view="top"]', tap);
+      await settle(page);
+      await press(page, "#create-sketch", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.planes === "XY, XZ, YZ", null, "planes offered");
+      // The half disc's top, z = 10, well inside it.
+      await at(page, [60, 4, 10], tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching on the half disc's top");
+      await settle(page);
+      await press(page, "#sketch-tool-circle", tap);
+      const half = 5 * (await mmPerPixel(page));
+      // Half a snap reach inside each corner, up the arc's side: Q (70, 0) then P (50, 0), each shown as its own corner.
+      for (const [x, inward] of [[70, -1], [50, 1]]) {
+        const near = [x + inward * half * 0.6, half * 0.8, 10];
+        if (!tap) {
+          await hover(page, near);
+          await shown(page, "sketchSnap", `edge endpoint ${x},0`);
+          if (x === 70) await shot(page, `half-disc-corner-snap-${width}`);
+        }
+        await at(page, near, tap);
+        await until(page, (w) => (document.querySelector("#viewport").dataset.sketchPoints ?? "").endsWith(w), `${x},0`, `a centre on (${x}, 0)`);
+        // The rim through (x, −3): below the half disc, clear of its corners' snaps. Drawn once the click has landed (the kernel
+        // may answer late, E2E_KERNEL_DELAY): more lines drawn than before it (a finished circle's), recorded as Draw circle.
+        const lines = Number(await data(page, "sketchLines"));
+        await at(page, [x, -3, 10], tap);
+        await until(page, (n) => Number(document.querySelector("#viewport").dataset.sketchLines) > n && document.querySelector("#undo").title.startsWith("Undo Draw circle"), lines, "the circle drawn");
+      }
+      assert.equal(await data(page, "sketchPoints"), "70,0 50,0");
+      await (tap ? closeAndReopen(page, "sketch-9") : pointerAway(page));
+      await shot(page, `half-disc-circles-${width}`);
+      await finish(page, tap);
+      // Saved (both pins in it), the half disc made radius 14 in the file: P to (46, 0), Q to (74, 0), the centre at (60, 0).
+      const file = await saveFile(page, tap);
+      const design = file.workspaces.design;
+      const pins = design.sketches.find((x) => x.id === "sketch-9").pins;
+      assert.equal(pins.length, 2, `both centres pinned: ${JSON.stringify(design.sketches.find((x) => x.id === "sketch-9"))}`);
+      assert.notEqual(pins[0].name, pins[1].name, "each to a corner of its own");
+      for (const pt of design.sketches.find((x) => x.id === "sketch-2").points) if (pt.y === 0 && pt.x !== 60) pt.x = pt.x < 60 ? 46 : 74;
+      await open(file);
+      await volumeLike(page, /^3,078\.760801 mm³$/, "the half disc of radius 14: ½ π 14² · 10 = 980π = 3,078.760801 mm³");
+      await reopen(page, tap, "sketch-9");
+      assert.equal(await data(page, "sketchPoints"), "74,0 46,0", "each centre followed its own corner");
+      await shot(page, `half-disc-followed-${width}`);
       await page.context().close();
     });
   }

@@ -48,6 +48,9 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
   let mesh: DisplayMesh | null = null;
   let highlight: ViewportHighlight = { body: false, faces: [], edges: [] };
   let builds = 0;
+  /** While held (`hold`), every kernel call waits here until `release` (a slow kernel, as on a busy phone). */
+  let gate: Promise<void> | null = null;
+  let open = () => {};
   // What Create sketch offered (step 26d), each Look At asked for, and the sketches last drawn.
   let planes: { planes: readonly OriginPlane[]; faces: readonly number[] } = { planes: [], faces: [] };
   const looks: { plane: Plane; side: 1 | -1 }[] = [];
@@ -55,7 +58,8 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
   const counted: KernelCalls = {
     call: ((op: string, ...args: unknown[]) => {
       if (op === "body_build") builds++;
-      return (kernel.call as (op: string, ...a: unknown[]) => Promise<unknown>)(op, ...args);
+      const call = () => (kernel.call as (op: string, ...a: unknown[]) => Promise<unknown>)(op, ...args);
+      return gate ? gate.then(call) : call();
     }) as KernelCalls["call"],
   };
   const element = slot();
@@ -199,6 +203,20 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
     },
     async key(id: string) {
       view.shortcut?.(id);
+      await settle();
+    },
+    /** Shortcut `id` as the shell runs it, not waited for (with the kernel held, nothing it asks is answered yet). */
+    press(id: string) {
+      view.shortcut?.(id);
+    },
+    /** Holds every kernel call from now on until `release`: what the app does meanwhile is what a user sees while a slow kernel looks. */
+    hold() {
+      gate ??= new Promise<void>((r) => (open = r));
+    },
+    /** Lets every held kernel call go, and the ones after it, then waits for them all. */
+    async release() {
+      gate = null;
+      open();
       await settle();
     },
     /** Another workspace shown, then Design again (X7: asleep, then woken). */

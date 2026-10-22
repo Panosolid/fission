@@ -1,0 +1,56 @@
+{
+ "subject": "design",
+ "seed": "2550",
+ "cuts": false,
+ "setup": {
+  "corners": [
+   [
+    -30,
+    17
+   ],
+   [
+    22,
+    17
+   ],
+   [
+    22,
+    61
+   ],
+   [
+    -30,
+    61
+   ]
+  ],
+  "distance": 39,
+  "cap": "start",
+  "centre": [
+   -30,
+   61
+  ],
+  "radius": 3,
+  "depth": 37,
+  "pin": {
+   "at": "corner",
+   "before": "line-3",
+   "after": "line-4"
+  }
+ },
+ "steps": [
+  {
+   "op": "move-corner",
+   "corner": 0.2512681497474849,
+   "to": [
+    -36,
+    -2
+   ]
+  },
+  {
+   "op": "move-corner",
+   "corner": 0.6498645948110868,
+   "to": [
+    -47,
+    46
+   ]
+  }
+ ]
+}

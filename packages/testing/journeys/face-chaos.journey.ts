@@ -27,7 +27,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { emptyProject, projectFromJson, projectToJson, type DisplayMesh, type Plane, type SketchDrawing } from "@fission/core";
-import { addSketch, designWorkspace, drawRectangle, extrudeSketch, partDocument, settleKept, type DesignDocument } from "@fission/design";
+import { addSketch, designWorkspace, drawLine, drawRectangle, extrudeSketch, partDocument, settleKept, type DesignDocument } from "@fission/design";
 import { app, close, kernel } from "./design-app.ts";
 
 const SEEDS = Number(process.env.FISSION_SESSIONS ?? 6);
@@ -48,17 +48,32 @@ function rng(seed: number): () => number {
 }
 
 /**
- * The start of a session: a 40 × 30 × 20 box, and on odd seeds a 40 × 30
- * rectangle at x 100 to 140 extruded 20 after it (then the part the panel
- * edits; on even seeds the box is, and stays: those sessions extrude
- * nothing, so the shape buttons change the box whose faces sketches are
- * on, losing them, after Edit feature and typed sizes have moved them).
+ * The start of a session: a 40 × 30 × 20 box, and on odd seeds a body
+ * extruded 20 after it at x 100 on (then the part the panel edits; on even
+ * seeds the box is, and stays: those sessions extrude nothing, so the shape
+ * buttons change the box whose faces sketches are on, losing them, after
+ * Edit feature and typed sizes have moved them). The odd seeds' body (26h's
+ * nasty faces) by seed mod 10: 1, a 40 × 30 rectangle; 3, a 1 µm square
+ * extruded 1 µm (faces the kernel's smallest piece across); 5, a 998 m by
+ * 30 mm rectangle (faces near the kernel's largest size); 7, a sliver,
+ * 40 mm by 1 µm; 9, a right triangle whose long side faces exactly 45°
+ * between the XZ and YZ planes (the frame rule's tie).
  */
 export function start(seed = 1): DesignDocument {
   const box = partDocument("box", 40, 30, 20);
   if (seed % 2 === 0) return box;
   const made = addSketch(box);
-  return extrudeSketch(drawRectangle(made.doc, made.id, [100, 0], [140, 30]).doc, made.id, 20).doc;
+  const kind = seed % 10;
+  if (kind === 9) {
+    let doc = drawLine(made.doc, made.id, [100, 0], [140, 0]).doc;
+    let pts = doc.sketches.at(-1)!.points;
+    doc = drawLine(doc, made.id, pts[1].id, [100, 40]).doc;
+    pts = doc.sketches.at(-1)!.points;
+    return extrudeSketch(drawLine(doc, made.id, pts[2].id, pts[0].id).doc, made.id, 20).doc;
+  }
+  const [from, to, height]: [[number, number], [number, number], number] =
+    kind === 3 ? [[100, 0], [100.001, 0.001], 0.001] : kind === 5 ? [[-499000, 100], [499000, 130], 20] : kind === 7 ? [[100, 0], [140, 0.001], 20] : [[100, 0], [140, 30], 20];
+  return extrudeSketch(drawRectangle(made.doc, made.id, from, to).doc, made.id, height).doc;
 }
 
 /** JSON with every object's keys sorted: the file writer sorts them, so their order is no change. */

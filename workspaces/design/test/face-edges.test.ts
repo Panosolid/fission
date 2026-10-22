@@ -90,22 +90,66 @@ test("hand-worked: a pin is found by name where its corner is now, and is lost o
   // A name the body hasn't got: lost; a line's edge asked for its centre: lost.
   assert.deepEqual(pinNow({ ...corner, name: "back+left&back+top&right+top" }, wider.view, wider.names, TOP), { cause: "point-lost" });
   assert.deepEqual(pinNow({ point: "p", kind: "centre", name: "right+top" }, wider.view, wider.names, TOP), { cause: "point-lost" });
-  // Two vertices with one name (two curves meeting at both ends, a half disc): ambiguous, so never one of them.
-  const lens = {
-    vertex_points: [[10, 0, 5], [-10, 0, 5]],
-    edge_vertices: [[0, 1], [1, 0], [0, 0], [1, 1]],
-    edge_faces: [[1, 2], [1, 3], [2, 3], [3, 2]],
-    edge_middles: [[0, 0, 5], [0, 10, 5], [10, 0, 2.5], [-10, 0, 2.5]],
-    edge_centres: [null, [0, 0, 5], null, null],
-  } as unknown as BodyView;
-  // Hand-named: the end cap's edges along the line and the arc, and the two uprights between the sides, one each way.
-  const lensNames = { feature: "feature-2", faces: [], edges: ["end+side:line-1", "end+side:arc-2", "side:line-1>side:arc-2", "side:arc-2>side:line-1"], shared: { faces: new Map(), edges: new Map() } };
-  const v = vertexNames(lens, lensNames);
-  assert.deepEqual(v.vertices, [null, null]);
-  assert.deepEqual([...v.shared], [["end+side:arc-2&end+side:line-1&side:arc-2+side:line-1", 2]]);
-  assert.deepEqual(pinNow({ point: "p", kind: "endpoint", name: "end+side:arc-2&end+side:line-1&side:arc-2+side:line-1" }, lens, lensNames, TOP), { cause: "point-ambiguous" });
-  // An arc's middle and centre are offered; its ends are not, the corners being unnamed.
-  assert.deepEqual(at(faceEdgeTargets(lens, lensNames, 1, plane([0, 0, 5], [1, 0, 0], [0, 0, 1]))), ["midpoint 0,0 end+side:line-1", "midpoint 0,10 end+side:arc-2", "centre 0,0 end+side:arc-2"]);
+  // Two vertices with one name: ambiguous, so never one of them (a body built by hand, below).
+  const twins = { ...lensNames, ends: undefined };
+  assert.deepEqual(vertexNames(lens, twins).vertices, [null, null, null, null]);
+  assert.deepEqual([...vertexNames(lens, twins).shared], [[OLD_LENS, 2], ["side:arc-2+side:line-1", 2]]);
+  assert.deepEqual(pinNow({ point: "p", kind: "endpoint", name: OLD_LENS }, lens, twins, TOP), { cause: "point-ambiguous" });
+  assert.deepEqual(at(faceEdgeTargets(lens, twins, 1, plane([0, 0, 5], [1, 0, 0], [0, 0, 1]))), ["midpoint 0,0 end+side:line-1", "midpoint 0,10 end+side:arc-2", "centre 0,0 end+side:arc-2"]);
+});
+
+// A half disc's end cap, by hand: the line from (−10, 0) to (10, 0), the arc from (10, 0) counter-clockwise over (0, 10) back.
+// Vertex 0 is (10, 0, 5), vertex 1 (−10, 0, 5), vertices 2 and 3 below them at z = 0; edges 0 and 1 the cap's along the line and
+// the arc; edges 2 and 3 the uprights up to vertex 0 and vertex 1 (the start cap left out). Two curves meeting at both ends: the
+// cap's edges are the same pair at both.
+const lens = {
+  vertex_points: [[10, 0, 5], [-10, 0, 5], [10, 0, 0], [-10, 0, 0]],
+  edge_vertices: [[0, 1], [1, 0], [2, 0], [3, 1]],
+  edge_faces: [[1, 2], [1, 3], [2, 3], [3, 2]],
+  edge_middles: [[0, 0, 5], [0, 10, 5], [10, 0, 2.5], [-10, 0, 2.5]],
+  edge_centres: [null, [0, 0, 5], null, null],
+} as unknown as BodyView;
+// Hand-named: the uprights by naming.ts's order ("A>B", the way round the outline goes) and by which ends of the curves meet there
+// (27b `ends`): at (10, 0) the line ends and the arc starts, at (−10, 0) the arc ends and the line starts.
+const lensNames = {
+  feature: "feature-2",
+  faces: [],
+  edges: ["end+side:line-1", "end+side:arc-2", "side:line-1>side:arc-2", "side:arc-2>side:line-1"],
+  ends: [null, null, "side:arc-2@start+side:line-1@end", "side:arc-2@end+side:line-1@start"],
+  shared: { faces: new Map(), edges: new Map() },
+};
+/** Both corners' name as 26f gave it, the uprights' order left out, so the two shared it (files from 0.26). */
+const OLD_LENS = "end+side:arc-2&end+side:line-1&side:arc-2+side:line-1";
+
+test("27b, hand-worked: a half disc's two corners each have a name, by the ends of the curves meeting there, both offered and found", () => {
+  // Each corner: its three edges' names sorted ("end+side:arc-2" < "end+side:line-1" < "side:…") and joined by "&".
+  const Q = "end+side:arc-2&end+side:line-1&side:arc-2@start+side:line-1@end";
+  const P = "end+side:arc-2&end+side:line-1&side:arc-2@end+side:line-1@start";
+  const { vertices, shared } = vertexNames(lens, lensNames);
+  // Below them only the uprights meet (the start cap's edges left out here).
+  assert.deepEqual(vertices, [Q, P, "side:arc-2@start+side:line-1@end", "side:arc-2@end+side:line-1@start"]);
+  assert.equal(shared.size, 0);
+  // Both corners offered, (10, 0) first (edge 0 runs from it), then the line's middle, P, the arc's middle and its centre.
+  assert.deepEqual(at(faceEdgeTargets(lens, lensNames, 1, plane([0, 0, 5], [1, 0, 0], [0, 0, 1]))), [
+    `endpoint 10,0 ${Q}`,
+    `endpoint -10,0 ${P}`,
+    "midpoint 0,0 end+side:line-1",
+    "midpoint 0,10 end+side:arc-2",
+    "centre 0,0 end+side:arc-2",
+  ]);
+  // Each pin found at its own corner, never the other's.
+  assert.deepEqual(pinNow({ point: "q", kind: "endpoint", name: Q }, lens, lensNames, TOP), { at: [10, 0] });
+  assert.deepEqual(pinNow({ point: "p", kind: "endpoint", name: P }, lens, lensNames, TOP), { at: [-10, 0] });
+  // The uprights' middles, as a sketch on the flat side would pin them, by the same ends: (10, 0, 2.5) and (−10, 0, 2.5).
+  assert.deepEqual(pinNow({ point: "m", kind: "midpoint", name: "side:arc-2@start+side:line-1@end" }, lens, lensNames, TOP), { at: [10, 0] });
+  assert.deepEqual(pinNow({ point: "m", kind: "midpoint", name: "side:arc-2@end+side:line-1@start" }, lens, lensNames, TOP), { at: [-10, 0] });
+  // A 26h pin on an upright's middle, named in order, is still found by that name.
+  assert.deepEqual(pinNow({ point: "m", kind: "midpoint", name: "side:arc-2>side:line-1" }, lens, lensNames, TOP), { at: [-10, 0] });
+  // A corner's name from 0.26 is both corners' 26f name, so it stays ambiguous, never one of them.
+  assert.deepEqual(pinNow({ point: "p", kind: "endpoint", name: OLD_LENS }, lens, lensNames, TOP), { cause: "point-ambiguous" });
+  // Ends naming a corner the body hasn't got (the line ending at both): lost.
+  assert.deepEqual(pinNow({ point: "p", kind: "endpoint", name: "end+side:arc-2&end+side:line-1&side:arc-2@end+side:line-1@end" }, lens, lensNames, TOP), { cause: "point-lost" });
+  assert.deepEqual(pinNow({ point: "m", kind: "midpoint", name: "side:arc-2@end+side:line-1@end" }, lens, lensNames, TOP), { cause: "point-lost" });
 });
 
 test("hunt 26g, hand-worked: a point in a slanted frame, and −0 never out of either coordinate", () => {
@@ -156,6 +200,24 @@ test("hunt 26g: a pin whose name is not found is lost, or ambiguous when its edg
   // A cylinder's rim's centre: on the axis, (0, 0) in the top's frame.
   const cyl = cylinderView(5, 10);
   assert.deepEqual(pinNow({ point: "p", kind: "centre", name: "side+top" }, cyl, nameBody("feature-1", cyl, () => null), TOP), { at: [0, 0] });
+});
+
+test("hunt 26h: a middle's pin between two sides ('A>B') is found the other way round ('B>A') only when its own name finds nothing, and is ambiguous when that is two edges'", () => {
+  // The box's edge between the front and right, renamed as two sides' edge "side:f>side:r", its middle at
+  // (40, 0, 10): (40, 0) through the top's frame.
+  const { view, names } = box();
+  const e = names.edges.indexOf("front+right");
+  const sides = (name: string) => ({ ...names, edges: names.edges.map((n, i) => (i === e ? name : n)) });
+  const pin = (name: string, kind: "midpoint" | "centre" = "midpoint") => ({ point: "p", kind, name });
+  assert.deepEqual(pinNow(pin("side:f>side:r"), view, sides("side:f>side:r"), TOP), { at: [40, 0] }, "by its name");
+  assert.deepEqual(pinNow(pin("side:r>side:f"), view, sides("side:f>side:r"), TOP), { at: [40, 0] }, "the outline turned over: the other way round");
+  // A set ("+") is never turned round, and neither is a centre's pin.
+  assert.deepEqual(pinNow(pin("right+front"), view, names, TOP), { cause: "point-lost" });
+  assert.deepEqual(pinNow(pin("side:r>side:f", "centre"), view, sides("side:f>side:r"), TOP), { cause: "point-lost" });
+  // Gone both ways round, and "side:f>side:r" now two edges' name: ambiguous, never one of them.
+  const two = { ...sides("x"), shared: { faces: names.shared.faces, edges: new Map([["side:f>side:r", 2]]) } };
+  assert.deepEqual(pinNow(pin("side:r>side:f"), view, two, TOP), { cause: "point-ambiguous" });
+  assert.deepEqual(pinNow(pin("side:r>side:f"), view, { ...two, shared: names.shared }, TOP), { cause: "point-lost" });
 });
 
 test("hunt 26g: the targets a sketch is offered come from its own face on the bodies shown, and none for an origin plane, no scene, no frame or a face not found", () => {

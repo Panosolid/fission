@@ -449,6 +449,25 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(`Change shape to ${SHAPE_LABELS[kind] ?? kind}`);
   }
 
+  /** Why the panel's sizes for `kind` can't be taken (the first shown box that isn't more than 0 mm), or null. */
+  function refusedSize(kind: PartKind): string | null {
+    for (const r of parameterRows(kind)) {
+      if (!r.shown) continue;
+      const text = inputs[SIZE_KEYS.indexOf(r.key)].value;
+      const label = kind === "sketch-extrude" ? "distance" : r.label.toLowerCase();
+      const v = Number(text);
+      if (text.trim() === "" || !Number.isFinite(v)) return `Type the ${label} in mm.`;
+      if (v <= 0) return `The ${label} must be more than 0 mm.`;
+    }
+    return null;
+  }
+  /** Leaving a size box whose text was refused: the size the design last took comes back, and the words go. */
+  function restoreRefused(i: number) {
+    if (saved === null || refusedSize(shape) === null) return;
+    inputs[i].value = saved.sizes[i];
+    if (refusedSize(shape) === null) panel.showError("");
+  }
+
   /**
    * Builds the part from the panel, or makes `next` the document (an
    * extrude); `label` and `mergeKey` name the undo step when this is a
@@ -456,10 +475,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   async function update(label?: string, mergeKey?: string, next?: DesignDocument) {
     const kind = shape;
-    // A size no file can hold ("Infinity" where the box takes it as typed) is refused, as Edit feature refuses it: the
-    // design keeps its last sizes (hunt 26g: it took the size, its undo step couldn't be saved, and nothing said so).
-    const bad = next === undefined && loaded === undefined ? parameterRows(kind).find((r) => r.shown && !Number.isFinite(Number(inputs[SIZE_KEYS.indexOf(r.key)].value))) : undefined;
-    if (bad) return panel.showError(`Type the ${kind === "sketch-extrude" ? "distance" : bad.label.toLowerCase()} in mm.`);
+    // A size typed in the panel that isn't one is refused there, and the design keeps its last sizes: no number, or one
+    // no file can hold ("Infinity" where the box takes it as typed; hunt 26g: it took the size, its undo step couldn't
+    // be saved, and nothing said so), and an empty box, 0 or below (Ben's Fusion answer 8: -5 and 0 are not accepted;
+    // hunt 26h: they went to the kernel and the failed part was recorded and saved). Leaving the box puts the last
+    // size back (`restoreRefused`). The kernel judges the rest (under 0.001 mm, over its largest size).
+    if (next === undefined && loaded === undefined) {
+      const refused = refusedSize(kind);
+      if (refused !== null) return panel.showError(refused);
+    }
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
     // The panel edits the part's one solid feature, keeping the sketches; the
@@ -1164,6 +1188,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   };
   /** The pointer's moves counted, the pointer leaving the view among them: a move's rounding answered after a later move is dropped, so it never shows a snap where the pointer was. */
   let moves = 0;
+  /** The last hover the kernel has answered (its move's count, where the pointer was, rounded, its pixel); null once the pointer left the view. */
+  let hovered: { move: number; at: SketchXY; rounded: SketchXY; pixel: number | undefined } | null = null;
+  /**
+   * The pointer's last move since the last click (its count, where it was, its pixel, and the kernel's rounding of it
+   * on the way), or null: an Enter places from where the pointer was as Enter was pressed, once that move is rounded.
+   */
+  let lastMove: { at: SketchXY; pixel: number | undefined; rounded: Promise<SketchXY> } | null = null;
   /** Clicks are handled one after another, each on the document the last one left. */
   let clicks = Promise.resolve();
   const onSketchPointer = (pointer: SketchPointer) => {
@@ -1173,13 +1204,17 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const move = ++moves;
       if (!at) {
         mode.pointer = mode.snap = null;
+        hovered = lastMove = null;
         return drawSketches();
       }
       // The centre arc follows which way the pointer goes round its centre, from every move (a reply the kernel drops as stale must not lose a turn).
       mode.tool = hoverTool(mode.tool, at);
       // A hover off the modelling range just doesn't move the preview.
-      void roundPointer(at, mode.grid, pointer.pixel).then((value) => {
+      const rounded = roundPointer(at, mode.grid, pointer.pixel);
+      lastMove = { at, pixel: pointer.pixel, rounded };
+      void rounded.then((value) => {
         if (move !== moves || mode.kind !== "edit") return;
+        hovered = { move, at, rounded: value, pixel: pointer.pixel };
         mode.snap = snapOnSketch(designDoc(), mode.tool, at, value, pointer.pixel, edgeTargets(mode.tool.sketch));
         mode.pointer = mode.snap.at;
         mode.pixel = pointer.pixel;
@@ -1189,6 +1224,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     }
     if (!at) return;
     const changes = toolChanges;
+    // What is typed as the click is made (hunt 26h): the kernel may answer after more is typed, which is for the next point.
+    const took = locks;
+    const movedAt = moves;
+    lastMove = null; // an Enter from now on places from this click's point, or from a hover after it
     clicks = clicks.then(async () => {
       if (mode.kind !== "edit") return;
       let rounded: SketchXY;
@@ -1203,10 +1242,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       const edges = edgeTargets(mode.tool.sketch);
       const snapped = snapOnSketch(designDoc(), mode.tool, at, rounded, pointer.pixel, edges).at;
       // A typed size overrules the pointer for what it locks (SF4): the point goes where the locks put it, exactly.
-      const aim = aimOf(designDoc(), mode.tool, snapped, locks);
+      const aim = aimOf(designDoc(), mode.tool, snapped, took);
       if (!aim) return sketchBox.showError(NO_AIM);
       const before = designDoc();
-      const done = clickAt(before, withLocks(mode.tool, locks, snapped), aim);
+      const done = clickAt(before, withLocks(mode.tool, took, snapped), aim);
       // The owner's rule (rebuild.ts): an extrude whose sketch this edit breaks keeps the sketch as it was, in the same undo step.
       // A new point on the face's edges is pinned there (26f), in the same step.
       let next = pinNewPoints(before, done.doc, done.tool.sketch, edges);
@@ -1220,40 +1259,67 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
         if (mode.kind !== "edit" || toolChanges !== changes || designDoc() !== before) return;
       }
       sketchBox.showError(done.note ?? "");
-      if (done.tool !== mode.tool) unlock();
+      if (done.tool !== mode.tool && locks === took) unlock(); // the sizes it placed with, not any typed since
       mode.tool = done.tool;
-      // The pointer is still there: what it snaps to now, with the new point and the tool's next step. (A finger has
-      // left the view by now, and this keeps the hint and the boxes by the tap; sketch-hover.journey.ts.)
-      mode.snap = snapOnSketch(done.doc, done.tool, at, rounded, pointer.pixel, edges);
+      // What the pointer snaps to now, with the new point and the tool's next step: where a hover answered since the
+      // click has it (the click waited its turn behind the kernel while the pointer moved on: hunt 26h), else still at
+      // the click. (A finger has left the view by now, and this keeps the hint and the boxes by the tap; sketch-hover.journey.ts.)
+      const now = hovered !== null && hovered.move > movedAt ? hovered : { at, rounded, pixel: pointer.pixel };
+      mode.snap = snapOnSketch(done.doc, done.tool, now.at, now.rounded, now.pixel, edges);
       mode.pointer = mode.snap.at;
-      mode.pixel = pointer.pixel;
+      mode.pixel = now.pixel;
       if (done.drew) applySketchEdit(next, drawStep(done.tool), done.tool.sketch);
       drawSketches();
       if (done.drew) await showOutline();
     });
   };
 
-  /** Enter in a typed box (SF4): the point placed where the locks and the last pointer put it, as a click there would; the keys stay in the boxes for the next line. */
+  /**
+   * Enter in a typed box (SF4): the point placed where the locks and the
+   * pointer put it as Enter is pressed, as a click there would; the keys
+   * stay in the boxes for the next line. Enter takes the boxes and empties
+   * them at once (hunt 26h): placing waits behind the kernel's last answer,
+   * and the next side typed meanwhile must go into fresh boxes, not be read
+   * by this Enter (a fast "10, Tab, 90, Enter" placed a point 180 mm off).
+   * An Enter that places nothing gives its sizes back, unless something was
+   * typed since.
+   */
   function placeTyped() {
+    if (mode.kind !== "edit") return;
+    const took = locks;
+    const texts = typed.texts();
+    const from = lastMove;
+    const changes = toolChanges;
+    unlock(true);
+    drawSketches();
+    const giveBack = () => void (mode.kind === "edit" && typed.restore(texts));
     clicks = clicks.then(async () => {
-      if (mode.kind !== "edit") return;
-      const aim = aimOf(designDoc(), mode.tool, mode.pointer, locks);
-      if (!aim) return sketchBox.showError(NO_AIM);
-      const changes = toolChanges;
+      // A tool chosen (or Escape) since: the sizes were for the old tool, so the Enter is dropped, as a click is.
+      if (mode.kind !== "edit" || toolChanges !== changes) return;
+      // Where the pointer was as Enter was pressed: its last move, rounded and snapped on the sketch as it is now (the
+      // points placed before this one in), else where the last click or hover left it.
+      let pointer = mode.pointer;
+      if (from) {
+        const rounded = await from.rounded.catch(() => null);
+        if (mode.kind !== "edit" || toolChanges !== changes) return;
+        if (rounded) pointer = snapOnSketch(designDoc(), mode.tool, from.at, rounded, from.pixel, edgeTargets(mode.tool.sketch)).at;
+      }
+      const aim = aimOf(designDoc(), mode.tool, pointer, took);
+      if (!aim) return (sketchBox.showError(NO_AIM), giveBack());
       const before = designDoc();
-      const done = clickAt(before, withLocks(mode.tool, locks, mode.pointer), aim);
+      const done = clickAt(before, withLocks(mode.tool, took, pointer), aim);
       // As a click: an extrude whose sketch this breaks keeps the sketch as it was (rebuild.ts), in the same undo step, and a point on the face's edges is pinned (26f).
       let next = pinNewPoints(before, done.doc, done.tool.sketch, edgeTargets(done.tool.sketch));
       if (done.drew) {
         try {
           next = await settleKept(kernel, before, next, bodies);
         } catch (e) {
-          return sketchBox.showError(e instanceof Error ? e.message : String(e));
+          return (sketchBox.showError(e instanceof Error ? e.message : String(e)), giveBack());
         }
         if (mode.kind !== "edit" || toolChanges !== changes || designDoc() !== before) return;
       }
       sketchBox.showError(done.note ?? "");
-      if (done.tool !== mode.tool) unlock(true);
+      if (done.tool === mode.tool) giveBack();
       mode.tool = done.tool;
       mode.snap = null;
       if (done.drew) applySketchEdit(next, drawStep(done.tool), done.tool.sketch);
@@ -1317,9 +1383,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // Typing in one box is one undo step (the merge key), named for the box.
-  inputs.forEach((input, i) =>
-    input.addEventListener("input", () => update(shape === "sketch-extrude" && SIZE_KEYS[i] === "height" ? DISTANCE_STEP : `Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])),
-  );
+  inputs.forEach((input, i) => {
+    input.addEventListener("input", () => update(shape === "sketch-extrude" && SIZE_KEYS[i] === "height" ? DISTANCE_STEP : `Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i]));
+    // Left (or Enter): a refused size gives way to the last one. Blur too: Firefox gives no change for a number box
+    // left empty after 0 and -5 (hunt 26h, CI's browsers job).
+    input.addEventListener("change", () => restoreRefused(i));
+    input.addEventListener("blur", () => restoreRefused(i));
+  });
   listen();
   const first = update();
   enterSketch(); // after an Undo or Redo inside a sketch: still in it

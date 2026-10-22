@@ -560,8 +560,15 @@ try {
   });
 
   await check("bad input shows an error instead of crashing", async () => {
+    // 0 is refused by the panel itself (26h, as Fusion): nothing is built, so the numbers on screen are still the part's.
+    const shown = await text("volume");
     await setSize("width", 0);
-    await page.waitForFunction(() => document.querySelector("#error").textContent.includes("width must be"));
+    await page.waitForFunction(() => document.querySelector("#error").textContent === "The width must be more than 0 mm.");
+    assert.equal(await page.$eval("#stats", (el) => el.dataset.stale), "false");
+    assert.equal(await text("volume"), shown);
+    // A size the kernel refuses (under its 0.001 mm) gets the kernel's own reason.
+    await setSize("width", 0.0001);
+    await page.waitForFunction(() => document.querySelector("#error").textContent.includes("width must be between"));
     // The old numbers stay on screen, but marked out of date, never shown as current.
     assert.equal(await page.$eval("#stats", (el) => el.dataset.stale), "true");
     assert.equal(await page.isVisible("#stale-note"), true);

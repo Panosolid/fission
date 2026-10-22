@@ -270,7 +270,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -287,8 +287,11 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      - run: npx playwright install --with-deps chromium
+      # Retries and time limits for apt's stalls: see the script.
+      - name: Install the browser (chromium)
         working-directory: apps/fission
+        timeout-minutes: 27
+        run: ../../.github/scripts/install-browser.sh chromium
       - name: Journeys against the baseline
         working-directory: apps/fission
         env:

@@ -7,16 +7,22 @@
 //
 // Names, like the faces' and edges' of naming.ts, never the kernel's
 // indices: an edge's end is a vertex, named by every edge that meets there
-// ("end+side:line-4&end+side:line-5&side:line-4+side:line-5", the edges'
-// names sorted and joined by "&", which encodeURIComponent never leaves in
-// an id), so a corner keeps its name while the lines it sits between are
-// the same lines, however they move. An edge between two sides is named
-// there without its order ("A+B", not naming.ts's "A>B"): the order is the
-// way round the outline goes, which a corner moved across the outline can
-// turn over without the corner being any other. So the two corners of an
-// outline of only two curves (a half disc) share a name, and neither can
-// be pinned. A middle or a centre is named by its edge. A name two vertices (or edges) would share finds none of them and
-// says so: a pin is never moved to one of two (the owner's rule for 25a).
+// ("end+side:line-4&end+side:line-5&side:line-4@end+side:line-5@start",
+// the edges' names sorted and joined by "&", which encodeURIComponent
+// never leaves in an id), so a corner keeps its name while the lines it
+// sits between are the same lines, however they move. An edge between two
+// sides is named there by which end of each side's curve meets at it
+// (naming.ts `ends`, step 27b), not by naming.ts's "A>B": that order is the
+// way round the outline goes, which a corner moved across the outline, a
+// flipped extrude or two arcs swapping bulges turns over without the
+// corner being any other. So the two corners of an outline of only two
+// curves (a half disc, a crescent) have a name each and can each be pinned
+// (26f left the order out, "A+B", so those two shared a name and neither
+// could be; a pin saved with such a name is still found when one corner
+// has it). The middle of such an edge is named the same way; any other
+// middle, and a centre, by its edge. A name two vertices (or edges) would
+// share finds none of them and says so: a pin is never moved to one of
+// two (the owner's rule for 25a).
 //
 // Every point comes from the kernel's exact vertex_points, edge_middles and
 // edge_centres (26f), placed into the sketch through the frame the sketch
@@ -67,11 +73,22 @@ export function inSketch(p: Vec3, plane: Plane): SketchXY {
 /** Whether edge `e` is closed: a whole circle, whose one vertex is only where its seam is, so it has no ends and no middle. */
 const closed = (view: BodyView, e: number) => view.edge_vertices[e][0] === view.edge_vertices[e][1];
 
-/** An edge's name without the order between two sides: "A>B" as "A+B", its two faces sorted. */
+/** An edge's name without the order between two sides: "A>B" as "A+B", its two faces sorted (26f's names). */
 function unordered(name: string | null): string | null {
   if (name === null || !name.includes(">")) return name;
   const [a, b] = name.split(">");
   return a <= b ? `${a}+${b}` : `${b}+${a}`;
+}
+
+/** Edge `e`'s name in a vertex's name or a middle's pin: which ends of its two sides' curves meet there when known (27b), else its name with no order. */
+function partName(names: BodyNames, e: number): string | null {
+  return names.edges[e] === null ? null : (names.ends?.[e] ?? unordered(names.edges[e]));
+}
+
+/** A vertex's name as 26f gave it (files from 0.26): each "A@x+B@y" part as "A+B", the parts sorted again. */
+function oldName(name: string): string {
+  const part = (p: string) => (p.includes("@") ? unordered(p.split("+").map((x) => x.slice(0, x.indexOf("@"))).join(">"))! : p);
+  return name.split("&").map(part).sort().join("&");
 }
 
 /**
@@ -83,7 +100,7 @@ export function vertexNames(view: BodyView, names: BodyNames): { vertices: (stri
   const at: string[][] = Array.from({ length: view.vertex_points.length }, () => []);
   const unnamed = new Set<number>();
   view.edge_vertices.forEach(([a, b], e) => {
-    const n = unordered(names.edges[e]);
+    const n = partName(names, e);
     for (const v of a === b ? [a] : [a, b]) {
       if (n === null) unnamed.add(v);
       else at[v].push(n);
@@ -116,7 +133,8 @@ export function faceEdgeTargets(view: BodyView, names: BodyNames, face: number, 
         seen.add(v);
         out.push({ at: inSketch(view.vertex_points[v], plane), kind: "endpoint", name });
       }
-      if (edge !== null) out.push({ at: inSketch(view.edge_middles[e], plane), kind: "midpoint", name: edge });
+      const middle = edge === null ? null : (names.ends?.[e] ?? edge);
+      if (middle !== null) out.push({ at: inSketch(view.edge_middles[e], plane), kind: "midpoint", name: middle });
     }
     const centre = view.edge_centres[e];
     if (centre && edge !== null) out.push({ at: inSketch(centre, plane), kind: "centre", name: edge });
@@ -124,12 +142,37 @@ export function faceEdgeTargets(view: BodyView, names: BodyNames, face: number, 
   return out;
 }
 
+/**
+ * The edge a middle's or centre's pin names: an edge between two sides by
+ * the ends of their curves (27b), any other by its name, or for a middle on
+ * an edge between two sides ("A>B") whose name finds nothing, the edge named
+ * the other way round ("B>A"), the same edge once the outline turned over
+ * (a corner dragged across it turns every such name round; hunt 26h: the
+ * corners' pins followed, the middles' were lost). Never in place of an
+ * edge the name itself finds: a half disc's two upright edges are "A>B"
+ * and "B>A", and each name goes with its own end of the line. -1 for none.
+ */
+function edgeIndex(pin: SketchPin, names: BodyNames): number {
+  if (pin.name.includes("@")) return names.ends?.indexOf(pin.name) ?? -1;
+  const e = names.edges.indexOf(pin.name);
+  const other = reversed(pin);
+  return e >= 0 || other === null ? e : names.edges.indexOf(other);
+}
+/** A middle's pin on an edge between two sides, "A>B", as "B>A"; null for any other pin. */
+function reversed(pin: SketchPin): string | null {
+  if (pin.kind !== "midpoint" || !pin.name.includes(">")) return null;
+  const [a, b] = pin.name.split(">");
+  return `${b}>${a}`;
+}
+
 /** Where a pin is now: found (in the sketch, through `plane`), or why not: its vertex or edge is gone, or its name is now more than one's. */
 export type PinNow = { at: SketchXY } | { cause: "point-lost" | "point-ambiguous" };
 
 /**
  * Where `pin` lies on this body now, the body of the feature whose face
- * the sketch is on: its vertex or edge found by name, through `plane`;
+ * the sketch is on: its vertex or edge found by name, through `plane` (a
+ * vertex's name from 0.26, its uprights unordered, found when exactly one
+ * vertex has it, ambiguous when more do);
  * "point-ambiguous" when the name (or one of the edges a vertex is named
  * by) would be two or more's, never one of them; else "point-lost" (no
  * such vertex or edge, or an edge that is now a whole circle, or one with
@@ -141,11 +184,16 @@ export function pinNow(pin: SketchPin, view: BodyView, names: BodyNames, plane: 
     const { vertices, shared } = vertexNames(view, names);
     const v = vertices.indexOf(pin.name);
     if (v >= 0) return { at: inSketch(view.vertex_points[v], plane) };
+    if (!pin.name.includes("@")) {
+      const old = vertices.flatMap((n, k) => (n !== null && oldName(n) === pin.name ? [k] : []));
+      if (old.length === 1) return { at: inSketch(view.vertex_points[old[0]], plane) };
+      if (old.length > 1) return { cause: "point-ambiguous" };
+    }
     const ambiguous = (shared.get(pin.name) ?? 0) > 1 || pin.name.split("&").some((part) => edgeShared(part) > 1);
     return { cause: ambiguous ? "point-ambiguous" : "point-lost" };
   }
-  const e = names.edges.indexOf(pin.name);
-  if (e < 0) return { cause: edgeShared(pin.name) > 1 ? "point-ambiguous" : "point-lost" };
+  const e = edgeIndex(pin, names);
+  if (e < 0) return { cause: edgeShared(pin.name) > 1 || (reversed(pin) !== null && edgeShared(reversed(pin)!) > 1) ? "point-ambiguous" : "point-lost" };
   if (pin.kind === "midpoint") return closed(view, e) ? { cause: "point-lost" } : { at: inSketch(view.edge_middles[e], plane) };
   const centre = view.edge_centres[e];
   return centre ? { at: inSketch(centre, plane) } : { cause: "point-lost" };

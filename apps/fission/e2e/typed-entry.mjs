@@ -46,6 +46,9 @@ const until = (page, fn, arg, what) => page.waitForFunction(fn, arg, { timeout: 
 const shown = (key) => async (page, want) => until(page, ([k, w]) => document.querySelector("#viewport").dataset[k] === w, [key, want], `${key} "${want}"`).catch(async (e) => assert.fail(`${e.message} (shown: "${await data(page, key)}")`));
 const points = shown("sketchPoints");
 const previewIs = shown("sketchPreview");
+/** Box `id`'s live size (its placeholder), once the hover it shows has been answered: the kernel rounds each hover first. */
+const placeholderIs = (page, id, want, what = `${id}'s live size ${want}`) =>
+  until(page, ([i, w]) => document.querySelector(i)?.getAttribute("placeholder") === w, [id, want], what).catch(async (e) => assert.fail(`${e.message} (shown: "${await page.getAttribute(id, "placeholder")}")`));
 const boxesShown = (page) => page.isVisible("#typed-entry");
 const focused = (page) => page.evaluate(() => document.activeElement?.id ?? "");
 const locked = (page, field) => page.isVisible(`label[data-field=${field}] .typed-entry-lock`);
@@ -96,8 +99,8 @@ await check("1280 px: a 10 mm square typed side by side closes on its first corn
   await hover(page, [20, 0]);
   await previewIs(page, "0,0 20,0");
   assert.equal(await boxesShown(page), true, "the boxes show once the line has its start");
-  assert.equal(await page.getAttribute("#typed-length", "placeholder"), "20", "the live length");
-  assert.equal(await page.getAttribute("#typed-angle", "placeholder"), "0", "the live angle");
+  await placeholderIs(page, "#typed-length", "20", "the live length");
+  await placeholderIs(page, "#typed-angle", "0", "the live angle");
   // Regression (Firefox sketch session): with nothing typed, a click where the boxes are goes through them to the sketch.
   const under = async () => page.evaluate(() => {
     const r = document.querySelector("#typed-entry").getBoundingClientRect();
@@ -211,9 +214,10 @@ await check("1280 px: a rectangle typed 20 × 5 down and to the right", async ()
   await page.keyboard.press("r");
   await clickPlane(page, [30, 30]);
   await hover(page, [35, 20]);
-  assert.deepEqual(await page.$$eval(".typed-entry-name", (e) => e.map((x) => x.textContent)), ["Width", "Height"]);
-  assert.equal(await page.getAttribute("#typed-width", "placeholder"), "5");
-  assert.equal(await page.getAttribute("#typed-height", "placeholder"), "10");
+  // The boxes show once the kernel has placed the first corner.
+  await until(page, () => [...document.querySelectorAll(".typed-entry-name")].map((x) => x.textContent).join() === "Width,Height", null, "the Width and Height boxes");
+  await placeholderIs(page, "#typed-width", "5");
+  await placeholderIs(page, "#typed-height", "10");
   await page.keyboard.type("20");
   await page.keyboard.press("Tab");
   await page.keyboard.type("5");
@@ -262,7 +266,7 @@ await check("1280 px: a 3-point arc, its end typed 20 mm at 0°, then a point on
   await hover(page, [6, 8]);
   await hintIs(page, "Specify next point");
   assert.deepEqual(await page.$$eval(".typed-entry-name", (e) => e.map((x) => x.textContent)), ["Length", "Angle"]);
-  assert.equal(await page.getAttribute("#typed-length", "placeholder"), "10", "the live length to (6, 8)");
+  await placeholderIs(page, "#typed-length", "10", "the live length to (6, 8)");
   await page.keyboard.type("20");
   await page.keyboard.press("Tab");
   await page.keyboard.type("0");
