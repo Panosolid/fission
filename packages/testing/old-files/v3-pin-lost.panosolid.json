@@ -1,0 +1,100 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Pin lost",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 6,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "centre": "point-3",
+              "id": "circle-4",
+              "kind": "circle",
+              "radius": 2
+            }
+          ],
+          "id": "sketch-2",
+          "pins": [
+            {
+              "feature": "feature-1",
+              "kind": "endpoint",
+              "name": "back+bottom&back+right&bottom+right",
+              "point": "point-3"
+            }
+          ],
+          "points": [
+            {
+              "id": "point-3",
+              "x": 60,
+              "y": 30
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [
+              "feature-1"
+            ],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 1 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-2"
+            ],
+            "id": "feature-5",
+            "intent": {
+              "parameters": {
+                "distance": 5,
+                "sketch": "sketch-2"
+              },
+              "summary": "Extrude Sketch 1 by 5 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-2",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-5",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 3
+    }
+  }
+}

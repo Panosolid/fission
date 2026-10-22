@@ -1,0 +1,72 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Star",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "profiles": [
+        {
+          "depth": 40,
+          "id": "profile-1",
+          "kind": "star",
+          "plane": {
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "xAxis": [
+              1,
+              0,
+              0
+            ]
+          },
+          "width": 40
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [
+              "profile-1"
+            ],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "distance": 10,
+                "profile": "profile-1"
+              },
+              "summary": "Extrude: Star profile 40 × 40 mm, by 10 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "profile-1",
+                  "label": "Star profile",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (extrude)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 1
+    }
+  }
+}

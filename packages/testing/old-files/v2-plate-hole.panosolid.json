@@ -1,0 +1,134 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Plate with hole",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 14,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "end": "point-4",
+              "id": "line-5",
+              "kind": "line",
+              "start": "point-3"
+            },
+            {
+              "end": "point-6",
+              "id": "line-7",
+              "kind": "line",
+              "start": "point-4"
+            },
+            {
+              "end": "point-8",
+              "id": "line-9",
+              "kind": "line",
+              "start": "point-6"
+            },
+            {
+              "end": "point-3",
+              "id": "line-10",
+              "kind": "line",
+              "start": "point-8"
+            },
+            {
+              "centre": "point-11",
+              "id": "circle-12",
+              "kind": "circle",
+              "radius": 10
+            }
+          ],
+          "id": "sketch-2",
+          "points": [
+            {
+              "id": "point-3",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-4",
+              "x": 60,
+              "y": 0
+            },
+            {
+              "id": "point-6",
+              "x": 60,
+              "y": 40
+            },
+            {
+              "id": "point-8",
+              "x": 0,
+              "y": 40
+            },
+            {
+              "id": "point-11",
+              "x": 30,
+              "y": 20
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 1 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-2"
+            ],
+            "id": "feature-13",
+            "intent": {
+              "parameters": {
+                "distance": 8,
+                "sketch": "sketch-2"
+              },
+              "summary": "Extrude Sketch 1 by 8 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-2",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-13",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 2
+    }
+  }
+}

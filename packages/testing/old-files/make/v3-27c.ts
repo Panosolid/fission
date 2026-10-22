@@ -1,0 +1,33 @@
+// Run at 998ebb8c (step 27c, Design data version 3): ./make.sh 998ebb8c v3-27c.ts
+import { designWorkspace, partDocument } from "@fission/design";
+import { app, close } from "./packages/testing/journeys/design-app.ts";
+import { save } from "./save.ts";
+// 27c, through the app itself: a 40 x 30 x 20 box, Sketch 1 on the ground plane XY, a circle r 2 centred on the box's corner (40, 30) seen from above (pinned to it), extruded 5, the box made 60 wide; then the box deleted (the point is lost and held).
+const a = await app(partDocument("box", 40, 30, 20), designWorkspace);
+a.$("#create-sketch")!.click();
+await a.settle();
+await a.pick({ plane: "XY" });
+const [box] = a.doc().timeline.features.map((f) => f.id);
+await a.key("sketch-circle");
+a.pointer("move", [39.6, 29.7]);
+await a.settle();
+await a.click(39.6, 29.7);
+await a.click(42, 30);
+a.$("#sketch-extrude")!.click();
+await a.settle();
+(a.$("#extrude-distance") as HTMLInputElement).value = "5";
+(a.$("#extrude-ok") as HTMLButtonElement).click();
+await a.settle();
+if (a.sketching()) await a.finish();
+await a.menu(box, "edit");
+(a.$("#edit-width") as HTMLInputElement).value = "60";
+a.$("#feature-edit-ok")!.click();
+await a.settle();
+console.log("volume", a.volume(), a.warning());
+save("Pinned to a body", "v3-body-pin.panosolid.json", a.doc());
+await a.menu(box, "delete");
+a.$("#delete-ask-confirm")!.click();
+await a.settle();
+console.log("volume", a.volume(), a.warning());
+save("Pin lost", "v3-pin-lost.panosolid.json", a.doc());
+await close(a);

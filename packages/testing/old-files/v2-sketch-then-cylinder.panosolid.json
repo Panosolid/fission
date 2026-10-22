@@ -1,0 +1,127 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Slot then cylinder",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 15,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "end": "point-4",
+              "id": "line-5",
+              "kind": "line",
+              "start": "point-3"
+            },
+            {
+              "centre": "point-7",
+              "end": "point-6",
+              "id": "arc-8",
+              "kind": "arc",
+              "start": "point-4"
+            },
+            {
+              "end": "point-9",
+              "id": "line-10",
+              "kind": "line",
+              "start": "point-6"
+            },
+            {
+              "centre": "point-11",
+              "end": "point-3",
+              "id": "arc-12",
+              "kind": "arc",
+              "start": "point-9"
+            }
+          ],
+          "id": "sketch-2",
+          "points": [
+            {
+              "id": "point-3",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-4",
+              "x": 30,
+              "y": 0
+            },
+            {
+              "id": "point-6",
+              "x": 30,
+              "y": 20
+            },
+            {
+              "id": "point-7",
+              "x": 30,
+              "y": 10
+            },
+            {
+              "id": "point-9",
+              "x": 0,
+              "y": 20
+            },
+            {
+              "id": "point-11",
+              "x": 0,
+              "y": 10
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 1 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [],
+            "id": "feature-14",
+            "intent": {
+              "parameters": {
+                "diameter": 20,
+                "height": 30
+              },
+              "summary": "Cylinder: ⌀20 × 30 mm",
+              "type": "cylinder"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-14",
+                "label": "Feature 1 (cylinder)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 2
+    }
+  }
+}
