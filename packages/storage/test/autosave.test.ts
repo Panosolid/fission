@@ -262,3 +262,47 @@ test("following the undo history: an amend after the edit was stored is stored t
   await clock.advance(5000);
   assert.deepEqual(saved, [20, 21, 10], "stopped: no longer following");
 });
+
+test("following the undo history: a change that leaves the project as the store holds it is no change (hunt 26h)", async () => {
+  // A reload: the project just opened from the store (`stored`), then the history starts afresh on it and a
+  // workspace's mount takes its defaults in by an amend that changes nothing. Following every history change
+  // said "Saving…" for a second and wrote the same project again (smoke's autosave check caught it).
+  const { store, saved } = recordingStore();
+  let project = part(10);
+  const history = createHistory({ capture: () => projectToJson(project), restore: (t) => void (project = JSON.parse(t) as Project) });
+  const clock = fakeTimers();
+  const statuses: AutosaveStatus[] = [];
+  const autosave = startAutosave(store, "p", () => project, (s) => statuses.push(s), { timers: clock.timers, follows: history, stored: true });
+  history.reset();
+  await clock.advance(5000);
+  assert.deepEqual(statuses, [], "a fresh history on the stored project");
+  assert.deepEqual(saved, []);
+  assert.equal(autosave.leaving(), true, "nothing unkept");
+  // A real amend is still a change.
+  project = part(11);
+  history.amend();
+  assert.deepEqual(statuses, [{ state: "saving" }]);
+  await clock.advance(1000);
+  assert.deepEqual(saved, [11]);
+  // A history change on the project as just stored is no change either.
+  history.reset();
+  await clock.advance(5000);
+  assert.deepEqual(saved, [11], "the project is what the store holds");
+  autosave.stop();
+});
+
+test("following the undo history: a project the store doesn't hold yet is stored on any history change (hunt 26h)", async () => {
+  // A new project (not `stored`): a history starting afresh on it is the first chance to keep it.
+  const { store, saved } = recordingStore();
+  const project = part(10);
+  const history = createHistory({ capture: () => projectToJson(project), restore: () => {} });
+  const clock = fakeTimers();
+  const autosave = startAutosave(store, "p", () => project, () => {}, { timers: clock.timers, follows: history });
+  history.reset();
+  await clock.advance(1000);
+  assert.deepEqual(saved, [10]);
+  history.reset();
+  await clock.advance(5000);
+  assert.deepEqual(saved, [10], "once stored, the same project again is no change");
+  autosave.stop();
+});
