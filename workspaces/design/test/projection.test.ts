@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson, type BodyView, type Plane, type SketchXY } from "@fission/core";
 import { partDocument, readDesignDocument, type DesignDocument, type Sketch } from "../src/document.ts";
 import { addFaceSketch, addSketch, deleteCurve, drawLine, drawRectangle, movePoint, pinNewPoints, PROJECTED_POINT, projectEdges, sketchCurves, unproject, type EdgeToProject } from "../src/sketch.ts";
-import { edgeNamed, edgeShape, MIN_LENGTH, PROJECT_HELD, PROJECT_NOTHING, PROJECT_UNNAMED, projectAfter, projectionWords, projectPick, REFUSED, type EdgeShape } from "../src/projection.ts";
+import { cornerOrder, edgeNamed, edgeShape, MIN_LENGTH, placesOf, profileCurves, PROJECTED_OPEN, projectedOpen, PROJECT_HELD, PROJECT_NOTHING, PROJECT_UNNAMED, projectAfter, projectionWords, projectPick, REFUSED, type EdgeShape } from "../src/projection.ts";
 import { drawnFrame, facePlane } from "../src/face-sketch.ts";
 import { followedSketch } from "../src/rebuild.ts";
 import { nameBody, type BodyNames } from "../src/naming.ts";
@@ -67,6 +67,38 @@ test("hand-worked: a box's top front edge seen from XY is the line (0, 0) to (40
   // From the front (XZ: x = X, y = Z) the same upright is the line (40, 0) to (40, 20), and the top front edge the line at height 20.
   same(edgeShape(view, 8, XZ), { kind: "line", a: [40, 0], b: [40, 20] });
   same(edgeShape(view, 4, XZ), { kind: "line", a: [0, 20], b: [40, 20] });
+});
+
+test("hand-worked (27e): a straight edge's line runs from the corner whose name comes first, whichever way the kernel runs the edge", () => {
+  // One edge from (40, 0, 20) to (0, 0, 20), its corners named "b" and "a": seen from XY it runs from "a" at (0, 0) to "b"
+  // at (40, 0), against the kernel's order; given the other way round, the same line.
+  const back = oneLine([40, 0, 20], [0, 0, 20]);
+  const ahead = oneLine([0, 0, 20], [40, 0, 20]);
+  same(edgeShape(back, 0, XY, ["b", "a"]), { kind: "line", a: [0, 0], b: [40, 0] });
+  same(edgeShape(ahead, 0, XY, ["a", "b"]), { kind: "line", a: [0, 0], b: [40, 0] });
+  assert.deepEqual(cornerOrder(back, 0, ["b", "a"]), [1, 0]);
+  // No names, one unknown, or both one name: the kernel's order (null), as before 27e.
+  for (const corners of [undefined, [null, "a"], ["a", null], ["a", "a"]]) assert.equal(cornerOrder(back, 0, corners), null, JSON.stringify(corners));
+  same(edgeShape(back, 0, XY), { kind: "line", a: [40, 0], b: [0, 0] });
+  // A round edge has no corners to order by.
+  assert.equal(cornerOrder(oneRound([0, 0, 0], [5, 0, 0], [0, 5, 0], [-5, 0, 0], [0, 0, 1]), 0, ["a", "b"]), null);
+});
+
+test("hand-worked (27e): a followed line's ends go by its corners' names when it has them, else each to the place that moves the line's points less", () => {
+  const { doc, id, front } = onGround();
+  const s = sketchOf(projectEdges(doc, id, [front]).doc, id);
+  const q = s.projected![0];
+  const [start, end] = [s.points[0].id, s.points[1].id];
+  // The line is (0, 0) to (40, 0). Seen now from (0, 0) to (−60, 0) (its far end moved past its near one), by names: as given.
+  const named = placesOf(s, q, { kind: "line", a: [0, 0], b: [-60, 0] }, true);
+  assert.deepEqual(named.points, [{ point: start, at: [0, 0] }, { point: end, at: [-60, 0] }]);
+  // With no names, the moves: as given, 0² + (40 + 60)² = 10000; swapped, (0 + 60)² + (40 − 0)² = 3600 + 1600 = 5200. Swapped.
+  const free = placesOf(s, q, { kind: "line", a: [0, 0], b: [-60, 0] });
+  assert.deepEqual(free.points, [{ point: start, at: [-60, 0] }, { point: end, at: [0, 0] }]);
+  // Slid 100 along itself, given end first: as given 100² + 100² = 20000, swapped 140² + 60² = 23200. Each end slides.
+  assert.deepEqual(placesOf(s, q, { kind: "line", a: [140, 0], b: [100, 0] }).points, [{ point: start, at: [100, 0] }, { point: end, at: [140, 0] }]);
+  // Turned half a turn about its middle: 40² + 40² both ways, a tie: the shape's order.
+  assert.deepEqual(placesOf(s, q, { kind: "line", a: [20, 20], b: [20, -20] }).points, [{ point: start, at: [20, 20] }, { point: end, at: [20, -20] }]);
 });
 
 test("hand-worked: a 20 mm upright seen from a plane tilted to cos 0.8 is 12 mm long (a 3-4-5 triangle)", () => {
@@ -213,6 +245,8 @@ test("a projected point can't be moved by hand or pinned; a projected curve is d
 
 /** The ids of the outline's lines (sketch.ts `sketchCurves`), by the curves they came from. */
 const outlineLines = (s: Sketch) => sketchCurves(s).lines.length;
+/** Edges `list` of `view` as seen from XY. */
+const edgeShapes = (view: BodyView, list: number[]) => list.map((e) => edgeShape(view, e, XY) as EdgeShape);
 
 test("hand-worked: projected lines join the outline only where they close it with the sketch's own; a face's four alone close by themselves", () => {
   const { doc, id, front, back } = onGround();
@@ -234,6 +268,57 @@ test("hand-worked: projected lines join the outline only where they close it wit
   assert.equal(outlineLines(sketchOf(open, id)), 1);
   // No projections: the sketch's own curves, as before 27d.
   assert.equal(outlineLines(sketchOf(drawRectangle(doc, id, [0, 0], [1, 1]).doc, id)), 4);
+});
+
+test("hand-worked (27e): a projected curve lying exactly on one the outline has already is left out of it: traced over, projected twice, seen edge on", () => {
+  const { doc, id } = onGround();
+  const { view } = box();
+  // The box's top edges (4 to 7) and its bottom edges (0 to 3), seen from XY: both the rectangle (0, 0) to (40, 30).
+  const edges = (list: number[], tag: string) => list.map((e): EdgeToProject => ({ feature: "feature-1", edge: `${tag}-${e}`, shape: edgeShape(view, e, XY) as EdgeShape }));
+  const top = projectEdges(doc, id, edges([4, 5, 6, 7], "top")).doc;
+  // A rectangle drawn over the projected one, its corners on the projected corners: the outline is the four drawn lines
+  // only (before 27e it was eight, four ends meeting at each corner, and the kernel refused it).
+  const traced = drawRectangle(top, id, [0, 0], [40, 30]).doc;
+  const own = new Set(sketchOf(traced, id).curves.filter((c) => !sketchOf(traced, id).projected!.some((p) => p.made === c.id)).map((c) => c.id));
+  assert.equal(own.size, 4);
+  assert.deepEqual(profileCurves(sketchOf(traced, id)).map((c) => c.id).sort(), [...own].sort());
+  // The top and the bottom both projected, nothing drawn: the first four (the top's), not eight.
+  const twice = projectEdges(top, id, edges([0, 1, 2, 3], "bottom")).doc;
+  assert.deepEqual(profileCurves(sketchOf(twice, id)).map((c) => c.id), profileCurves(sketchOf(top, id)).map((c) => c.id));
+  // The front face seen edge on from XY: its top and bottom edges (4 and 3) are both (0, 0) to (40, 0), so one is left out, and
+  // the other then has two free ends: no outline at all, rather than a loop of two lines with no area.
+  const edgeOn = sketchOf(projectEdges(doc, id, edges([4, 3], "front")).doc, id);
+  assert.deepEqual(profileCurves(edgeOn), []);
+  // That sketch says so in its own words (the kernel, asked about no curves, said it had none yet); one with curves of its
+  // own, or none at all, is the kernel's to judge.
+  assert.equal(projectedOpen(edgeOn), PROJECTED_OPEN);
+  assert.equal(projectedOpen(sketchOf(traced, id)), null);
+  assert.equal(projectedOpen(sketchOf(doc, id)), null);
+  // A circle projected twice (a cylinder's two rims from XY): one.
+  const rim = (k: number): EdgeToProject => ({ feature: "feature-1", edge: `rim-${k}`, shape: { kind: "circle", centre: [60, 15], radius: 5 } });
+  assert.equal(profileCurves(sketchOf(projectEdges(doc, id, [rim(0), rim(1)]).doc, id)).length, 1);
+  // Arcs: a half disc's arc (5, 0) round to (−5, 0) twice, with its line: the arc and the line, not three curves meeting at
+  // each end; the same ends and centre the other way round is the rest of the circle, so the two halves both stay.
+  const arc = (k: number, start: SketchXY, end: SketchXY): EdgeToProject => ({ feature: "feature-1", edge: `arc-${k}`, shape: { kind: "arc", start, end, centre: [0, 0] } });
+  const chord: EdgeToProject = { feature: "feature-1", edge: "chord", shape: { kind: "line", a: [-5, 0], b: [5, 0] } };
+  assert.deepEqual(profileCurves(sketchOf(projectEdges(doc, id, [arc(0, [5, 0], [-5, 0]), arc(1, [5, 0], [-5, 0]), chord]).doc, id)).map((c) => c.kind), ["arc", "line"]);
+  assert.equal(profileCurves(sketchOf(projectEdges(doc, id, [arc(0, [5, 0], [-5, 0]), arc(1, [-5, 0], [5, 0])]).doc, id)).length, 2);
+});
+
+test("a projected curve is on another when every point it has is within SAME_PLACE of that one's (0.9 ×), not past it (1.1 ×)", () => {
+  const { doc, id } = onGround();
+  const { view } = box();
+  const square = edgeShapes(view, [4, 5, 6, 7]);
+  const shifted = (k: number) =>
+    square.map((sh, j): EdgeToProject => {
+      const move = (p: SketchXY): SketchXY => [p[0] + k * SAME_PLACE, p[1]];
+      return { feature: "feature-1", edge: `moved-${j}`, shape: sh.kind === "line" ? { kind: "line", a: move(sh.a), b: move(sh.b) } : sh };
+    });
+  const first = square.map((shape, j): EdgeToProject => ({ feature: "feature-1", edge: `square-${j}`, shape }));
+  // 0.9 × SAME_PLACE along x: every end within SAME_PLACE of the first square's, so the second is the first again.
+  assert.equal(profileCurves(sketchOf(projectEdges(doc, id, [...first, ...shifted(0.9)]).doc, id)).length, 4);
+  // 1.1 ×: a square of its own (its ends meet each other, not the first's), so both stay and the kernel judges them.
+  assert.equal(profileCurves(sketchOf(projectEdges(doc, id, [...first, ...shifted(1.1)]).doc, id)).length, 8);
 });
 
 // ---------------------------------------------------------------- what a click takes
