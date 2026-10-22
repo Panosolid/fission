@@ -61,6 +61,45 @@ Sketcher and timeline (in build order: the owner's decision 2026-10-17 put the t
 - [x] 25. Edit any feature and rebuild after it (25a, PRs #188 to #211; 25b files and fuzzing, #216 to #220; 25c the X1–X8 re-check, #221 to #225); projected edges and sketch planes re-resolve through their IDs. Then re-check the integration pieces X1–X8, which were built on preset shapes only, against real sketches and timelines (actions on a sketch, Copy as SVG of a sketch outline, files dropped into a sketch, links, downstream chips and change notes naming a sketch or a later feature, the AI context listing the timeline), and hand any fixes to the integration workstream (substeps and test plan in docs/progress/cad.md)
 - [ ] 26. Sketch on any planar face (the sketch's plane is the face's stable id from 24, never a kernel index)
 - [ ] 27. Project/include edges into a sketch, linked to their source edges by stable id from 24
+
+Build order from step 27 (owner's asks, 2026-10-22: "attempt the big battle sooner instead of making more and more assumptions", then front-load the hardest parts to get into a rhythm with them): after 27 and the break that follows it, (1) golden models (38) and B0's outside review; (2) flat booleans 41–45, with the Combine tool at 44; (3) the constraint solver core (29); (4) curved booleans 46 (46a first) and 47a, then join, cut, intersect and new body in Extrude (48a); (5) full topological naming (50); (6) the rest of the curved booleans, 47b–47e; (7) chamfer and fillets 55–57, last of the hard block because they need all of the above; then the easier sketch steps 28 and 30–33, then 48b, 49, 34–37 and on. Shell (58), NURBS (63–69) and STEP (70–72) stay where they are. Reason: every step built before booleans adds faces, edges and links that booleans must later split, merge and rename, and every surface type added before them (cones and tori at 35–36) adds intersection cases; 28 and 30–33 work inside one sketch, so they add almost nothing booleans must undo, and the solver (29) is the one sketch step hard enough to belong in the hard block. The numbers stay as they are, because code, tests and other workstreams' files cite them (steps 44, 46 and 47 in kernel/CLAUDE.md and the kernel's comments); the sections below are grouped by area, and this note gives the order.
+
+Test infrastructure (in place before booleans, which are built against it)
+- [ ] 38. Golden models in tests/golden/ + tests/baseline.json metrics (the one piece of 38–40 not built yet: 39 and 40 already run on primitives and timelines, and booleans join them the day each lands)
+- [ ] 39. OpenCascade oracle comparison (Python + cadquery/OCP): volume, area, face count, bounding box (`prototypes/oracle/compare.py` already does this for the harness's primitives; boolean results join it at 44)
+- [ ] 40. Overnight fuzzing + simulated-user bot (Tier 3), extended as each new feature lands
+
+Booleans
+- [x] B0. Boolean design review (before 41; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. Decisions written and confirmed by the owner 2026-10-16 in kernel/CLAUDE.md, "Boolean design (B0 decisions)", with the boolean test plan. Still to do: an outside reviewer reads them; this is the first piece of the boolean work, a fresh high-effort review thread with no stake in the decisions, before any of 41 is written. From an expert's review of the B-rep (2026-10-16):
+  - P-curves: store each edge's curve in every face's uv space, or write down why uv computed on demand from the 3D edge is exact for the supported surfaces (and when that stops holding: 46–47, NURBS).
+  - Model contract: closed, manifold solids only, stated as a rule (validate's "every edge used exactly twice" follows from it). What a boolean does with a non-manifold result (two boxes touching along an edge): an error, or separate bodies (45).
+  - Bodies with several pieces and with voids (a subtraction that splits a part or seals a hollow): how Body and Shell represent them, and what validate and the inside-out check then require.
+  - Curve types for intersection curves: an ellipse (slanted plane through a cylinder, 46) and a representation for general crossings (cylinder–cylinder, 47): fitted spline or procedural "where these two surfaces meet".
+  - Tolerance model: one global LINEAR, or per-edge/per-vertex tolerances for intersection edges that never lie exactly on both surfaces.
+  - Tidying results: merging faces that lie on the same surface, removing sliver faces and tiny edges, and how topological naming (24, 50) survives that.
+  - Point-in-face on curved trimmed faces (42–43) and robust predicates beyond planes (interval arithmetic or error bounds).
+  - Validation in four separate categories, each tested on its own: topological consistency, geometric consistency, solid validity (inside/outside), and correctness against the operation (boolean identities, oracle). The self-intersection check's known limits (`self_intersect.rs` header) are extended where booleans make such faces.
+- [ ] 41. Plane–plane and line–plane intersection. Add per-vertex and per-edge tolerance fields (all LINEAR) and the four validation categories first (B0 decisions 5, 8)
+- [ ] 42. Splitting planar faces along intersection lines
+- [ ] 43. Inside/outside classification with exact predicates: three-valued IN/OUT/ON, seeded ray retries (B0 decision 7)
+- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 1 km frame with 1 µm walls, turned and baked, gives 4010.3 instead of 4000.0 today; 37231 instead of 40000 at the old 10 km limit; see the step 12 regressions). The Combine tool (from 49) lands with 44, the first piece of booleans to try in the app: join, cut or intersect two chosen bodies; a body with curved faces is refused with a message naming the face until 46 and 47a (a tracked compromise, never a wrong answer)
+- [ ] 45. Coplanar faces, touching edges, shared vertices; the vertex-fan check and `NonManifoldResult`, decided on the result (B0 decision 2); merging faces and edges, and the history map (decision 6)
+- [ ] 46. Plane–cylinder intersection (drill a hole through a box): the Ellipse curve, stored p-curves on curved faces, uv point-in-face, and the self-intersection check on such faces (B0 decisions 1, 4, 7, 8)
+  - [ ] 46a (first, its own pull request; owner's request after the health check of 2026-10-17, risk 3). The data before the geometry: each `Edge` gains its tolerance field (B0 decision 5: LINEAR by default, grown only by an intersection to what it measured, never above the 100 nm cap) and each coedge on a curved face its p-curve (its edge in the face's uv, decision 1), with validate checking both, every existing test passing with unchanged answers, before any ellipse or intersection-curve code.
+- [ ] 47. Cylinder–cylinder, plane–sphere (B0 decision 4). Build order: 47a before 48a (a hole cut through a rounded corner meets a parallel cylinder, and every sketch extruded the same way gives parallel cylinders), 47b–47e after 50. Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces. Substeps:
+  - [ ] 47a. Exact special cases: coaxial and parallel cylinders, plane–sphere, sphere–sphere
+  - [ ] 47b. The procedural cylinder–quadric curve: evaluation, derivatives, inversion, branches split at turning points, hand-worked tests
+  - [ ] 47c. Cylinder–cylinder booleans in general position (a small pipe through a big one), Steinmetz solid volume check
+  - [ ] 47d. The equal-radius tee (two crossing ellipses, four edges at one vertex) and nearly-equal radii (parametrisation switch), at 0.9×/1.1× of the snap threshold
+  - [ ] 47e. Tangent cases: cylinder tangent to a plane, to a cylinder, sphere kissing a face; oracle comparison over all of 47
+- [ ] 48. Extrude modes. 48a: join, cut, intersect and new body in Design's Extrude; the naming harness's cut cases (Ben's Fusion answers 1–7, Q6 a sketch on a cut's floor, and the split face) then run on Design for real instead of only on the model, and the ambiguous-name path (25a4) gets real split faces. 48b: symmetric, to-face, taper (taper makes slanted planes and cones, so after 35)
+- [ ] 49. Hole feature (after 50; the Combine tool moved to 44)
+- [ ] Later: an optional "keep as separate bodies" for union/subtract results that only touch along an edge or at a vertex (B0 decision 2)
+
+Robustness, pulled forward (right after 48a, so names survive booleans before more is built on them)
+- [ ] 50. Full topological naming on top of the 24 scheme (faces split by booleans, merged faces, history matching)
+
+Sketcher, continued (29 right after 45, the rest after the hard block; see the build-order note above)
 - [ ] 28. Profile detection (closed regions, nested); an extrude names its region by the ids of the curves around it, never by an index (docs/document-model.md, section 3)
 - [ ] 29. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical (in the kernel, on K1's curves, with its tolerances). Extra-heavy testing (owner's ask, 2026-10-21): the harness comes before any solver code (hand-worked cases), then thousands of seeded random sketches checked against the SolveSpace oracle, deliberately planted solver bugs that the tests must catch, and browser drag tests checking that shapes never flip or jump; split into small substeps, each tested hard before the next starts
 - [ ] 30. Parallel, perpendicular, equal, tangent
@@ -74,47 +113,14 @@ Parametric
 - [ ] 36. Revolve
 - [ ] 37. Per-feature error display on the timeline
 
-Test infrastructure (in place before booleans, which are built against it)
-- [ ] 38. Golden models in tests/golden/ + tests/baseline.json metrics
-- [ ] 39. OpenCascade oracle comparison (Python + cadquery/OCP): volume, area, face count, bounding box
-- [ ] 40. Overnight fuzzing + simulated-user bot (Tier 3), extended as each new feature lands
-
-Booleans
-- [x] B0. Boolean design review (before 41; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. Decisions written and confirmed by the owner 2026-10-16 in kernel/CLAUDE.md, "Boolean design (B0 decisions)", with the boolean test plan. Still to do: an outside reviewer reads them. From an expert's review of the B-rep (2026-10-16):
-  - P-curves: store each edge's curve in every face's uv space, or write down why uv computed on demand from the 3D edge is exact for the supported surfaces (and when that stops holding: 46–47, NURBS).
-  - Model contract: closed, manifold solids only, stated as a rule (validate's "every edge used exactly twice" follows from it). What a boolean does with a non-manifold result (two boxes touching along an edge): an error, or separate bodies (45).
-  - Bodies with several pieces and with voids (a subtraction that splits a part or seals a hollow): how Body and Shell represent them, and what validate and the inside-out check then require.
-  - Curve types for intersection curves: an ellipse (slanted plane through a cylinder, 46) and a representation for general crossings (cylinder–cylinder, 47): fitted spline or procedural "where these two surfaces meet".
-  - Tolerance model: one global LINEAR, or per-edge/per-vertex tolerances for intersection edges that never lie exactly on both surfaces.
-  - Tidying results: merging faces that lie on the same surface, removing sliver faces and tiny edges, and how topological naming (24, 50) survives that.
-  - Point-in-face on curved trimmed faces (42–43) and robust predicates beyond planes (interval arithmetic or error bounds).
-  - Validation in four separate categories, each tested on its own: topological consistency, geometric consistency, solid validity (inside/outside), and correctness against the operation (boolean identities, oracle). The self-intersection check's known limits (`self_intersect.rs` header) are extended where booleans make such faces.
-- [ ] 41. Plane–plane and line–plane intersection. Add per-vertex and per-edge tolerance fields (all LINEAR) and the four validation categories first (B0 decisions 5, 8)
-- [ ] 42. Splitting planar faces along intersection lines
-- [ ] 43. Inside/outside classification with exact predicates: three-valued IN/OUT/ON, seeded ray retries (B0 decision 7)
-- [ ] 44. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 1 km frame with 1 µm walls, turned and baked, gives 4010.3 instead of 4000.0 today; 37231 instead of 40000 at the old 10 km limit; see the step 12 regressions)
-- [ ] 45. Coplanar faces, touching edges, shared vertices; the vertex-fan check and `NonManifoldResult`, decided on the result (B0 decision 2); merging faces and edges, and the history map (decision 6)
-- [ ] 46. Plane–cylinder intersection (drill a hole through a box): the Ellipse curve, stored p-curves on curved faces, uv point-in-face, and the self-intersection check on such faces (B0 decisions 1, 4, 7, 8)
-  - [ ] 46a (first, its own pull request; owner's request after the health check of 2026-10-17, risk 3). The data before the geometry: each `Edge` gains its tolerance field (B0 decision 5: LINEAR by default, grown only by an intersection to what it measured, never above the 100 nm cap) and each coedge on a curved face its p-curve (its edge in the face's uv, decision 1), with validate checking both, every existing test passing with unchanged answers, before any ellipse or intersection-curve code.
-- [ ] 47. Cylinder–cylinder, plane–sphere (B0 decision 4). Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces. Substeps:
-  - [ ] 47a. Exact special cases: coaxial and parallel cylinders, plane–sphere, sphere–sphere
-  - [ ] 47b. The procedural cylinder–quadric curve: evaluation, derivatives, inversion, branches split at turning points, hand-worked tests
-  - [ ] 47c. Cylinder–cylinder booleans in general position (a small pipe through a big one), Steinmetz solid volume check
-  - [ ] 47d. The equal-radius tee (two crossing ellipses, four edges at one vertex) and nearly-equal radii (parametrisation switch), at 0.9×/1.1× of the snap threshold
-  - [ ] 47e. Tangent cases: cylinder tangent to a plane, to a cylinder, sphere kissing a face; oracle comparison over all of 47
-- [ ] 48. Extrude modes (join/cut/intersect/new body), symmetric, to-face, taper
-- [ ] 49. Hole feature, Combine tool
-- [ ] Later: an optional "keep as separate bodies" for union/subtract results that only touch along an edge or at a vertex (B0 decision 2)
-
 Robustness
-- [ ] 50. Full topological naming on top of the 24 scheme (faces split by booleans, merged faces, history matching)
 - [ ] 51. Cached feature results, incremental rebuild
 
 Modelling tools
 - [ ] 52. Construction planes, axes, points
 - [ ] 53. Sketch on construction planes
 - [ ] 54. Rectangular/circular patterns, mirror
-- [ ] 55. Chamfer
+- [ ] 55. Chamfer (with 56–57, the end of the front-loaded hard block, right after 47b–47e; see the build-order note)
 - [ ] 56. Fillet between planar faces
 - [ ] 57. Fillet planar–curved, edge chains
 - [ ] 58. Shell
