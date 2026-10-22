@@ -7,7 +7,9 @@
 // so each projection stays where it was and its sketch says "projection
 // lost"; suppressing the cylinder greys every sketch projecting it. A box's
 // front face picked from XZ projects its four edges, which extrude; from XY
-// its uprights are points. Against
+// its uprights are points. In the app (design-app.ts), a file whose
+// projection names an edge the cylinder hasn't got warns on the panel, the
+// sketch's row and its bar item, the circle drawn where it was. Against
 // the naming model (rule 12, R12): naming.journey.ts. Run with
 // `npm run journeys` after the app build.
 import { test } from "node:test";
@@ -36,7 +38,7 @@ import {
   type TimelineBuild,
 } from "@fission/design";
 import { emptyProject, projectFromJson, projectToJson, type Plane } from "@fission/core";
-import { kernel } from "./design-app.ts";
+import { app, kernel } from "./design-app.ts";
 
 /** The rebuild of `doc`, its bodies as the app joins them, and `doc` with every followed point taken in (as the app does after an edit). */
 async function built(doc: DesignDocument) {
@@ -216,4 +218,22 @@ test("hand-worked: the box's front face picked from XZ projects its four edges, 
   // (0, 0) and (40, 0), each the end on the ground (z = 0).
   const flat = projectPick(s.doc, s.xy, scene, frameOf(build, s.xy), { face: scene.faceStart[k] + front });
   assert.deepEqual(flat.edges.map((e) => (e.shape.kind === "point" ? `point ${e.shape.at}` : ends(e.shape))).sort(), ["0,0 40,0", "0,0 40,0", "point 0,0", "point 40,0"]);
+});
+
+test("in the app: a file whose projection names an edge the cylinder hasn't got opens with the circle where it was, warned on the panel, the sketch's row and its bar item", async () => {
+  const s = start();
+  const projected = await projectRim(s.doc, s.xy, s.cylinder);
+  const doc: DesignDocument = { ...projected, sketches: projected.sketches.map((x) => (x.projected ? { ...x, projected: x.projected.map((q) => ({ ...q, edge: "side:line-99+top" })) } : x)) };
+  const a = await app(doc);
+  const LOST = "Sketch 2: a projected edge has lost its edge, so it stays where it was.";
+  assert.equal(a.warning(), LOST);
+  const row = a.$(`[data-node="timeline"] .tree-row[data-node="${s.xy}"]`)!;
+  assert.ok(row.classList.contains("kept") && row.title === LOST, `the sketch's row: ${row.className} "${row.title}"`);
+  assert.equal(a.$(`.timeline-bar-item[data-item="${s.xy}"]`)!.dataset.warned, "true");
+  // Drawn where it was, in the projected colour's list (not the sketch's own lines), and not red: its plane is found.
+  const drawing = a.drawings().find((d) => d.projected !== undefined)!;
+  assert.ok(drawing && !drawing.lost && drawing.lines.length === 0 && drawing.projected!.lines.length > 0, JSON.stringify(drawing?.projected?.points));
+  const c = projectedCurve(a.doc(), s.xy);
+  assert.ok("centre" in c && near(c.centre, [60, 15]) && c.radius === 5, JSON.stringify(c));
+  assert.ok(await a.close(), "every body freed");
 });

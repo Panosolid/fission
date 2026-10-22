@@ -370,7 +370,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * The rebuild's warnings in timeline order: an extrude built from its kept
    * shape (the owner's rule: on its row and its sketch's), and from 26e a
    * sketch whose plane is lost (Q1, Q6: it stays where it was, drawn red)
-   * and an extrude built from one (its source is lost).
+   * and an extrude built from one (its source is lost); from 26f a
+   * sketch's points whose edges are lost, and from 27d its projections.
    */
   function warningsOf(doc: DesignDocument, build: TimelineBuild): Warned[] {
     const out: Warned[] = [];
@@ -382,6 +383,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (r.warning) out.push({ item: f.id, rows: [f.id, r.warning.sketch], sketch: r.warning.sketch, words: `${label} keeps its last shape. ${r.warning.message}.` });
       if (r.source) out.push({ item: f.id, rows: [f.id], sketch: r.source.sketch, words: `${r.source.message}.` });
       if (r.points) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.points.message}.` });
+      if (r.projections) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.projections.message}.` });
     }
     return out;
   }

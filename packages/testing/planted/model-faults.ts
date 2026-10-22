@@ -295,6 +295,7 @@ const SKETCH = "workspaces/design/src/sketch.ts";
 const ASK = "workspaces/design/src/delete-ask.ts";
 const EDGES = "workspaces/design/src/face-edges.ts";
 const PROJECTION = "workspaces/design/src/projection.ts";
+const WORKSPACE = "workspaces/design/src/workspace.ts";
 
 /** A plant in Design's sketch on a face (step 26c), and the naming model's bug it is the same mistake as, when it is one. */
 export interface NamingPlant extends Plant {
@@ -629,6 +630,13 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     edits: [{ file: PROJECTION, find: "  return curves.filter((_, k) => joined.has(k));", replace: "  return [...curves];" }],
     run: ["naming"],
     caught: "Fusion answers",
+  },
+  "projection-warning-hidden": {
+    what: "the rebuild holds a lost projection with its warning, but the app never shows it: no words on the panel, the sketch's row or its bar item",
+    edits: [{ file: WORKSPACE, find: "      if (r.projections) out.push({ item: f.id, rows: [f.id], sketch: f.id, words: `${r.projections.message}.` });", replace: "" }],
+    run: ["naming"],
+    caught: "projection: in the app",
+    why: "the naming harness reads the rebuild's own warnings, never the app's; found while 27d was written (the app showed none) and fixed with this check",
   },
   "projection-never-greys": {
     what: "a sketch is greyed by its face's feature and its pins' only, so one projecting a suppressed body's edge is built, its projection lost, instead of greyed (rule 13)",
