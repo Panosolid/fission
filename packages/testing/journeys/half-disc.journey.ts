@@ -126,10 +126,16 @@ test("27b, hand-worked: flipping the half disc's extrude keeps each corner's nam
   // builds from the outline mirrored, which turns it round), so a name keeping that order would send Q's pin to P.
   const ordered = edgeAt(a.body, [5, 0, 5])!;
   assert.equal(edgeAt(b.body, [-5, 0, -5]), ordered);
-  // The upright's middle, as a sketch on the flat side pins it, is named by the ends too, and stays at Q: (5, 0, ±5).
-  const upright = a.body.view.edge_middles.findIndex((m) => m.every((c, k) => Math.abs(c - [5, 0, 5][k]) < 1e-9));
-  const middle = { point: "m", kind: "midpoint" as const, name: a.body.names.ends![upright]! };
-  assert.deepEqual(pinNow(middle, b.body.view, b.body.names, XY), { at: [5, 0] });
+  // A sketch on the flat side (the line's face, y = 0, seen in XZ's frame: sketch (x, y) is world (x, z)) is offered both uprights'
+  // middles, (±5, 5), each named by the ends of the curves meeting there; the one at Q, pinned, is at Q's upright once flipped:
+  // (5, −5), the body now running from z = −10 to 0.
+  const flat = a.body.view.face_roles.findIndex((r, f) => r?.role === "side" && a.body.names.faces[f]!.includes("line"));
+  const XZ = { origin: [0, 0, 0] as [number, number, number], xAxis: [1, 0, 0] as [number, number, number], normal: [0, -1, 0] as [number, number, number] };
+  const middles = faceEdgeTargets(a.body.view, a.body.names, flat, XZ).filter((t) => t.kind === "midpoint" && Math.abs(t.at[1] - 5) < 1e-9);
+  assert.deepEqual(middles.map((t) => `${t.at}`).sort(), ["-5,5", "5,5"]);
+  const atQ5 = middles.find((t) => t.at[0] === 5)!;
+  assert.ok(atQ5.name.includes("@"), atQ5.name);
+  assert.deepEqual(pinNow({ point: "m", kind: "midpoint", name: atQ5.name }, b.body.view, b.body.names, XZ), { at: [5, -5] });
 });
 
 test("27b, hand-worked: a crescent whose arcs swap which bulges further keeps its corners' names", async () => {
