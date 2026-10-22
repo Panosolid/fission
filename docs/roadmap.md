@@ -62,7 +62,7 @@ Sketcher and timeline (in build order: the owner's decision 2026-10-17 put the t
 - [ ] 26. Sketch on any planar face (the sketch's plane is the face's stable id from 24, never a kernel index)
 - [ ] 27. Project/include edges into a sketch, linked to their source edges by stable id from 24
 
-Build order from step 27 (owner's ask, 2026-10-22: "attempt the big battle sooner instead of making more and more assumptions"): after 27 and the break that follows it, the test infrastructure (38) and booleans come next (B0's outside review, 41–46, 47a, 48a, with the Combine tool at 44), then full topological naming (50), then the sketch steps 28–33, then 47b–47e, 48b, 49, 34–37 and on. Reason: every step built before booleans adds faces, edges and links that booleans must later split, merge and rename, and every surface type added before them (cones and tori at 35–36) adds intersection cases; 28–33 work inside one sketch, so they add almost nothing booleans must undo. The numbers stay as they are, because code, tests and other workstreams' files cite them (steps 44, 46 and 47 in kernel/CLAUDE.md and the kernel's comments); the sections below are in the new build order.
+Build order from step 27 (owner's asks, 2026-10-22: "attempt the big battle sooner instead of making more and more assumptions", then front-load the hardest parts to get into a rhythm with them): after 27 and the break that follows it, (1) golden models (38) and B0's outside review; (2) flat booleans 41–45, with the Combine tool at 44; (3) the constraint solver core (29); (4) curved booleans 46 (46a first) and 47a, then join, cut, intersect and new body in Extrude (48a); (5) full topological naming (50); (6) the rest of the curved booleans, 47b–47e; (7) chamfer and fillets 55–57, last of the hard block because they need all of the above; then the easier sketch steps 28 and 30–33, then 48b, 49, 34–37 and on. Shell (58), NURBS (63–69) and STEP (70–72) stay where they are. Reason: every step built before booleans adds faces, edges and links that booleans must later split, merge and rename, and every surface type added before them (cones and tori at 35–36) adds intersection cases; 28 and 30–33 work inside one sketch, so they add almost nothing booleans must undo, and the solver (29) is the one sketch step hard enough to belong in the hard block. The numbers stay as they are, because code, tests and other workstreams' files cite them (steps 44, 46 and 47 in kernel/CLAUDE.md and the kernel's comments); the sections below are grouped by area, and this note gives the order.
 
 Test infrastructure (in place before booleans, which are built against it)
 - [ ] 38. Golden models in tests/golden/ + tests/baseline.json metrics (the one piece of 38–40 not built yet: 39 and 40 already run on primitives and timelines, and booleans join them the day each lands)
@@ -99,7 +99,7 @@ Booleans
 Robustness, pulled forward (right after 48a, so names survive booleans before more is built on them)
 - [ ] 50. Full topological naming on top of the 24 scheme (faces split by booleans, merged faces, history matching)
 
-Sketcher, continued (after booleans and 50)
+Sketcher, continued (29 right after 45, the rest after the hard block; see the build-order note above)
 - [ ] 28. Profile detection (closed regions, nested); an extrude names its region by the ids of the curves around it, never by an index (docs/document-model.md, section 3)
 - [ ] 29. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical (in the kernel, on K1's curves, with its tolerances). Extra-heavy testing (owner's ask, 2026-10-21): the harness comes before any solver code (hand-worked cases), then thousands of seeded random sketches checked against the SolveSpace oracle, deliberately planted solver bugs that the tests must catch, and browser drag tests checking that shapes never flip or jump; split into small substeps, each tested hard before the next starts
 - [ ] 30. Parallel, perpendicular, equal, tangent
@@ -120,7 +120,7 @@ Modelling tools
 - [ ] 52. Construction planes, axes, points
 - [ ] 53. Sketch on construction planes
 - [ ] 54. Rectangular/circular patterns, mirror
-- [ ] 55. Chamfer
+- [ ] 55. Chamfer (with 56–57, the end of the front-loaded hard block, right after 47b–47e; see the build-order note)
 - [ ] 56. Fillet between planar faces
 - [ ] 57. Fillet planar–curved, edge chains
 - [ ] 58. Shell
