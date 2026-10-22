@@ -1,7 +1,7 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import type { CommandSpec } from "@fission/core";
-import { askForCommands, ANSWER_TIMEOUT_MS, createProvider, detectProviders, memoryKeyStore, type AIRequest, type Fetch } from "../src/index.ts";
+import { askForCommands, ANSWER_TIMEOUT_MS, createProvider, detectProviders, memoryKeyStore, pickLocal, type AIRequest, type Fetch } from "../src/index.ts";
 import { fakeServer, rng, SEED, type Call } from "./fakes.ts";
 
 const specs: CommandSpec[] = [{ op: "set_part", summary: "s", params: { width: { type: "length", description: "w" } } }];
@@ -236,8 +236,15 @@ test("detectProviders: says which can run here and why the others can't", async 
 
   const gpu = { requestAdapter: async () => ({ features: new Set(["shader-f16"]), limits: { maxStorageBufferBindingSize: 2 ** 30 } }) };
   const ollama = fakeServer(() => ({ json: { models: [] } }));
-  const builtIn = { availability: async () => "downloadable" as const, create: async () => ({}) as never };
+  const builtIn = { availability: async () => "available" as const, create: async () => ({}) as never };
   const all = await detectProviders({ fetch: ollama.fetch, gpu, builtIn, loadWebLLM });
   assert.deepEqual(all.map((d) => d.ok), [true, true, true, true]);
   assert.equal(ollama.calls[0].url, "http://localhost:11434/api/tags", "only Ollama's usual address on this computer is asked");
+
+  // A built-in model the browser has yet to download is not one that runs here (CI's Chrome 156, #238).
+  const toDownload = { availability: async () => "downloadable" as const, create: async () => ({}) as never };
+  const notYet = await detectProviders({ fetch: ollama.fetch, gpu, builtIn: toDownload, loadWebLLM });
+  assert.deepEqual(notYet.map((d) => [d.kind, d.ok]), [["in-browser", true], ["ollama", true], ["api-key", true], ["browser-built-in", false]]);
+  assert.match(notYet[3].reason!, /hasn't downloaded its built-in model yet/);
+  assert.equal(pickLocal(notYet), "ollama", "the running Ollama is chosen over a model that is not there");
 });

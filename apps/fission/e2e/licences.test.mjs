@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { ALLOWED, chooseLicences, cratesAll, cratesShipped, EMBEDDED, licencesPlugin, noticesFile, noticeTexts, npmAll, npmShipped, packageDir, parseLicence, refused, unlistedHolders } from "../licences.mjs";
+import { ALLOWED, ALLOWED_DEV_ONLY, ALLOWED_FOR_TOOLS, chooseLicences, cratesAll, cratesShipped, EMBEDDED, licencesPlugin, noticesFile, noticeTexts, npmAll, npmShipped, packageDir, parseLicence, refused, unlistedHolders } from "../licences.mjs";
 import { rng } from "./monkey-core.mjs";
 
 const scratch = mkdtempSync(join(tmpdir(), "licences-"));
@@ -142,12 +142,40 @@ test("the lockfile walk takes the app's run-time tree, nested copies included, n
     "node_modules/a/node_modules/b": { version: "2.0.0", license: "ISC" },
     "node_modules/b": { version: "1.0.0", license: "GPL-3.0", dev: true },
     "node_modules/c": { version: "3.0.0", license: "Zlib", optionalDependencies: { gone: "*" } },
-    "node_modules/vite": { version: "5.0.0", license: "MIT", dev: true, dependencies: { b: "^1" } },
+    "node_modules/vite": { version: "5.0.0", license: "MIT", dev: true, dependencies: { b: "^1", css: "*" } },
+    "node_modules/css": { version: "1.0.0", license: "MPL-2.0", dev: true },
   } }));
   assert.deepEqual(npmShipped(root).map((p) => `${p.name}@${p.version}`), ["a@1.0.0", "b@2.0.0", "c@3.0.0"]);
   assert.deepEqual(npmShipped(root).find((p) => p.name === "b").dir, join(root, "node_modules/a/node_modules/b"));
-  // Every package, dev ones too, is held to the list: the root's b@1 is refused.
-  assert.deepEqual(refused(npmAll(root)), ["b 1.0.0: GPL-3.0"]);
+  // Every package, dev ones too, is held to a list: the root's b@1 is
+  // refused either way; the dev tool's MPL css only by the shipped list.
+  assert.deepEqual(refused(npmAll(root)), ["b 1.0.0: GPL-3.0", "css 1.0.0: MPL-2.0"]);
+  assert.deepEqual(refused(npmAll(root), ALLOWED_FOR_TOOLS), ["b 1.0.0: GPL-3.0"]);
+});
+
+test("a dev-only licence never ships: in the run-time tree it is refused, and the notices stop", () => {
+  // The same MPL package, now a run-time dependency of the app.
+  const root = join(scratch, "repo-shipped-mpl");
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "package-lock.json"), JSON.stringify({ packages: {
+    "": { workspaces: ["apps/*"] },
+    "apps/fission": { dependencies: { css: "*" }, devDependencies: { tool: "*" } },
+    "node_modules/css": { version: "1.0.0", license: "MPL-2.0" },
+    "node_modules/tool": { version: "2.0.0", license: "MPL-2.0", dev: true },
+  } }));
+  // The tools walk takes both and allows both; the shipped walk takes css and refuses it.
+  assert.deepEqual(refused(npmAll(root), ALLOWED_FOR_TOOLS), []);
+  assert.deepEqual(npmShipped(root).map((p) => p.name), ["css"]);
+  assert.deepEqual(refused(npmShipped(root)), ["css 1.0.0: MPL-2.0"]);
+  assert.throws(() => noticesFile({ npm: npmShipped(root), crates: [] }), /MPL-2.0/);
+  // The dev-only list adds to ALLOWED and never repeats it: a licence in both would make the strict list weaker in disguise.
+  assert.ok(ALLOWED_DEV_ONLY.length > 0 && ALLOWED_DEV_ONLY.every((id) => !ALLOWED.includes(id)));
+  assert.deepEqual(ALLOWED_FOR_TOOLS, [...ALLOWED, ...ALLOWED_DEV_ONLY]);
+  assert.deepEqual(chooseLicences("MPL-2.0"), null);
+  assert.deepEqual(chooseLicences("MPL-2.0", ALLOWED_FOR_TOOLS), ["MPL-2.0"]);
+  // A choice still prefers the strict list's licences: a tool offering MIT OR MPL-2.0 is read as MIT.
+  assert.deepEqual(chooseLicences("MPL-2.0 OR MIT", ALLOWED_FOR_TOOLS), ["MIT"]);
+  assert.deepEqual(chooseLicences("GPL-3.0", ALLOWED_FOR_TOOLS), null);
 });
 
 test("the crates walk takes normal dependencies for wasm, not proc-macros, build or dev ones", () => {
@@ -168,9 +196,17 @@ test("the crates walk takes normal dependencies for wasm, not proc-macros, build
   assert.deepEqual(cratesAll("/", metadata).map((c) => c.name).sort(), ["cc", "derive", "glam", "libm", "proptest", "syn"]);
 });
 
-test("this repository: every npm package and crate, dev ones too, is under an allowed licence", () => {
-  assert.deepEqual(refused(npmAll()), []);
-  assert.deepEqual(refused(cratesAll()), []);
+test("this repository: everything shipped is under an allowed licence, and every tool under an allowed or dev-only one", () => {
+  assert.deepEqual(refused(npmShipped()), []);
+  assert.deepEqual(refused(cratesShipped()), []);
+  assert.deepEqual(refused(npmAll(), ALLOWED_FOR_TOOLS), []);
+  assert.deepEqual(refused(cratesAll(), ALLOWED_FOR_TOOLS), []);
+  // Whatever the dev-only list lets through must be a tool: none of it is in the shipped trees.
+  const shipped = new Set([...npmShipped(), ...cratesShipped()].map((p) => `${p.name} ${p.version}`));
+  const devOnly = [...refused(npmAll()), ...refused(cratesAll())];
+  for (const entry of devOnly) assert.ok(!shipped.has(entry.replace(/: .*$/, "")), entry);
+  // Today that is lightningcss, Vite 8's CSS tool, under MPL-2.0 (so the list is exercised, not idle).
+  assert.ok(devOnly.length > 0 && devOnly.every((e) => /^lightningcss.* MPL-2\.0$/.test(e)), devOnly.join(", "));
 });
 
 test("this repository: the notices name what ships and leave out the tools", () => {

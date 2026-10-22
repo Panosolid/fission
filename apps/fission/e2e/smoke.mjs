@@ -22,10 +22,14 @@ await page.addInitScript(() => {
   for (const k of Object.keys(localStorage)) if (k.startsWith("panoshape.unsaved/")) localStorage.removeItem(k);
 });
 
+// Every page's errors, each with the check that was running when it came,
+// so an error the last check reports can be traced to the check that made it.
 const consoleErrors = [];
-page.on("pageerror", (e) => consoleErrors.push(e.message));
+let running = "before the first check";
+const noteError = (message) => consoleErrors.push(`${message} (during: ${running})`);
+page.on("pageerror", (e) => noteError(e.message));
 page.on("console", (m) => {
-  if (m.type() === "error") consoleErrors.push(m.text());
+  if (m.type() === "error") noteError(m.text());
 });
 
 const text = (id) => page.textContent(`#${id}`);
@@ -85,6 +89,7 @@ const pixel = (fx, fy) =>
 
 let failed = false;
 async function check(name, fn) {
+  running = name;
   try {
     await fn();
     console.log(`PASS ${name}`);
@@ -1030,7 +1035,7 @@ try {
 
   await check("phone width: a tap selects a face", async () => {
     const phone = await browser.newPage({ viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true });
-    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    phone.on("pageerror", (e) => noteError(e.message));
     try {
       await phone.goto(url + "#design");
       await phone.waitForFunction(() => document.querySelector("#viewport")?.dataset.shape === "box");
@@ -1049,7 +1054,7 @@ try {
 
   await check("phone width: View buttons and cube reachable, clear of the panel toggles; a tap on the cube turns the view", async () => {
     const phone = await browser.newPage({ viewport: { width: 375, height: 740 }, hasTouch: true, isMobile: true });
-    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    phone.on("pageerror", (e) => noteError(e.message));
     try {
       await phone.goto(url + "#design");
       await phone.waitForFunction(() => document.querySelector("#viewport")?.dataset.shape === "box");
@@ -1091,6 +1096,19 @@ try {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto(url + "#design");
     await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    // Undo and Redo are tab stops only while there is a step to undo. A goto
+    // to the address the page already has keeps the page, and the steps the
+    // checks above made, in Chromium; in WebKit on CI both buttons were
+    // disabled when Tab reached them, as after a fresh start, so Tab skipped
+    // the pair (browsers (webkit) on #230 and #238). So make a step first: the
+    // width 41, once the app is quiet (the stored project open and written
+    // back, "Saved"; an edit typed while it is still opening can be lost to
+    // that opening's own rebuild). Not 41 and straight back to 40: edits to
+    // one box close together merge into one step, and one that changes
+    // nothing drops out of the history, leaving nothing to undo again.
+    await page.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
+    await setSize("width", 41);
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,600 mm³" && !document.querySelector("#undo").disabled); // 41·30·20
     // Tab from the top and note each region and how far down the page it is drawn.
     const tabRegions = async () => {
       // Start on the page's first focusable element (in the top bar), whatever was clicked last.
@@ -1119,6 +1137,9 @@ try {
     assert.deepEqual(ids(regions), ["topbar", "toolbar", "panel-toggles", "browser", "undo-redo", "view-controls", "timeline", "properties"]);
     assert.ok(downward(regions), JSON.stringify(regions));
     await page.click("#browser-toggle");
+    // The box as it was, stored, for the checks that reload below.
+    await setSize("width", 40);
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³" && document.querySelector("#save-status")?.dataset.state === "saved");
     await page.setViewportSize({ width: 1000, height: 640 });
   });
 
@@ -1166,7 +1187,7 @@ try {
 
   await check("autosave: edit the width, wait for Saved, reload, the same part and numbers come back", async () => {
     const kept = await browser.newPage({ viewport: { width: 1000, height: 640 } }); // its own storage, kept across reloads
-    kept.on("pageerror", (e) => consoleErrors.push(e.message));
+    kept.on("pageerror", (e) => noteError(e.message));
     try {
       await kept.goto(url + "#design");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
@@ -1208,7 +1229,7 @@ try {
     // empty project the app starts from, with no design in it, and a file opened then was replaced by the stored one.
     const context = await browser.newContext({ viewport: { width: 1000, height: 640 } }); // two tabs sharing one storage
     const kept = await context.newPage();
-    kept.on("pageerror", (e) => consoleErrors.push(e.message));
+    kept.on("pageerror", (e) => noteError(e.message));
     try {
       await kept.goto(url + "#design");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
@@ -1265,7 +1286,7 @@ try {
 
   await check("phone width: the workspace tabs keep the top bar; Save, Open, AI and Community are behind Menu", async () => {
     const phone = await browser.newPage({ viewport: { width: 375, height: 740 } });
-    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    phone.on("pageerror", (e) => noteError(e.message));
     try {
       await phone.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await phone.goto(url + "#design");
@@ -1318,7 +1339,7 @@ try {
 
   await check("wide screen: every tab, Save, Open, AI and Community in one row, no Menu", async () => {
     const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("pageerror", (e) => noteError(e.message));
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await wide.goto(url + "#design");
@@ -1351,7 +1372,7 @@ try {
 
   await check("a stored project that no longer opens starts a new project with a message, readable at phone width", async () => {
     const phone = await browser.newPage({ viewport: { width: 375, height: 740 } }); // its own storage, kept across reloads
-    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    phone.on("pageerror", (e) => noteError(e.message));
     try {
       await phone.goto(url + "#design");
       await phone.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
@@ -1392,7 +1413,7 @@ try {
 
   await check("storage full is reported in words at phone width, and the next change saves again", async () => {
     const phone = await browser.newPage({ viewport: { width: 375, height: 740 } });
-    phone.on("pageerror", (e) => consoleErrors.push(e.message));
+    phone.on("pageerror", (e) => noteError(e.message));
     try {
       // Every write fails the way a full disk does, until the test lets it through.
       await phone.addInitScript(() => {
@@ -1426,7 +1447,7 @@ try {
 
   await check("a browser that can't keep projects still opens the app and can Save a file", async () => {
     const bare = await browser.newPage({ viewport: { width: 1000, height: 640 } });
-    bare.on("pageerror", (e) => consoleErrors.push(e.message));
+    bare.on("pageerror", (e) => noteError(e.message));
     try {
       await bare.addInitScript(() => delete window.indexedDB);
       await bare.goto(url + "#design");
@@ -1446,9 +1467,9 @@ try {
 
   await check("split view: Image beside Design by default; Design in the second pane with its own panels and camera, one selection; a placeholder there says Coming soon and draws no 3D view; Close split restores one view", async () => {
     const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("pageerror", (e) => noteError(e.message));
     wide.on("console", (m) => {
-      if (m.type() === "error") consoleErrors.push(m.text());
+      if (m.type() === "error") noteError(m.text());
     });
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
@@ -1611,7 +1632,7 @@ try {
 
   await check("split view, every choice in the second pane: one toolbar row per pane and no empty band; placeholders say Coming soon and draw no 3D view; each check fails on the old layout", async () => {
     const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("pageerror", (e) => noteError(e.message));
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await wide.goto(url + "?test-hooks#design");
@@ -1756,9 +1777,9 @@ try {
     // The app as users get it has no test hook.
     assert.equal(await page.evaluate(() => "fissionTest" in window), false);
     const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("pageerror", (e) => noteError(e.message));
     wide.on("console", (m) => {
-      if (m.type() === "error") consoleErrors.push(m.text());
+      if (m.type() === "error") noteError(m.text());
     });
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
@@ -1821,9 +1842,9 @@ try {
 
   await check("change notes on the timeline (25c2): the marker moved past the box puts its plate out of date, the note naming the marker move", async () => {
     const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    wide.on("pageerror", (e) => consoleErrors.push(e.message));
+    wide.on("pageerror", (e) => noteError(e.message));
     wide.on("console", (m) => {
-      if (m.type() === "error") consoleErrors.push(m.text());
+      if (m.type() === "error") noteError(m.text());
     });
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
