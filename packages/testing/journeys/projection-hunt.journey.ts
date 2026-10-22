@@ -9,12 +9,17 @@
 // every corner and the kernel refuse the outline (B, D); a face seen edge
 // on, two lines on one, said the sketch had no lines yet (A). A diagonal
 // across a projected face is refused in words (B2: a sketch makes one loop
-// for now). Run with `npm run journeys` after the app build.
+// for now). Checked clean: a 1 µm cube's, a 1 µm sliver's and a 998 m
+// bar's top faces extrude to their footprints (F); a projected arc closed
+// by an own line 0.9 × SAME_PLACE off its ends, not at 1.1 × (G); two
+// Project clicks while the kernel is held add a face once (H). Run with
+// `npm run journeys` after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   addSketch,
   BodyCache,
+  drawArc,
   drawCircle,
   drawLine,
   drawRectangle,
@@ -33,7 +38,10 @@ import {
   type TimelineBuild,
 } from "@fission/design";
 import type { BodyView, Plane } from "@fission/core";
-import { kernel } from "./design-app.ts";
+import { app, kernel } from "./design-app.ts";
+
+/** Where Design and the kernel take two ends as one (snap.ts SAME_PLACE, kernel/src/tolerance.rs LINEAR): 10 nm, in mm. */
+const SAME_PLACE = 1e-5;
 
 async function built(doc: DesignDocument) {
   const cache = new BodyCache(kernel);
@@ -164,4 +172,70 @@ test("C3: the box's right side moved past its left (x = 40 to −60): a line dra
   const after = sketchOf(b.followed, s.sketch);
   const q = after.points.find((x) => x.id === corner.id)!;
   assert.deepEqual([q.x, q.y], [-60, 30]);
+});
+
+test("F: the top face of a 1 µm cube, a 40 mm × 1 µm sliver and a 998 m bar projected into XY and extruded 1 mm: each the box's footprint, w · d · 1", async () => {
+  for (const [w, d, h] of [[0.001, 0.001, 0.001], [40, 0.001, 5], [998000, 30, 20]]) {
+    const s = addSketch(partDocument("box", w, d, h));
+    const p = await project(s.doc, s.id, "feature-1", (v) => ({ face: faceWhere(v, (q) => q[2] === h) }));
+    assert.equal(p.note, null, `${w} × ${d} × ${h}: every edge taken`);
+    assert.equal(sketchOf(p.doc, s.id).curves.length, 4);
+    const up = extrudeSketch(p.doc, s.id, 1);
+    const b = await built(up.doc);
+    const r = b.build.results[up.id];
+    assert.ok(r?.status === "built", `${w} × ${d} × ${h}: ${JSON.stringify(r)}`);
+    // By hand: the footprint w × d extruded 1 mm is w · d mm³ (the kernel's volumes are exact to rounding).
+    assert.ok(Math.abs(b.volumes[up.id] - w * d) <= 1e-9 * Math.max(1, w * d), `${w} × ${d}: ${b.volumes[up.id]}`);
+  }
+});
+
+test("G: a half disc's arc projected, closed by a line of the sketch's own whose ends are 0.9 × SAME_PLACE off its ends: one outline, the half disc's area; at 1.1 × the arc is left out", async () => {
+  // A half disc: the line (50, 0) to (70, 0) and the arc from (70, 0) round (60, 0) back, extruded 10; its top arc at z = 10.
+  const a = addSketch(partDocument("box", 1, 1, 1));
+  const line = drawLine(a.doc, a.id, [50, 0], [70, 0]);
+  const pts = sketchOf(line.doc, a.id).points;
+  const arc = drawArc(line.doc, a.id, pts[1].id, pts[0].id, [60, 0]);
+  const disc = extrudeSketch(arc.doc, a.id, 10);
+  for (const [k, closes] of [[0.9, true], [1.1, false]] as const) {
+    const b = addSketch(disc.doc, "XY");
+    const p = await project(b.doc, b.id, disc.id, (v) => ({ edge: v.edge_types.findIndex((t, j) => t === "circle" && Math.abs(v.edge_middles[j][2] - 10) < 1e-9) }));
+    assert.equal(p.note, null);
+    // The arc's ends are (70, 0) and (50, 0); the own line runs between points k · SAME_PLACE below each.
+    const off = k * SAME_PLACE;
+    const closed = drawLine(p.doc, b.id, [50, -off], [70, -off]);
+    const up = extrudeSketch(closed.doc, b.id, 1);
+    const r = (await built(up.doc));
+    const res = r.build.results[up.id];
+    if (closes) {
+      // By hand: half a disc of radius 10, π · 10² / 2 = 50π, by 1 mm (the line's 9 nm off moves it by far less than 1e-6).
+      assert.ok(res?.status === "built" && Math.abs(r.volumes[up.id] - 50 * Math.PI) < 1e-3, `${k}: ${JSON.stringify(res).slice(0, 300)} ${r.volumes[up.id]}`);
+    } else assert.ok(res?.status === "failed" && res.cause === "open-outline", `${k}: ${JSON.stringify(res).slice(0, 300)}`);
+  }
+});
+
+/** Turns of the event loop, for what the app does at once while the kernel is held. */
+const turns = async (n: number) => {
+  for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+};
+
+test("H: two Project clicks on one face while the kernel is slow add its four edges once, and say the second added nothing", async () => {
+  const a = await app(partDocument("box", 40, 30, 20));
+  a.$("#create-sketch")!.click();
+  await a.settle();
+  await a.pick({ plane: "XY" });
+  await a.key("sketch-project");
+  const { scene } = await built(a.doc());
+  const top = scene.faceStart[0] + faceWhere(scene.bodies[0].view, (q) => q[2] === 20);
+  const projected = () => a.doc().sketches.at(-1)!.projected?.length ?? 0;
+  // Two clicks on the top before the kernel answers either: the second runs on the document the first left, so it adds nothing.
+  a.hold();
+  a.pointer("click", [20, 15], { face: top });
+  a.pointer("click", [20, 15], { face: top });
+  await turns(20);
+  await a.release();
+  assert.equal(projected(), 4);
+  assert.match(a.$("#sketch-grid-error")?.textContent ?? "", /projected into this sketch already/);
+  assert.match((await a.undo()) ?? "", /^Project/);
+  assert.equal(projected(), 0);
+  assert.ok(await a.close(), "every body freed");
 });

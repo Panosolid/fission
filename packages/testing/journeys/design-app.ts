@@ -191,15 +191,15 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
       viewport.onPick?.({ face: null, shift: false, ...p });
       await settle();
     },
-    /** A click on the view at sketch point (x, y), a pixel 0.1 mm wide (snaps reach 1 mm). */
-    async click(x: number, y: number) {
-      const pointer: SketchPointer = { kind: "click", at: [x, y], pixel: 0.1 };
+    /** A click on the view at sketch point (x, y), a pixel 0.1 mm wide (snaps reach 1 mm), over the body's edge or face `under` when given (joined indices: what the Project tool takes, 27d). */
+    async click(x: number, y: number, under: { edge?: number; face?: number } = {}) {
+      const pointer: SketchPointer = { kind: "click", at: [x, y], pixel: 0.1, ...under };
       viewport.onSketchPointer?.(pointer);
       await settle();
     },
     /** The pointer moved or clicked over the view at sketch point (x, y), or moved off it (null), not waited for: the kernel's rounding is still out when it returns. */
-    pointer(kind: SketchPointer["kind"], at: [number, number] | null) {
-      viewport.onSketchPointer?.({ kind, at, pixel: 0.1 });
+    pointer(kind: SketchPointer["kind"], at: [number, number] | null, under: { edge?: number; face?: number } = {}) {
+      viewport.onSketchPointer?.({ kind, at, pixel: 0.1, ...under });
     },
     async key(id: string) {
       view.shortcut?.(id);
