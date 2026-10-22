@@ -43,11 +43,13 @@ function underTestCSP(browser) {
   browser.newContext = async (options = {}) => {
     const context = await newContext({ bypassCSP: true, ...options });
     if (context && options.bypassCSP !== false && STRIP_META_CSP) await stripMetaCSP(context);
+    if (context) await slowKernel(context);
     return context;
   };
   browser.newPage = async (options = {}) => {
     const page = await newPage({ bypassCSP: true, ...options });
     if (options.bypassCSP !== false && STRIP_META_CSP) await stripMetaCSP(page.context());
+    await slowKernel(page.context());
     return page;
   };
   return browser;
@@ -66,4 +68,37 @@ function stripMetaCSP(context) {
       await route.fulfill({ response, body: body.replace(META_CSP, "") });
     },
   );
+}
+
+/**
+ * E2E_KERNEL_DELAY=ms holds each kernel worker answer back a random 0 to ms
+ * milliseconds (seeded by E2E_KERNEL_SEED, in order: never overtaking the
+ * one before), so the app's rebuilds land at the moments a slow CI runner
+ * sees. Checks must pass under it: a check that reads the page while a
+ * rebuild is still on its way and passes only when it lands first has a race.
+ */
+const KERNEL_DELAY = Number(process.env.E2E_KERNEL_DELAY || 0);
+const KERNEL_SEED = Number(process.env.E2E_KERNEL_SEED || 1);
+const delayed = new WeakSet();
+async function slowKernel(context) {
+  if (!(KERNEL_DELAY > 0) || delayed.has(context)) return;
+  delayed.add(context);
+  await context.addInitScript(([max, seed]) => {
+    let s = seed >>> 0 || 1;
+    const random = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+    const Real = window.Worker;
+    window.Worker = class extends Real {
+      constructor(...args) {
+        super(...args);
+        let last = 0;
+        let handler = null;
+        super.onmessage = (event) => {
+          const at = Math.max(last, performance.now() + random() * max);
+          last = at;
+          setTimeout(() => handler?.call(this, event), at - performance.now());
+        };
+        Object.defineProperty(this, "onmessage", { get: () => handler, set: (f) => (handler = f) });
+      }
+    };
+  }, [KERNEL_DELAY, KERNEL_SEED]);
 }

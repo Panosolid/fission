@@ -116,6 +116,19 @@ async function lineNear(page, img, p) {
 /** Waits until the page has drawn a whole frame since now (two animation frames: the first may already be under way). */
 const nextFrame = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
+/**
+ * Waits until no rebuild is on its way and a frame has been drawn since. An
+ * edit draws the timeline bar and the browser at once, then again (new
+ * elements) when the kernel's rebuild lands; a check that reads or taps in
+ * between sees the step before, or an element about to go. On CI's runners
+ * the rebuild can land late, and E2E_KERNEL_DELAY makes it late here
+ * (browser.mjs).
+ */
+async function rebuilt(page) {
+  await until(page, () => document.querySelector("#viewport")?.dataset.rebuilding !== "true", null, "the rebuild landed");
+  await nextFrame(page);
+}
+
 /** Waits until the camera holds still (two reads 100 ms apart within a nanometre). */
 async function settle(page) {
   let last = null;
@@ -344,10 +357,14 @@ try {
       assert.equal(ids.length, 3);
       const [box, sketch, ext] = ids;
       /** Each bar item's flags: s suppressed, g greyed, w warned, f failed. */
-      const flags = () => page.$$eval("#timeline [data-item]", (lis) => lis.map((li) => [li.dataset.item, (li.dataset.suppressed ? "s" : "") + (li.dataset.greyed ? "g" : "") + (li.dataset.warned ? "w" : "") + (li.dataset.failed ? "f" : "")]));
+      const flags = async () => {
+        await rebuilt(page);
+        return page.$$eval("#timeline [data-item]", (lis) => lis.map((li) => [li.dataset.item, (li.dataset.suppressed ? "s" : "") + (li.dataset.greyed ? "g" : "") + (li.dataset.warned ? "w" : "") + (li.dataset.failed ? "f" : "")]));
+      };
       const titleOf = (id) => page.getAttribute(`#timeline [data-item="${id}"]`, "title");
       const rowClasses = (id) => page.$eval(`#browser [data-node="timeline"] .tree-row[data-node="${id}"]`, (r) => [...r.classList].filter((c) => c === "kept" || c.startsWith("timeline-menu")).join(" "));
       const menu = async (id) => {
+        await rebuilt(page); // its element is drawn again when a rebuild lands
         const item = page.locator(`#timeline [data-item="${id}"]`);
         await item.scrollIntoViewIfNeeded();
         if (tap) {
@@ -359,6 +376,7 @@ try {
       const choose = async (action) => {
         await press(page, `#row-menu-${action}`, tap);
         await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed");
+        await rebuilt(page);
       };
       const lostLines = () => data(page, "sketchLost");
       /** The canvas's pixels within 6 of the lost red, (255, 107, 107): the X axis (229, 83, 75) and the box's greys and blues are well clear. */
