@@ -269,7 +269,7 @@ export const PLANTS: Record<ModelFault, Plant> = {
   },
   "greyed-warns": {
     what: "a sketch on a suppressed feature's face is held with its plane lost instead of greyed",
-    edits: [{ file: REBUILD, find: '  if (on?.status === "suppressed") return { status: "greyed", by: featureId };', replace: "" }],
+    edits: [{ file: REBUILD, find: '    if (on?.status === "suppressed") return { status: "greyed", by: id };', replace: "" }],
     run: ["timeline"],
     caught: "the rebuild differs from the model",
   },
@@ -403,7 +403,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   "suppress-keeps-dependents": {
     fault: "suppress-keeps-dependents",
     what: "a sketch on a suppressed feature's face is held with its plane lost, not greyed",
-    edits: [{ file: REBUILD, find: '  if (on?.status === "suppressed") return { status: "greyed", by: featureId };', replace: "" }],
+    edits: [{ file: REBUILD, find: '    if (on?.status === "suppressed") return { status: "greyed", by: id };', replace: "" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
@@ -467,7 +467,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   "pin-survives-move": {
     fault: "pin-survives-move",
     what: "a pinned point moved by hand keeps its pin, so the next settle puts it back on the edge",
-    edits: [{ file: SKETCH, find: "  return withSketch(doc, sketch.pins ? withPins(moved, sketch.pins.filter((p) => p.point !== pointId)) : moved);", replace: "  return withSketch(doc, moved);" }],
+    edits: [{ file: SKETCH, find: "  return sketch.pins ? withPins(doc, moved, sketch.pins.filter((p) => p.point !== pointId)) : withSketch(doc, moved);", replace: "  return withSketch(doc, moved);" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
@@ -532,5 +532,40 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     edits: [{ file: REBUILD, find: "  const to = new Map(r.pinned.map((p) => [p.point, p.at]));", replace: "  const to = new Map<string, SketchXY>();" }],
     run: ["naming"],
     caught: "seeded",
+  },
+  // Step 27c: pins on any earlier body's edges (rules 11 and 13).
+  "pin-own-feature-only": {
+    fault: "pin-own-feature-only",
+    what: "the rebuild looks for every pin on the body of the sketch's own face, so a pin on another body is lost (or found on the wrong body)",
+    edits: [{ file: REBUILD, find: "    const feature = pin.feature ?? face;", replace: "    const feature = face;" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "ref-not-dependency": {
+    fault: "ref-not-dependency",
+    what: "a pin's feature is not one the sketch depends on, so a drag across the link is allowed and deleting the body doesn't ask",
+    edits: [{ file: SKETCH, find: "  const dependsOn = [...new Set([...(face === null ? [] : [face]), ...pins.flatMap((p) => p.feature ?? [])])];", replace: "  const dependsOn = face === null ? [] : [face];" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "pin-never-greys": {
+    what: "a sketch is greyed only by its face's feature, so one pinned to a suppressed body is built, its point lost, instead of greyed (rule 13)",
+    edits: [{ file: REBUILD, find: "  for (const id of [...new Set([...(featureId === null ? [] : [featureId]), ...(content.pins ?? []).flatMap((p) => p.feature ?? [])])]) {", replace: "  for (const id of featureId === null ? [] : [featureId]) {" }],
+    run: ["naming"],
+    caught: "seeded",
+    why: "no hand-worked case suppresses a pinned body (27a's suppress case is a projection's, 27d's); the seeded sessions' suppress-ref steps do",
+  },
+  "greys-ignore-pins": {
+    what: "the timeline's own reading of what is greyed (document.ts, for the bar, the browser and which bodies are shown) leaves pins out, so it disagrees with the rebuild about a sketch pinned to a suppressed body",
+    edits: [{ file: DOCUMENT, find: "  return [...new Set([...(face === null ? [] : [face]), ...(content?.pins ?? []).flatMap((p) => p.feature ?? [])])];", replace: "  return face === null ? [] : [face];" }],
+    run: ["naming"],
+    caught: "seeded",
+  },
+  "own-face-targets-only": {
+    what: "a sketch is offered only its own face's edges, as in 26f, so a centre can't be snapped onto another body or another face",
+    edits: [{ file: EDGES, find: "  const all = scene.bodies.filter((b) => before.has(b.feature)).flatMap((b) => placedTargets(b.view, b.names, plane));", replace: "  const own = isFacePlane(facePlane) ? findInScene(faceReference(facePlane), scene) : null;\n  const all = own?.status === \"found\" ? scene.bodies.flatMap((b, k) => (k === sceneHit(scene, \"face\", own.index)!.body ? placedTargets(b.view, b.names, plane, sceneHit(scene, \"face\", own.index)!.index) : [])) : [];" }, { file: EDGES, find: 'import { findInScene, type Scene } from "./scene.ts";', replace: 'import { findInScene, sceneHit, type Scene } from "./scene.ts";' }],
+    run: ["naming"],
+    caught: "Design offers no",
+    why: "the naming harness snaps onto the target the model names, and finds none to snap onto before any check runs",
   },
 };

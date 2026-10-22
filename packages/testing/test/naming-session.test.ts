@@ -206,7 +206,9 @@ test(`step 27: ${SEEDS.length} seeds × ${STEPS} steps with pins on any extrude'
 
 test("step 27 sessions for a subject that pins but doesn't project yet (Design from 27c) pin to other bodies and never project", async () => {
   const total: NamingCounts = {};
-  for (const seed of SEEDS) for (const [k, v] of Object.entries(await runNamingSession(namingModelSubject([], false), randomNamingSession(seed, STEPS, false, "pins")))) total[k] = (total[k] ?? 0) + v;
+  // 48 seeds: from 27c a pin is made only on a body that is drawn (one suppressed can't be snapped to), so a sketch
+  // greyed through its pin needs a pinned body suppressed later ("suppress-ref"), about once in ten sessions.
+  for (const seed of Array.from({ length: 48 }, (_, k) => BigInt(2500 + k))) for (const [k, v] of Object.entries(await runNamingSession(namingModelSubject([], false), randomNamingSession(seed, STEPS, false, "pins")))) total[k] = (total[k] ?? 0) + v;
   for (const k of ["pin:other-feature", "pin:other-face", "pin:upright", "delete:ask-by-ref", "off:greyed-by-ref"]) assert.ok((total[k] ?? 0) >= 3, `${k} reached ${total[k] ?? 0} times`);
   assert.deepEqual(Object.keys(total).filter((k) => k.includes("project")), []);
 });

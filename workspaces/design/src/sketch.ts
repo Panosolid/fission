@@ -249,36 +249,75 @@ export function deleteCurve(doc: DesignDocument, sketchId: string, curveId: stri
   if (!sketch.curves.some((c) => c.id === curveId)) throw new Error(`sketch ${sketchId} has no curve ${curveId}`);
   const curves = sketch.curves.filter((c) => c.id !== curveId);
   const used = new Set(curves.flatMap(curvePoints));
-  return withSketch(doc, withPins({ ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) }, (sketch.pins ?? []).filter((p) => used.has(p.point))));
+  return withPins(doc, { ...sketch, curves, points: sketch.points.filter((p) => used.has(p.id)) }, (sketch.pins ?? []).filter((p) => used.has(p.point)));
 }
 
-/** The sketch with these pins, or without the list when there are none (26f: a file never holds an empty one). */
-function withPins(sketch: Sketch, pins: SketchPin[]): Sketch {
+/**
+ * The document with `sketch` holding these pins, or without the list when
+ * there are none (26f: a file never holds an empty one), and its timeline
+ * item depending on what it is built on (27c): the feature whose face it
+ * is on, then each feature a pin names, each once, so the item can't be
+ * dragged before any of them (timeline-edits.ts) and deleting one asks.
+ */
+function withPins(doc: DesignDocument, sketch: Sketch, pins: SketchPin[]): DesignDocument {
   const rest: Sketch = { ...sketch };
   delete rest.pins;
-  return pins.length === 0 ? rest : { ...rest, pins };
+  const next = withSketch(doc, pins.length === 0 ? rest : { ...rest, pins });
+  const item = doc.timeline.features.find((f) => f.id === sketch.id);
+  if (item === undefined) return next;
+  const plane = item.intent.parameters.plane;
+  const face = isFacePlane(plane) ? faceFeature(plane) : null;
+  const dependsOn = [...new Set([...(face === null ? [] : [face]), ...pins.flatMap((p) => p.feature ?? [])])];
+  if (dependsOn.length === item.dependsOn.length && dependsOn.every((d, k) => d === item.dependsOn[k])) return next;
+  const features = doc.timeline.features.map((f) => (f === item ? { ...f, dependsOn } : f));
+  return { ...next, timeline: { ...doc.timeline, features } };
 }
 
 /**
  * The document after a sketch edit from `before` to `after`, with every
  * point the edit added to sketch `sketchId` exactly on one of `targets`
- * (its face's edges' ends, middles and centres where the sketch lies now,
- * face-edges.ts `faceEdgeTargets`) pinned there (step 26f, Q4): the first
- * target listed at those coordinates. A point already there is left as it
- * was; a sketch on an origin plane has no targets. `after` itself when
- * nothing is pinned.
+ * (the ends, middles and centres of the edges of the bodies before it,
+ * where the sketch lies now, face-edges.ts `sketchEdgeTargets`) pinned
+ * there (step 26f, Q4; any body's from 27c): the first target listed at
+ * those coordinates, its feature named unless it is the one whose face the
+ * sketch is on (as 0.26 wrote pins). A point already there is left as it
+ * was. `after` itself when nothing is pinned.
  */
 export function pinNewPoints(before: DesignDocument, after: DesignDocument, sketchId: string, targets: readonly EdgeTarget[]): DesignDocument {
   if (targets.length === 0) return after;
   const had = new Set(before.sketches.find((s) => s.id === sketchId)?.points.map((p) => p.id) ?? []);
   const sketch = sketchIn(after, sketchId);
+  const plane = after.timeline.features.find((f) => f.id === sketchId)?.intent.parameters.plane;
+  const own = isFacePlane(plane) ? faceFeature(plane) : null;
   const pins = [...(sketch.pins ?? [])];
   for (const p of sketch.points) {
     if (had.has(p.id) || pins.some((x) => x.point === p.id)) continue;
     const t = targets.find((x) => x.at[0] === p.x && x.at[1] === p.y);
-    if (t) pins.push({ point: p.id, kind: t.kind, name: t.name });
+      if (t) pins.push(pinOf(p.id, t, own));
   }
-  return pins.length === (sketch.pins?.length ?? 0) ? after : withSketch(after, withPins(sketch, pins));
+  return pins.length === (sketch.pins?.length ?? 0) ? after : withPins(after, sketch, pins);
+}
+
+/** Point `point` pinned to target `t`, its feature named unless it is `own`, the feature whose face the sketch is on (as 0.26 wrote pins). */
+const pinOf = (point: string, t: EdgeTarget, own: string | null): SketchPin => (t.feature === own ? { point, kind: t.kind, name: t.name } : { point, kind: t.kind, name: t.name, feature: t.feature });
+
+/**
+ * The sketch with point `pointId` moved exactly onto `target` and pinned
+ * there (27c), in place of any pin it had: what dropping a dragged point
+ * on a body's corner will do once points can be dragged (step 29); the
+ * naming harness moves a circle's centre onto a point with it. The same
+ * document when the point is already there, pinned so.
+ */
+export function movePointOnto(doc: DesignDocument, sketchId: string, pointId: string, target: EdgeTarget): DesignDocument {
+  const moved = movePoint(doc, sketchId, pointId, target.at[0], target.at[1]);
+  const sketch = sketchIn(moved, sketchId);
+  const plane = doc.timeline.features.find((f) => f.id === sketchId)?.intent.parameters.plane;
+  const pin = pinOf(pointId, target, isFacePlane(plane) ? faceFeature(plane) : null);
+  const was = sketchIn(doc, sketchId).pins ?? [];
+  const k = was.findIndex((p) => p.point === pointId);
+  const pins = k < 0 ? [...(sketch.pins ?? []), pin] : was.map((p, j) => (j === k ? pin : p));
+  const next = withPins(moved, sketch, pins);
+  return JSON.stringify(next) === JSON.stringify(doc) ? doc : next;
 }
 
 /**
@@ -286,7 +325,8 @@ export function pinNewPoints(before: DesignDocument, after: DesignDocument, sket
  * arc using it follows, since curves name points. Until constraints (29)
  * nothing else moves with it, so moving one end of an arc leaves its
  * centre off the midway line and the kernel then says so. A point pinned
- * to its face's edge (26f) is moved off it, so its pin goes.
+ * to a body's edge (26f) is moved off it, so its pin goes (and, 27c, what
+ * only that pin made the sketch built on).
  */
 export function movePoint(doc: DesignDocument, sketchId: string, pointId: string, x: number, y: number): DesignDocument {
   const sketch = sketchIn(doc, sketchId);
@@ -294,7 +334,7 @@ export function movePoint(doc: DesignDocument, sketchId: string, pointId: string
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`a sketch point needs x and y in mm, not ${x}, ${y}`);
   // Moved off the edge it was pinned to (26f), it is pinned no longer.
   const moved = { ...sketch, points: sketch.points.map((p) => (p.id === pointId ? { ...p, x, y } : p)) };
-  return withSketch(doc, sketch.pins ? withPins(moved, sketch.pins.filter((p) => p.point !== pointId)) : moved);
+  return sketch.pins ? withPins(doc, moved, sketch.pins.filter((p) => p.point !== pointId)) : withSketch(doc, moved);
 }
 
 /** The sketch's lines as the kernel takes them, rebuilt from point ids (its circles and arcs are in `sketchCurves`). */

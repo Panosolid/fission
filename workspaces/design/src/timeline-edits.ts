@@ -14,6 +14,7 @@
 
 import type { Feature } from "@fission/core";
 import { isSketchItem, shown, type DesignDocument } from "./document.ts";
+import { faceFeature, isFacePlane } from "./face-sketch.ts";
 
 /** The undo step each timeline edit is recorded as, from the item's name ("Delete Sketch 1"). */
 export const TIMELINE_STEPS = {
@@ -70,15 +71,24 @@ export function deleteItem(doc: DesignDocument, id: string): DesignDocument {
   return Object.keys(kept).length === 0 ? { ...rest, profiles, sketches } : { ...rest, profiles, sketches, kept };
 }
 
-/** How `f` hangs on what it depends on: a sketch is drawn on a face of its feature (step 26e), anything else is built from its inputs. */
-const link = (f: Feature): string => (isSketchItem(f) ? "drawn on a face of" : "built from");
+/**
+ * How `f` hangs on `on`, one of the items it depends on: a sketch is drawn
+ * on a face of its face's feature (step 26e) and has a point snapped to an
+ * edge of any other (27c, a pin); anything else is built from its inputs.
+ */
+function link(f: Feature, on: Feature): string {
+  if (!isSketchItem(f)) return "built from";
+  const plane = f.intent.parameters.plane;
+  return isFacePlane(plane) && faceFeature(plane) === on.id ? "drawn on a face of" : "snapped to an edge of";
+}
 
 /**
  * The document with item `id` moved to place `to` (0 first) of the new
  * order; the marker stays on the item it names. The same document back
  * when it is already there. Refused, with the message the app shows, when
  * the item would come before an item it is built from, or after one built
- * from it; a sketch's words name the face it is drawn on (answer 7).
+ * from it; a sketch's words name the face it is drawn on (answer 7), or
+ * the body it has a point snapped to (27c).
  */
 export function reorderItem(doc: DesignDocument, id: string, to: number): Reordered {
   const item = itemIn(doc, id);
@@ -87,9 +97,9 @@ export function reorderItem(doc: DesignDocument, id: string, to: number): Reorde
   features.splice(to, 0, item);
   const place = (x: string) => features.findIndex((f) => f.id === x);
   const from = features.find((f) => item.dependsOn.includes(f.id) && place(f.id) > to);
-  if (from) return { refused: "before-dependency", message: `${itemName(item)} can't go before ${itemName(from)}: it is ${link(item)} ${itemName(from)}` };
+  if (from) return { refused: "before-dependency", message: `${itemName(item)} can't go before ${itemName(from)}: it is ${link(item, from)} ${itemName(from)}` };
   const user = features.find((f, j) => j < to && f.dependsOn.includes(id));
-  if (user) return { refused: "after-dependent", message: `${itemName(item)} can't go after ${itemName(user)}: ${itemName(user)} is ${link(user)} it` };
+  if (user) return { refused: "after-dependent", message: `${itemName(item)} can't go after ${itemName(user)}: ${itemName(user)} is ${link(user, item)} it` };
   if (doc.timeline.features.indexOf(item) === to) return { doc };
   return { doc: withTimeline(doc, features, doc.timeline.marker) };
 }
