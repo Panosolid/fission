@@ -111,7 +111,7 @@ export interface SharedViewport {
   /** The element the viewport fills. */
   readonly element: HTMLElement;
   showBody(mesh: DisplayMesh): void;
-  /** Sphere around the current body and the finished sketches drawn, lost ones too (radius 0 if none); what fit frames. */
+  /** Sphere around the current body (radius 0 if none); fit frames the finished sketches drawn too. */
   bodyFraming(): Framing;
   /** Frames the current body; returns what it framed (null if none). */
   fit(): Framing | null;

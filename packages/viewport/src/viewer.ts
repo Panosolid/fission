@@ -28,6 +28,8 @@ interface ViewHost {
   pick(pick: ViewportPick): void;
   setHover(face: number | null, edge: number | null): void;
   bodyFraming(): Framing;
+  /** The body and the finished sketches drawn: what Fit and the standard views frame. */
+  fitFraming(): Framing;
   /** The plane of the sketch being edited, while a workspace listens to the pointer on it; else null. */
   sketchPlane(): Plane | null;
   /** Which way the edited sketch faces against its plane's normal (SketchDrawing.side), for Look At. */
@@ -415,7 +417,7 @@ export class ViewportView {
   /** Turns this view's camera to a standard view, framing the current body; while this view shows an image every view frames it from above. Returns what it framed (null if none). */
   setView(name: ViewName): Framing | null {
     if (this.image) return this.frameImage();
-    const framing = this.host.bodyFraming();
+    const framing = this.host.fitFraming();
     if (!(framing.radius > 0)) return null;
     const { position, target, up } = viewBasis(name, framing, this.camera.fov, this.camera.aspect);
     this.place(position, target, up);
@@ -671,7 +673,7 @@ export class Viewer implements SharedViewport {
   private minorMaterial: THREE.LineBasicMaterial | null = null;
   /** The edited sketch's ends in model space, for Look At. */
   private editedWorld: number[][] = [];
-  /** Every finished sketch's line ends in world space (lost ones too), framed with the body (partFraming). */
+  /** Every finished sketch's line ends in world space (lost ones too), framed with the body by Fit (fitFraming). */
   private finishedWorld: number[][] = [];
   /** The sketches drawn (showSketches) and the plane of the one being edited. */
   private sketches = new THREE.Group();
@@ -713,6 +715,7 @@ export class Viewer implements SharedViewport {
       pick: (pick) => this.picker?.(pick),
       setHover: (face, edge) => this.setHover(face, edge),
       bodyFraming: () => this.bodyFraming(),
+      fitFraming: () => this.fitFraming(),
       sketchPlane: () => (this.sketchHandler ? this.editedPlane : null),
       sketchSide: () => this.editedSide,
       sketchPointer: (pointer) => this.sketchHandler?.(pointer),
@@ -1060,10 +1063,25 @@ export class Viewer implements SharedViewport {
     this.edges.setAttribute("color", new THREE.BufferAttribute(lineColours, 3));
   }
 
-  /** Sphere around the current body's bounding box and the finished sketches drawn, lost ones too (partFraming; radius 0 if none). */
+  /** Sphere around the current body's bounding box (radius 0 if none). */
   bodyFraming(): Framing {
+    return partFraming(this.bodyCorners());
+  }
+
+  /**
+   * Sphere around the current body and the finished sketches drawn, lost
+   * ones too (partFraming; radius 0 if none): what Fit and the standard
+   * views frame, so a sketch whose face went is never left out of view
+   * (hunt 26h). Not what a change must keep in view (bodyFraming): finishing
+   * a sketch never moves the camera.
+   */
+  fitFraming(): Framing {
+    return partFraming([...this.bodyCorners(), ...this.finishedWorld]);
+  }
+
+  private bodyCorners(): number[][] {
     const box = new THREE.Box3().setFromObject(this.body);
-    return partFraming([...(box.isEmpty() ? [] : [box.min.toArray(), box.max.toArray()]), ...this.finishedWorld]);
+    return box.isEmpty() ? [] : [box.min.toArray(), box.max.toArray()];
   }
 
   /** Frames the current body from the home view in the main view; returns what it framed (null if none). */
