@@ -526,7 +526,9 @@ function keep(id: string) {
   keepOnChange = null;
   autosave?.stop();
   if (!canKeep) return;
-  autosave = startAutosave(store, id, () => ctx.project, saveStatus, { journal: local });
+  // Following the undo history: an amend (a face sketch settled, a pinned point followed once the kernel answers) is a
+  // change no one records, and it can come after the edit was stored (hunt 26h).
+  autosave = startAutosave(store, id, () => ctx.project, saveStatus, { journal: local, follows: ctx.history });
   document.body.dataset.projectId = id; // read by the e2e test
 }
 /** A new project in place of the last one, kept once it is changed (`keepOnChange`). */

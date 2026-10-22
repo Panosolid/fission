@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emptyProject, projectToJson, type Project } from "@fission/core";
+import { createHistory, emptyProject, projectToJson, type Project } from "@fission/core";
 import { memoryKeyValue, projectStore, startAutosave, type AutosaveStatus, type ProjectStore, type Timers } from "../src/index.ts";
 
 /** A fake clock: timers run only when the test moves time on with `advance`. */
@@ -229,4 +229,36 @@ test("stop drops a waiting save and reports nothing more", async () => {
   assert.deepEqual(saved, []);
   assert.deepEqual(statuses, [{ state: "saving" }]);
   assert.equal(clock.pendingCount(), 0);
+});
+
+test("following the undo history: an amend after the edit was stored is stored too, and stop stops following (hunt 26h)", async () => {
+  // The app's case: an edit is recorded (and stored a quiet moment later), then the kernel's answer settles it, taken
+  // into the same undo step by an amend that no one records. Before, autosave was told only of records, undos and
+  // opens, so the store kept the unsettled design until the next edit, and a reload opened that.
+  const { store, saved } = recordingStore();
+  let project = part(10);
+  const history = createHistory({ capture: () => projectToJson(project), restore: (t) => void (project = JSON.parse(t) as Project) });
+  const clock = fakeTimers();
+  const autosave = startAutosave(store, "p", () => project, () => {}, { timers: clock.timers, follows: history });
+  project = part(20);
+  history.record("Edit");
+  await clock.advance(1000);
+  assert.deepEqual(saved, [20], "a recorded step is a change");
+  project = part(21);
+  assert.equal(history.amend(true), true);
+  await clock.advance(999);
+  assert.deepEqual(saved, [20], "a quiet moment after the amend, as after any change: not at 999 ms");
+  await clock.advance(1);
+  assert.deepEqual(saved, [20, 21], "the amend is stored");
+  assert.equal(autosave.leaving(), true, "and nothing is left unkept");
+  // An undo is a change too (the shell also says so; told twice, it is still one save).
+  history.undo();
+  autosave.changed();
+  await clock.advance(1000);
+  assert.deepEqual(saved, [20, 21, 10]);
+  autosave.stop();
+  project = part(30);
+  history.record("Edit");
+  await clock.advance(5000);
+  assert.deepEqual(saved, [20, 21, 10], "stopped: no longer following");
 });

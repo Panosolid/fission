@@ -14,6 +14,10 @@
 //     without waiting for the quiet moment. A save that stores a state at
 //     least as new as the journal's removes the journal entry; one that
 //     stores an older state leaves it.
+//   - Given the undo history to follow, every change to it is a change to
+//     the project too (hunt 26h): above all an amend, a change no one
+//     records (a face sketch settled, a pinned point followed once the
+//     kernel answers), which can come after the edit was stored.
 
 import { projectToJson, type Project } from "@fission/core";
 import type { ProjectStore } from "./store.ts";
@@ -39,6 +43,8 @@ export interface AutosaveOptions {
   timers?: Timers;
   /** Where `leaving()` keeps changes the store doesn't hold yet (the browser's localStorage); null keeps none. */
   journal?: JournalStorage | null;
+  /** The undo history (core history.ts): each change to it is taken as `changed()`, until `stop()`. */
+  follows?: { onChange(listener: () => void): () => void } | null;
 }
 
 export interface Autosave {
@@ -71,7 +77,7 @@ export function startAutosave(
   id: string,
   project: () => Project,
   onStatus: (status: AutosaveStatus) => void = () => {},
-  { quietMs = QUIET_MS, timers = globalThis, journal = null }: AutosaveOptions = {},
+  { quietMs = QUIET_MS, timers = globalThis, journal = null, follows = null }: AutosaveOptions = {},
 ): Autosave {
   let timer: unknown = null;
   let inFlight = false;
@@ -150,14 +156,17 @@ export function startAutosave(
     else if (timer === null) report({ state: "saved" });
   }
 
+  function changed() {
+    if (stopped) return;
+    version++;
+    if (timer !== null) timers.clearTimeout(timer);
+    timer = timers.setTimeout(() => void save(), quietMs);
+    report({ state: "saving" });
+  }
+  const unfollow = follows?.onChange(changed) ?? (() => {});
+
   return {
-    changed() {
-      if (stopped) return;
-      version++;
-      if (timer !== null) timers.clearTimeout(timer);
-      timer = timers.setTimeout(() => void save(), quietMs);
-      report({ state: "saving" });
-    },
+    changed,
     leaving() {
       if (stopped || storedVersion === version) return true;
       let kept = journalVersion === version;
@@ -181,6 +190,7 @@ export function startAutosave(
       if (timer !== null) timers.clearTimeout(timer);
       timer = null;
       stopped = true;
+      unfollow();
     },
   };
 }
