@@ -74,7 +74,7 @@ await check("the Arc row: hover opens the three arcs beside it, another row clos
     await page.click("#sketch-create");
     assert.equal(await page.isVisible("#sketch-arc-menu"), false, "the arcs wait for their row");
     const rows = await page.$$eval("#sketch-create-menu > button", (els) => els.map((e) => e.textContent));
-    assert.deepEqual(rows, ["LineL", "RectangleR", "CircleC", "Arc▸"], "Line, Rectangle, Circle, then Arc");
+    assert.deepEqual(rows, ["LineL", "RectangleR", "CircleC", "Arc▸", "ProjectP"], "Line, Rectangle, Circle, Arc, then Project");
     await page.hover("#sketch-menu-group-arc");
     await until(page, () => !document.getElementById("sketch-arc-menu").hidden, null, "the arcs open on hover");
     const sub = await page.$$eval("#sketch-arc-menu [role=menuitemradio]", (els) => els.map((e) => [e.querySelector("span").textContent, e.querySelector("kbd").textContent]));
@@ -90,8 +90,10 @@ await check("the Arc row: hover opens the three arcs beside it, another row clos
     if (shots) await page.screenshot({ path: `${shots}/arc-menu-1280.png` });
     await page.hover("#sketch-menu-circle");
     await until(page, () => document.getElementById("sketch-arc-menu").hidden, null, "another row closes the arcs");
-    // Keys: End to Arc, Right opens it on its first row, Down twice is Tangent arc, Enter chooses it.
+    // Keys: End to Project (the last row), Up to Arc, Right opens it on its first row, Down twice is Tangent arc, Enter chooses it.
     await page.keyboard.press("End");
+    assert.equal(await page.evaluate(() => document.activeElement.id), "sketch-menu-project");
+    await page.keyboard.press("ArrowUp");
     await page.keyboard.press("ArrowRight");
     assert.equal(await page.evaluate(() => document.activeElement.id), "sketch-menu-arc");
     await page.keyboard.press("ArrowDown");
