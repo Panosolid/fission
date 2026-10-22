@@ -287,7 +287,10 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      - run: npx playwright install --with-deps chromium
+      # A download that hangs (one held a merge-group run 30 minutes) is cut off
+      # after 5 minutes and tried once more.
+      - run: timeout 300 npx playwright install --with-deps chromium || timeout 300 npx playwright install --with-deps chromium
+        timeout-minutes: 11
         working-directory: apps/fission
       - name: Journeys against the baseline
         working-directory: apps/fission
