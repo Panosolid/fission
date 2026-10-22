@@ -3,7 +3,12 @@
 //   1. sizes typed and entered faster than the kernel answers go where
 //      they were typed: each Enter takes the boxes as they were when it was
 //      pressed, and empties them at once for the next side (e2e-races: a
-//      fast "10, Tab, 90, Enter" placed the pointer's point instead).
+//      fast "10, Tab, 90, Enter" placed the pointer's point instead);
+//   2. a hover answered while a slow click waited its turn is where the
+//      preview goes on from;
+//   4. a size box emptied, or typed 0 or -5, takes nothing into the design
+//      and gets its last size back once left (Ben's Fusion answer 8: -5 and
+//      0 are not accepted and the value returns).
 // Run with `npm run journeys` after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -153,5 +158,46 @@ test("3. a centre arc's way round follows the pointer's moves made while the ker
   const arcs = sketchCurves(a.doc().sketches.at(-1)!).arcs;
   assert.equal(arcs.length, 1, "the arc is drawn");
   assert.deepEqual([arcs[0].start, arcs[0].end, arcs[0].centre], [[20, 20], [30, 10], [20, 10]]);
+  assert.ok(await a.close(), "every body freed");
+});
+
+test("4. a size box emptied or typed 0 or -5 records nothing, says why, and gets its last size back when left", async () => {
+  const a = await app(partDocument("box", 40, 30, 20));
+  const sizes = () => a.doc().timeline.features[0].intent.parameters;
+  const undo = a.history.undoLabel();
+  const builds = a.builds();
+  const height = a.$("#height") as HTMLInputElement;
+  const typeIn = async (text: string) => {
+    height.value = text;
+    height.dispatchEvent(new a.window.Event("input") as unknown as Event);
+    await a.settle();
+  };
+  // A browser's number box reads "-" and "" alike as empty; "-0" is 0.
+  for (const [typed, words] of [["", "Type the height in mm."], ["0", "The height must be more than 0 mm."], ["-0", "The height must be more than 0 mm."], ["-5", "The height must be more than 0 mm."]] as const) {
+    await typeIn(typed);
+    assert.equal(a.error(), words, `"${typed}" says why`);
+    assert.deepEqual(sizes(), { width: 40, depth: 30, height: 20 }, `"${typed}": the design keeps its sizes`);
+  }
+  assert.equal(a.history.undoLabel(), undo, "no undo step");
+  assert.equal(a.builds(), builds, "nothing went to the kernel");
+  // Leaving the box (change fires as it loses the keys): the last size the design took comes back, and the words go.
+  height.dispatchEvent(new a.window.Event("change") as unknown as Event);
+  await a.settle();
+  assert.equal(height.value, "20");
+  assert.equal(a.error(), "");
+  // A good size after: taken. Then 0.5 typed through "0" and "0.": the 0 is refused on the way, 0.5 is taken, and
+  // leaving keeps it.
+  await typeIn("25");
+  assert.deepEqual(sizes(), { width: 40, depth: 30, height: 25 });
+  await typeIn("0");
+  await typeIn("0.5");
+  assert.deepEqual(sizes(), { width: 40, depth: 30, height: 0.5 });
+  assert.equal(a.error(), "");
+  height.dispatchEvent(new a.window.Event("change") as unknown as Event);
+  await a.settle();
+  assert.equal(height.value, "0.5");
+  // Undo goes back to 25, then to 20: the refused texts were never steps.
+  assert.equal(await a.undo(), "Change height");
+  assert.deepEqual(sizes(), { width: 40, depth: 30, height: 20 }, "typing in one box is one step: 25 and 0.5 merged");
   assert.ok(await a.close(), "every body freed");
 });

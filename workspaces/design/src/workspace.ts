@@ -449,6 +449,25 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     return update(`Change shape to ${SHAPE_LABELS[kind] ?? kind}`);
   }
 
+  /** Why the panel's sizes for `kind` can't be taken (the first shown box that isn't more than 0 mm), or null. */
+  function refusedSize(kind: PartKind): string | null {
+    for (const r of parameterRows(kind)) {
+      if (!r.shown) continue;
+      const text = inputs[SIZE_KEYS.indexOf(r.key)].value;
+      const label = kind === "sketch-extrude" ? "distance" : r.label.toLowerCase();
+      const v = Number(text);
+      if (text.trim() === "" || !Number.isFinite(v)) return `Type the ${label} in mm.`;
+      if (v <= 0) return `The ${label} must be more than 0 mm.`;
+    }
+    return null;
+  }
+  /** Leaving a size box whose text was refused: the size the design last took comes back, and the words go. */
+  function restoreRefused(i: number) {
+    if (saved === null || refusedSize(shape) === null) return;
+    inputs[i].value = saved.sizes[i];
+    if (refusedSize(shape) === null) panel.showError("");
+  }
+
   /**
    * Builds the part from the panel, or makes `next` the document (an
    * extrude); `label` and `mergeKey` name the undo step when this is a
@@ -456,10 +475,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   async function update(label?: string, mergeKey?: string, next?: DesignDocument) {
     const kind = shape;
-    // A size no file can hold ("Infinity" where the box takes it as typed) is refused, as Edit feature refuses it: the
-    // design keeps its last sizes (hunt 26g: it took the size, its undo step couldn't be saved, and nothing said so).
-    const bad = next === undefined && loaded === undefined ? parameterRows(kind).find((r) => r.shown && !Number.isFinite(Number(inputs[SIZE_KEYS.indexOf(r.key)].value))) : undefined;
-    if (bad) return panel.showError(`Type the ${kind === "sketch-extrude" ? "distance" : bad.label.toLowerCase()} in mm.`);
+    // A size typed in the panel that isn't one is refused there, and the design keeps its last sizes: no number, or one
+    // no file can hold ("Infinity" where the box takes it as typed; hunt 26g: it took the size, its undo step couldn't
+    // be saved, and nothing said so), and an empty box, 0 or below (Ben's Fusion answer 8: -5 and 0 are not accepted;
+    // hunt 26h: they went to the kernel and the failed part was recorded and saved). Leaving the box puts the last
+    // size back (`restoreRefused`). The kernel judges the rest (under 0.001 mm, over its largest size).
+    if (next === undefined && loaded === undefined) {
+      const refused = refusedSize(kind);
+      if (refused !== null) return panel.showError(refused);
+    }
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
     // The panel edits the part's one solid feature, keeping the sketches; the
@@ -1358,9 +1382,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   // Typing in one box is one undo step (the merge key), named for the box.
-  inputs.forEach((input, i) =>
-    input.addEventListener("input", () => update(shape === "sketch-extrude" && SIZE_KEYS[i] === "height" ? DISTANCE_STEP : `Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i])),
-  );
+  inputs.forEach((input, i) => {
+    input.addEventListener("input", () => update(shape === "sketch-extrude" && SIZE_KEYS[i] === "height" ? DISTANCE_STEP : `Change ${SIZE_KEYS[i]}`, SIZE_KEYS[i]));
+    input.addEventListener("change", () => restoreRefused(i));
+  });
   listen();
   const first = update();
   enterSketch(); // after an Undo or Redo inside a sketch: still in it
