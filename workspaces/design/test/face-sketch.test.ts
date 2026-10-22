@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson, type BodyView, type Plane } from "@fission/core";
 import { buildingItems, builds, greyedBy, greyedItems, partDocument, readDesignDocument, type DesignDocument } from "../src/document.ts";
-import { drawnFrame, drawnOnFace, faceFeature, frameNow, squared, turned, type SketchPlacement } from "../src/face-sketch.ts";
+import { drawnFrame, drawnOnFace, faceFeature, frameNow, frameOf, isFacePlane, isFaceSketch, planeWords, squared, turned, type SketchPlacement } from "../src/face-sketch.ts";
 import { addFaceSketch, addSketch, drawCircle, sketchPlane } from "../src/sketch.ts";
 import { sketchDrawings } from "../src/sketch-tool.ts";
 import { extrudeSketch, isFlipped, setExtrudeFlip } from "../src/extrude.ts";
@@ -52,6 +52,29 @@ test("hand-worked: squared makes the axes unit and square, and finds no frame in
   assert.equal(squared(plane([0, 0, 0], [0, 0, 3], [0, 0, 1])), null);
   assert.equal(squared(plane([0, 0, 0], [1, 0, 0], [0, 0, Number.NaN])), null);
   assert.equal(squared(plane([0, 0, 0], [1, 0, 0], [0, 0, Number.POSITIVE_INFINITY])), null);
+});
+
+test("hunt 26g: squared refuses a normal too long to square, and writes every −0 of the origin as 0", () => {
+  // (1e200, 0, 0) · itself is 1e400, past the largest double, so Infinity: made unit it would come out (0, 0, 0), no
+  // normal at all, so no frame.
+  assert.equal(squared(plane([0, 0, 0], [0, 1, 0], [1e200, 0, 0])), null);
+  const p = squared(plane([-0, -0, -0], [1, 0, 0], [0, 0, 1]))!;
+  assert.ok(p.origin.every((x) => Object.is(x, 0)), `[${p.origin.map((x) => (Object.is(x, -0) ? "-0" : x))}]`);
+});
+
+test("hunt 26g: face planes and face sketches told apart, a broken escape names no feature, a frame for the kernel, the plane warnings' words", () => {
+  assert.equal(isFacePlane("face:feature-1/top"), true);
+  for (const p of [undefined, null, 7, "XY", "edge:feature-1/a+b"]) assert.equal(isFacePlane(p), false, String(p));
+  const item = (type: string) => ({ id: "x", intent: { type, parameters: { plane: "face:feature-1/top" } } }) as never;
+  assert.equal(isFaceSketch(item("sketch")), true);
+  assert.equal(isFaceSketch(item("extrude")), false, "only a sketch is a face sketch");
+  assert.equal(faceFeature("face:%E0%A4%A/top"), null, "%E0%A4%A is no escape decodeURIComponent reads");
+  const f = plane([1, 2, 3], [0, 1, 0], [1, 0, 0]);
+  const k = frameOf(f);
+  assert.deepEqual(k, { origin: [1, 2, 3], x: [0, 1, 0], normal: [1, 0, 0] });
+  assert.ok(k.origin !== f.origin && k.x !== f.xAxis && k.normal !== f.normal, "copies, so the kernel's frame can't change the sketch's");
+  assert.equal(planeWords("plane-lost", "Sketch 2"), "Sketch 2's face is gone, so its plane is lost: it stays where it was");
+  assert.equal(planeWords("plane-ambiguous", "Sketch 2"), "Sketch 2's face is now more than one face, so its plane is ambiguous: it stays where it was rather than guess");
 });
 
 test("hand-worked: the frame drawn on each face of a box keeps the world's coordinates (Q2)", () => {
