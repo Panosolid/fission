@@ -11,7 +11,7 @@ import { buildContext } from "../src/context.ts";
 import { requestJson, type Fetch } from "../src/http.ts";
 import { browserKeyStore, memoryKeyStore } from "../src/keys.ts";
 import { anthropicAnswer, anthropicBody, apiOrigin, hostedProvider, listHostedModels, openaiAnswer, otherEndpoint } from "../src/hosted.ts";
-import { isThisComputer, ollamaEndpoint, ollamaModels, ollamaProvider } from "../src/ollama.ts";
+import { hasModel, isThisComputer, ollamaEndpoint, ollamaModels, ollamaProvider } from "../src/ollama.ts";
 import { builtInProvider, gpuCanRun, inBrowserDownloadBytes, inBrowserProvider, type BuiltInModelLike, type GpuLike, type WebLLMLike } from "../src/local.ts";
 import { systemPrompt } from "../src/prompt.ts";
 import { SPECIALISTS } from "../src/specialists.ts";
@@ -508,4 +508,42 @@ test("leftovers from the second run: blank addresses, default vendors, names in 
   assert.deepEqual([c.selection, c.graph.dependsOnSelection], [[], []]);
   assert.equal(chooseModel({ kind: "api-key", vendor: "openai", model: "x" }, ["first", "x:latest"]), "first");
   assert.equal(chooseModel({ kind: "ollama", model: "x" }, ["first", "x:latest"]), "x:latest");
+});
+
+// ---------- leftovers from the third run ----------
+
+test("a marker of \"start\" means nothing is built, even when an item happens to be called start", () => {
+  // Kills `timeline.marker === "start"` => false and "start" => "": both fall back to finding
+  // the item named by the marker, which here exists (the first of two), so they would count
+  // one item as built. Worked by hand: marker "start" puts the end at 0, so both items are
+  // after the marker.
+  const project = emptyProject();
+  project.workspaces.design = { version: 1, profiles: [], timeline: { features: [{ ...feature(1), id: "start" }, feature(2)], marker: "start" } };
+  const c = buildContext(project, { workspace: "design", graph: new DependencyGraph() });
+  assert.deepEqual(c.features.map((f) => [f.id, f.afterMarker]), [["start", true], ["feature-2", true]]);
+});
+
+test("a selected id the graph doesn't have adds nothing to what depends on the selection", () => {
+  // Kills `o.graph.has(id) ? [...] : []` => `["Stryker was here"]`: an id that is not in the
+  // graph has no downstream at all.
+  const g = new DependencyGraph();
+  g.set({ id: "a", label: "a", workspace: "design", cost: "cheap" });
+  g.set({ id: "b", label: "b", workspace: "design", cost: "cheap" }, ["a"]);
+  const c = buildContext(emptyProject(), { workspace: "design", graph: g, selection: ["gone", "a"] });
+  assert.deepEqual(c.graph.dependsOnSelection, ["b"]);
+});
+
+test("Ollama: a name listed without a tag matches a model asked for without one", () => {
+  // Kills `n === model` => false: "llama3.2" asked for becomes want "llama3.2:latest", so only
+  // the exact compare finds a list entry written "llama3.2".
+  assert.equal(hasModel(["llama3.2"], "llama3.2"), true);
+  assert.equal(hasModel(["llama3.2:1b"], "llama3.2"), false);
+});
+
+test("listing models at another provider with no key names that provider's address", async () => {
+  // Kills `vendor === "openai"` => true in listHostedModels' `who`: an 'other' address would be
+  // called OpenAI's API in the error.
+  const { fetch, calls } = fakeServer(() => ({ json: { data: [] } }));
+  await assert.rejects(listHostedModels({ vendor: "other", endpoint: "https://llm.example/v1", keys: memoryKeyStore(), fetch }), { message: "no API key is saved for https://llm.example" });
+  assert.equal(calls.length, 0);
 });

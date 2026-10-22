@@ -530,5 +530,320 @@
     "original": "\"+\"",
     "replacement": "\"\"",
     "why": "\"+\".split(/\\+(?!$)/) is [\"+\"] too: its only + is at the end, where the lookahead refuses to split."
+  },
+  {
+    "file": "packages/viewport/src/picking.ts",
+    "mutator": "ConditionalExpression",
+    "original": "triangle == null",
+    "replacement": "false",
+    "why": "Number.isInteger(null) and Number.isInteger(undefined) are false, so the next check returns null for them anyway."
+  },
+  {
+    "file": "packages/viewport/src/picking.ts",
+    "mutator": "EqualityOperator",
+    "original": "4 * s + 3 < screen.length",
+    "replacement": "4 * s + 3 <= screen.length",
+    "why": "The extra round reads screen[screen.length], which is undefined, so the finite check skips it."
+  },
+  {
+    "file": "packages/viewport/src/picking.ts",
+    "mutator": "ArithmeticOperator",
+    "original": "4 * s + 3",
+    "replacement": "4 * s - 3",
+    "why": "The extra rounds read past the end, where every value is undefined, so the finite check skips them and the loop still ends."
+  },
+  {
+    "file": "packages/viewport/src/picking.ts",
+    "mutator": "ConditionalExpression",
+    "original": "![ax, ay, bx, by].every(Number.isFinite)",
+    "replacement": "false",
+    "why": "A NaN or infinite end makes the distance NaN or Infinity (Infinity - Infinity is NaN, hypot of an infinite part is Infinity), and neither is < radius, so the segment is left out all the same."
+  },
+  {
+    "file": "packages/viewport/src/picking.ts",
+    "mutator": "MethodExpression",
+    "original": "[ax, ay, bx, by].every(Number.isFinite)",
+    "replacement": "[ax, ay, bx, by].some(Number.isFinite)",
+    "why": "A NaN or infinite end makes the distance NaN or Infinity, never < radius, so the segment is left out all the same."
+  },
+  {
+    "file": "packages/viewport/src/picking.ts",
+    "mutator": "ArrayDeclaration",
+    "original": "[ax, ay, bx, by]",
+    "replacement": "[]",
+    "why": "[].every is true, so the check never skips; a NaN or infinite end still gives a NaN or infinite distance, never < radius."
+  },
+  {
+    "file": "packages/viewport/src/picking.ts",
+    "mutator": "ArithmeticOperator",
+    "original": "a.segment - b.segment",
+    "replacement": "a.segment + b.segment",
+    "why": "Only reached on equal distances, where segment numbers are 0 or more, so the mutant gives 0 or a positive number; V8's sort treats any comparator result that is not below 0 as 'keep the order', and segments were pushed in increasing order."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "along === 0",
+    "replacement": "false",
+    "why": "Dividing by along = 0 gives an infinite t or NaN, which the !(t > 0) || !Number.isFinite(t) check refuses on the next line."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "!(pixel > 0) || !Number.isFinite(pixel)",
+    "replacement": "false",
+    "why": "A pixel of 0, below 0, NaN or infinite makes want 0, negative, NaN or infinite; log10 then gives -Infinity, NaN or Infinity, tenTo of those is NaN (Number('1eNaN')), and the final Number.isFinite(spacing) check returns null all the same."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "LogicalOperator",
+    "original": "!(pixel > 0) || !Number.isFinite(pixel)",
+    "replacement": "!(pixel > 0) && !Number.isFinite(pixel)",
+    "why": "A pixel of 0, below 0, NaN or infinite gets through to an e of -Infinity, NaN or Infinity, tenTo gives NaN, and the final finite check returns null."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "pixel > 0",
+    "replacement": "true",
+    "why": "A pixel of 0, below 0 or NaN gets through to an e of -Infinity or NaN, tenTo gives NaN, and the final finite check returns null."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "EqualityOperator",
+    "original": "pixel > 0",
+    "replacement": "pixel >= 0",
+    "why": "A pixel of exactly 0 makes want 0 and log10(0) -Infinity, tenTo(-Infinity) is NaN, and the final finite check returns null."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "step !== null && (!(step > 0) || !Number.isFinite(step))",
+    "replacement": "false",
+    "why": "A step of 0 makes want / 0 infinite and 0 × tenTo(Infinity) NaN; a negative or NaN step makes the log NaN; an infinite step gives spacing Infinity. The final finite check returns null for each."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "LogicalOperator",
+    "original": "!(step > 0) || !Number.isFinite(step)",
+    "replacement": "!(step > 0) && !Number.isFinite(step)",
+    "why": "A step of 0, below 0, NaN or infinite reaches a NaN or infinite spacing, which the final finite check turns into null."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "step > 0",
+    "replacement": "true",
+    "why": "A step of 0, below 0 or NaN reaches a NaN spacing, which the final finite check turns into null."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "EqualityOperator",
+    "original": "step > 0",
+    "replacement": "step >= 0",
+    "why": "A step of exactly 0 makes base 0, so spacing is 0 × tenTo(Infinity) = NaN, which the final finite check turns into null."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "spacing > 0",
+    "replacement": "true",
+    "why": "spacing is never 0 here: base is positive and finite, and tenTo(e) for the smallest want a double allows (e about -322) is still a positive subnormal; a 0 from tenTo would fail `< want` and raise e."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "EqualityOperator",
+    "original": "spacing > 0",
+    "replacement": "spacing >= 0",
+    "why": "spacing is never 0 here: base is positive and finite and tenTo(e) stays positive for every e a positive finite want reaches."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "EqualityOperator",
+    "original": "px > 0",
+    "replacement": "px >= 0",
+    "why": "At px = 0 log10(0) is -Infinity, which Math.max(0, …) turns into the same 0."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ArithmeticOperator",
+    "original": "Math.log10(px / GRID_MIN_PIXELS) / Math.log10(GRID_MAJOR)",
+    "replacement": "Math.log10(px / GRID_MIN_PIXELS) * Math.log10(GRID_MAJOR)",
+    "why": "GRID_MAJOR is 10 and Math.log10(10) is exactly 1, so dividing and multiplying by it agree."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "minor === null || !centre.every(Number.isFinite)",
+    "replacement": "false",
+    "why": "With no spacing (minor null) major is 0, the centre / 0 is NaN or infinite, and the Number.isSafeInteger check two lines down returns null; a centre that is not finite ends the same way."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "LogicalOperator",
+    "original": "minor === null || !centre.every(Number.isFinite)",
+    "replacement": "minor === null && !centre.every(Number.isFinite)",
+    "why": "A null minor or a non-finite centre makes cx or cy NaN or infinite, so the Number.isSafeInteger check below returns null all the same."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "ConditionalExpression",
+    "original": "minor === null",
+    "replacement": "false",
+    "why": "With no spacing (minor null) major is 0, the centre / 0 is NaN or infinite, and the Number.isSafeInteger check two lines down returns null; a centre that is not finite ends the same way."
+  },
+  {
+    "file": "packages/viewport/src/sketch-view.ts",
+    "mutator": "MethodExpression",
+    "original": "centre.every(Number.isFinite)",
+    "replacement": "centre.some(Number.isFinite)",
+    "why": "A centre with one non-finite coordinate makes that cx or cy NaN or infinite, so the Number.isSafeInteger check below returns null all the same."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "ArithmeticOperator",
+    "original": "d[0] * towardCamera[0] + d[1] * towardCamera[1]",
+    "replacement": "d[0] * towardCamera[0] - d[1] * towardCamera[1]",
+    "why": "Only front (0,-1,0) and back (0,1,0) have a y part, so the mutant just swaps their two scores; both have up (0,0,1), so the up returned is the same."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "ConditionalExpression",
+    "original": "dist === 0",
+    "replacement": "false",
+    "why": "For a zero offset s is -1e-6 × 0, so the nudged offset is the same zeros (at most the sign of a zero changes, which no position or distance shows)."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "EqualityOperator",
+    "original": "Math.abs(abs[k] - 1) > 1e-3",
+    "replacement": "Math.abs(abs[k] - 1) >= 1e-3",
+    "why": "No double is exactly 1e-3 from 1: x - 1 is exact for x near 1, and 1e-3 needs bits below 1's last bit (2^-52 above 1, 2^-53 below)."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "EqualityOperator",
+    "original": "p[i] < 0",
+    "replacement": "p[i] <= 0",
+    "why": "sign is only asked for k (|p[k]| is about 1) and, at a corner, for coordinates with |p[i]| >= 0.6, so p[i] is never 0."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "ConditionalExpression",
+    "original": "i === k",
+    "replacement": "false",
+    "why": "abs[k] is within 1e-3 of 1, above CUBE_CORNER (0.6), so `abs[i] >= CUBE_CORNER` is already true for i = k."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "EqualityOperator",
+    "original": "sign(2) > 0",
+    "replacement": "sign(2) >= 0",
+    "why": "sign returns only -1 or 1, never 0, so > 0 and >= 0 agree."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "EqualityOperator",
+    "original": "sign(1) < 0",
+    "replacement": "sign(1) <= 0",
+    "why": "sign returns only -1 or 1, never 0, so < 0 and <= 0 agree."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "EqualityOperator",
+    "original": "sign(0) < 0",
+    "replacement": "sign(0) <= 0",
+    "why": "sign returns only -1 or 1, never 0, so < 0 and <= 0 agree."
+  },
+  {
+    "file": "packages/viewport/src/views.ts",
+    "mutator": "EqualityOperator",
+    "original": "sign(k) < 0",
+    "replacement": "sign(k) <= 0",
+    "why": "sign returns only -1 or 1, never 0, so < 0 and <= 0 agree."
+  },
+  {
+    "file": "packages/ai/src/commands.ts",
+    "mutator": "StringLiteral",
+    "original": "\"\"",
+    "replacement": "\"Stryker was here!\"",
+    "why": "lastError is set by every failed attempt before the final message reads it, so its first value is never shown."
+  },
+  {
+    "file": "packages/ai/src/hosted.ts",
+    "mutator": "MethodExpression",
+    "original": "endpoint.trim()",
+    "replacement": "endpoint",
+    "why": "The URL parser strips leading and trailing spaces itself, and the check above already refused an address that is only spaces."
+  },
+  {
+    "file": "packages/ai/src/http.ts",
+    "mutator": "ConditionalExpression",
+    "original": "o.body === undefined",
+    "replacement": "false",
+    "why": "JSON.stringify(undefined) is undefined, so a request with no body still sends none."
+  },
+  {
+    "file": "packages/ai/src/local.ts",
+    "mutator": "BlockStatement",
+    "original": "{ adapter = null; }",
+    "replacement": "{}",
+    "why": "adapter is declared with let and no value, so it is already undefined, which the `!adapter` check below treats like null."
+  },
+  {
+    "file": "packages/ai/src/local.ts",
+    "mutator": "LogicalOperator",
+    "original": "typeof r.nbytes !== \"number\" || !Number.isFinite(r.nbytes)",
+    "replacement": "typeof r.nbytes !== \"number\" && !Number.isFinite(r.nbytes)",
+    "why": "The records come from a JSON reply, which cannot hold NaN or Infinity, so a number there is always finite and a non-number still fails both halves."
+  },
+  {
+    "file": "packages/ai/src/local.ts",
+    "mutator": "ConditionalExpression",
+    "original": "typeof r.nbytes !== \"number\"",
+    "replacement": "false",
+    "why": "Number.isFinite never converts: it is false for anything that is not a number, so the next half refuses those all the same."
+  },
+  {
+    "file": "packages/ai/src/ollama.ts",
+    "mutator": "MethodExpression",
+    "original": "endpoint.trim()",
+    "replacement": "endpoint",
+    "why": "Both places hand the text to the URL parser, which strips leading and trailing spaces itself; ollamaEndpoint returns url.href and isThisComputer reads url.hostname, never the raw text."
+  },
+  {
+    "file": "packages/ai/src/ollama.ts",
+    "mutator": "Regex",
+    "original": "/^127\\.\\d+\\.\\d+\\.\\d+$/",
+    "replacement": "/127\\.\\d+\\.\\d+\\.\\d+$/",
+    "why": "A host ending in a number must parse as IPv4 or the URL parser throws (caught above as false), and it writes IPv4 as four decimals, so a hostname that ends in 127.x.x.x always starts with it."
+  },
+  {
+    "file": "packages/ai/src/ollama.ts",
+    "mutator": "ArrayDeclaration",
+    "original": "[]",
+    "replacement": "[\"Stryker was here\"]",
+    "why": "The made-up entry is a string, whose .name is undefined, so the typeof filter drops it."
+  },
+  {
+    "file": "packages/ai/src/providers.ts",
+    "mutator": "ArrowFunction",
+    "original": "() => import(\"@mlc-ai/web-llm\") as unknown as Promise<WebLLMLike>",
+    "replacement": "() => undefined",
+    "why": "The default loader imports the real web-llm package, which only works in a browser with WebGPU; every unit test passes its own loadWebLLM, so this default is never called there."
+  },
+  {
+    "file": "packages/ai/src/providers.ts",
+    "mutator": "ConditionalExpression",
+    "original": "settings.vendor !== \"other\"",
+    "replacement": "true",
+    "why": "DEFAULT_MODELS has no entry for 'other', so looking it up gives the same undefined."
+  },
+  {
+    "file": "packages/ai/src/providers.ts",
+    "mutator": "StringLiteral",
+    "original": "\"other\"",
+    "replacement": "\"\"",
+    "why": "DEFAULT_MODELS has no entry for 'other', so looking it up gives the same undefined."
   }
 ]

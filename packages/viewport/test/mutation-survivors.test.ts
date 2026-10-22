@@ -8,11 +8,11 @@ import assert from "node:assert/strict";
 import type { Plane, SharedViewport } from "@fission/core";
 import { needsRefit, selectionFraming } from "../src/framing.ts";
 import { BASE_COLOUR, EDGE_COLOUR } from "../src/highlight.ts";
-import { cubeDragAngles, NAV_MODES, orbitBy } from "../src/navigation.ts";
+import { clampZoom, cubeDragAngles, NAV_MODES, orbitBy } from "../src/navigation.ts";
 import { paneViewports, type PaneCamera } from "../src/pane.ts";
 import { segmentsNear, unhidden, EDGE_DEPTH_SLACK } from "../src/picking.ts";
 import { rayOnPlane, sketchGrid, gridSpacing, toWorld, yAxisOf } from "../src/sketch-view.ts";
-import { cubeView, orbitSafeOffset, planeViewBasis, viewDirection } from "../src/views.ts";
+import { cubeView, fitDistance, orbitSafeOffset, planeViewBasis, viewDirection } from "../src/views.ts";
 
 const close = (a: readonly number[] | null | undefined, b: readonly number[], what: string, eps = 1e-12) => {
   assert.ok(a, `${what}: nothing`);
@@ -212,4 +212,24 @@ test("leftovers from the second run: an x too large with a finite y, the y axis 
   // Kills each corner's signs => their opposite.
   const corners = { "top-front-left": [-1, -1, 1], "top-front-right": [1, -1, 1], "top-back-left": [-1, 1, 1], "top-back-right": [1, 1, 1], "bottom-front-left": [-1, -1, -1], "bottom-front-right": [1, -1, -1], "bottom-back-left": [-1, 1, -1], "bottom-back-right": [1, 1, -1] } as const;
   for (const [name, d] of Object.entries(corners)) assert.deepEqual(viewDirection(name as keyof typeof corners), d, name);
+});
+
+test("a zoom that lands exactly on a limit keeps its own factor, not one worked back from the limit", () => {
+  // Kills `wanted < min` => `<=` and `wanted > max` => `>=`: at the limit the mutant returns
+  // limit / distance, which rounding can make differ from the factor. Worked by hand in
+  // doubles: 3 × 0.1 = 0.30000000000000004 and that / 3 = 0.10000000000000002;
+  // 3 × 0.7 = 2.0999999999999996 and that / 3 = 0.6999999999999998.
+  assert.equal(clampZoom(3, 0.1, 3 * 0.1, 100), 0.1);
+  assert.equal(clampZoom(3, 0.7, 0, 3 * 0.7), 0.7);
+});
+
+test("a square canvas fits with the vertical half-angle itself, not one sent through tan and atan", () => {
+  // Kills `aspect < 1` => `<=`: at aspect 1 the mutant uses atan(tan(h)), which for a 2.26°
+  // field of view is one step off h = 2.26π/360, and there the distance r / sin(h) changes in
+  // its last digit: 50.70751684352266 against the mutant's 50.707516843522654 (no whole-degree
+  // field of view shows it, so this odd one is used).
+  const h = (2.26 * Math.PI) / 360;
+  assert.notEqual(Math.atan(Math.tan(h)), h);
+  assert.equal(fitDistance(1, 2.26, 1), 50.70751684352266);
+  assert.equal(fitDistance(1, 2.26, 1), 1 / Math.sin(h));
 });
