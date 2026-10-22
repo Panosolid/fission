@@ -388,10 +388,7 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      # A download that hangs (one held a merge-group run 30 minutes) is cut off
-      # after 5 minutes and tried once more.
-      - run: timeout 300 npx playwright install --with-deps chromium || timeout 300 npx playwright install --with-deps chromium
-        timeout-minutes: 11
+      - run: npx playwright install --with-deps chromium
         working-directory: apps/fission
       - run: node e2e/shard.mjs ${{ matrix.shard }} 3
         working-directory: apps/fission
@@ -433,10 +430,7 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      # A download that hangs (one held a merge-group run 30 minutes) is cut off
-      # after 5 minutes and tried once more.
-      - run: timeout 300 npx playwright install --with-deps chromium || timeout 300 npx playwright install --with-deps chromium
-        timeout-minutes: 11
+      - run: npx playwright install --with-deps chromium
         working-directory: apps/fission
       - run: node e2e/smoke.mjs
         working-directory: apps/fission
@@ -505,10 +499,7 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      # A download that hangs (one held a merge-group run 30 minutes) is cut off
-      # after 5 minutes and tried once more.
-      - run: timeout 300 npx playwright install --with-deps ${{ matrix.browser }} || timeout 300 npx playwright install --with-deps ${{ matrix.browser }}
-        timeout-minutes: 11
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
         working-directory: apps/fission
       # Firefox finds no GL driver headless on CI: it runs with a window on a
       # virtual screen, drawing with Mesa's software GL (e2e/browser.mjs).
