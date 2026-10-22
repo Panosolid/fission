@@ -243,7 +243,11 @@ Slice workspace (3D printing; starts right after CAD step 33, ahead of Render or
 - [ ] P7. Profiles and settings: printer, filament and quality presets; a beginner view with four choices (quality, strength, supports on or off, filament) and an Advanced view with everything; PrusaSlicer profile import
 - [ ] P8. Multi-colour with the AMS: a colour per body or per face, tool changes, a purge tower
 - [ ] P9. Exact slicing: section the exact body instead of its mesh, so holes and curves print as true arcs (G2/G3) and round holes come out round (after kernel steps 41–46; removes the mesh-first compromise)
-- [ ] P10. Later: tree supports, variable-width walls (Arachne), adaptive layer heights, seam placement, ironing, several plates per project; sending a job to a printer only much later and only behind the confirmation screen (I15)
+- [ ] P10. Feature-aware printing: Slice reads each feature's intent (I11), so a hole knows its size and is grown to make up for the plastic's shrink, and a face can be marked as mating (fine layers, accurate size) or cosmetic; bolts and pins fit first time
+- [ ] P11. Settings stick to faces through edits: painted supports, seams, per-face settings and AMS colours are tied to each face's stable name (24, then 50), so changing the design keeps them, where other slicers lose them on re-import; a face that splits or vanishes warns, never guesses
+- [ ] P12. Printing feedback while designing: the print time and weight chip, overhangs and walls too thin for the nozzle shown live in Design as the part is modelled
+- [ ] P13. Calibration that feeds the design: print a small test piece, type in what you measure, and the printer and filament's shrink and fit allowances flow back into every hole and fit in the project (through P10)
+- [ ] P14. Later: tree supports, variable-width walls (Arachne), adaptive layer heights, seam placement, ironing, several plates per project; sending a job to a printer only much later and only behind the confirmation screen (I15)
 
 Circuit workspace (PCB / electronics; starts after CAD step 75: full topological naming at 50, assemblies and joints at 74–75)
 - [ ] E1. Schematic capture and a component library
