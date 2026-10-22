@@ -28,7 +28,10 @@ import {
   type NamingItem,
   type NamingModel,
   type NamingOp,
+  edgeAt,
+  namingDeps,
   pinAt,
+  planDelete,
 } from "../src/naming-model.ts";
 import { BEN, randomOutline, setupOps } from "../src/naming-session.ts";
 
@@ -455,4 +458,90 @@ test("hand-worked: a pinned centre goes with its corner, stays when the corner i
   assert.deepEqual(circle().centre, [10, 10]);
   // A pin asked for where there is no such corner is refused, not guessed.
   assert.throws(() => applyNaming(m, { op: "add-face-sketch", face: { feature: "extrude-2", role: "end" }, centre: [0, 0], radius: 1, pin: { at: "corner", before: "line-1", after: "line-3" } }), /no corner:line-1>line-3/);
+});
+
+// ---------------------------------------------------------- step 27 (rules 11 to 13)
+
+/** Ben's part with a new body, and a second body before the face sketch (sketch-3 and extrude-4 here): a 60..80 × 0..10 rectangle, lines 5 to 8, extruded 5. */
+const twoBodies = () => {
+  const m = createNamingModel();
+  run(m, ...setupOps({ ...BEN, other: { corners: rect(60, 0, 80, 10), distance: 5 } }, false));
+  return m;
+};
+
+test("hand-worked: pins and projected edges on another body and on its own body's other faces, seen down a cap's normal (rules 11 and 12)", () => {
+  const m = twoBodies();
+  assert.deepEqual(m.doc.items.map((i) => i.id), ["sketch-1", "extrude-2", "sketch-3", "extrude-4", "sketch-5", "extrude-6"]);
+  const top = { feature: "extrude-2", role: "end" as const };
+  // The second rectangle's corners: 0 (60, 0), 1 (80, 0), 2 (80, 10), 3 (60, 10); line 5 + k runs from corner k.
+  // Corner 2 sits after line 6 and before line 7, on either cap: seen straight down it is (80, 10).
+  assert.deepEqual(pinAt(m.doc, top, { at: "corner", before: "line-6", after: "line-7", feature: "extrude-4", cap: "end" }), [80, 10]);
+  assert.deepEqual(pinAt(m.doc, top, { at: "corner", before: "line-6", after: "line-7", feature: "extrude-4", cap: "start" }), [80, 10]);
+  // Line 8's middle, ((60 + 60) / 2, (10 + 0) / 2) = (60, 5); the upright at corner 1 (after line 5) runs along the normal, so its middle is (80, 0).
+  assert.deepEqual(pinAt(m.doc, top, { at: "middle", line: "line-8", feature: "extrude-4", cap: "start" }), [60, 5]);
+  assert.deepEqual(pinAt(m.doc, top, { at: "upright", before: "line-5", after: "line-6", feature: "extrude-4" }), [80, 0]);
+  // Its own body's bottom: the same (x, y) as the top's corner.
+  assert.deepEqual(pinAt(m.doc, top, { at: "corner", before: "line-2", after: "line-3", feature: "extrude-2", cap: "start" }), [40, 30]);
+  // Lines of one body asked of the other: nothing (and planted, looked for on the sketch's own body: nothing either, so it would be lost).
+  assert.equal(pinAt(m.doc, top, { at: "corner", before: "line-2", after: "line-3", feature: "extrude-4", cap: "end" }), null);
+  assert.equal(pinAt(m.doc, top, { at: "corner", before: "line-6", after: "line-7", feature: "extrude-4", cap: "end" }, new Set(["pin-own-feature-only"])), null);
+  // A sketch isn't an extrude, and a cylinder has no lines.
+  assert.equal(pinAt(m.doc, top, { at: "middle", line: "line-5", feature: "sketch-3" }), null);
+  assert.equal(pinAt(m.doc, top, { at: "middle", line: "line-5", feature: "extrude-6" }), null);
+  // Edges: the cap edge along line 6 is corner 1 to corner 2; an upright is one point; planted, line 7's edge instead.
+  assert.deepEqual(edgeAt(m.doc, { feature: "extrude-4", at: "cap-edge", cap: "end", line: "line-6" }), [[80, 0], [80, 10]]);
+  assert.deepEqual(edgeAt(m.doc, { feature: "extrude-4", at: "cap-edge", cap: "start", line: "line-8" }), [[60, 10], [60, 0]]);
+  assert.deepEqual(edgeAt(m.doc, { feature: "extrude-4", at: "upright", before: "line-8", after: "line-5" }), [[60, 0]]);
+  assert.deepEqual(edgeAt(m.doc, { feature: "extrude-4", at: "cap-edge", cap: "end", line: "line-6" }, new Set(["projection-wrong-line"])), [[80, 10], [60, 10]]);
+  // No such upright (line 6 doesn't end where line 5 starts), no such line.
+  assert.equal(edgeAt(m.doc, { feature: "extrude-4", at: "upright", before: "line-6", after: "line-5" }), null);
+  assert.equal(edgeAt(m.doc, { feature: "extrude-4", at: "cap-edge", cap: "end", line: "line-1" }), null);
+});
+
+test("hand-worked: a projection follows, is held when lost, is never doubled, and a pin or projection can only name what is before its sketch (rules 12 and 13)", () => {
+  const m = twoBodies();
+  const sketch = () => m.doc.items.find((i) => i.id === "sketch-5") as Extract<NamingItem, { kind: "face-sketch" }>;
+  const edge = { feature: "extrude-4", at: "cap-edge" as const, cap: "end" as const, line: "line-6" };
+  // The 9th of the line counter (lines 1 to 8 taken).
+  assert.deepEqual(applyNaming(m, { op: "project", sketch: "sketch-5", edge }), { kind: "done", ids: ["projection-9"] });
+  assert.deepEqual(rebuildNaming(m.doc).results["sketch-5"], { kind: "sketch", placement: flat(20), projected: [{ id: "projection-9", at: [[80, 0], [80, 10]] }] });
+  // Again: nothing, no undo step (planted: a second copy).
+  const steps = m.undo.length;
+  assert.deepEqual(applyNaming(m, { op: "project", sketch: "sketch-5", edge }), { kind: "unchanged" });
+  assert.equal(m.undo.length, steps);
+  // Corner 2 to (90, 20): the edge from (80, 0) to (90, 20).
+  applyNaming(m, { op: "move-corner", sketch: "sketch-3", corner: 2, to: [90, 20] });
+  assert.deepEqual(sketch().projections![0].at, [[80, 0], [90, 20]]);
+  // A triangle: new lines, so the edge is gone; held where it was, warned by id; planted, silent or sent to the origin.
+  applyNaming(m, { op: "set-corners", sketch: "sketch-3", corners: [[60, 0], [80, 0], [70, 10]] });
+  assert.deepEqual(rebuildNaming(m.doc).results["sketch-5"], {
+    kind: "sketch",
+    placement: flat(20),
+    warning: { cause: "projection-lost", projections: ["projection-9"] },
+    projected: [{ id: "projection-9", at: [[80, 0], [90, 20]] }],
+  });
+  assert.equal(rebuildNaming(m.doc, new Set(["lost-projection-silent"])).results["sketch-5"].warning, undefined);
+  applyNaming(m, { op: "undo" });
+  // Rule 13: the second body is now built on; nothing else is (no face sketch on it, no cut into it).
+  assert.deepEqual(namingDeps(m.doc, sketch()), ["extrude-2", "extrude-4"]);
+  assert.deepEqual(namingDeps(m.doc, sketch(), new Set(["ref-not-dependency"])), ["extrude-2"]);
+  assert.deepEqual(planDelete(m.doc, "extrude-4"), { ask: true, removes: ["extrude-4"] });
+  // Suppressed: the sketch and the cylinder from it greyed, with no warning.
+  applyNaming(m, { op: "suppress", item: "extrude-4", on: true });
+  const r = rebuildNaming(m.doc);
+  assert.deepEqual([r.results["sketch-5"], r.results["extrude-6"]], [{ kind: "greyed" }, { kind: "greyed" }]);
+  applyNaming(m, { op: "suppress", item: "extrude-4", on: false });
+  // Removing the projection takes it, and the link with it.
+  applyNaming(m, { op: "unproject", sketch: "sketch-5", projection: "projection-9" });
+  assert.equal(sketch().projections, undefined);
+  assert.deepEqual(planDelete(m.doc, "extrude-4"), { ask: false, removes: ["extrude-4"] });
+  // Only what is before the sketch can be named: a third body added after it is refused, never guessed.
+  run(m, { op: "add-sketch", corners: rect(100, 0, 110, 10) }, { op: "add-extrude", sketch: "sketch-7", distance: 5 });
+  assert.throws(() => applyNaming(m, { op: "project", sketch: "sketch-5", edge: { feature: "extrude-8", at: "cap-edge", cap: "end", line: "line-10" } }), /no edge extrude-8\/end:line-10 before sketch-5/);
+  assert.throws(() => applyNaming(m, { op: "set-circle", sketch: "sketch-5", centre: [0, 0], radius: 5, pin: { at: "middle", line: "line-10", feature: "extrude-8" } }), /before sketch-5 to pin to/);
+  // A pin moved onto a point is pinned to it; moved by hand again, it is let go.
+  applyNaming(m, { op: "set-circle", sketch: "sketch-5", centre: [0, 0], radius: 5, pin: { at: "upright", before: "line-5", after: "line-6", feature: "extrude-4" } });
+  assert.deepEqual([sketch().centre, sketch().pin], [[80, 0], { at: "upright", before: "line-5", after: "line-6", feature: "extrude-4" }]);
+  applyNaming(m, { op: "set-circle", sketch: "sketch-5", centre: [5, 5], radius: 5 });
+  assert.equal(sketch().pin, undefined);
 });

@@ -203,7 +203,8 @@ test("hand-worked: the outline's sketch deleted, its extrude keeps the sketch's 
 // ---------------------------------------------------------------- Ben's answers
 
 test("every one of Ben's Fusion answers that holds without a cut holds on Design (1, 2, 5, 7, Q1, Q2, Q3, Q4)", async () => {
-  const cases = FUSION_CASES.filter((c) => !c.cuts);
+  // Step 27's cases (rules 11 to 13) join as Design gains them: from 27c and 27d (`from`).
+  const cases = FUSION_CASES.filter((c) => !c.cuts && c.from === undefined);
   assert.deepEqual([...new Set(cases.map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3", "Q4"]);
   const start = await kernel.call("body_count");
   for (const c of cases) {

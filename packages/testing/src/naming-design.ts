@@ -124,6 +124,8 @@ const planeOfFace = (f: FaceName) => facePlane(encodeURIComponent(f.feature), f.
  * or "side:<line>+<cap>", sorted).
  */
 function pinMatches(t: EdgeTarget, face: FaceName, pin: PinName): boolean {
+  // Step 27 (rules 11 to 13): other faces' and other bodies' points come with 27c; until then a session that names one is the harness's mistake.
+  if (pin.at === "upright" || (pin.feature !== undefined && (pin.feature !== face.feature || pin.cap !== face.role))) throw new Error(`harness: Design pins only to its own face's edges until step 27c (${JSON.stringify(pin)})`);
   if (face.role === "side") return false;
   const capEdge = (line: string) => [face.role, `side:${encodeURIComponent(line)}`].sort().join("+");
   if (pin.at === "middle") return t.kind === "midpoint" && t.name === capEdge(pin.line);
@@ -223,9 +225,13 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
       case "set-distance":
         doc = setExtrudeFlip(setExtrudeDistance(doc, Math.abs(op.value), op.item), op.value < 0, op.item);
         return { state: { doc, meta }, made: [] };
+      case "project":
+      case "unproject":
+        throw new Error("harness: Design projects no edges until step 27d");
       case "set-circle": {
         const m = meta[op.sketch];
         if (!("circle" in m)) throw new Error(`harness: ${op.sketch} has no circle`);
+        if (op.pin) throw new Error("harness: Design pins a moved circle only from step 27c");
         doc = movePoint(doc, op.sketch, m.centre, op.centre[0], op.centre[1]);
         // A circle's radius has no edit yet: written into the data, as a later Panosolid would.
         const sketches = doc.sketches.map((x) => (x.id === op.sketch ? { ...x, curves: x.curves.map((c) => (c.id === m.circle && c.kind === "circle" ? { ...c, radius: op.radius } : c)) } : x));

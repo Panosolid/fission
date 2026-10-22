@@ -28,6 +28,7 @@ import {
   createNamingModel,
   discInsidePolygon,
   discMeetsPolygon,
+  edgeAt,
   faceKeyOf,
   namingFaces,
   planDelete,
@@ -36,6 +37,8 @@ import {
   type Cap,
   type FaceName,
   type DeletePlan,
+  type EdgeName,
+  type NamingItem,
   type NamingApplied,
   type NamingDoc,
   type NamingFault,
@@ -73,18 +76,28 @@ export interface Setup {
   depth: number;
   /** On a cap, the circle's centre snapped onto a corner or a side's middle and pinned there (rule 10, step 26f); `centre` is then that point. */
   pin?: PinName;
+  /** Step 27: a second outline on XY extruded before the face sketch (sketch-3, extrude-4), so its edges can be pinned to and projected (rule 13). */
+  other?: { corners: Point[]; distance: number };
 }
 
 /** The face a setup's circle is on, in the model's ids. */
 export const setupFace = (cap: Setup["cap"]): FaceName => (typeof cap === "string" ? { feature: "extrude-2", role: cap } : { feature: "extrude-2", role: "side", line: `line-${cap.side + 1}` });
 
-/** The setup as edits. The model's ids are fixed by its counters: sketch-1 (lines line-1 onwards, the k-th from corner k − 1), extrude-2, sketch-3, then cut-4 or extrude-4. */
+/**
+ * The setup as edits. The model's ids are fixed by its counters: sketch-1
+ * (lines line-1 onwards, the k-th from corner k − 1), extrude-2, sketch-3,
+ * then cut-4 or extrude-4; with a second outline (step 27), that is
+ * sketch-3 and extrude-4, the face sketch sketch-5, then cut-6 or extrude-6.
+ */
 export function setupOps(s: Setup, cuts: boolean): NamingOp[] {
+  const other: NamingOp[] = s.other ? [{ op: "add-sketch", corners: s.other.corners }, { op: "add-extrude", sketch: "sketch-3", distance: s.other.distance }] : [];
+  const sketch = s.other ? "sketch-5" : "sketch-3";
   return [
     { op: "add-sketch", corners: s.corners },
     { op: "add-extrude", sketch: "sketch-1", distance: s.distance },
+    ...other,
     { op: "add-face-sketch", face: setupFace(s.cap), centre: s.centre, radius: s.radius, ...(s.pin ? { pin: s.pin } : {}) },
-    cuts ? { op: "add-cut", sketch: "sketch-3", depth: s.depth } : { op: "add-face-extrude", sketch: "sketch-3", distance: s.depth },
+    cuts ? { op: "add-cut", sketch, depth: s.depth } : { op: "add-face-extrude", sketch, distance: s.depth },
   ];
 }
 
@@ -109,8 +122,17 @@ export type NamingCounts = Record<string, number>;
 // ------------------------------------------------------------ comparing
 
 const vecClose = (a: Vec3, b: Vec3) => a.every((x, k) => close(x, b[k]));
-// A pin's warning by its cause alone: a sketch has at most one pin, and a subject names it its own way.
-const warnKey = (w: NamingWarning | undefined) => (w === undefined ? "none" : "input" in w ? `${w.cause}:${w.input}` : "face" in w ? `${w.cause}:${faceKeyOf(w.face)}` : w.cause);
+// A pin's warning by its cause alone: a sketch has at most one pin, and a subject names it its own way. Held projections by their ids (step 27).
+const warnKey = (w: NamingWarning | undefined) =>
+  w === undefined ? "none" : "input" in w ? `${w.cause}:${w.input}` : "face" in w ? `${w.cause}:${faceKeyOf(w.face)}` : "projections" in w ? `${w.cause}:${w.projections}` : w.cause;
+const pointsClose = (a: readonly Point[], b: readonly Point[]) => a.length === b.length && a.every((p, k) => close(p[0], b[k][0]) && close(p[1], b[k][1]));
+/** What differs between two sketches' projected edges (rule 12; none is an empty list), or null. */
+function projectedDiff(got: { id: string; at: Point[] }[] = [], want: { id: string; at: Point[] }[] = []): string | null {
+  const ids = (l: { id: string }[]) => l.map((q) => q.id).join();
+  if (ids(got) !== ids(want)) return `projections [${ids(got)}], want [${ids(want)}]`;
+  const k = want.findIndex((q, j) => !pointsClose(got[j].at, q.at));
+  return k < 0 ? null : `${want[k].id} at ${JSON.stringify(got[k].at)}, want ${JSON.stringify(want[k].at)}`;
+}
 /** What differs between two placements, or null. */
 function placementDiff(got: Placement, want: Placement): string | null {
   if (got.side !== want.side) return `faces ${got.side} along its normal, want ${want.side}`;
@@ -125,7 +147,7 @@ function resultDiff(id: string, want: NamingResult, got: NamingResult | undefine
   if (got.kind !== want.kind) return `${id}: a ${got.kind}, not a ${want.kind}`;
   if (warnKey(got.warning) !== warnKey(want.warning)) return `${id}: warning ${warnKey(got.warning)}, want ${warnKey(want.warning)}`;
   if (want.kind === "sketch" && got.kind === "sketch") {
-    const d = placementDiff(got.placement, want.placement);
+    const d = placementDiff(got.placement, want.placement) ?? projectedDiff(got.projected, want.projected);
     if (d) return `${id}: ${d}`;
   }
   if (want.kind === "solid" && got.kind === "solid") {
@@ -154,11 +176,21 @@ export function namingDiff(want: NamingRebuild, got: NamingRebuild): string | nu
 
 /** Renames every id in a rebuild. */
 function renamed(r: NamingRebuild, to: (id: string) => string): NamingRebuild {
-  const warning = (w: NamingWarning | undefined): NamingWarning | undefined => (w === undefined ? undefined : "input" in w ? { cause: w.cause, input: to(w.input) } : "face" in w ? { cause: w.cause, face: renamedFace(w.face, to) } : w);
+  const warning = (w: NamingWarning | undefined): NamingWarning | undefined =>
+    w === undefined
+      ? undefined
+      : "input" in w
+        ? { cause: w.cause, input: to(w.input) }
+        : "face" in w
+          ? { cause: w.cause, face: renamedFace(w.face, to) }
+          : "projections" in w
+            ? { cause: w.cause, projections: w.projections.map(to) }
+            : w;
   const results: Record<string, NamingResult> = {};
   for (const [id, res] of Object.entries(r.results)) {
     const w = warning(res.warning);
-    results[to(id)] = { ...res, ...(w ? { warning: w } : {}) } as NamingResult;
+    const projected = res.kind === "sketch" && res.projected ? { projected: res.projected.map((q) => ({ id: to(q.id), at: q.at })) } : {};
+    results[to(id)] = { ...res, ...(w ? { warning: w } : {}), ...projected } as NamingResult;
   }
   return { order: r.order.map(to), results, bodies: Object.fromEntries(Object.entries(r.bodies).map(([id, v]) => [to(id), v])) };
 }
@@ -166,11 +198,23 @@ function renamed(r: NamingRebuild, to: (id: string) => string): NamingRebuild {
 /** A face's name with its feature's (and side's line's) id renamed. */
 const renamedFace = (f: FaceName, to: (id: string) => string): FaceName => (f.role === "side" ? { feature: to(f.feature), role: "side", line: to(f.line) } : { feature: to(f.feature), role: f.role });
 
+/** A pin with its lines' (and from step 27 its feature's) ids renamed. */
+function renamedPin(p: PinName, to: (id: string) => string): PinName {
+  if (p.at === "upright") return { at: "upright", before: to(p.before), after: to(p.after), feature: to(p.feature) };
+  const on = p.feature === undefined ? {} : { feature: to(p.feature), ...(p.cap ? { cap: p.cap } : {}) };
+  return p.at === "middle" ? { at: "middle", line: to(p.line), ...on } : { at: "corner", before: to(p.before), after: to(p.after), ...on };
+}
+
+/** A projected edge's name with its feature's and lines' ids renamed (rule 12). */
+const renamedEdge = (e: EdgeName, to: (id: string) => string): EdgeName =>
+  e.at === "cap-edge" ? { feature: to(e.feature), at: "cap-edge", cap: e.cap, line: to(e.line) } : { feature: to(e.feature), at: "upright", before: to(e.before), after: to(e.after) };
+
 function renamedOp(op: NamingOp, to: (id: string) => string): NamingOp {
   const o = JSON.parse(JSON.stringify(op)) as Record<string, unknown>;
-  for (const k of ["sketch", "item"]) if (typeof o[k] === "string") o[k] = to(o[k] as string);
+  for (const k of ["sketch", "item", "projection"]) if (typeof o[k] === "string") o[k] = to(o[k] as string);
   if (op.op === "add-face-sketch") o.face = renamedFace(op.face, to);
-  if (op.op === "add-face-sketch" && op.pin) o.pin = op.pin.at === "corner" ? { at: "corner", before: to(op.pin.before), after: to(op.pin.after) } : { at: "middle", line: to(op.pin.line) };
+  if ((op.op === "add-face-sketch" || op.op === "set-circle") && op.pin) o.pin = renamedPin(op.pin, to);
+  if (op.op === "project") o.edge = renamedEdge(op.edge, to);
   return o as NamingOp;
 }
 
@@ -198,6 +242,25 @@ function cutCases(doc: NamingDoc, r: NamingRebuild): string[] {
   return out;
 }
 
+const isOff = (r: NamingResult | undefined) => r?.kind === "suppressed" || r?.kind === "greyed";
+
+/** The features face sketch `s` names by its pin and projections only (rule 13), not its face's. */
+const refsOf = (s: NamingDoc["items"][number]): string[] =>
+  s.kind !== "face-sketch" ? [] : [...(s.pin?.feature ? [s.pin.feature] : []), ...(s.projections ?? []).map((q) => q.edge.feature)].filter((f) => f !== s.face.feature);
+
+/** Whether moving `item` is refused only because of what a pin or a projection names: it is such a sketch, or such a feature. */
+function refRefused(doc: NamingDoc, item: string): boolean {
+  const it = doc.items.find((i) => i.id === item);
+  return it !== undefined && (refsOf(it).length > 0 || doc.items.some((i) => refsOf(i).includes(item)));
+}
+
+/** Whether deleting `item` asks only because a pin or a projection names it: nothing else is built on it. */
+function askedForRef(doc: NamingDoc, item: string): boolean {
+  const named = doc.items.some((i) => refsOf(i).includes(item));
+  const builtOn = doc.items.some((i) => (i.kind === "face-sketch" && i.face.feature === item) || ((i.kind === "extrude" || i.kind === "face-extrude" || i.kind === "cut") && i.sketch === item) || (i.kind === "cut" && i.target === item));
+  return named && !builtOn;
+}
+
 function count(counts: NamingCounts, what: string) {
   counts[what] = (counts[what] ?? 0) + 1;
 }
@@ -215,8 +278,9 @@ export async function runNaming(subject: NamingSubject, setup: Setup, steps: rea
   const sub = (id: string) => toSubject.get(id) ?? `unknown:${id}`;
   const mod = (id: string) => toModel.get(id) ?? `unknown:${id}`;
   const counts: NamingCounts = {};
-  /** Each face sketch's centre after the last step, to count a pinned one moving. */
+  /** Each face sketch's centre after the last step, to count a pinned one moving; each projected edge's place, to count one following (step 27). */
   const centres = new Map<string, Point>();
+  const projectedAt = new Map<string, string>();
   let last: NamingRebuild = { order: [], results: {}, bodies: {} };
   const all: NamingStep[] = [...setupOps(setup, subject.cuts).map((op): NamingStep => ({ kind: "op", op, want: "done" })), ...steps];
   for (let n = 0; n < all.length; n++) {
@@ -238,6 +302,7 @@ export async function runNaming(subject: NamingSubject, setup: Setup, steps: rea
       count(counts, "save-open");
     } else {
       const { op } = step;
+      const beforeOp: NamingDoc = JSON.parse(JSON.stringify(model.doc));
       if (op.op === "delete") {
         const want = planDelete(model.doc, op.item);
         const got = await subject.planDelete(sub(op.item));
@@ -258,6 +323,9 @@ export async function runNaming(subject: NamingSubject, setup: Setup, steps: rea
         });
       }
       count(counts, `op:${op.op}:${outcome(want)}`);
+      // Step 27 (rule 13): a reorder refused because of what a pin or a projection names.
+      if (op.op === "reorder" && want.kind === "refused" && refRefused(beforeOp, op.item)) count(counts, "reorder:refused-by-ref");
+      if (op.op === "delete" && askedForRef(beforeOp, op.item)) count(counts, "delete:ask-by-ref");
     }
     const first = await subject.read();
     const again = await subject.read();
@@ -271,12 +339,25 @@ export async function runNaming(subject: NamingSubject, setup: Setup, steps: rea
       const res = want.results[item.id];
       if (res.kind === "suppressed" || res.kind === "greyed") {
         count(counts, `off:${res.kind}`);
+        // Step 27 (rule 13): greyed only by a feature its pin or a projection names.
+        if (item.kind === "face-sketch" && res.kind === "greyed" && !isOff(want.results[item.face.feature])) count(counts, "off:greyed-by-ref");
         continue;
       }
       if (item.kind === "face-sketch" && res.kind === "sketch") {
         count(counts, res.warning ? `sketch:${res.warning.cause}` : item.face.role === "side" ? "sketch:side" : "sketch:followed");
         // Rule 10: a pin followed, and followed somewhere new since the last step.
         if (item.pin && !res.warning) count(counts, `pin:${item.pin.at}`);
+        // Step 27 (rule 11): a pin on another extrude, or on another face of its own.
+        if (item.pin?.feature !== undefined && !res.warning) count(counts, item.pin.feature !== item.face.feature ? "pin:other-feature" : "pin:other-face");
+        // Rule 12: each projected edge followed (a line or a point), and followed somewhere new.
+        for (const q of item.projections ?? []) {
+          const held = res.warning?.cause === "projection-lost" && res.warning.projections.includes(q.id);
+          if (!held && (!res.warning || res.warning.cause === "projection-lost")) count(counts, q.at.length === 1 ? "projection:point" : "projection:line");
+          if (q.edge.feature !== item.face.feature) count(counts, "projection:other-feature");
+          const key = JSON.stringify(q.at);
+          if (projectedAt.has(q.id) && projectedAt.get(q.id) !== key) count(counts, "projection:moved");
+          projectedAt.set(q.id, key);
+        }
         const was = centres.get(item.id);
         if (item.pin && was && (was[0] !== item.centre[0] || was[1] !== item.centre[1])) count(counts, "pin:moved");
         centres.set(item.id, item.centre);
@@ -310,7 +391,27 @@ export type RandomStep =
   | { op: "reorder"; pick: number; to: number }
   | { op: "undo" }
   | { op: "redo" }
-  | { op: "save-open" };
+  | { op: "save-open" }
+  // Step 27, drawn from a stream of their own (`randomNamingSession`'s `step27`):
+  /** Another outline on XY (at most three), then extruded: more bodies to pin to and project from. */
+  | { op: "add-outline"; corners: Point[] }
+  | { op: "extrude-outline"; pick: number; distance: number }
+  /** A sketch or extrude after the face sketch, moved to just before it, so the sketch can name it (rule 13). */
+  | { op: "reorder-early"; pick: number }
+  /** The circle snapped onto a corner (kind < 0.4), a cap edge's middle (< 0.75) or an upright's middle of an extrude before it (rule 11). */
+  | { op: "pin"; pick: number; kind: number; cap: number; line: number; radius: number }
+  /** A cap edge (kind < 0.7) or an upright of an extrude before it projected into the face sketch (rule 12). */
+  | { op: "project"; pick: number; kind: number; cap: number; line: number }
+  | { op: "unproject"; pick: number }
+  /** A feature the face sketch's pin or a projection names, deleted (rule 13: it asks first). */
+  | { op: "delete-ref"; pick: number }
+  /** An edge the face sketch already holds, projected again (rule 12: nothing changes). */
+  | { op: "project-again"; pick: number }
+  /** A drag across a link (rule 13): the face sketch before a feature it names, or such a feature after the sketch. */
+  | { op: "reorder-across"; pick: number; way: number }
+  /** A corner of an outline other than the first moved, or that outline redrawn. */
+  | { op: "move-other"; pick: number; corner: number; to: Point }
+  | { op: "redraw-other"; pick: number; corners: Point[] };
 
 const int = (r: SeededRandom, lo: number, hi: number) => lo + Math.floor(r.next() * (hi - lo + 1));
 /** A circle's radius: mostly small, so whole holes are as common as bites and misses. */
@@ -378,7 +479,53 @@ function randomStep(r: SeededRandom): RandomStep {
     case "reorder":
       return { op, pick: r.next(), to: r.next() };
     default:
-      return { op };
+      return { op: op as "undo" | "redo" | "save-open" };
+  }
+}
+
+const WEIGHTS_27: [RandomStep["op"], number][] = [
+  ["add-outline", 5],
+  ["extrude-outline", 6],
+  ["reorder-early", 6],
+  ["pin", 8],
+  ["project", 10],
+  ["unproject", 3],
+  ["delete-ref", 4],
+  ["project-again", 2],
+  ["reorder-across", 3],
+  ["move-other", 9],
+  ["redraw-other", 3],
+];
+
+/** A step 27 step (rules 11 to 13), from its own stream; with `pinsOnly`, never a projection (for Design from 27c, before 27d's projections). */
+function randomStep27(r: SeededRandom, pinsOnly: boolean): RandomStep {
+  const weights = pinsOnly ? WEIGHTS_27.filter(([o]) => o !== "project" && o !== "unproject" && o !== "project-again") : WEIGHTS_27;
+  let x = r.next() * weights.reduce((s, [, w]) => s + w, 0);
+  let op: RandomStep["op"] = weights[0][0];
+  for (const [o, w] of weights) {
+    op = o;
+    if ((x -= w) < 0) break;
+  }
+  switch (op) {
+    case "add-outline":
+      return { op, corners: randomOutline(r) };
+    case "extrude-outline":
+      return { op, pick: r.next(), distance: nonZero(r, 40) };
+    case "reorder-early":
+    case "unproject":
+    case "delete-ref":
+    case "project-again":
+      return { op, pick: r.next() };
+    case "reorder-across":
+      return { op, pick: r.next(), way: r.next() };
+    case "pin":
+      return { op, pick: r.next(), kind: r.next(), cap: r.next(), line: r.next(), radius: radiusOf(r) };
+    case "project":
+      return { op, pick: r.next(), kind: r.next(), cap: r.next(), line: r.next() };
+    case "move-other":
+      return { op, pick: r.next(), corner: r.next(), to: [int(r, -50, 50), int(r, -50, 50)] };
+    default:
+      return { op: "redraw-other", pick: r.next(), corners: randomOutline(r) };
   }
 }
 
@@ -491,7 +638,94 @@ export function resolveRandom(doc: NamingDoc, step: RandomStep): NamingStep | nu
       return edit({ op: step.op });
     case "save-open":
       return { kind: "save-open" };
+    case "add-outline":
+      return kind("sketch").length < 3 ? edit({ op: "add-sketch", corners: step.corners }) : null;
+    case "extrude-outline": {
+      const s = pickOf(
+        kind("sketch").filter((x) => !doc.items.some((i) => i.kind === "extrude" && i.sketch === x.id)),
+        step.pick,
+      );
+      return s ? edit({ op: "add-extrude", sketch: s.id, distance: step.distance }) : null;
+    }
+    case "reorder-early": {
+      const s = kind("face-sketch")[0];
+      if (s === undefined) return null;
+      const at = doc.items.indexOf(s);
+      const ok = (i: NamingItem) => i.kind === "sketch" || (i.kind === "extrude" && doc.items.findIndex((j) => j.id === i.sketch) < at);
+      const item = pickOf(doc.items.slice(at + 1).filter(ok), step.pick);
+      return item ? edit({ op: "reorder", item: item.id, to: at }) : null;
+    }
+    case "pin":
+    case "project": {
+      // On the face sketch while it is on a cap, built, and on a face found (rule 13: of the extrudes before it, with lines).
+      const s = kind("face-sketch")[0];
+      if (s?.kind !== "face-sketch" || !onFoundCap(doc, s)) return null;
+      const at = doc.items.indexOf(s);
+      const f = pickOf(
+        doc.items.slice(0, at).filter((i) => i.kind === "extrude" && outlineLines(doc, i.id) !== null),
+        step.pick,
+      );
+      if (f === undefined) return null;
+      const lines = outlineLines(doc, f.id)!;
+      const n = lines.length;
+      const j = Math.min(n - 1, Math.floor(step.line * n));
+      const cap: Cap = step.cap < 0.5 ? "start" : "end";
+      const [before, after] = [lines[(j + n - 1) % n], lines[j]];
+      if (step.op === "project") {
+        const edge: EdgeName = step.kind < 0.7 ? { feature: f.id, at: "cap-edge", cap, line: lines[j] } : { feature: f.id, at: "upright", before, after };
+        return edit({ op: "project", sketch: s.id, edge });
+      }
+      const pin: PinName = step.kind < 0.4 ? { at: "corner", before, after, feature: f.id, cap } : step.kind < 0.75 ? { at: "middle", line: lines[j], feature: f.id, cap } : { at: "upright", before, after, feature: f.id };
+      return edit({ op: "set-circle", sketch: s.id, centre: [0, 0], radius: step.radius, pin });
+    }
+    case "unproject": {
+      const s = kind("face-sketch")[0];
+      const q = s?.kind === "face-sketch" ? pickOf(s.projections ?? [], step.pick) : undefined;
+      return q ? edit({ op: "unproject", sketch: s.id, projection: q.id }) : null;
+    }
+    case "project-again": {
+      const s = kind("face-sketch")[0];
+      const q = s?.kind === "face-sketch" ? pickOf(s.projections ?? [], step.pick) : undefined;
+      if (s?.kind !== "face-sketch" || q === undefined || !onFoundCap(doc, s)) return null;
+      const before = doc.items.findIndex((i) => i.id === q.edge.feature) < doc.items.indexOf(s);
+      return before && edgeAt(doc, q.edge) !== null ? edit({ op: "project", sketch: s.id, edge: q.edge }) : null;
+    }
+    case "reorder-across": {
+      const s = kind("face-sketch")[0];
+      const f = s ? pickOf([...new Set(refsOf(s))].filter((id) => doc.items.some((i) => i.id === id)), step.pick) : undefined;
+      if (!s || !f) return null;
+      const [at, fat] = [doc.items.indexOf(s), doc.items.findIndex((i) => i.id === f)];
+      return step.way < 0.5 ? edit({ op: "reorder", item: s.id, to: fat }) : edit({ op: "reorder", item: f, to: at });
+    }
+    case "delete-ref": {
+      const s = kind("face-sketch")[0];
+      const f = s ? pickOf([...new Set(refsOf(s))].filter((id) => doc.items.some((i) => i.id === id)), step.pick) : undefined;
+      return f ? edit({ op: "delete", item: f }) : null;
+    }
+    case "move-other":
+    case "redraw-other": {
+      const s = pickOf(kind("sketch").slice(1), step.pick);
+      if (s?.kind !== "sketch") return null;
+      if (step.op === "redraw-other") return edit({ op: "set-corners", sketch: s.id, corners: step.corners });
+      const k = Math.min(s.corners.length - 1, Math.floor(step.corner * s.corners.length));
+      const moved = s.corners.map((p, j): Point => (j === k ? step.to : p));
+      return polygonValid(moved) ? edit({ op: "move-corner", sketch: s.id, corner: k, to: step.to }) : null;
+    }
   }
+}
+
+/** Whether face sketch `s` is on a cap, built, and on a face found: where a pin or a projection can be made (rule 13). */
+function onFoundCap(doc: NamingDoc, s: Extract<NamingItem, { kind: "face-sketch" }>): boolean {
+  const res = rebuildNaming(doc).results[s.id];
+  return s.face.role !== "side" && res?.kind === "sketch" && !(res.warning !== undefined && "face" in res.warning);
+}
+
+/** An extrude's outline's line ids: its sketch's, or those kept when the sketch was deleted; null with none. */
+function outlineLines(doc: NamingDoc, feature: string): readonly string[] | null {
+  const f = doc.items.find((i) => i.id === feature);
+  if (f?.kind !== "extrude") return null;
+  const s = doc.items.find((i) => i.id === f.sketch);
+  return s?.kind === "sketch" ? s.lines : (f.keptLines ?? null);
 }
 
 /**
@@ -535,11 +769,19 @@ export interface NamingSession {
   steps: RandomStep[];
 }
 
-/** A seeded session; `cuts` as the subject's, since only a subject without cuts gets setups on a side. */
-export function randomNamingSession(seed: bigint, steps: number, cuts = true): NamingSession {
+/**
+ * A seeded session; `cuts` as the subject's, since only a subject without
+ * cuts gets setups on a side. With `step27` (a subject that pins to any
+ * extrude's edges, "pins", and projects them too, "all": rules 11 to 13),
+ * the setup has a second body before the face sketch and two steps in five
+ * are step 27's, from a stream of their own; without, the sessions are 26's.
+ */
+export function randomNamingSession(seed: bigint, steps: number, cuts = true, step27: false | "pins" | "all" = false): NamingSession {
   const r = seeded(seed);
   const setup = randomSetup(r, cuts, seeded(seed ^ 0x26fn));
-  return { setup, steps: Array.from({ length: steps }, () => randomStep(r)) };
+  const r27 = seeded(seed ^ 0x27an);
+  if (step27) setup.other = { corners: randomOutline(r27), distance: nonZero(r27, 40) };
+  return { setup, steps: Array.from({ length: steps }, () => (step27 && r27.next() < 0.4 ? randomStep27(r27, step27 === "pins") : randomStep(r))) };
 }
 
 /** Runs a random session: each step resolved against the model's document as it stands, then checked like any other. */
@@ -571,14 +813,20 @@ export async function namingFailureOf(make: () => NamingSubject, session: Naming
   }
 }
 
-/** Cuts a failing session to a 1-minimal list of steps failing the same check (no single step can be dropped). */
+/**
+ * Cuts a failing session to a list of steps failing the same check from
+ * which no single step and no two steps can be dropped. Pairs too, since a
+ * step's targets are fractions picked against the document as it stands:
+ * two steps that only steer a later pick onto the same target (step 27's
+ * second projection of one edge) go only together.
+ */
 export async function shrinkNaming(make: () => NamingSubject, session: NamingSession): Promise<NamingSession> {
   const first = await namingFailureOf(make, session);
   if (first === null) return session;
   const same = async (steps: RandomStep[]) => (await namingFailureOf(make, { setup: session.setup, steps }))?.check === first.check;
   let cur = [...session.steps];
-  for (let changed = true; changed; ) {
-    changed = false;
+  const singles = async () => {
+    let changed = false;
     for (let k = cur.length - 1; k >= 0; k--) {
       const shorter = [...cur.slice(0, k), ...cur.slice(k + 1)];
       if (await same(shorter)) {
@@ -586,7 +834,20 @@ export async function shrinkNaming(make: () => NamingSubject, session: NamingSes
         changed = true;
       }
     }
-  }
+    return changed;
+  };
+  const pairs = async () => {
+    for (let j = cur.length - 1; j > 0; j--)
+      for (let k = j - 1; k >= 0; k--) {
+        const shorter = cur.filter((_, i) => i !== j && i !== k);
+        if (await same(shorter)) {
+          cur = shorter;
+          return true;
+        }
+      }
+    return false;
+  };
+  while ((await singles()) || (await pairs()));
   return { setup: session.setup, steps: cur };
 }
 
@@ -614,7 +875,8 @@ export function namingModelSubject(faults: Iterable<NamingFault> = [], cuts = tr
 export interface Expect {
   order: string[];
   /** A sketch's placement; `x` and `normal` are the world's XY frame's unless given. */
-  sketch?: { id: string; origin: Vec3; x?: Vec3; normal?: Vec3; side: 1 | -1; warning?: "plane-lost" | "plane-ambiguous" | "point-lost" };
+  /** `projected`: its projected edges (step 27), checked when given ([] for none). */
+  sketch?: { id: string; origin: Vec3; x?: Vec3; normal?: Vec3; side: 1 | -1; warning?: "plane-lost" | "plane-ambiguous" | "point-lost" | "projection-lost"; projected?: { id: string; at: Point[] }[] };
   cut?: { id: string; removed: number } | { id: string; failed: true };
   bodies: Record<string, number>;
   /** New bodies' centroids (before any cut) and the warning the feature that made each one shows, none unless given. */
@@ -624,11 +886,16 @@ export interface Expect {
 }
 
 export interface FusionCase {
-  /** Which of the owner's answers it encodes: "1" to "7" from 25a (docs/progress/cad.md, "Naming test plan (25a)"), "Q1" to "Q4" from step 26 ("Sketch on a face test plan (26a)"). */
+  /**
+   * Which of the owner's answers it encodes: "1" to "7" from 25a (docs/progress/cad.md, "Naming test plan (25a)"), "Q1" to "Q4" from step 26 ("Sketch on a face test plan (26a)");
+   * from step 27, "R11" to "R13", the model's rules 11 to 13 (Fusion's projected geometry as the harness reads it; "Projected edges test plan (27a)").
+   */
   answer: string;
   title: string;
   /** Whether it needs a cut (booleans), or holds for a subject that makes the circle a new body. */
   cuts: boolean;
+  /** For step 27's cases, the substep from which Design runs it: 27c (pins on any extrude's edges) or 27d (projected edges). */
+  from?: "27c" | "27d";
   setup: Setup;
   steps: NamingStep[];
   expect: Expect;
@@ -645,6 +912,8 @@ export function expectDiff(r: NamingRebuild, e: Expect): string | null {
     if (d) return `${e.sketch.id}: ${d}`;
     const w = s.warning?.cause;
     if (w !== e.sketch.warning) return `${e.sketch.id} warning ${w ?? "none"}, want ${e.sketch.warning ?? "none"}`;
+    const p = e.sketch.projected && projectedDiff(s.projected, e.sketch.projected);
+    if (p) return `${e.sketch.id}: ${p}`;
   }
   if (e.cut) {
     const c = r.results[e.cut.id];
@@ -701,6 +970,20 @@ export const PINNED: Setup = { ...BEN, centre: [40, 30], pin: { at: "corner", be
 const PI = Math.PI;
 
 const op = (o: NamingOp, want?: NamingApplied["kind"] | RefuseCause): NamingStep => ({ kind: "op", op: o, ...(want ? { want } : {}) });
+/**
+ * Step 27's second body, before the face sketch so it can be named (rule
+ * 13): a 60..80 × 0..10 rectangle (sketch-5, lines 5 to 8: line 5 along
+ * y = 0 from (60, 0), line 6 up x = 80, line 7 back along y = 10, line 8
+ * down x = 60) extruded 5 (extrude-6: 200 · 5 = 1000, middle (70, 5, 2.5)),
+ * both dragged to just after Extrude 2.
+ */
+const OTHER_BODY: NamingStep[] = [
+  op({ op: "add-sketch", corners: rect(60, 0, 80, 10) }, "done"),
+  op({ op: "add-extrude", sketch: "sketch-5", distance: 5 }, "done"),
+  op({ op: "reorder", item: "sketch-5", to: 2 }, "done"),
+  op({ op: "reorder", item: "extrude-6", to: 3 }, "done"),
+];
+const ORDER_27 = ["sketch-1", "extrude-2", "sketch-5", "extrude-6", "sketch-3", "extrude-4"];
 const FULL = ["sketch-1", "extrude-2", "sketch-3", "cut-4"];
 const NEW = ["sketch-1", "extrude-2", "sketch-3", "extrude-4"];
 /** Ben's part with a new body, unedited: the base and the cylinder on its top, both on, nothing warning. */
@@ -1355,5 +1638,229 @@ export const FUSION_CASES: readonly FusionCase[] = [
     // A circle of radius 5 round a right-angled corner has a quarter of it
     // inside: π · 5² / 4 · 10 = 62.5π removed, from 36000 after the edit.
     expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", removed: 62.5 * PI }, bodies: { "extrude-2": 36000 - 62.5 * PI } },
+  },
+  // ---------------------------------------------------------- step 27 (rules 11 to 13)
+  {
+    answer: "R11",
+    title: "new body: a centre snapped onto another body's corner follows that body's outline",
+    cuts: false,
+    from: "27c",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "set-circle", sketch: "sketch-3", centre: [0, 0], radius: 5, pin: { at: "corner", before: "line-6", after: "line-7", feature: "extrude-6", cap: "end" } }, "done"),
+      op({ op: "move-corner", sketch: "sketch-5", corner: 2, to: [90, 20] }, "done"),
+    ],
+    // Corner 2 of the 60..80 × 0..10 rectangle, where line 6 ends and line 7
+    // starts, is (80, 10); the top's frame is the world's (rule 8), so seen
+    // straight down the centre lands on (80, 10), then goes with the corner to
+    // (90, 20): the cylinder's middle 20 + 10 / 2 = 25 up, (90, 20, 25). The
+    // moved outline (60, 0), (80, 0), (90, 20), (60, 10) has area
+    // ½ |0 + 1600 − 300 − 600| = 350, so the second body is 350 · 5 = 1750.
+    expect: {
+      order: ORDER_27,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI, "extrude-6": 1750 },
+      solids: { "extrude-4": { centroid: [90, 20, 25] } },
+    },
+  },
+  {
+    answer: "R11",
+    title: "new body: a centre snapped onto its own body's bottom corner, then an upright's middle, seen from the top",
+    cuts: false,
+    from: "27c",
+    setup: BEN,
+    steps: [
+      op({ op: "set-circle", sketch: "sketch-3", centre: [0, 0], radius: 5, pin: { at: "corner", before: "line-2", after: "line-3", feature: "extrude-2", cap: "start" } }, "done"),
+      op({ op: "set-distance", item: "extrude-2", value: 35 }, "done"),
+      op({ op: "set-circle", sketch: "sketch-3", centre: [0, 0], radius: 5, pin: { at: "upright", before: "line-1", after: "line-2", feature: "extrude-2" } }, "done"),
+      op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done"),
+    ],
+    // The bottom's back right corner (40, 30, 0) seen down from the top is
+    // (40, 30); the top goes to 35. Then the upright at corner 1 (after
+    // line 1, before line 2) runs from (40, 0, 0) to (40, 0, 35): its middle
+    // seen from the top is (40, 0), and the 60-wide rectangle takes it to
+    // (60, 0). The cylinder: (60, 0, 35 + 5) = (60, 0, 40); the base
+    // 60 · 30 · 35 = 63000.
+    expect: {
+      order: NEW,
+      sketch: { id: "sketch-3", origin: [0, 0, 35], side: 1 },
+      bodies: { "extrude-2": 63000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [60, 0, 40] } },
+    },
+  },
+  {
+    answer: "R11",
+    title: "a hole snapped onto the back right upright bites a quarter out of the corner, and follows it to 60 × 30",
+    cuts: true,
+    from: "27c",
+    setup: BEN,
+    steps: [
+      op({ op: "set-circle", sketch: "sketch-3", centre: [0, 0], radius: 5, pin: { at: "upright", before: "line-2", after: "line-3", feature: "extrude-2" } }, "done"),
+      op({ op: "set-corners", sketch: "sketch-1", corners: rect(0, 0, 60, 30) }, "done"),
+    ],
+    // The upright at corner 2 is over (40, 30), then (60, 30): a quarter of
+    // the circle inside the right-angled corner, π · 5² / 4 · 10 = 62.5π
+    // removed from 60 · 30 · 20 = 36000.
+    expect: { order: FULL, sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1 }, cut: { id: "cut-4", removed: 62.5 * PI }, bodies: { "extrude-2": 36000 - 62.5 * PI } },
+  },
+  {
+    answer: "R12",
+    title: "new body: another body's edge projected follows it, an upright projects to one point, and projecting it again adds nothing",
+    cuts: false,
+    from: "27d",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "cap-edge", cap: "end", line: "line-6" } }, "done"),
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "upright", before: "line-5", after: "line-6" } }, "done"),
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "cap-edge", cap: "end", line: "line-6" } }, "unchanged"),
+      op({ op: "move-corner", sketch: "sketch-5", corner: 1, to: [85, 0] }, "done"),
+    ],
+    // Line 6 runs from corner 1 (80, 0) to corner 2 (80, 10); the top's edge
+    // along it, seen straight down, is that segment (projection-9: the 9th
+    // of the line counter, after lines 1 to 8). The upright at corner 1 runs
+    // straight down the sketch's normal, so it is the point (80, 0)
+    // (projection-10). Corner 1 moved to (85, 0) takes both: the edge from
+    // (85, 0) to (80, 10), the point to (85, 0). The second body:
+    // (60, 0), (85, 0), (80, 10), (60, 10), area ½ |0 + 850 + 200 − 600| = 225,
+    // · 5 = 1125.
+    expect: {
+      order: ORDER_27,
+      sketch: {
+        id: "sketch-3",
+        origin: [0, 0, 20],
+        side: 1,
+        projected: [
+          { id: "projection-9", at: [[85, 0], [80, 10]] },
+          { id: "projection-10", at: [[85, 0]] },
+        ],
+      },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI, "extrude-6": 1125 },
+      solids: { "extrude-4": { centroid: [20, 15, 25] } },
+    },
+  },
+  {
+    answer: "R12",
+    title: "new body: the other body's outline redrawn as a triangle loses the projected edge: it stays where it was, the sketch warns",
+    cuts: false,
+    from: "27d",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "cap-edge", cap: "end", line: "line-6" } }, "done"),
+      op({ op: "set-corners", sketch: "sketch-5", corners: [[60, 0], [80, 0], [70, 10]] }, "done"),
+    ],
+    // Three corners is a new outline with new lines (10 to 12), so no edge
+    // runs along line 6 any more: projection-9 is held at (80, 0) to
+    // (80, 10) and named in the warning. The triangle: ½ · 20 · 10 = 100,
+    // · 5 = 500. The circle and its cylinder are untouched.
+    expect: {
+      order: ORDER_27,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "projection-lost", projected: [{ id: "projection-9", at: [[80, 0], [80, 10]] }] },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI, "extrude-6": 500 },
+      solids: { "extrude-4": { centroid: [20, 15, 25] } },
+    },
+  },
+  {
+    answer: "R12",
+    title: "new body: undo after losing the projected edge finds it again, with no warning, through save and open",
+    cuts: false,
+    from: "27d",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "cap-edge", cap: "end", line: "line-6" } }, "done"),
+      op({ op: "set-corners", sketch: "sketch-5", corners: [[60, 0], [80, 0], [70, 10]] }, "done"),
+      { kind: "save-open" },
+      op({ op: "undo" }, "done"),
+      { kind: "save-open" },
+    ],
+    // Back to the rectangle with lines 5 to 8: line 6's edge is (80, 0) to (80, 10) again.
+    expect: {
+      order: ORDER_27,
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, projected: [{ id: "projection-9", at: [[80, 0], [80, 10]] }] },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI, "extrude-6": 1000 },
+      solids: { "extrude-4": { centroid: [20, 15, 25] }, "extrude-6": { centroid: [70, 5, 2.5] } },
+    },
+  },
+  {
+    answer: "R13",
+    title: "new body: deleting a body a projection names asks first; the sketch stays, its projection held",
+    cuts: false,
+    from: "27d",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "cap-edge", cap: "end", line: "line-6" } }, "done"),
+      { kind: "plan", item: "extrude-6", want: { ask: true, removes: ["extrude-6"] } },
+      op({ op: "delete", item: "extrude-6" }, "done"),
+    ],
+    // Only the projection is built on Extrude 6, so it asks, and takes
+    // nothing else; the edge is gone, so projection-9 stays at (80, 0) to
+    // (80, 10) with the warning. Sketch 5 stays (only its extrude went).
+    expect: {
+      order: ["sketch-1", "extrude-2", "sketch-5", "sketch-3", "extrude-4"],
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "projection-lost", projected: [{ id: "projection-9", at: [[80, 0], [80, 10]] }] },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+    },
+  },
+  {
+    answer: "R13",
+    title: "new body: deleting the body a pinned centre is on asks first; the centre stays where it was, the sketch warns",
+    cuts: false,
+    from: "27c",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "set-circle", sketch: "sketch-3", centre: [0, 0], radius: 5, pin: { at: "middle", line: "line-5", feature: "extrude-6", cap: "end" } }, "done"),
+      { kind: "plan", item: "extrude-6", want: { ask: true, removes: ["extrude-6"] } },
+      op({ op: "delete", item: "extrude-6" }, "done"),
+    ],
+    // Line 5's middle, (60 + 80) / 2 = 70 along y = 0: (70, 0); held there
+    // after the delete, so the cylinder is at (70, 0, 25).
+    expect: {
+      order: ["sketch-1", "extrude-2", "sketch-5", "sketch-3", "extrude-4"],
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, warning: "point-lost" },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI },
+      solids: { "extrude-4": { centroid: [70, 0, 25] } },
+    },
+  },
+  {
+    answer: "R13",
+    title: "new body: suppressing the body a projection names greys the sketch and the cylinder built from it, with no warning",
+    cuts: false,
+    from: "27d",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "cap-edge", cap: "end", line: "line-6" } }, "done"),
+      op({ op: "suppress", item: "extrude-6", on: true }, "done"),
+    ],
+    // Q3 through the projection: Extrude 6 off, Sketch 3 greyed by it, Extrude 4 by Sketch 3; only the base is built.
+    expect: { order: ORDER_27, bodies: { "extrude-2": 24000 }, off: { "extrude-6": "suppressed", "sketch-3": "greyed", "extrude-4": "greyed" } },
+  },
+  {
+    answer: "R13",
+    title: "new body: a drag across a projection's link is refused either way, and allowed once the projection is removed",
+    cuts: false,
+    from: "27d",
+    setup: BEN,
+    steps: [
+      ...OTHER_BODY,
+      op({ op: "project", sketch: "sketch-3", edge: { feature: "extrude-6", at: "cap-edge", cap: "end", line: "line-6" } }, "done"),
+      // Sketch 3 to place 2 would put it before Extrude 6 (at 4), which it projects from.
+      op({ op: "reorder", item: "sketch-3", to: 2 }, "before-dependency"),
+      // Extrude 6 to place 4 would put it after Sketch 3 (at 3), which projects from it.
+      op({ op: "reorder", item: "extrude-6", to: 4 }, "after-dependent"),
+      op({ op: "unproject", sketch: "sketch-3", projection: "projection-9" }, "done"),
+      op({ op: "reorder", item: "sketch-3", to: 2 }, "done"),
+    ],
+    // With the projection gone Sketch 3 is built on Extrude 2 alone, so it may go straight after it.
+    expect: {
+      order: ["sketch-1", "extrude-2", "sketch-3", "sketch-5", "extrude-6", "extrude-4"],
+      sketch: { id: "sketch-3", origin: [0, 0, 20], side: 1, projected: [] },
+      bodies: { "extrude-2": 24000, "extrude-4": 250 * PI, "extrude-6": 1000 },
+    },
   },
 ];

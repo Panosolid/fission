@@ -41,15 +41,17 @@ async function caseFailure(make: () => NamingSubject, c: (typeof FUSION_CASES)[n
   }
 }
 
-test("Ben's Fusion answers (1 to 7, and Q1 to Q4 of step 26) hold on the model, with the cut and with a new body", async () => {
+test("Ben's Fusion answers (1 to 7, and Q1 to Q4 of step 26) and step 27's rules (R11 to R13) hold on the model, with the cut and with a new body", async () => {
   for (const c of FUSION_CASES) {
     const f = await caseFailure(() => namingModelSubject([], c.cuts), c);
     assert.equal(f, null, `answer ${c.answer} (${c.title}): ${f?.message}`);
   }
   // Every answer has a case, and every case a cut or a new-body subject runs.
-  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => c.cuts).map((c) => c.answer))].sort(), ["1", "2", "3", "4", "5", "6", "7", "Q3", "Q4"]);
+  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => c.cuts).map((c) => c.answer))].sort(), ["1", "2", "3", "4", "5", "6", "7", "Q3", "Q4", "R11"]);
   // Q1 is answer 4 with a new body; Q2 (sides) has no cut until booleans.
-  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => !c.cuts).map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3", "Q4"]);
+  assert.deepEqual([...new Set(FUSION_CASES.filter((c) => !c.cuts).map((c) => c.answer))].sort(), ["1", "2", "5", "7", "Q1", "Q2", "Q3", "Q4", "R11", "R12", "R13"]);
+  // Step 27's cases, and only they, say from which substep Design runs them.
+  for (const c of FUSION_CASES) assert.equal(c.from !== undefined, c.answer.startsWith("R"), c.title);
 });
 
 /** For each planted bug, the answers whose cases must catch it (none for the guess between two faces, which this part never makes: test/naming-model.test.ts catches it). */
@@ -79,6 +81,13 @@ const CAUGHT_BY: Record<NamingFault, string[]> = {
   "lost-pin-moves": ["Q4"],
   "pin-wrong-end": ["Q4"],
   "pin-survives-move": ["Q4"],
+  "pin-own-feature-only": ["R11"],
+  "ref-not-dependency": ["R13"],
+  "projection-stays-put": ["R12"],
+  "lost-projection-silent": ["R12", "R13"],
+  "lost-projection-moves": ["R12", "R13"],
+  "projection-wrong-line": ["R12"],
+  "projection-doubled": ["R12"],
 };
 
 test("each planted bug breaks the Fusion answers it should, and no other bug goes unnoticed by them", async () => {
@@ -149,19 +158,74 @@ test(`${SEEDS.length} seeds × ${STEPS} random steps pass on the model and reach
   assert.ok(total.skipped < 0.4 * 2 * SEEDS.length * STEPS, `skipped ${total.skipped}`);
 });
 
+test(`step 27: ${SEEDS.length} seeds × ${STEPS} steps with pins on any extrude's edges and projected edges pass on the model and reach every case`, async () => {
+  const total: NamingCounts = {};
+  for (const cuts of [true, false])
+    for (const seed of SEEDS) {
+      const s = randomNamingSession(seed, STEPS, cuts, "all");
+      let counts: NamingCounts;
+      try {
+        counts = await runNamingSession(namingModelSubject([], cuts), s);
+      } catch (e) {
+        if (!(e instanceof NamingFailure)) throw e;
+        const shrunk = await shrinkNaming(() => namingModelSubject([], cuts), s);
+        assert.fail(`seed ${seed}: ${e.message}\nminimal session (save in test/regressions/naming/${seed}-27.json):\n${JSON.stringify({ seed: String(seed), cuts, ...shrunk })}`);
+      }
+      for (const [k, v] of Object.entries(counts)) total[k] = (total[k] ?? 0) + v;
+    }
+  const reached = [
+    // Rule 11: pins on another extrude, on another face of its own, on an upright's middle; followed and lost.
+    "pin:other-feature",
+    "pin:other-face",
+    "pin:upright",
+    "pin:corner",
+    "pin:middle",
+    "pin:moved",
+    "sketch:point-lost",
+    // Rule 12: lines and points, from another extrude, followed somewhere new, lost and held; projected twice; removed.
+    "projection:line",
+    "projection:point",
+    "projection:other-feature",
+    "projection:moved",
+    "sketch:projection-lost",
+    "op:project:done",
+    "op:project:unchanged",
+    "op:unproject:done",
+    // Rule 13: greyed, refused and asked only because of what a pin or a projection names.
+    "off:greyed-by-ref",
+    "reorder:refused-by-ref",
+    "delete:ask-by-ref",
+    // The 26 cases still come up among them.
+    "sketch:plane-lost",
+    "op:undo:done",
+    "save-open",
+  ];
+  for (const k of reached) assert.ok((total[k] ?? 0) >= 3, `${k} reached ${total[k] ?? 0} times: ${JSON.stringify(total)}`);
+  assert.ok(total.skipped < 0.4 * 2 * SEEDS.length * STEPS, `skipped ${total.skipped}`);
+});
+
+test("step 27 sessions for a subject that pins but doesn't project yet (Design from 27c) pin to other bodies and never project", async () => {
+  const total: NamingCounts = {};
+  for (const seed of SEEDS) for (const [k, v] of Object.entries(await runNamingSession(namingModelSubject([], false), randomNamingSession(seed, STEPS, false, "pins")))) total[k] = (total[k] ?? 0) + v;
+  for (const k of ["pin:other-feature", "pin:other-face", "pin:upright", "delete:ask-by-ref", "off:greyed-by-ref"]) assert.ok((total[k] ?? 0) >= 3, `${k} reached ${total[k] ?? 0} times`);
+  assert.deepEqual(Object.keys(total).filter((k) => k.includes("project")), []);
+});
+
 test("each planted bug a session can reach is caught by the random sessions, and shrinks to a short list", async () => {
   for (const fault of NAMING_FAULTS) {
     if (fault === "ambiguous-picks-first") continue; // this part never names two faces alike (see above)
     let found: { cuts: boolean; s: NamingSession; f: NamingFailure } | null = null;
     // With the cut first; the side faces' bugs only show without it, where setups go on sides too.
     // A rare one (a face redrawn away while greyed, then back on: 1 session in 18) may take more seeds than the 12 above.
-    for (const cuts of [true, false])
-      for (const seed of HUNT_SEEDS) {
-        if (found) break;
-        const s = randomNamingSession(seed, STEPS, cuts);
-        const f = await namingFailureOf(() => namingModelSubject([fault], cuts), s);
-        if (f) found = { cuts, s, f };
-      }
+    // Step 27's bugs (rules 11 to 13) only show in the sessions with its steps.
+    for (const step27 of [false, "all"] as const)
+      for (const cuts of [true, false])
+        for (const seed of HUNT_SEEDS) {
+          if (found) break;
+          const s = randomNamingSession(seed, STEPS, cuts, step27);
+          const f = await namingFailureOf(() => namingModelSubject([fault], cuts), s);
+          if (f) found = { cuts, s, f };
+        }
     assert.ok(found, `${fault} was never caught`);
     const make = () => namingModelSubject([fault], found.cuts);
     const shrunk = await shrinkNaming(make, found.s);
