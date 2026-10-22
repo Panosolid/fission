@@ -140,6 +140,8 @@ export async function app(start: DesignDocument, plugin: WorkspacePlugin = desig
     /** The properties panel's note on what a rebuild took out of the selection ("" when hidden). */
     note: () => ($("#selection-note")!.hidden ? "" : $("#selection-note")!.textContent),
     builds: () => builds,
+    /** How many bodies the kernel holds that it didn't hold before this app was made. */
+    bodies: async () => ((await kernel.call("body_count")) as number) - startBodies,
     /** The sketch bar's Finish Sketch is on screen: a sketch is open. */
     sketching: () => $("#finish-sketch") !== null && $("#finish-sketch")!.closest("[hidden]") === null,
     warning: () => ($("#kept-warning")!.hidden ? null : $("#kept-warning")!.textContent),

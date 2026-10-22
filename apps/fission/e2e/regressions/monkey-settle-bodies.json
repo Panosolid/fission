@@ -1,0 +1,22 @@
+{
+  "seed": 8,
+  "what": "Create sketch, a face picked, then a height the kernel refuses: settling kept its own copy of the box in the kernel, so the kernel held a body the Bodies group didn't list (hunt 26g; fixed by settling on the drawn bodies, BodyCache.using)",
+  "actions": [
+    {
+      "do": "click",
+      "sel": "#create-sketch"
+    },
+    {
+      "do": "canvas",
+      "x": 0.339,
+      "y": 0.517,
+      "double": false
+    },
+    {
+      "do": "type",
+      "sel": "#height",
+      "text": "Infinity",
+      "finish": "Tab"
+    }
+  ]
+}

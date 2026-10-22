@@ -138,8 +138,6 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
   let undo: string[] = [];
   let redo: string[] = [];
   let cache = new BodyCache(kernel);
-  // settleKept's own bodies, kept between edits (never the cache read from, rebuild.ts).
-  const settling = new BodyCache(kernel);
 
   async function build(doc: DesignDocument): Promise<TimelineBuild> {
     if (fs.has("leak-bodies")) cache = new BodyCache(kernel);
@@ -295,7 +293,7 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
       }
       const r = await edit(state, op);
       if ("kind" in r) return r;
-      const doc = fs.has("no-settle") ? r.state.doc : await settleKept(kernel, state.doc, r.state.doc, settling);
+      const doc = fs.has("no-settle") ? r.state.doc : await settleKept(kernel, state.doc, r.state.doc, cache);
       if (save(doc) === save(state.doc)) return { kind: "unchanged" };
       undo.push(before);
       redo = [];
@@ -316,7 +314,6 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
     },
     async dispose() {
       await cache.clear();
-      await settling.clear();
     },
   };
 }
