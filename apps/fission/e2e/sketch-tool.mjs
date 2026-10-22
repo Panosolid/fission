@@ -144,9 +144,12 @@ async function check(name, fn, known) {
  * their number box takes the letter typed into the grid box, so it shows "Type the
  * grid size in mm." when it loses focus, which pushes Extrude down between
  * the press and the release of the click on it, and the click is lost.
+ * WebKit 27 (Playwright 1.64, #238) no longer takes the letter, so the
+ * rectangle check passes there and only Firefox keeps the mark; the check
+ * below that types the bad grid size on purpose still fails in every engine.
  */
 const GRID_ERROR_MOVES_EXTRUDE = {
-  engines: ["webkit", "firefox"],
+  engines: ["firefox"],
   bug: "an invalid grid size's message moves Extrude mid-click (sketch-panel.ts)",
   symptom: /^Extrude's OK on: timed out; the page shows .*grid error "Type the grid size in mm\."$/,
 };

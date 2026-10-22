@@ -12,9 +12,10 @@
 // - code that a package has copied inside itself (EMBEDDED, kept by hand;
 //   the build fails if a shipped file names a copyright holder that the
 //   notices don't, so a new one can't slip in unlisted).
-// `check` holds every npm package and crate in the repository, the
-// development-only ones too, to ALLOWED, so no copyleft licence arrives
-// unnoticed and every licence choice stays open (audit L4).
+// `check` holds every npm package and crate in the repository to ALLOWED,
+// so no copyleft licence arrives unnoticed and every licence choice stays
+// open (audit L4); a development-only tool (never shipped) may also be
+// under ALLOWED_DEV_ONLY.
 //
 //   node licences.mjs check            exit 1 naming each dependency off the list
 //   node licences.mjs write <file>     write the notices file
@@ -34,6 +35,18 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const ALLOWED = ["MIT", "MIT-0", "0BSD", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Zlib", "BSL-1.0", "Apache-2.0", "Unlicense", "CC0-1.0", "Unicode-3.0", "Unicode-DFS-2016"];
 /** Licence exceptions (SPDX `WITH`) that only ever widen what is allowed. */
 export const ALLOWED_EXCEPTIONS = ["LLVM-exception"];
+/**
+ * Licences allowed for development tools only: npm packages and crates that
+ * run while building or testing and never ship a byte. MPL-2.0 is a
+ * file-level copyleft: changes to the tool's own files must be shared, but
+ * what the tool builds is untouched, so it leaves every licence choice for
+ * Panosolid open (audit L4). Nothing under these may be bundled: the shipped
+ * walks (`npmShipped`, `cratesShipped`), the notices and the build plugin
+ * take ALLOWED alone. First use: lightningcss, Vite 8's CSS tool.
+ */
+export const ALLOWED_DEV_ONLY = ["MPL-2.0"];
+/** ALLOWED plus ALLOWED_DEV_ONLY: what a development-only dependency may be under. */
+export const ALLOWED_FOR_TOOLS = [...ALLOWED, ...ALLOWED_DEV_ONLY];
 
 /**
  * Parses an SPDX licence expression: ids joined by AND, OR and WITH, with
@@ -84,16 +97,18 @@ export function parseLicence(text) {
 
 /**
  * The licences a copy is shipped under: for OR, the allowed alternative
- * ranked best in ALLOWED; for AND, every part. Null when no reading of the
+ * ranked best in `allowed` (ALLOWED, or ALLOWED_FOR_TOOLS for a dependency
+ * that never ships); for AND, every part. Null when no reading of the
  * expression is fully allowed, which is exactly when CI refuses it.
  * @param {string | null | undefined} text
+ * @param {string[]} allowed
  * @returns {string[] | null}
  */
-export function chooseLicences(text) {
-  const rank = (ids) => Math.max(...ids.map((id) => ALLOWED.indexOf(id)));
+export function chooseLicences(text, allowed = ALLOWED) {
+  const rank = (ids) => Math.max(...ids.map((id) => allowed.indexOf(id)));
   function choose(node) {
     if ("id" in node) {
-      if (!ALLOWED.includes(node.id)) return null;
+      if (!allowed.includes(node.id)) return null;
       if (node.exception !== undefined && !ALLOWED_EXCEPTIONS.includes(node.exception)) return null;
       return [node.id];
     }
@@ -319,9 +334,13 @@ export function noticesFile({ npm, crates, embedded = EMBEDDED, app = "Panosolid
   return `${out.join("\n").trimEnd()}\n`;
 }
 
-/** Each dependency whose licence isn't allowed, as "name version: licence". */
-export function refused(list) {
-  return list.filter((p) => chooseLicences(p.licence) === null).map((p) => `${p.name} ${p.version}: ${p.licence ?? "no licence given"}`);
+/**
+ * Each dependency whose licence isn't in `allowed` (ALLOWED for what ships;
+ * ALLOWED_FOR_TOOLS for the whole lockfile or crate graph, where the
+ * development-only tools live), as "name version: licence".
+ */
+export function refused(list, allowed = ALLOWED) {
+  return list.filter((p) => chooseLicences(p.licence, allowed) === null).map((p) => `${p.name} ${p.version}: ${p.licence ?? "no licence given"}`);
 }
 
 /**
@@ -389,12 +408,13 @@ export function licencesPlugin({ emit, source = notices }) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [command, file] = process.argv.slice(2);
   if (command === "check") {
-    const bad = [...refused(npmAll()), ...refused(cratesAll())];
+    // What ships is held to ALLOWED; every dependency, the tools too, to ALLOWED_FOR_TOOLS.
+    const bad = [...new Set([...refused(npmShipped()), ...refused(cratesShipped()), ...refused(npmAll(), ALLOWED_FOR_TOOLS), ...refused(cratesAll(), ALLOWED_FOR_TOOLS)])];
     if (bad.length > 0) {
-      console.error(`Licences not on the allowed list (apps/fission/licences.mjs, ALLOWED):\n  ${bad.join("\n  ")}`);
+      console.error(`Licences not on the allowed list (apps/fission/licences.mjs, ALLOWED; ALLOWED_DEV_ONLY for tools that never ship):\n  ${bad.join("\n  ")}`);
       process.exit(1);
     }
-    console.log(`every npm package and crate is under an allowed licence`);
+    console.log(`every shipped npm package and crate is under an allowed licence, and every tool under an allowed or dev-only one`);
   } else if (command === "write" && file) {
     writeFileSync(file, noticesFile({ npm: npmShipped(), crates: cratesShipped() }));
     console.log(`wrote ${file}`);

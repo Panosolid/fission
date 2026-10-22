@@ -1335,7 +1335,10 @@ struct Measure {
     hi: DVec3,
 }
 
-fn measure(b: &Placed) -> Result<Measure, String> {
+/// `b`'s mesh and measurements, after checking its bounds against its mesh
+/// to the rounding of numbers of size `built_at` or its own size, whichever
+/// is larger.
+fn measure(b: &Placed, built_at: f64) -> Result<Measure, String> {
     let mesh = b.tessellate(&TessOptions::DISPLAY).map_err(|e| format!("tessellation failed: face {}: {}", e.face, e.message))?;
     mesh.check_closed().map_err(|e| format!("mesh not closed: {} problems", e.len()))?;
     let perimeters = (0..mesh.triangles.len())
@@ -1355,14 +1358,31 @@ fn measure(b: &Placed) -> Result<Measure, String> {
         _ => None,
     });
     let sag = radii.map(|r| 2.0 * tolerance::DISPLAY_CHORD.max(r * (1.0 - (std::f64::consts::PI / 256.0).cos()))).fold(0.0, f64::max);
-    let slack = tolerance::rounding_slack(lo.abs().max(hi.abs()).max_element()) * 4.0;
+    // Both are rounded at the size of the numbers they went through, which
+    // can be far larger than where the body ends up: a disc drawn at
+    // −62.75 km and placed back at the origin by its frame keeps the
+    // rounding of 62.75 km (seedf88c3ef60948), though the placed body,
+    // re-centred, no longer shows it. `built_at` is that size, from the
+    // harness's record of the body's history (0 for a body built where it
+    // is).
+    let scale = lo.abs().max(hi.abs()).max_element().max(built_at);
+    check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, scale)?;
+    Ok(Measure { exact: b.mass_properties(), volume: mesh.signed_volume(), area: mesh.area(), perimeters, lo, hi, mesh })
+}
+
+/// The bounds `lo..hi` hold every mesh point in `mlo..mhi` and reach past
+/// them by no more than `sag`, each to the rounding of numbers of size
+/// `scale` (four times the slack: the box and the mesh round separately,
+/// each through a placement).
+fn check_bounds_hold_mesh((lo, hi): (DVec3, DVec3), (mlo, mhi): (DVec3, DVec3), sag: f64, scale: f64) -> Result<(), String> {
+    let slack = tolerance::rounding_slack(scale) * 4.0;
     if (mlo - lo).min_element() < -slack || (hi - mhi).min_element() < -slack {
         return Err(format!("bounds {lo}..{hi} miss mesh points spanning {mlo}..{mhi}"));
     }
     if (mlo - lo).max_element() > sag + slack || (hi - mhi).max_element() > sag + slack {
         return Err(format!("bounds {lo}..{hi} reach more than the chord sag {sag:e} past the mesh {mlo}..{mhi}"));
     }
-    Ok(Measure { exact: b.mass_properties(), volume: mesh.signed_volume(), area: mesh.area(), perimeters, lo, hi, mesh })
+    Ok(())
 }
 
 fn reach(m: &Measure) -> f64 {
@@ -2371,7 +2391,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             };
             drawn.map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             let built = Placed::new(base.clone());
-            let m0 = measure(&built).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
+            let m0 = measure(&built, 0.0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             check_primitive(shape, &m0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
             check_face_model(shape, &base, &m0).map_err(|m| fail(m, vec![("primitive".into(), base.clone())]))?;
 
@@ -2404,7 +2424,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 return Err(fail(format!("move by {to} well inside model space was refused"), vec![("primitive".into(), base)]));
             }
             if let Some(p) = &placed {
-                let m1 = measure(p).map_err(|m| fail(m, vec![("placed".into(), p.baked())]))?;
+                let m1 = measure(p, 0.0).map_err(|m| fail(m, vec![("placed".into(), p.baked())]))?;
                 check_rigid(&m0, &m1, "placing").map_err(|m| fail(m, vec![("primitive".into(), base.clone()), ("placed".into(), p.baked())]))?;
             }
             record(op, placed.is_some());
@@ -2419,7 +2439,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
         Op::Move { target, by } => {
             let Some(body) = slots[*target].body.clone() else { return Ok(()) };
             let by = v3(by);
-            let before = measure(&body).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
+            let before = measure(&body, slots[*target].reach).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
             let moved = classify_motion(&body, guarded(|| transform::translate(&body, by))).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
             if moved.is_some() && !by.is_finite() {
                 return Err(fail("non-finite move accepted".into(), vec![]));
@@ -2429,7 +2449,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             }
             record(op, moved.is_some());
             if let Some(m) = moved {
-                let after = measure(&m).map_err(|e| fail(e, vec![("after".into(), m.baked())]))?;
+                let after = measure(&m, slots[*target].reach.max(by.abs().max_element())).map_err(|e| fail(e, vec![("after".into(), m.baked())]))?;
                 let both = || vec![("before".into(), body.baked()), ("after".into(), m.baked())];
                 check_rigid(&before, &after, "moving").map_err(|e| fail(e, both()))?;
                 // Bounds shift by exactly `by`, up to rounding.
@@ -2450,7 +2470,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
         Op::Rotate { target, pivot, axis, angle } => {
             let Some(body) = slots[*target].body.clone() else { return Ok(()) };
             let (pv, ax, an) = (v3(pivot), v3(axis), angle.0);
-            let before = measure(&body).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
+            let before = measure(&body, slots[*target].reach).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
             let turned = classify_motion(&body, guarded(|| transform::rotate(&body, pv, ax, an))).map_err(|m| fail(m, vec![("before".into(), body.baked())]))?;
             // Like every point, the pivot must lie in model space.
             let valid = axis_ok(ax) && an.is_finite() && pv.is_finite() && pv.abs().max_element() <= MAX_COORD;
@@ -2463,7 +2483,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
             }
             record(op, turned.is_some());
             if let Some(t) = turned {
-                let after = measure(&t).map_err(|e| fail(e, vec![("after".into(), t.baked())]))?;
+                let after = measure(&t, slots[*target].reach).map_err(|e| fail(e, vec![("after".into(), t.baked())]))?;
                 let both = || vec![("before".into(), body.baked()), ("after".into(), t.baked())];
                 check_rigid(&before, &after, "rotating").map_err(|e| fail(e, both()))?;
                 // Every vertex keeps its distance from the pivot.
@@ -2524,7 +2544,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 slots.push(Slot { body: None, shape: shape.clone(), affine: glam::DAffine3::IDENTITY, start: vec![], start_faces: vec![], steps: 0, reach: 0.0 });
                 return Ok(());
             };
-            let m0 = measure(&Placed::new(base.clone())).map_err(|m| fail(m, vec![("unplaced".into(), base.clone())]))?;
+            let m0 = measure(&Placed::new(base.clone()), 0.0).map_err(|m| fail(m, vec![("unplaced".into(), base.clone())]))?;
             // Every world point is within |origin| + (the local point's
             // distance from the frame's origin) of the world's.
             let surely_inside = o.abs().max_element() + m0.lo.abs().max(m0.hi.abs()).length() < MAX_COORD * 0.5;
@@ -2536,7 +2556,7 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 return Ok(());
             };
             let world = || vec![("placed".to_string(), p.baked())];
-            let m1 = measure(&p).map_err(|m| fail(m, world()))?;
+            let m1 = measure(&p, o.abs().max_element().max(reach(&m0))).map_err(|m| fail(m, world()))?;
             check_rigid(&m0, &m1, "placing in a frame").map_err(|m| fail(m, world()))?;
             let affine = frame_affine(o, xa, na);
             check_placed_model(shape, &p, affine, flip, &m1).map_err(|m| fail(m, world()))?;
@@ -2700,7 +2720,7 @@ fn oracle_lines(slots: &[Slot]) -> String {
     let mut out = String::new();
     for s in slots {
         let Some(b) = &s.body else { continue };
-        let Ok(m) = measure(b) else { continue };
+        let Ok(m) = measure(b, s.reach) else { continue };
         let world = b.baked();
         // Largest distance of a triangle centroid or edge midpoint from its
         // surface: how far the mesh strays from the exact shape.
@@ -2879,6 +2899,48 @@ fn saved_regressions_still_pass() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// seedf88c3ef60948: a 68 mm disc drawn at y = −62.75 km on the front plane
+/// and placed by an origin at z = +62.75 km lands at the world origin, but
+/// its numbers went through 62.75 km, where one unit in the last place is
+/// 2⁻²⁷ ≈ 7.45e-9 mm. Its box top (67.99998898436542) sits 3.68e-9 under
+/// its top mesh point (67.99998898804188); exactly, with fractions, the arc's
+/// top is at (y + origin z) + sagitta = −1.0997e-5 + 67.99999999632352 =
+/// 67.99998899926656, so both are a couple of those units low: rounding,
+/// not a wrong box.
+#[test]
+fn bounds_round_at_the_size_they_were_built_at() {
+    let lo = DVec3::new(-17.999499999999944, -0.49999998606633145, -0.000011011958129358845);
+    let hi = DVec3::new(50.000500000000045, 0.000000013933683734590474, 67.99998898436542);
+    let mlo = DVec3::new(-17.98957861165301, -0.49999998606633145, -0.000011011958129358845);
+    let mhi = DVec3::new(49.990578611653014, 0.000000013933683734590474, 67.99998898804188);
+    let sag = 0.02; // 2·max(DISPLAY_CHORD = 0.01, 34·(1 − cos(π/256)) ≈ 0.0026)
+    // At 62.75 km the slack is 6.2751733e7 · 64 · 2⁻⁵² · 4 ≈ 3.57e-6 ≫ 3.68e-9.
+    assert_eq!(check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, 62751732.8929737), Ok(()));
+    // At the world size alone, 68 · 64 · 2⁻⁵² · 4 ≈ 3.87e-12 ≪ 3.68e-9: the
+    // old reading, which flagged it.
+    let e = check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, 68.0).unwrap_err();
+    assert!(e.contains("miss mesh points"), "{e}");
+}
+
+/// The bounds check's slack at scale 1000 is 1000 · 64 · 2⁻⁵² · 4 =
+/// 256000 · 2⁻⁵² ≈ 5.684e-11; a 10 mm cube's box missing a mesh point, or
+/// reaching past the mesh beyond the sag, by 0.9× that passes and by 1.1×
+/// fails.
+#[test]
+fn bounds_check_slack_boundaries() {
+    let slack = 256000.0 * f64::EPSILON;
+    assert_eq!(tolerance::rounding_slack(1000.0) * 4.0, slack);
+    let (lo, hi) = (DVec3::ZERO, DVec3::splat(10.0));
+    let mesh = |d: f64| (DVec3::ZERO, DVec3::new(10.0, 10.0, 10.0 + d));
+    assert_eq!(check_bounds_hold_mesh((lo, hi), mesh(0.9 * slack), 0.0, 1000.0), Ok(()));
+    let e = check_bounds_hold_mesh((lo, hi), mesh(1.1 * slack), 0.0, 1000.0).unwrap_err();
+    assert!(e.contains("miss mesh points"), "{e}");
+    // The box 0.5 past the mesh, with a sag of 0.5 − 0.9·slack or 0.5 − 1.1·slack.
+    assert_eq!(check_bounds_hold_mesh((lo, hi), mesh(-0.5), 0.5 - 0.9 * slack, 1000.0), Ok(()));
+    let e = check_bounds_hold_mesh((lo, hi), mesh(-0.5), 0.5 - 1.1 * slack, 1000.0).unwrap_err();
+    assert!(e.contains("reach more than the chord sag"), "{e}");
 }
 
 #[test]

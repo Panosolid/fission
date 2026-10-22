@@ -12,7 +12,10 @@ if (!(browserName in ENGINES)) throw new Error(`E2E_BROWSER must be chromium, fi
 
 /** Launches the chosen browser. */
 export function launch() {
-  const sandboxChromium = "/opt/pw-browsers/chromium";
+  // E2E_CHROMIUM runs the Chromium checks on another build, for example CI's
+  // (Playwright's own, "Chrome for Testing", a newer Chrome than a sandbox
+  // may have); otherwise a sandbox's preinstalled Chromium, else Playwright's.
+  const sandboxChromium = process.env.E2E_CHROMIUM || "/opt/pw-browsers/chromium";
   const options = browserName === "chromium" && existsSync(sandboxChromium) ? { executablePath: sandboxChromium } : {};
   // Headless Firefox on a CI machine with no graphics card refuses WebGL
   // ("AllowWebgl2:false restricts context creation"), so nothing would be

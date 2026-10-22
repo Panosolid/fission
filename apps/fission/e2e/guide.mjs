@@ -285,11 +285,63 @@ try {
     assert.ok(await page.$("dialog.guide[open]"));
   });
 
-  await check("375 px: Licences and Close both fit in the guide's bar", async () => {
+  await check("Privacy beside Licences opens the privacy and terms page in a new tab, and the page says what the app really does", async () => {
+    const page = await fresh({ query: "?guide" });
+    await page.waitForSelector("dialog.guide[open][data-frames]");
+    const link = await page.$eval(".guide-privacy", (a) => ({ box: a.getBoundingClientRect().toJSON(), licences: document.querySelector(".guide-licences").getBoundingClientRect().toJSON(), rel: a.rel, target: a.target }));
+    assert.ok(link.box.width > 0 && link.box.right <= link.licences.left && link.box.top >= 0, `Privacy sits left of Licences: ${JSON.stringify(link)}`);
+    assert.deepEqual([link.rel, link.target], ["noopener", "_blank"]);
+    const [tab] = await Promise.all([page.context().waitForEvent("page"), page.click(".guide-privacy")]);
+    await tab.waitForLoadState();
+    assert.equal(new URL(tab.url()).pathname, "/privacy.html");
+    const headings = await tab.$$eval("h1, h2, h3", (hs) => hs.map((h) => h.textContent));
+    await tab.close();
+    assert.deepEqual(headings, ["Privacy and terms", "Privacy", "What is kept, and where", "What leaves your device", "Children and students", "Deleting your data", "Terms of use", "Questions"]);
+    // The words must match the app: the assistant's Remove key button, the providers it offers, and the licences file it links.
+    const words = await (await page.request.get(`${url}privacy.html`)).text();
+    const assistant = await import("node:fs").then((fs) => fs.readFileSync(new URL("../src/assistant.ts", import.meta.url), "utf8"));
+    assert.match(assistant, />Remove key</);
+    for (const said of ["choose Remove key", "Anthropic, OpenAI", "Ollama", "in-browser model", "no analytics", 'href="third-party-licences.txt"', "panosolid.github.io"]) assert.ok(words.includes(said), said);
+    assert.ok(await page.$("dialog.guide[open]"));
+  });
+
+  await check("The privacy page runs under its own strict policy: no script, no outside request, nothing wider than a 375 px phone", async () => {
+    const context = await browser.newContext({ viewport: { width: 375, height: 740 }, bypassCSP: false });
+    const tab = await context.newPage();
+    const requests = [];
+    const problems = [];
+    tab.on("request", (r) => requests.push(r.url()));
+    tab.on("console", (m) => m.type() === "error" && problems.push(m.text()));
+    tab.on("pageerror", (e) => problems.push(e.message));
+    await tab.goto(`${url}privacy.html`);
+    const csp = await tab.$eval('meta[http-equiv="Content-Security-Policy"]', (m) => m.content);
+    assert.match(csp, /default-src 'none'/);
+    assert.equal(await tab.$$eval("script", (s) => s.length), 0);
+    // A script slipped into the page would be refused by the policy, not run.
+    const ran = await tab.evaluate(() => {
+      const s = document.createElement("script");
+      s.textContent = "window.ranInline = true";
+      document.body.append(s);
+      return window.ranInline === true;
+    });
+    assert.equal(ran, false);
+    const width = await tab.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(width <= 375, `scrollWidth ${width}`);
+    await context.close();
+    // The page itself, and at most its icon: the browser asks for the icon in its own time, sometimes
+    // after the tab has closed (it was missing in a merge-queue run), so it may or may not be in the list.
+    const unexpected = requests.filter((r) => ![`${url}privacy.html`, `${url}favicon.svg`].includes(r));
+    assert.deepEqual(unexpected, []);
+    assert.ok(requests.includes(`${url}privacy.html`), requests.join("\n"));
+    assert.ok(problems.every((p) => /Content Security Policy|Content-Security-Policy/.test(p)), problems.join("\n")); // only the refused test script
+  });
+
+  await check("375 px: Privacy, Licences and Close all fit in the guide's bar", async () => {
     const page = await fresh({ width: 375, height: 740, touch: true, query: "?guide" });
     await page.waitForSelector("dialog.guide[open][data-frames]");
-    const [title, link, close] = await page.$$eval(".guide-title, .guide-licences, .guide-close", (els) => els.map((e) => e.getBoundingClientRect().toJSON()));
-    assert.ok(title.right <= link.left && link.right <= close.left && close.right <= 375, `${JSON.stringify({ title, link, close })}`);
+    const [title, privacy, link, close] = await page.$$eval(".guide-title, .guide-privacy, .guide-licences, .guide-close", (els) => els.map((e) => e.getBoundingClientRect().toJSON()));
+    assert.ok(title.right <= privacy.left && privacy.right <= link.left && link.right <= close.left && close.right <= 375, `${JSON.stringify({ title, privacy, link, close })}`);
+    assert.ok(Math.abs((privacy.top + privacy.bottom) / 2 - (link.top + link.bottom) / 2) < 4, "Privacy on Licences' line");
     assert.ok(link.height >= 13 && Math.abs((link.top + link.bottom) / 2 - (close.top + close.bottom) / 2) < 4, "on Close's line");
   });
 

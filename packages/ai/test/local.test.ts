@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createProvider, gpuCanRun, IN_BROWSER_MODEL, inBrowserDownloadBytes, type BuiltInModelLike, type WebLLMLike, type WebLLMModel } from "../src/index.ts";
+import { createProvider, gpuCanRun, IN_BROWSER_MODEL, inBrowserDownloadBytes, pickLocal, type BuiltInModelLike, type WebLLMLike, type WebLLMModel } from "../src/index.ts";
 import { LOW_RESOURCE_BUFFER, FULL_BUFFER } from "../src/local.ts";
 import { fakeServer } from "./fakes.ts";
 
@@ -131,4 +131,22 @@ test("the browser's built-in model: absent or unavailable says so", async () => 
   assert.deepEqual(await createProvider({ kind: "browser-built-in" }, { builtIn: undefined }).check(), { ok: false, reason: "this browser has no built-in model", suggest: "in-browser" });
   const off: BuiltInModelLike = { availability: async () => "unavailable", create: async () => ({}) as never };
   assert.equal((await createProvider({ kind: "browser-built-in" }, { builtIn: off }).check()).ok, false);
+});
+
+test("the browser's built-in model: only one that is there counts; one still to download, or downloading, says so and is never created", async () => {
+  // Each answer the API can give (the Prompt API's Availability values), and whether a session may be made of it.
+  let created = 0;
+  const api = (availability: Awaited<ReturnType<BuiltInModelLike["availability"]>>): BuiltInModelLike => ({
+    availability: async () => availability,
+    create: async () => (created++, {}) as never,
+  });
+  assert.deepEqual(await createProvider({ kind: "browser-built-in" }, { builtIn: api("available") }).check(), { ok: true });
+  assert.deepEqual(await createProvider({ kind: "browser-built-in" }, { builtIn: api("downloadable") }).check(), { ok: false, reason: "this browser hasn't downloaded its built-in model yet", suggest: "in-browser" });
+  assert.deepEqual(await createProvider({ kind: "browser-built-in" }, { builtIn: api("downloading") }).check(), { ok: false, reason: "this browser is still downloading its built-in model; it can be chosen once that has finished", suggest: "in-browser" });
+  // An API that fails to answer counts as unavailable, not as there.
+  const broken: BuiltInModelLike = { availability: async () => { throw new Error("gone"); }, create: async () => (created++, {}) as never };
+  assert.equal((await createProvider({ kind: "browser-built-in" }, { builtIn: broken }).check()).ok, false);
+  assert.equal(created, 0, "check() never makes a session, so it never starts a download");
+  // A model that is only downloadable is not picked for the user, whatever else is found.
+  assert.equal(pickLocal([{ kind: "browser-built-in", ...(await createProvider({ kind: "browser-built-in" }, { builtIn: api("downloadable") }).check()) }]), null);
 });
