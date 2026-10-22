@@ -663,6 +663,9 @@ try {
         if (finger) {
           await finger.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
           for (let k = 1; k <= 8; k++) await finger.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + ((toX - x) * k) / 8, y }] });
+          // A finger's pointermove reaches the page with the next frame, and Chrome 156 (Playwright 1.64, #238) still
+          // had the last one queued when DevTools acknowledged it, so the line stood a place short while held.
+          await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
           if (hold) await hold();
           await finger.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
         } else {
@@ -773,6 +776,7 @@ try {
         const [x, y] = [b.x + b.width / 2, b.y + b.height / 2];
         await finger.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
         for (let k = 1; k <= 8; k++) await finger.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + 10 * k, y }] });
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))); // the moves have reached the page (see above)
         assert.equal(await line(), null, "no drag");
         await finger.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
         await page.waitForTimeout(150);

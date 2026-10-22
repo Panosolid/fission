@@ -11,7 +11,9 @@
 // can't run, asks Ollama nothing until the user looks for it and lists it
 // only once it answers, recognises a pasted key
 // and lists the models it can use. WebGPU is taken away in every page so
-// the in-browser model is never found, whatever the machine running this.
+// the in-browser model is never found, whatever the machine running this,
+// and so is the browser's own built-in model (Chrome 156 has one, #238),
+// unless a check gives the page a fake one.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
@@ -30,8 +32,10 @@ const OPENAI_KEY = "sk-proj-test-e2e-0123456789";
  * A fresh page with a fake Ollama and fake Anthropic and OpenAI APIs;
  * `answers` are what the model says, in order. `ollama: false` refuses
  * Ollama's address as if nothing listens there; `builtIn` gives the page a
- * built-in model that answers from `answers` too. Model lists asked for
- * are recorded in `listed`, requests to a model in `asked`.
+ * built-in model that answers from `answers` too (`true`: one that is there;
+ * an availability word such as "downloadable": one in that state). Model
+ * lists asked for are recorded in `listed`, requests to a model in `asked`,
+ * sessions made of the built-in model in `builtInCreated`.
  */
 async function fresh(answers = [], { ollama = true, builtIn = false, open = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -39,13 +43,21 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
   await page.addInitScript(() => Object.defineProperty(Navigator.prototype, "gpu", { get: () => undefined, configurable: true }));
   const builtInAsked = [];
+  const builtInCreated = [];
   if (builtIn) {
     await page.exposeFunction("builtInAnswer", (input) => (builtInAsked.push(input), answers.shift() ?? "{}"));
-    await page.addInitScript(() => {
+    await page.exposeFunction("builtInCreate", () => void builtInCreated.push(Date.now()));
+    await page.addInitScript((availability) => {
       globalThis.LanguageModel = {
-        availability: async () => "available",
-        create: async () => ({ prompt: (input) => globalThis.builtInAnswer(input), destroy() {} }),
+        availability: async () => availability,
+        create: async () => (globalThis.builtInCreate(), { prompt: (input) => globalThis.builtInAnswer(input), destroy() {} }),
       };
+    }, builtIn === true ? "available" : builtIn);
+  } else {
+    // The browser's own built-in model, where it has one, would be found first and chosen.
+    await page.addInitScript(() => {
+      delete globalThis.LanguageModel;
+      if ("LanguageModel" in globalThis) Object.defineProperty(globalThis, "LanguageModel", { value: undefined, configurable: true });
     });
   }
   page.on("pageerror", (e) => errors.push(e.message));
@@ -95,7 +107,7 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
   await page.goto(url + "#design");
   await volume(page, "24,000 mm³"); // the default box: 40 · 30 · 20
   if (open) await page.click("#assistant-toggle");
-  return { page, asked, listed, builtInAsked, ollamaHits, remoteHits };
+  return { page, asked, listed, builtInAsked, builtInCreated, ollamaHits, remoteHits };
 }
 const looked = (page) => page.waitForFunction(() => !/Looking/.test(document.querySelector("#ai-found").textContent) && document.querySelector("#ai-found").textContent !== "");
 /** Pastes `text` into the key box the way a real paste arrives (an input event of type insertFromPaste). */
@@ -507,6 +519,30 @@ try {
       await page.close();
     }
   });
+
+  // Found by CI's Chrome 156 (#238): its LanguageModel answers "downloadable"
+  // on a machine with no model, the panel chose it, and every question hung
+  // on a download that never came. A model that isn't there yet is not an AI
+  // that runs on this computer.
+  for (const state of ["downloadable", "downloading"]) {
+    await check(`a built-in model the browser has yet to download ("${state}") is not picked: AI stays off, the panel says why, and no session (so no download) is started`, async () => {
+      const { page, asked, builtInAsked, builtInCreated, ollamaHits } = await fresh([setPart("box", 50, 30, 20)], { builtIn: state, ollama: false });
+      try {
+        await looked(page);
+        assert.equal(await page.textContent("#assistant-toggle"), "AI off");
+        assert.match(await page.textContent("#ai-found"), /No AI that runs on this computer was found/);
+        assert.match(await page.textContent("#ai-found"), state === "downloading" ? /Your browser's built-in AI can't run here: this browser is still downloading its built-in model/ : /Your browser's built-in AI can't run here: this browser hasn't downloaded its built-in model yet/);
+        assert.equal(await page.$eval('#ai-provider option[value="browser-built-in"]', (o) => o.disabled && /can't run here/.test(o.textContent)), true, "the option is greyed out with the reason");
+        assert.equal(await page.isDisabled("#ai-ask-button"), true);
+        assert.deepEqual(builtInCreated, [], "no session was made of a model that is not there");
+        assert.deepEqual(builtInAsked, []);
+        assert.equal(asked.length, 0);
+        assert.equal(ollamaHits.length, 0, "Ollama is still asked nothing until the user looks for it");
+      } finally {
+        await page.close();
+      }
+    });
+  }
 
   await check("choosing Off is kept: the next visit doesn't pick for the user again", async () => {
     const { page } = await fresh();

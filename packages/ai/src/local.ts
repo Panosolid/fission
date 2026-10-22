@@ -140,8 +140,20 @@ export function builtInProvider(o: { api: BuiltInModelLike | undefined }): AIPro
     async check() {
       if (!o.api) return { ok: false, reason: "this browser has no built-in model", suggest: "in-browser" };
       const a = await o.api.availability().catch(() => "unavailable" as const);
+      if (a === "available") return { ok: true };
       if (a === "unavailable") return { ok: false, reason: "this browser's built-in model can't run on this computer", suggest: "in-browser" };
-      return { ok: true };
+      // The browser has the API but not the model ("downloadable", or
+      // "downloading" once something asked for it): a session made now would
+      // start or wait on a download of a few gigabytes and answer nothing
+      // until it ends. Found by CI's Chrome 156 (#238), which says
+      // "downloadable" on a machine with no model: the panel chose it and
+      // every question hung. Offering the download with the user's consent is
+      // a later item; until then only a model that is there counts.
+      return {
+        ok: false,
+        reason: a === "downloading" ? "this browser is still downloading its built-in model; it can be chosen once that has finished" : "this browser hasn't downloaded its built-in model yet",
+        suggest: "in-browser",
+      };
     },
     async complete(r) {
       if (!o.api) throw new Error("this browser has no built-in model");
