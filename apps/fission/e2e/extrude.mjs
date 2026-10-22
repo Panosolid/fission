@@ -87,6 +87,15 @@ async function at(page, [x, y], view, tap = false) {
 
 const volume = async (page, want) => until(page, (w) => document.querySelector("#volume")?.textContent === w, want, `volume ${want} (shown: ${await page.textContent("#volume")}, ${await undoTitle(page)})`);
 const extrudeStatus = (page, want) => until(page, (w) => document.querySelector("#extrude-status")?.textContent.startsWith(w), want, `extrude status "${want}…"`);
+/**
+ * Enter in Extrude's distance box once the kernel has said the outline is
+ * closed (OK on): until then the panel takes no Enter, as OK takes no click.
+ * The kernel's answer can come after the panel shows (CI's runners).
+ */
+async function extrudeEnter(page) {
+  await until(page, () => document.querySelector("#extrude-ok")?.disabled === false, null, "Extrude's OK on");
+  await page.press("#extrude-distance", "Enter");
+}
 
 /** Create sketch on the ground plane, then a closed chain through these points (grid 10), seen from above. */
 async function drawn(page, pts, tap = false) {
@@ -140,7 +149,7 @@ try {
     assert.equal(await page.textContent("#volume"), "24,000 mm³", "the box is still the part");
     // 10 mm, Enter: 40 · 30 · 10 = 12,000 mm³; area 2(1200) + 2(400) + 2(300) = 3,800 mm².
     await page.fill("#extrude-distance", "10");
-    await page.press("#extrude-distance", "Enter");
+    await extrudeEnter(page);
     await volume(page, "12,000 mm³");
     assert.equal(await page.textContent("#area"), "3,800 mm²");
     assert.equal(await page.textContent("#topology"), "8 V · 12 E · 6 F");
@@ -239,7 +248,7 @@ try {
     await drawn(page, [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]]);
     await status(page, "4 lines, a closed outline.");
     await page.click("#sketch-extrude");
-    await page.press("#extrude-distance", "Enter");
+    await extrudeEnter(page);
     await volume(page, "12,000 mm³");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
     const saved = JSON.parse(await download.path().then((p) => import("node:fs").then((fs) => fs.readFileSync(p, "utf8"))));
@@ -328,7 +337,7 @@ try {
       await drawn(page, [[0, 0], [40, 0], [40, 30], [0, 30], [0, 0]], tap);
       await status(page, "4 lines, a closed outline.");
       await press("#sketch-extrude");
-      await page.press("#extrude-distance", "Enter");
+      await extrudeEnter(page);
       await volume(page, "12,000 mm³");
       // Sketch 2 (sketch-12), left empty: nothing is built from it.
       await top();

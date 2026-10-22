@@ -32,6 +32,19 @@ const shots = process.env.E2E_SHOTS;
 
 const until = (page, fn, arg, what) => page.waitForFunction(fn, arg, { timeout: 5000 }).catch(async () => assert.fail(`${what}: timed out`));
 
+/**
+ * Waits until no rebuild is on its way and a frame has been drawn since. An
+ * edit draws the bar and the browser at once, then again (new elements) when
+ * the kernel's rebuild lands, which also sets the volume and the bodies'
+ * pixels; a check that reads or taps in between sees the step before, or an
+ * element about to go. On CI's runners the rebuild can land late (Chrome 156
+ * made it common), and E2E_KERNEL_DELAY makes it late here (browser.mjs).
+ */
+async function rebuilt(page) {
+  await until(page, () => document.querySelector("#viewport")?.dataset.rebuilding !== "true", null, "the rebuild landed");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+}
+
 async function fresh(width, touch) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
@@ -72,6 +85,7 @@ function onCanvas(cam, box, p) {
 
 /** The canvas's colour at each model point, through the camera the app has now (a frame or two after it settles), after its top left corner's. */
 async function colours(page, points) {
+  await rebuilt(page);
   await page.waitForTimeout(250);
   const cam = await page.evaluate(() => window.fissionTest.camera());
   const box = await page.locator("#viewport canvas").boundingBox();
@@ -111,14 +125,19 @@ const undoTitle = (page) => page.evaluate(() => document.getElementById("undo").
 const undoIs = (page, step) => until(page, (w) => document.getElementById("undo").title === w, `Undo ${step} (Ctrl+Z)`, `the undo step "${step}"`);
 
 /** The bar's items: id and flags, with the marker as "|" where it stands. */
-const bar = (page) =>
-  page.$$eval("#timeline .timeline-bar > li", (lis) =>
+async function bar(page) {
+  await rebuilt(page);
+  return page.$$eval("#timeline .timeline-bar > li", (lis) =>
     lis
       .filter((li) => !li.classList.contains("timeline-bar-more-slot"))
       .map((li) => (li.classList.contains("timeline-bar-marker") ? "|" : [li.dataset.item, li.dataset.suppressed && "suppressed", li.dataset.rolledBack && "rolled back", li.dataset.greyed && "greyed", li.dataset.failed && "failed"].filter(Boolean).join(" "))),
   );
+}
 /** The browser's Timeline rows marked red as failed. */
-const redRows = (page) => page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-failed', (rows) => rows.map((r) => r.dataset.node));
+async function redRows(page) {
+  await rebuilt(page);
+  return page.$$eval('#browser [data-node="timeline"] .tree-row.timeline-menu-failed', (rows) => rows.map((r) => r.dataset.node));
+}
 
 /**
  * The app's camera once it has stopped moving (Look at and Home ease into
@@ -202,6 +221,8 @@ try {
       /** Item `id`'s menu from the bar: a right-click, or a tap on the item and then its ⋯. */
       const barMenu = async (id) => {
         const item = page.locator(`#timeline [data-item="${id}"]`);
+        await rebuilt(page); // its element is drawn again when a rebuild lands
+
         await item.scrollIntoViewIfNeeded();
         if (tap) {
           await item.tap();
@@ -221,6 +242,8 @@ try {
       const rowMenu = async (id) => {
         await browserOpen();
         const row = page.locator(`#browser [data-node="timeline"] .tree-row[data-node="${id}"]`);
+        await rebuilt(page); // its element is drawn again when a rebuild lands
+
         await row.scrollIntoViewIfNeeded();
         if (tap) await page.tap(`#browser [data-node="timeline"] [data-more="${id}"]`);
         else await row.click({ button: "right" });
@@ -907,6 +930,8 @@ try {
       };
       const barMenu = async (id) => {
         const item = page.locator(`#timeline [data-item="${id}"]`);
+        await rebuilt(page); // its element is drawn again when a rebuild lands
+
         await item.scrollIntoViewIfNeeded();
         if (tap) {
           // A tap on the picked item unpicks it: its ⋯ is tapped straight away when it already shows.
@@ -918,6 +943,8 @@ try {
       const rowMenu = async (id) => {
         await browserOpen();
         const row = page.locator(`#browser [data-node="timeline"] .tree-row[data-node="${id}"]`);
+        await rebuilt(page); // its element is drawn again when a rebuild lands
+
         await row.scrollIntoViewIfNeeded();
         if (tap) await page.tap(`#browser [data-node="timeline"] [data-more="${id}"]`);
         else await row.click({ button: "right" });
@@ -1069,6 +1096,8 @@ try {
 
       // 1. A double-click (or double-tap) on Sketch 1's bar item opens it: its sketch bar, its four lines, nothing recorded.
       const item = page.locator('#timeline [data-item="sketch-2"]');
+      await rebuilt(page); // its element is drawn again when a rebuild lands
+
       await item.scrollIntoViewIfNeeded();
       if (tap) {
         // Two taps straight after each other at the item's middle (the bar redraws between them, as the first picks it).
@@ -1123,6 +1152,8 @@ try {
       // 5. From the browser's Sketches row: its menu leads with Edit Sketch, read "Edit Sketch 1"; it opens, and the warning hides while it is open.
       await browserOpen();
       const row = page.locator('#browser .tree-row[data-node="sketches/sketch-2"]');
+      await rebuilt(page); // its element is drawn again when a rebuild lands
+
       await row.scrollIntoViewIfNeeded();
       if (tap) await page.tap('#browser [data-more="sketches/sketch-2"]');
       else await row.click({ button: "right" });
@@ -1135,6 +1166,8 @@ try {
       if (shots) await page.screenshot({ path: `${shots}/edit-sketch-open-${width}.png` });
       // Its menu now has Edit Sketch off, saying why.
       const barItem = page.locator('#timeline [data-item="sketch-2"]');
+      await rebuilt(page); // its element is drawn again when a rebuild lands
+
       await barItem.scrollIntoViewIfNeeded();
       if (tap) {
         if (!(await page.isVisible('#timeline [data-more="sketch-2"]'))) await barItem.tap();
@@ -1185,6 +1218,8 @@ try {
 
       // Edit Sketch from the bar's menu; the left side drawn up from the ⊐'s bottom-left end to its top-left end closes it (4 lines, 20 × 10).
       const item = page.locator('#timeline [data-item="sketch-2"]');
+      await rebuilt(page); // its element is drawn again when a rebuild lands
+
       await item.scrollIntoViewIfNeeded();
       if (tap) {
         if (!(await page.isVisible('#timeline [data-more="sketch-2"]'))) await item.tap();
@@ -1270,6 +1305,8 @@ try {
 
       // 2. Edit feature on the box from the bar: 35 high. The selection is the same name, no note, and the lit face is the top at z = 35.
       const item = page.locator('#timeline [data-item="feature-1"]');
+      await rebuilt(page); // its element is drawn again when a rebuild lands
+
       await item.scrollIntoViewIfNeeded();
       if (tap) {
         if (!(await page.isVisible('#timeline [data-more="feature-1"]'))) await item.tap();
