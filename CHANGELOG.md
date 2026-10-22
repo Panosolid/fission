@@ -10,9 +10,13 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
-## 0.26.7 (2026-10-22)
+## 0.26.8 (2026-10-22)
 
 - Kernel: its maths library glam moves from 0.29.3 to 0.34.1 (the last breaking release before glam 1.0), in the kernel, its fuzz crate and the same-answer check; the only two indirect crates behind (libc, cc) are brought up as well, and every other Rust crate was already current. No kernel code changed: the methods glam removed (camera matrices and the old feature names) were never used. Because every number the kernel gives goes through this library, the whole suite was rerun and compared with a run of the previous version on the same commit: the same-answer check's 2562 saved fuzz inputs give bit-for-bit the same volumes, areas, meshes, STL bytes and refusal messages natively and in WebAssembly as before (and its planted one-bit break is still caught); all 491 kernel tests pass (the fuzz corpus and every saved crash replayed among them); the seeded random session of 216 cases gives 490 of its 492 final bodies identically and the OpenCascade oracle agrees with all of them, before and after. The two other bodies are the tester's own doing, not the kernel's: glam's `min`/`max` now carry a NaN through instead of dropping it, so a hostile profile with a NaN corner no longer adds a made-up size to the tester's pool of interesting coordinates, and two later cases drew different (equally valid) inputs from that pool. The speed and memory baseline is unchanged in memory and allocations and 0 to 3.6% fewer instructions per operation; the app's unit tests, typecheck, journeys on the real kernel and the whole browser suite on Chrome 156 pass on the new WebAssembly.
+
+## 0.26.7 (2026-10-22)
+
+- Upkeep: the viewer's 3D library, three.js, goes from r170 to r186 (sixteen releases; the migration guide was read release by release, and nothing the viewport uses was removed or renamed, so no code changed). r181 changed how lit surfaces are shaded, so the pictures the viewer and the guide draw were compared pixel by pixel on both versions (19 pictures: the box from the home, top, front and side views, the plane picker, a sketch being drawn and finished, and every guide chapter): every lit face is at most 5 of 255 darker (2%), evenly across a face, and no pixel changed in any other way, so the browser checks' expected colours and the two golden images stand as they are. Checked by all 321 browser checks in Chromium (Chrome 156, the build CI uses), the app journeys (within the baseline), the licence check in the build and the viewport's unit tests; CI's Firefox and WebKit runs cover those browsers.
 
 ## 0.26.6 (2026-10-22)
 
