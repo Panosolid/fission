@@ -10,7 +10,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -121,4 +121,23 @@ test("the nightly ts-mutants job runs every target run.sh knows, one job each, a
   const collect = readFileSync(join(root, ".github/scripts/collect-results.sh"), "utf8");
   assert.equal(/for t in ([\w ]+); do/.exec(collect)?.[1], targets);
   assert.ok(/needs: \[.*\bts-mutants\b.*\]/.test(nightly.slice(nightly.indexOf("\n  collect:\n"))), "collect waits for ts-mutants");
+});
+
+test("each killing test file (test/*-survivors.test.ts) runs in the targets for its folder", () => {
+  // model.json once named its tests one by one and left out model-survivors.test.ts, so a rerun
+  // could not see the tests written to kill its survivors.
+  const runSh = readFileSync(join(stryker, "run.sh"), "utf8");
+  const dirs = Object.fromEntries([...(/declare -A dirs=\((.*)\)/.exec(runSh)![1]).matchAll(/\[(\w+)\]=([\w/]+)/g)].map((m) => [m[1], m[2]]));
+  for (const folder of new Set(Object.values(dirs))) {
+    const killers = readdirSync(join(root, folder, "test")).filter((f) => f.endsWith("survivors.test.ts"));
+    for (const k of killers) {
+      const running = Object.entries(dirs)
+        .filter(([, f]) => f === folder)
+        .filter(([t]) => {
+          const command = (JSON.parse(readFileSync(join(stryker, `${t}.json`), "utf8")) as { commandRunner: { command: string } }).commandRunner.command;
+          return command.includes(`test/${k}`) || command.includes("test/*.test.ts");
+        });
+      assert.ok(running.length > 0, `${folder}/test/${k} runs in none of ${folder}'s targets`);
+    }
+  }
 });
