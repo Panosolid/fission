@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Step 26c: sketches on a body's flat face, the parts the kernel isn't
 // needed for: the frame maths (face-sketch.ts), the data and its checks
 // when a file is opened (document.ts), adding one (sketch.ts addFaceSketch),

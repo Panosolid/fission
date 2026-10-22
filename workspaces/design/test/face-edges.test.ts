@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Step 26f: a face's edges in a sketch drawn on it (face-edges.ts), the
 // parts the kernel isn't needed for: the points a sketch can snap to and
 // their names, where a pin is now, the snap onto them (snap.ts), pinning
