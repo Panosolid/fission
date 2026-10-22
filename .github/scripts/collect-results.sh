@@ -86,13 +86,14 @@ add_run() {
     echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"$'\n'"no report: the journeys job stopped before the walk" >journeys/latest.txt
   fi
 
-  # TypeScript mutation testing: the latest run's survivor lines.
+  # TypeScript mutation testing: the latest run's survivor lines, one target per job.
   mkdir -p ts-mutants
-  if [ -s "$IN/ts-mutants/report.txt" ]; then
-    { echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"; cat "$IN/ts-mutants/report.txt"; } >ts-mutants/latest.txt
-  else
-    echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"$'\n'"no report: the ts-mutants job stopped before the check" >ts-mutants/latest.txt
-  fi
+  {
+    echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"
+    for t in core design storage model svg viewport ai; do
+      if [ -s "$IN/ts-mutants-$t/$t.txt" ]; then cat "$IN/ts-mutants-$t/$t.txt"; else echo "$t: no report (the job stopped before the check)"; fi
+    done
+  } >ts-mutants/latest.txt
 
   awk -F, -v now="$today UTC" 'NR > 1 {
       rounds++; cases += $3; fails += ($4 == "FAIL"); bodies += $5; dis += $6; secs += $7

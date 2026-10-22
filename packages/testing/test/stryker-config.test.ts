@@ -111,3 +111,14 @@ test("a missing config, a renamed source file or test, a target check.mjs doesn'
   assert.match(problem, /^run\.sh's targets .* differ from check\.mjs's /);
   assert.deepEqual(targetProblems(stryker, edited("run.sh", "targets=(core design storage model svg viewport ai)", "targets=(core design)")), ['run.sh runs "core design" by default, not every target']);
 });
+
+test("the nightly ts-mutants job runs every target run.sh knows, one job each, and collect-results.sh reports each", () => {
+  const runSh = readFileSync(join(stryker, "run.sh"), "utf8");
+  const targets = /targets=\(([\w ]+)\)$/m.exec(runSh)![1];
+  const nightly = readFileSync(join(root, ".github/workflows/nightly.yml"), "utf8");
+  const job = nightly.slice(nightly.indexOf("\n  ts-mutants:\n"), nightly.indexOf("\n  collect:\n"));
+  assert.equal(/target: \[([\w, ]+)\]/.exec(job)?.[1].split(", ").join(" "), targets);
+  const collect = readFileSync(join(root, ".github/scripts/collect-results.sh"), "utf8");
+  assert.equal(/for t in ([\w ]+); do/.exec(collect)?.[1], targets);
+  assert.ok(/needs: \[.*\bts-mutants\b.*\]/.test(nightly.slice(nightly.indexOf("\n  collect:\n"))), "collect waits for ts-mutants");
+});
