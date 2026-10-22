@@ -16,7 +16,7 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
-| 1 | Design → Slice | bodies on a print plate; hole intent (so holes print round) | Solid, re-tessellated by Slice at the printer's resolution (Mesh only when the source is a mesh) | printability overlay (overhangs, thin walls), print time and weight as Data | plate update cheap, slicing expensive | P1 (after 73) |
+| 1 | Design → Slice | bodies on a print plate; hole intent (so holes print round) | Solid, re-tessellated by Slice at the printer's resolution (Mesh only when the source is a mesh) | printability overlay (overhangs, thin walls), print time and weight as Data | plate update cheap, slicing expensive | P1 (after 33) |
 | 2 | Design → Laser | planar faces, sketches, sheet-metal flat patterns | Outline (exact lines, arcs, later splines) | none; kerf and sheet thickness are Design parameters (row 30) | cheap | L1 (after 31); flat patterns after 83 |
 | 3 | Design → Manufacture | bodies as parts in a setup; faces and edges picked for strategies; feature intent (a hole feature becomes a drilling cycle) | Solid, faces and edges by stable id | machinability overlay (internal corners sharper than the smallest tool) | toolpaths expensive | M1–M2 (after 50) |
 | 4 | Design → Simulate | bodies; loads and fixtures on faces by stable id; materials | Solid, meshed by S2 | stress, displacement and safety-factor overlays; results as Data | expensive | S1–S3 (after 50) |
