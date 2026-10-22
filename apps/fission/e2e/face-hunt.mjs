@@ -135,8 +135,12 @@ try {
       await settle(page);
       await press(page, "#sketch-tool-circle", tap);
       await at(page, [20, 15, 20], tap);
-      await until(page, () => document.querySelector("#viewport").dataset.sketchPoints === "20,15", null, "the centre at (20, 15)");
-      await at(page, [15, 15, 20], tap);
+      // The centre where the click landed: (20, 15) to the grid where the pointer's pixel is exact (Chromium); WebKit's whole pixels
+      // can put it a grid step off, so the rim and the probes below go from where it is, within 0.5 mm of (20, 15).
+      await until(page, () => /^-?[\d.]+,-?[\d.]+$/.test(document.querySelector("#viewport").dataset.sketchPoints), null, "the centre placed");
+      const c = (await page.evaluate(() => document.querySelector("#viewport").dataset.sketchPoints)).split(",").map(Number);
+      assert.ok(Math.hypot(c[0] - 20, c[1] - 15) <= 0.5, `the centre at (20, 15), not (${c})`);
+      await at(page, [c[0] - 5, c[1], 20], tap);
       await until(page, () => document.querySelector("#undo").title.startsWith("Undo Draw circle"), null, "Draw circle recorded");
       await top(page);
       await press(page, "#finish-sketch", tap);
@@ -155,9 +159,9 @@ try {
       await page.waitForTimeout(200);
       await shot(page, `face-hunt-lost-${width}`);
       const img = await canvasImage(page);
-      // The rim's points at (20, 15) + 5 · (−0.6, −0.8), (0, −1) and (−1, 0) at each height: its front and left, away from the
+      // The rim's points at the centre + 5 · (−0.6, −0.8), (0, −1) and (−1, 0) at each height: its front and left, away from the
       // view cube (top right at 375 px).
-      const rim = (z) => [[17, 11, z], [20, 10, z], [15, 15, z]];
+      const rim = (z) => [[c[0] - 3, c[1] - 4, z], [c[0], c[1] - 5, z], [c[0] - 5, c[1], z]];
       for (const p of rim(40)) assert.ok(await redNear(page, img, p), `red at [${p}], where the circle last was`);
       for (const p of rim(20)) assert.equal(await redNear(page, img, p), false, `no red at [${p}], where it was first drawn`);
       // One Undo: the box again, the circle found on its top, nothing lost.
