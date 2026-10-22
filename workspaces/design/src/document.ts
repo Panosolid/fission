@@ -86,8 +86,9 @@ export interface Sketch {
   /** Only for a sketch on a face (step 26c). */
   face?: SketchFace;
   /**
-   * Only for a sketch on a face (step 26f): its points pinned to the face's
-   * edges (face-edges.ts), each point once; left out when none are.
+   * Its points pinned to a body's edges (face-edges.ts): to the face's
+   * (step 26f), from 27c to any body's before it, on any plane; each point
+   * once; left out when none are.
    */
   pins?: SketchPin[];
 }
@@ -475,29 +476,44 @@ function checkFaceSketch(f: Feature, content: Sketch, byId: ReadonlyMap<string, 
   checkPlane(face.frame, `${at}'s frame`);
   if (face.side !== 1 && face.side !== -1) throw new Error(`${at}'s side must be 1 or -1, not ${shown(face.side)}`);
   if (Object.hasOwn(face, "held")) checkPlane(face.held, `${at}'s held plane`);
-  if (Object.hasOwn(content, "pins")) checkPins(content, at);
   const there = byId.get(feature);
   if (there !== undefined && (there.at > byId.get(f.id)!.at || isSketchItem(there.item))) throw new Error(`${at} is on a face of ${shown(feature)}, which is not a solid item before it in the timeline`);
   if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(feature)) throw new Error(`${at} is on a face of ${feature} but does not depend on it`);
 }
 
 /**
- * A face sketch's pins, checked (step 26f): a list of at least one, each
- * one of the sketch's points (each point once), what on the edge (an
- * endpoint, a middle or a centre) and a name: a vertex's for an endpoint
- * (edge names joined by "&"), an edge's for the others (face-edges.ts).
+ * A sketch's pins, checked (step 26f; on any sketch from 27c): a list of
+ * at least one, each one of the sketch's points (each point once), what on
+ * the edge (an endpoint, a middle or a centre), a name (a vertex's for an
+ * endpoint, edge names joined by "&"; an edge's for the others,
+ * face-edges.ts) and the feature whose body it is on: named (27c), or
+ * left out for the feature whose face the sketch is on (0.26's pins; a
+ * sketch on an origin plane has none, so names it), a solid item before
+ * the sketch (or gone: deleted, the point is held) that the sketch depends
+ * on.
  */
-function checkPins(content: Sketch, at: string): void {
+function checkPins(f: Feature, content: Sketch, byId: ReadonlyMap<string, { item: Feature; at: number }>): void {
+  const at = `Design sketch ${f.id}`;
   const pins = content.pins as unknown;
   if (!Array.isArray(pins) || pins.length === 0) throw new Error(`${at}'s pins must be a list of at least one pin, or left out`);
   const points = new Set(content.points.map((p) => p.id));
   const seen = new Set<string>();
+  const onFace = isFacePlane(f.intent.parameters.plane);
   for (const [j, pin] of pins.entries()) {
     if (!isRecord(pin) || typeof pin.point !== "string" || !points.has(pin.point)) throw new Error(`${at}'s pin ${j + 1} is not on one of the sketch's points`);
     if (seen.has(pin.point)) throw new Error(`${at} pins point ${pin.point} twice`);
     seen.add(pin.point);
     if (pin.kind !== "endpoint" && pin.kind !== "midpoint" && pin.kind !== "centre") throw new Error(`${at}'s pin on ${pin.point} must be an endpoint, a midpoint or a centre, not ${shown(pin.kind)}`);
     if (typeof pin.name !== "string" || pin.name.length === 0 || pin.name.includes("/") || (pin.kind !== "endpoint" && pin.name.includes("&"))) throw new Error(`${at}'s pin on ${pin.point} has no ${pin.kind === "endpoint" ? "vertex" : "edge"} name`);
+    if (!Object.hasOwn(pin, "feature")) {
+      if (!onFace) throw new Error(`${at} is on the ${shown(f.intent.parameters.plane)} plane, so its pin on ${pin.point} must name the feature whose body it is on`);
+      continue;
+    }
+    const feature = pin.feature;
+    if (typeof feature !== "string" || feature.length === 0) throw new Error(`${at}'s pin on ${pin.point} names no feature`);
+    const there = byId.get(feature);
+    if (there !== undefined && (there.at > byId.get(f.id)!.at || isSketchItem(there.item))) throw new Error(`${at}'s pin on ${pin.point} is on ${shown(feature)}, which is not a solid item before it in the timeline`);
+    if (!Array.isArray(f.dependsOn) || !f.dependsOn.includes(feature)) throw new Error(`${at} has a point pinned to ${feature} but does not depend on it`);
   }
 }
 
@@ -565,8 +581,9 @@ export function readDesignDocument(data: unknown): DesignDocument {
     if (content === undefined) throw new Error(`Design timeline item ${f.id} is a sketch with no content in the sketches list`);
     if (isFacePlane(f.intent.parameters.plane)) checkFaceSketch(f, content, byId);
     else if (Object.hasOwn(content, "face")) throw new Error(`Design sketch ${f.id} is on the ${shown(f.intent.parameters.plane)} plane but keeps a face's frame`);
-    else if (Object.hasOwn(content, "pins")) throw new Error(`Design sketch ${f.id} is on the ${shown(f.intent.parameters.plane)} plane but pins points to a face's edges`);
     else if (!(SKETCH_PLANES as readonly unknown[]).includes(f.intent.parameters.plane)) throw new Error(`Design sketch ${f.id} is on ${shown(f.intent.parameters.plane)}, not a plane this Panosolid knows (XY, XZ, YZ or a face)`);
+    // Any sketch's points may be pinned to an earlier body's edges (27c), checked once its plane is.
+    if (Object.hasOwn(content, "pins")) checkPins(f, content, byId);
   }
   const itemIds = new Set(items.map((f) => f.id));
   for (const s of d.sketches) if (!itemIds.has(s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
@@ -622,22 +639,38 @@ export function readDesignDocument(data: unknown): DesignDocument {
   return d as DesignDocument;
 }
 
-/** What an item is built on: a sketch on a face, that face's feature (26c); an extrude of a sketch, the sketch; else nothing. */
-function inputOf(features: readonly Feature[], f: Feature): Feature | undefined {
-  if (isSketchItem(f)) return isFacePlane(f.intent.parameters.plane) ? features.find((x) => x.id === faceFeature(f.intent.parameters.plane as string)) : undefined;
-  return isSketchExtrude(f) ? features.find((x) => x.id === f.intent.parameters.sketch && isSketchItem(x)) : undefined;
+/**
+ * What a sketch is built on, by id, each once: the feature whose face it is
+ * drawn on (26c), then each feature its points are pinned to (27c, the
+ * naming model's rule 13); none on an origin plane with no pins.
+ */
+function sketchInputs(f: Feature, content: Sketch | undefined): string[] {
+  const plane = f.intent.parameters.plane;
+  const face = isFacePlane(plane) ? faceFeature(plane) : null;
+  return [...new Set([...(face === null ? [] : [face]), ...(content?.pins ?? []).flatMap((p) => p.feature ?? [])])];
+}
+
+/** What an item is built on, of the items in the timeline: a sketch's (`sketchInputs`); an extrude of a sketch, the sketch; else nothing. */
+function inputsOf(document: DesignDocument, f: Feature): Feature[] {
+  const features = document.timeline.features;
+  if (isSketchItem(f)) return sketchInputs(f, document.sketches.find((s) => s.id === f.id)).flatMap((id) => features.find((x) => x.id === id) ?? []);
+  const sketch = isSketchExtrude(f) ? features.find((x) => x.id === f.intent.parameters.sketch && isSketchItem(x)) : undefined;
+  return sketch === undefined ? [] : [sketch];
 }
 
 /**
  * The suppressed item that greys `f` (Q3; from 26e for every item built
- * on another, an extrude of a suppressed sketch too): what it is built on,
- * when that is suppressed, else whatever greys that; null when nothing
- * does, `f` itself suppressed included.
+ * on another, an extrude of a suppressed sketch too; from 27c a sketch
+ * whose point is pinned to a suppressed feature's body): of what it is
+ * built on, in order, the first suppressed, or else whatever greys it;
+ * null when nothing does, `f` itself suppressed included.
  */
 export function greyedBy(document: DesignDocument, f: Feature): string | null {
-  const input = inputOf(document.timeline.features, f);
-  if (input === undefined) return null;
-  return input.suppressed ? input.id : greyedBy(document, input);
+  for (const input of inputsOf(document, f)) {
+    const by = input.suppressed ? input.id : greyedBy(document, input);
+    if (by !== null) return by;
+  }
+  return null;
 }
 
 /**
@@ -655,7 +688,7 @@ export function builds(document: DesignDocument, f: Feature): boolean {
   if (marker === "start" || (marker !== undefined && at > features.findIndex((x) => x.id === marker))) return false;
   if (greyedBy(document, f) !== null) return false;
   if (isSketchItem(f) || !isSketchExtrude(f)) return true;
-  const sketch = inputOf(features, f);
+  const [sketch] = inputsOf(document, f);
   // A deleted sketch: the extrude builds from its kept shape, if it has one (24d2).
   if (sketch === undefined) return keptOf(document, f) !== undefined;
   return builds(document, sketch);
@@ -672,13 +705,19 @@ function walk(document: DesignDocument): { building: Set<Feature>; greyed: Map<F
     if (isSketchItem(f) && !sketches.has(f.id)) sketches.set(f.id, f);
     if (!byId.has(f.id)) byId.set(f.id, f);
   }
+  const contents = new Map<string, Sketch>();
+  for (const s of document.sketches) if (!contents.has(s.id)) contents.set(s.id, s);
   const open = new Set(features.filter((f, i) => i < end && !f.suppressed));
   const building = new Set<Feature>();
   const greyed = new Map<Feature, string>();
   // In timeline order, so what an item is built on (always before it; a file that puts it later is refused when opened) is decided first.
   for (const f of open) {
-    const input = isSketchItem(f) ? (isFacePlane(f.intent.parameters.plane) ? byId.get(faceFeature(f.intent.parameters.plane as string)) : undefined) : isSketchExtrude(f) ? sketches.get(f.intent.parameters.sketch) : undefined;
-    const by = input === undefined ? null : input.suppressed ? input.id : (greyed.get(input) ?? null);
+    // A sketch: its face's feature, then each feature a pin names (27c), as `inputsOf` (one lookup each, audit S2).
+    const sketch = isSketchExtrude(f) ? sketches.get(f.intent.parameters.sketch) : undefined;
+    const inputs = isSketchItem(f) ? sketchInputs(f, contents.get(f.id)).flatMap((id) => byId.get(id) ?? []) : sketch === undefined ? [] : [sketch];
+    const input = inputs[0];
+    let by: string | null = null;
+    for (const x of inputs) if ((by = x.suppressed ? x.id : (greyed.get(x) ?? null)) !== null) break;
     if (by !== null) greyed.set(f, by);
     // A sketch builds, on a face followed or held (26c); an extrude when its sketch does (a sketch on an origin plane
     // whenever it is in range and on, wherever it is), or from its kept shape when it is gone.

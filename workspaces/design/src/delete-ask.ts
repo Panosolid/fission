@@ -6,14 +6,16 @@
 // to each: an extrude that keeps its last shape shows the warning, one with
 // no shape to keep fails, and a sketch on one of its faces stays where it
 // is with its plane lost (26c, Q1), and what is built from that sketch stays
-// too with its source lost (26e). What the box says is worked out from the very
+// too with its source lost (26e); a sketch with a point snapped to one of
+// its edges keeps that point where it is, saying it is lost (27c, the naming
+// model's rule 13). What the box says is worked out from the very
 // document the delete would record (`deleteItem`, then `settleKept`), so
 // it can't promise a kept shape the rebuild then doesn't have.
 // Styles: src/styles/delete-ask.css.
 
 import type { KernelCalls } from "@fission/core";
-import { isSketchExtrude, type DesignDocument } from "./document.ts";
-import { isFaceSketch } from "./face-sketch.ts";
+import { isSketchExtrude, isSketchItem, type DesignDocument } from "./document.ts";
+import { faceFeature, isFaceSketch } from "./face-sketch.ts";
 import { settleKept } from "./rebuild.ts";
 import { deleteItem, itemName } from "./timeline-edits.ts";
 
@@ -51,19 +53,33 @@ export function deleteWords(before: DesignDocument, after: DesignDocument, id: s
   const users = before.timeline.features.filter((f) => f.dependsOn.includes(id));
   if (users.length === 0) return null;
   const keeps = users.filter((f) => isSketchExtrude(f) && after.kept !== undefined && Object.hasOwn(after.kept, f.id)).map(itemName);
-  const staying = users.filter(isFaceSketch);
+  const staying = users.filter((f) => isFaceSketch(f) && faceFeature(f.intent.parameters.plane as string) === id);
   const stays = staying.map(itemName);
+  // 27c (rule 13): a sketch only pinned to its edges keeps those points where they are.
+  const holds = users.filter((f) => isSketchItem(f) && !staying.includes(f)).map(itemName);
   // 26e (Q1): what is built from a sketch that stays stays with it, saying its source is lost.
   const built = before.timeline.features.filter((f) => isSketchExtrude(f) && staying.some((s) => f.dependsOn.includes(s.id))).map(itemName);
-  const fails = users.map(itemName).filter((n) => !keeps.includes(n) && !stays.includes(n));
+  const fails = users.map(itemName).filter((n) => !keeps.includes(n) && !stays.includes(n) && !holds.includes(n));
   const one = (n: readonly unknown[]) => n.length === 1;
   const what = [
     ...(keeps.length > 0 ? [`${listWords(keeps)} ${one(keeps) ? "keeps its last shape and shows a warning" : "keep their last shapes and show a warning"}`] : []),
     ...(stays.length > 0 ? [`${listWords(stays)} ${one(stays) ? "stays where it is and shows its plane is lost" : "stay where they are and show their planes are lost"}`] : []),
     ...(built.length > 0 ? [`what is built from ${one(stays) ? "it" : "them"}, ${listWords(built)}, ${one(built) ? "stays where it is and shows its source is lost" : "stay where they are and show their sources are lost"}`] : []),
+    ...(holds.length > 0 ? [`${listWords(holds)} ${one(holds) ? "keeps its snapped points where they are and shows they are lost" : "keep their snapped points where they are and show they are lost"}`] : []),
     ...(fails.length > 0 ? [`${listWords(fails)} ${one(fails) ? "has no shape to keep and fails" : "have no shapes to keep and fail"}`] : []),
   ].join(", and ");
-  const on = stays.length === users.length ? (one(users) ? "is drawn on a face of" : "are drawn on faces of") : one(users) ? "is built from" : "are built from";
+  const on =
+    stays.length === users.length
+      ? one(users)
+        ? "is drawn on a face of"
+        : "are drawn on faces of"
+      : holds.length === users.length
+        ? one(users)
+          ? "is snapped to an edge of"
+          : "are snapped to edges of"
+        : one(users)
+          ? "is built from"
+          : "are built from";
   const usedBy = `${listWords(users.map(itemName))} ${on} ${name}.`;
   return { heading: `Delete ${name}?`, words: `${usedBy} If you delete it, ${what}. Undo brings ${name} back.` };
 }

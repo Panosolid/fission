@@ -17,6 +17,8 @@ import { SNAP_PIXELS, snapLabel, snapPointer, snapTargets } from "../src/snap.ts
 import { startTool } from "../src/sketch-tool.ts";
 import { followedDoc, type TimelineBuild } from "../src/rebuild.ts";
 import { boxView, cylinderView, onlyBody } from "./views.ts";
+import type { Scene } from "../src/scene.ts";
+import type { BodyNames } from "../src/naming.ts";
 
 const DESIGN = [{ id: "design" as const, readData: readDesignDocument }];
 const plane = (origin: number[], xAxis: number[], normal: number[]): Plane => ({ origin: origin as Plane["origin"], xAxis: xAxis as Plane["xAxis"], normal: normal as Plane["normal"] });
@@ -26,6 +28,16 @@ const box = (w = 40, d = 30, h = 20) => {
   return { view, names: nameBody("feature-1", view, () => null) };
 };
 const at = (ts: EdgeTarget[]) => ts.map((t) => `${t.kind} ${t.at} ${t.name}`);
+/** A body's view moved by `d`: its points (corners, middles, centres) only, all the targets read. */
+const shifted = (v: BodyView, d: [number, number, number]): BodyView => {
+  const move = (p: readonly number[]) => [p[0] + d[0], p[1] + d[1], p[2] + d[2]] as [number, number, number];
+  return { ...v, vertex_points: v.vertex_points.map(move), edge_middles: v.edge_middles.map(move), edge_centres: v.edge_centres.map((c) => (c ? move(c) : c)) };
+};
+/** Two bodies shown, in build order. */
+const twoBodies = (a: BodyView, an: BodyNames, b: BodyView, bn: BodyNames): Scene => {
+  const one = onlyBody(a, an);
+  return { ...one, bodies: [...one.bodies, { feature: bn.feature, place: 2, view: b, names: bn }], faceStart: [0, a.face_roles.length], edgeStart: [0, a.edge_faces.length] };
+};
 
 test("hand-worked: a point in the sketch is its offset from the frame's origin along x and along normal × x", () => {
   // Frame at (1, 2, 3), x (0.6, 0.8, 0), normal z: y = z × x = (−0.8, 0.6, 0).
@@ -220,33 +232,86 @@ test("hunt 26h: a middle's pin between two sides ('A>B') is found the other way 
   assert.deepEqual(pinNow(pin("side:r>side:f"), view, { ...two, shared: names.shared }, TOP), { cause: "point-lost" });
 });
 
-test("hunt 26g: the targets a sketch is offered come from its own face on the bodies shown, and none for an origin plane, no scene, no frame or a face not found", () => {
+test("27c, hand-worked: a sketch on a box's top is offered every corner and edge middle of the box, the top's first where three land on one place", () => {
   const { view, names } = box();
   const scene = onlyBody(view, names);
   const { doc, id } = onTop();
-  assert.equal(sketchEdgeTargets(doc, id, scene, TOP).length, 8, "the top's four corners and four middles");
+  const ts = sketchEdgeTargets(doc, id, scene, TOP);
+  // The box has 8 corners and 12 straight edges: 20 points, each named on feature-1.
+  assert.equal(ts.length, 20);
+  assert.ok(ts.every((t) => t.feature === "feature-1"));
+  // Seen straight down, the top's back right corner (40, 30, 20), the
+  // upright's middle under it (40, 30, 10) and the bottom corner (40, 30, 0)
+  // all land on (40, 30): 0, 10 and 20 mm from the top's plane, offered in
+  // that order, so the snap (the first listed of those at one place) pins
+  // the top's corner.
+  assert.deepEqual(at(ts.filter((t) => t.at[0] === 40 && t.at[1] === 30)), [
+    "endpoint 40,30 back+right&back+top&right+top",
+    "midpoint 40,30 back+right",
+    "endpoint 40,30 back+bottom&back+right&bottom+right",
+  ]);
+  // The top's 8 points (on its plane) first, by name; then the 4 uprights' middles 10 mm off; then the bottom's 8, 20 mm off.
+  assert.deepEqual(ts.slice(0, 8).map((t) => t.name), ["back+left&back+top&left+top", "back+right&back+top&right+top", "back+top", "front+left&front+top&left+top", "front+right&front+top&right+top", "front+top", "left+top", "right+top"]);
+  assert.deepEqual(ts.slice(8, 12).map((t) => t.name), ["back+left", "back+right", "front+left", "front+right"]);
+  assert.ok(ts.slice(12).every((t) => t.name.includes("bottom")));
+  // Middle of the right side's top edge (40, 15) is the top's; the front's bottom edge's middle (20, 0, 0) seen from above is (20, 0).
+  assert.ok(at(ts).includes("midpoint 40,15 right+top") && at(ts).includes("midpoint 20,0 bottom+front"));
+});
+
+test("27c: a sketch on an origin plane is offered the bodies before it, none after it, and none with no scene, no frame or a face not found", () => {
+  const { view, names } = box();
+  const scene = onlyBody(view, names);
+  const { doc, id } = onTop();
   assert.deepEqual(sketchEdgeTargets(doc, id, null, TOP), []);
   assert.deepEqual(sketchEdgeTargets(doc, id, scene, undefined), []);
   assert.deepEqual(sketchEdgeTargets(doc, "sketch-99", scene, TOP), []);
+  // A sketch on XY after the box: the box's 20 points, seen from below the ground (the XY frame faces +Z, so (x, y) is the world's).
   const xy = addSketch(doc);
-  assert.deepEqual(sketchEdgeTargets(xy.doc, xy.id, scene, TOP), [], "an origin plane has no edges");
-  // A face the box hasn't got.
+  const ground = sketchEdgeTargets(xy.doc, xy.id, scene, plane([0, 0, 0], [1, 0, 0], [0, 0, 1]));
+  assert.equal(ground.length, 20);
+  // Now on the ground plane, the bottom's corner (40, 30, 0) comes first at (40, 30), then the upright's middle, then the top's.
+  assert.deepEqual(at(ground.filter((t) => t.at[0] === 40 && t.at[1] === 30)).map((t) => t.split(" ")[2]), ["back+bottom&back+right&bottom+right", "back+right", "back+right&back+top&right+top"]);
+  // The same sketch moved before the box (to place 0): the box is after it and offers nothing.
+  const first = { ...xy.doc, timeline: { features: [xy.doc.timeline.features.at(-1)!, ...xy.doc.timeline.features.slice(0, -1)] } };
+  assert.deepEqual(sketchEdgeTargets(first, xy.id, scene, plane([0, 0, 0], [1, 0, 0], [0, 0, 1])), []);
+  // A face the box hasn't got: the sketch is held, so it follows nothing and is offered nothing.
   const odd = addFaceSketch(doc, { plane: facePlane("feature-1", "side:line-9"), feature: "feature-1" }, drawnFrame([0, 0, 1], [20, 15, 20]));
   assert.deepEqual(sketchEdgeTargets(odd.doc, odd.id, scene, TOP), []);
 });
 
+test("27c, hand-worked: of two bodies only the one before the sketch is offered, its points named on its own feature", () => {
+  // Two boxes: feature-1 at the origin, and a 10 × 10 × 10 box 60 mm along x built as feature-3 after the sketch.
+  const { view, names } = box();
+  const later = shifted(boxView(10, 10, 10), [60, 0, 0]);
+  const scene = twoBodies(view, names, later, nameBody("feature-3", later, () => null));
+  const { doc, id } = onTop();
+  const withLater = { ...doc, timeline: { features: [...doc.timeline.features, { ...doc.timeline.features[0], id: "feature-3", provenance: { self: { workspace: "design" as const, id: "feature-3", label: "Box 2" }, from: [] } }] } };
+  const ts = sketchEdgeTargets(withLater, id, scene, TOP);
+  assert.equal(ts.length, 20);
+  assert.ok(ts.every((t) => t.feature === "feature-1"));
+  // The later box moved before the sketch: its 20 points join, (60, 0) to (70, 10) seen from the top, named on feature-3.
+  const before = { ...withLater, timeline: { features: [withLater.timeline.features[0], withLater.timeline.features[2], withLater.timeline.features[1]] } };
+  const both = sketchEdgeTargets(before, id, scene, TOP);
+  assert.equal(both.length, 40);
+  const second = both.filter((t) => t.feature === "feature-3");
+  assert.deepEqual([...new Set(second.filter((t) => t.kind === "endpoint").map((t) => `${t.at}`))].sort(), ["60,0", "60,10", "70,0", "70,10"]);
+  // The 10 mm box's top is 10 below the sketch, its bottom 20: its top corner (70, 10, 10) before its bottom one.
+  assert.deepEqual(at(second.filter((t) => t.at[0] === 70 && t.at[1] === 10)).map((t) => t.split(" ")[2]), ["back+right&back+top&right+top", "back+right", "back+bottom&back+right&bottom+right"]);
+});
+
 test("the warning's words: one point or several, lost or ambiguous", () => {
-  assert.equal(pointWords("point-lost", 1, "Sketch 2"), "Sketch 2: a point snapped to an edge of its face has lost that edge, so it stays where it was");
-  assert.equal(pointWords("point-lost", 3, "Sketch 2"), "Sketch 2: 3 points snapped to edges of its face have lost their edges, so they stay where they were");
-  assert.equal(pointWords("point-ambiguous", 1, "Sketch 2"), "Sketch 2: a point snapped to an edge of its face is on an edge that is now more than one edge, so it stays where it was rather than guess");
-  assert.equal(pointWords("point-ambiguous", 2, "Sketch 2"), "Sketch 2: 2 points snapped to edges of its face are on edges that are now more than one edge, so they stay where they were rather than guess");
+  // From 27c a point may be snapped to any body's edge, not only its face's: the words say an edge.
+  assert.equal(pointWords("point-lost", 1, "Sketch 2"), "Sketch 2: a point snapped to an edge has lost that edge, so it stays where it was");
+  assert.equal(pointWords("point-lost", 3, "Sketch 2"), "Sketch 2: 3 points snapped to edges have lost their edges, so they stay where they were");
+  assert.equal(pointWords("point-ambiguous", 1, "Sketch 2"), "Sketch 2: a point snapped to an edge is on an edge that is now more than one edge, so it stays where it was rather than guess");
+  assert.equal(pointWords("point-ambiguous", 2, "Sketch 2"), "Sketch 2: 2 points snapped to edges are on edges that are now more than one edge, so they stay where they were rather than guess");
 });
 
 // ---- The snap ----
 
 const targets: EdgeTarget[] = [
-  { at: [40, 30], kind: "endpoint", name: "back+right&back+top&right+top" },
-  { at: [40, 15], kind: "midpoint", name: "right+top" },
+  { at: [40, 30], kind: "endpoint", name: "back+right&back+top&right+top", feature: "feature-1" },
+  { at: [40, 15], kind: "midpoint", name: "right+top", feature: "feature-1" },
 ];
 
 /** A sketch on the box's top with nothing drawn, and its id. */
@@ -300,7 +365,7 @@ test("hand-worked: a new point exactly on a face's corner or middle is pinned th
   // No targets (an origin plane): the document as it was.
   assert.equal(pinNewPoints(doc, c.doc, id, []), c.doc);
   // A rectangle from corner to corner of the top: (40, 0) and (0, 30) land on corners too, all pinned (the rule is where a point lands).
-  const all: EdgeTarget[] = [...targets, { at: [0, 0], kind: "endpoint", name: "a" }, { at: [40, 0], kind: "endpoint", name: "b" }, { at: [0, 30], kind: "endpoint", name: "c" }];
+  const all: EdgeTarget[] = [...targets, { at: [0, 0], kind: "endpoint", name: "a", feature: "feature-1" }, { at: [40, 0], kind: "endpoint", name: "b", feature: "feature-1" }, { at: [0, 30], kind: "endpoint", name: "c", feature: "feature-1" }];
   const r = drawRectangle(doc, id, [0, 0], [40, 30]);
   assert.equal(pinNewPoints(doc, r.doc, id, all).sketches.find((s) => s.id === id)!.pins!.length, 4);
 });
@@ -391,9 +456,27 @@ test("pins survive save and open, and every way a file can break them is refused
     [[{ ...pin, name: "a/b" }], /has no vertex name/],
     [[{ ...pin, kind: "midpoint", name: "a&b" }], /has no edge name/],
   ] as const) assert.throws(() => open(withPins(pins)), words, JSON.stringify(pins));
-  // A sketch on an origin plane can't pin points to a face's edges.
+  // 27c: a pin names the feature whose body it is on: a solid item before the sketch (or one deleted), depended on.
+  for (const [p, words] of [
+    [{ ...pin, feature: "" }, /names no feature/],
+    [{ ...pin, feature: 7 }, /names no feature/],
+    [{ ...pin, feature: id }, /is on sketch-\d+, which is not a solid item before it/],
+  ] as const) assert.throws(() => open(withPins([p])), words, JSON.stringify(p));
+  // Its own face's feature named outright is that feature (depended on already); a deleted one is held, so it opens.
+  assert.doesNotThrow(() => open(withPins([{ ...pin, feature: "feature-1" }])));
+  const gone = withPins([{ ...pin, feature: "feature-77" }]);
+  assert.throws(() => open(gone), /pinned to feature-77 but does not depend on it/);
+  const dependsOn = (d: DesignDocument, ids: string[]) => ({ ...d, timeline: { features: d.timeline.features.map((f) => (f.id === id ? { ...f, dependsOn: ids } : f)) } });
+  assert.doesNotThrow(() => open(dependsOn(gone, ["feature-1", "feature-77"])));
+  // A sketch on an origin plane may pin its points too (27c), naming the feature; one that doesn't is refused.
   const xy = { ...partDocument("box", 40, 30, 20) };
   const flat = drawCircle({ ...xy, nextId: 5, sketches: [{ id: "sketch-4", points: [], curves: [], constraints: [] }], timeline: { features: [...xy.timeline.features, { id: "sketch-4", intent: { type: "sketch", parameters: { plane: "XY" }, summary: "Sketch 1 on the XY plane" }, provenance: { self: { workspace: "design", id: "sketch-4", label: "Sketch 1" }, from: [] }, dependsOn: [], suppressed: false }] } }, "sketch-4", [1, 1], 1);
-  const flatPinned = { ...flat.doc, sketches: flat.doc.sketches.map((s) => ({ ...s, pins: [{ point: s.points[0].id, kind: "endpoint", name: "a" }] })) };
-  assert.throws(() => open(flatPinned), /XY plane but pins points to a face's edges/);
+  const flatPinned = (p: object, deps: string[]) => ({ ...flat.doc, timeline: { features: flat.doc.timeline.features.map((f) => (f.id === "sketch-4" ? { ...f, dependsOn: deps } : f)) }, sketches: flat.doc.sketches.map((s) => ({ ...s, pins: [{ point: s.points[0].id, kind: "endpoint", name: "a", ...p }] })) });
+  assert.throws(() => open(flatPinned({}, [])), /on the XY plane, so its pin on point-\d+ must name the feature whose body it is on/);
+  assert.throws(() => open(flatPinned({ feature: "feature-1" }, [])), /pinned to feature-1 but does not depend on it/);
+  const ok = flatPinned({ feature: "feature-1" }, ["feature-1"]);
+  assert.deepEqual(open(ok), ok);
+  // A feature after the sketch: refused (only what is before a sketch can be pinned to, rule 13).
+  const after = { ...ok, timeline: { features: [ok.timeline.features[1], ok.timeline.features[0]] } };
+  assert.throws(() => open(after), /is on feature-1, which is not a solid item before it/);
 });

@@ -71,7 +71,7 @@ const round = (v: number) => v > 0.99 * 250 * Math.PI && v <= 250 * Math.PI;
 const near = (got: number[], want: number[], tol = 1e-4) => got.every((g, k) => Math.abs(g - want[k]) <= tol);
 
 const CORNER = "back+right&back+top&right+top";
-const LOST = "Sketch 1: a point snapped to an edge of its face has lost that edge, so it stays where it was.";
+const LOST = "Sketch 1: a point snapped to an edge has lost that edge, so it stays where it was.";
 
 /** The whole journey on Design (or a planted copy); throws at the first thing that differs. Returns the document it ended with. */
 async function journey(plugin: WorkspacePlugin): Promise<DesignDocument> {

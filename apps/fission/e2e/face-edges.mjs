@@ -17,7 +17,13 @@
 // (26f offered neither: they shared a name), each with a circle centred
 // there and pinned; saved, its radius made 14 in the file and opened
 // again, the circles are centred on (74, 0) and (46, 0), each on its own
-// corner. Screenshots go to E2E_SHOTS when set. Run with `npm run e2e` (after `npm run build`); Firefox and
+// corner. Step 27c: a sketch on the XY plane snaps onto the box's corner
+// (40, 30) (its bottom one, on XY, of the two seen there), pinned to
+// Feature 1 and depending on it, and follows it when the box is typed 60
+// wide; a sketch on the half disc's top (z = 10) snaps at (40, 30) onto
+// the other body's upright's middle (on its plane, before the corners 10
+// mm off it) and follows it when the box is made 60 wide in the file.
+// Screenshots go to E2E_SHOTS when set. Run with `npm run e2e` (after `npm run build`); Firefox and
 // WebKit in CI (`e2e:engines`).
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -335,6 +341,100 @@ try {
       await reopen(page, tap, "sketch-9");
       assert.equal(await data(page, "sketchPoints"), "74,0 46,0", "each centre followed its own corner");
       await shot(page, `half-disc-followed-${width}`);
+      await page.context().close();
+    });
+  }
+  /**
+   * A circle of radius 5 drawn with its centre clicked half a snap reach in from the world point `corner` (down and left on screen,
+   * on the sketch's plane at height `z`), its rim through `rim`: the centre lands on (cx, cy), recorded as Draw circle.
+   */
+  async function circleOn(page, tap, [cx, cy], z, label, rim) {
+    await press(page, "#sketch-tool-circle", tap);
+    const half = 5 * (await mmPerPixel(page));
+    const near = [cx - half * 0.6, cy - half * 0.8, z];
+    if (!tap) {
+      await hover(page, near);
+      await shown(page, "sketchSnap", label);
+    }
+    await at(page, near, tap);
+    await until(page, (w) => (document.querySelector("#viewport").dataset.sketchPoints ?? "").endsWith(w), `${cx},${cy}`, `a centre on (${cx}, ${cy})`);
+    const lines = Number(await data(page, "sketchLines"));
+    await at(page, rim, tap);
+    await until(page, (n) => Number(document.querySelector("#viewport").dataset.sketchLines) > n && document.querySelector("#undo").title.startsWith("Undo Draw circle"), lines, "the circle drawn");
+  }
+  for (const [width, tap] of [[1280, false], [375, true]]) {
+    await check(`${width} px${tap ? " with taps" : ""}: a sketch on the XY plane snaps onto the box's corner (27c); its circle is pinned to Feature 1, which it then depends on, and follows the corner to (60, 30)`, async () => {
+      const page = await fresh(width, tap);
+      await press(page, '[data-view="top"]', tap);
+      await settle(page);
+      await press(page, "#create-sketch", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.planes === "XY, XZ, YZ", null, "planes offered");
+      await press(page, "#sketch-plane-XY", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching on XY");
+      await settle(page);
+      // The box's back right corners (40, 30, 0) and (40, 30, 20) are one place seen from above; the bottom one is on XY, so it is taken.
+      await circleOn(page, tap, [40, 30], 0, "edge endpoint 40,30", [35, 30, 0]);
+      assert.equal(await data(page, "sketchPoints"), "40,30");
+      if (!tap) await pointerAway(page);
+      await shot(page, `body-pins-xy-${width}`);
+      await finish(page, tap);
+      const file = await saveFile(page, tap);
+      const design = file.workspaces.design;
+      const item = design.timeline.features.find((f) => f.id === "sketch-2");
+      assert.deepEqual(item.dependsOn, ["feature-1"], "the sketch depends on the box it is pinned to");
+      const pins = design.sketches.find((s) => s.id === "sketch-2").pins;
+      assert.equal(pins.length, 1);
+      assert.equal(pins[0].feature, "feature-1", `pinned to the box: ${JSON.stringify(pins)}`);
+      assert.equal(pins[0].kind, "endpoint");
+      // The bottom one, where the back (y = 30), right (x = 40) and bottom (z = 0) faces meet, not the top's.
+      assert.equal(pins[0].name, "back+bottom&back+right&bottom+right", "the corner on XY");
+      // The box 60 wide, typed: the corner, seen from above, moves to (60, 30), and the circle's centre with it.
+      await page.fill("#width", "60");
+      await until(page, () => document.querySelector("#volume")?.textContent === "36,000 mm³", null, "60 × 30 × 20 = 36,000 mm³");
+      await reopen(page, tap);
+      assert.equal(await data(page, "sketchPoints"), "60,30", "the centre followed the box's corner");
+      await shot(page, `body-pins-xy-followed-${width}`);
+      await page.context().close();
+    });
+  }
+  for (const [width, tap] of [[1280, false], [375, true]]) {
+    await check(`${width} px${tap ? " with taps" : ""}: a sketch on the half disc's top snaps onto the other body's upright's middle on its plane (27c), and follows it when the box is made 60 wide in the file`, async () => {
+      const page = await fresh(width, tap);
+      const project = await saveFile(page, tap);
+      project.workspaces.design = structuredClone(HALF_DISC);
+      const open = (p) => page.setInputFiles("#open-file", { name: "half-disc.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(p)) });
+      await open(project);
+      await volumeLike(page, /^1,570\.796327 mm³$/, "the half disc");
+      await press(page, '[data-view="top"]', tap);
+      await settle(page);
+      await press(page, "#create-sketch", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.planes === "XY, XZ, YZ", null, "planes offered");
+      await at(page, [60, 4, 10], tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching on the half disc's top");
+      await settle(page);
+      // The box's back right upright, on a body the sketch is not on, seen from above at (40, 30): its corners (40, 30, 0) and
+      // (40, 30, 20) are 10 mm off the sketch's plane (z = 10), its middle (40, 30, 10) is on it, so the middle is taken. The rim
+      // through (35, 30) on the sketch's plane.
+      await circleOn(page, tap, [40, 30], 10, "edge midpoint 40,30", [35, 30, 10]);
+      assert.equal(await data(page, "sketchPoints"), "40,30");
+      if (!tap) await pointerAway(page);
+      await shot(page, `body-pins-other-body-${width}`);
+      await finish(page, tap);
+      const file = await saveFile(page, tap);
+      const design = file.workspaces.design;
+      const item = design.timeline.features.find((f) => f.id === "sketch-9");
+      assert.deepEqual(item.dependsOn, ["feature-8", "feature-1"], "on the half disc's face, pinned to the box");
+      const pin = design.sketches.find((s) => s.id === "sketch-9").pins[0];
+      assert.equal(pin.feature, "feature-1");
+      assert.equal(pin.kind, "midpoint", `the upright's middle, on the sketch's plane: ${JSON.stringify(pin)}`);
+      // The box made 60 wide in the file and opened: the half disc is the same (its volume), the centre follows the box's corner.
+      design.timeline.features.find((f) => f.id === "feature-1").intent.parameters.width = 60;
+      await open(file);
+      await until(page, () => document.querySelector("#viewport").dataset.rebuilding !== "true", null, "rebuilt");
+      await volumeLike(page, /^1,570\.796327 mm³$/, "the half disc, unchanged");
+      await reopen(page, tap, "sketch-9");
+      assert.equal(await data(page, "sketchPoints"), "60,30", "the centre followed the other body's corner");
+      await shot(page, `body-pins-other-body-followed-${width}`);
       await page.context().close();
     });
   }

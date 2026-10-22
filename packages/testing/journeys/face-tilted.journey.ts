@@ -2,18 +2,22 @@
 // seeded 3- to 5-sided outline extruded, then 1 to 4 sketches each on a
 // random flat face of the body before (often slanted, often an end cap
 // flipped), each a small triangle with one corner on a corner of its face,
-// pinned there (26f), and extruded. Then 12 seeded edits upstream (a corner
+// pinned there (26f; from 27c the corner is any corner of any body before
+// the sketch, its own face's or another face's or another body's, seen along
+// the sketch's normal), and extruded. Then 12 seeded edits upstream (a corner
 // of the outline moved, a distance, a flip), each settled as the app
 // settles every edit, and after each one:
 //   - no sketch's frame is refused (a frame turned with its face must stay
 //     square and unit, however slanted);
 //   - following the pins is a fixed point (follow, build, follow again:
 //     nothing moves);
-//   - every pinned corner is a corner of the body extruded from its sketch,
-//     in the world, to 1e-7 mm: the pin's world point (the face's vertex)
-//     and the child's vertex are worked out by different code (the face's
-//     own corner from the kernel against the sketch point carried through
-//     the turned frame and extruded), so a frame that drifts shows.
+//   - every pinned corner, seen straight along the sketch's normal onto its
+//     plane, is a corner of the body extruded from its sketch, in the world,
+//     to 1e-7 mm: the pin's world point (the vertex, from the kernel, put on
+//     the plane by w − ((w − o) · n) n) and the child's vertex are worked
+//     out by different code (against the sketch point carried through the
+//     turned frame and extruded), so a frame that drifts, or a point seen
+//     along anything but the normal, shows.
 // An edit whose outline the kernel refuses (a moved corner crossing an
 // edge, or a triangle followed thinner than a micrometre: 6 in 1000
 // seeds) is a fair failure and skipped; any other refusal fails. Planting a frame origin 1e-6 off
@@ -89,6 +93,11 @@ async function session(seed: number): Promise<string | null> {
       const targets = sketchEdgeTargets(made.doc, made.id, scene, drawn.plane).filter((t) => t.kind === "endpoint");
       if (targets.length === 0) return `no targets on ${plane}`;
       const t = targets[Math.floor(r() * targets.length)];
+      // 27c: a corner of another body, or of another face of its own body (off the sketch's plane), as well as its face's own.
+      const tv = scene.bodies.find((x) => x.feature === t.feature)!;
+      const tw = tv.view.vertex_points[vertexNames(tv.view, tv.names).vertices.indexOf(t.name)];
+      const off = Math.abs((tw[0] - drawn.plane.origin[0]) * drawn.plane.normal[0] + (tw[1] - drawn.plane.origin[1]) * drawn.plane.normal[1] + (tw[2] - drawn.plane.origin[2]) * drawn.plane.normal[2]);
+      bump(t.feature !== last.feature ? "pinned-other-body" : off > 1e-6 ? "pinned-other-face" : "pinned-own-face");
       // A small triangle from the corner into the face's middle direction (centroid in sketch coords).
       const c = last.view.face_centroids[f];
       const dd = [c[0] - drawn.plane.origin[0], c[1] - drawn.plane.origin[1], c[2] - drawn.plane.origin[2]];
@@ -153,22 +162,28 @@ async function session(seed: number): Promise<string | null> {
       const again = await sceneOf(doc, cache);
       if (followedDoc(doc, again.b) !== doc) return `following is not a fixed point after ${log.at(-1)}\n${log.join("\n")}`;
       for (const x of Object.values(again.b.results)) if (x.status === "built" && x.points) bump(`held-${x.points.cause}`);
-      // Apart from frames: each face sketch's pinned corner is a corner of the body extruded from it, in the world, to 1e-7 mm.
+      // Apart from frames: each face sketch's pinned corner, seen along its normal onto its plane, is a corner of the body
+      // extruded from it, in the world, to 1e-7 mm (27c: the corner's body is the pin's feature's, else the face's).
       const bodies = new Map((await shownBodies(doc, again.b, cache)).map((x) => [x.feature, x]));
       for (const sk of doc.sketches) {
         if (!sk.face || !sk.pins) continue;
         const item = doc.timeline.features.find((x) => x.id === sk.id)!;
-        const parent = bodies.get(decodeURIComponent((item.intent.parameters.plane as string).slice(5).split("/")[0]));
+        const own = decodeURIComponent((item.intent.parameters.plane as string).slice(5).split("/")[0]);
         const ext = doc.timeline.features.find((x) => x.intent.parameters.sketch === sk.id);
         const child = ext && bodies.get(ext.id);
-        if (!parent || !child || again.b.results[sk.id].status !== "built" || (again.b.results[sk.id] as { plane?: unknown }).plane) continue;
+        const res = again.b.results[sk.id];
+        if (!child || res.status !== "built" || res.plane || !res.placement) continue;
+        const { origin: o, normal: n } = res.placement.plane;
         for (const pin of sk.pins) {
-          const v = vertexNames(parent.view, parent.names).vertices.indexOf(pin.name);
-          if (v < 0) continue;
-          const w = parent.view.vertex_points[v];
+          const parent = bodies.get(pin.feature ?? own);
+          const v = parent ? vertexNames(parent.view, parent.names).vertices.indexOf(pin.name) : -1;
+          if (!parent || v < 0) continue;
+          const p = parent.view.vertex_points[v];
+          const along = (p[0] - o[0]) * n[0] + (p[1] - o[1]) * n[1] + (p[2] - o[2]) * n[2];
+          const w = [p[0] - along * n[0], p[1] - along * n[1], p[2] - along * n[2]];
           const near = child.view.vertex_points.some((q) => Math.hypot(q[0] - w[0], q[1] - w[1], q[2] - w[2]) < 1e-7);
-          bump(near ? "corner-on-corner" : "corner-off");
-          if (!near) return `${sk.id}'s pinned corner ${pin.name} at [${w}] is no corner of ${ext!.id}'s body after ${log.at(-1)}\n${log.join("\n")}`;
+          bump(near ? (Math.abs(along) > 1e-6 ? "corner-seen-along" : "corner-on-corner") : "corner-off");
+          if (!near) return `${sk.id}'s pinned corner ${pin.feature ?? own}/${pin.name} at [${p}], on its plane [${w}], is no corner of ${ext!.id}'s body after ${log.at(-1)}\n${log.join("\n")}`;
         }
       }
     }
@@ -188,8 +203,8 @@ test("seeded chains of pinned sketches on slanted faces: only spoiled outlines r
   }
   if (process.env.FISSION_TRACE) console.log(JSON.stringify(stats));
   // Reached: pins on slanted faces, pins that moved with an edit, and corners checked.
-  for (const k of ["pinned", "pin-moved", "fixed", "corner-on-corner"]) assert.ok((stats[k] ?? 0) > 0, `${k} reached (${JSON.stringify(stats)})`);
-  assert.ok(stats["corner-on-corner"] >= 10 * N, `corners checked: ${stats["corner-on-corner"]}`);
+  for (const k of ["pinned", "pin-moved", "fixed", "corner-on-corner", "pinned-own-face", "pinned-other-face", "pinned-other-body", "corner-seen-along"]) assert.ok((stats[k] ?? 0) > 0, `${k} reached (${JSON.stringify(stats)})`);
+  assert.ok(stats["corner-on-corner"] + stats["corner-seen-along"] >= 10 * N, `corners checked: ${JSON.stringify(stats)}`);
 });
 
 const SAVED = new URL("../test/regressions/settle/", import.meta.url);

@@ -199,7 +199,10 @@ export async function faceSession(seed: number, steps: number, plugin = designWo
           // An origin plane: a rectangle extruded, a new body with flat faces to sketch on.
           const plane = pick(["XY", "XZ", "YZ"]);
           await a.pick({ plane });
-          const [x, y, w] = [Math.floor(r() * 200) - 100, Math.floor(r() * 60), 5 + Math.floor(r() * 30)];
+          let [x, y, w] = [Math.floor(r() * 200) - 100, Math.floor(r() * 60), 5 + Math.floor(r() * 30)];
+          // 27c: often its first corner on a body's corner seen along the plane's normal (a hair off, so it snaps and is pinned).
+          const seen = seenCorners(a);
+          if (seen.length > 0 && r() < 0.5) [x, y] = ((c) => [c[0] + 0.03, c[1] - 0.02])(pick(seen));
           await a.key("sketch-rectangle");
           await a.click(x, y);
           await a.click(x + w, y + w);
@@ -360,6 +363,8 @@ export async function faceSession(seed: number, steps: number, plugin = designWo
         }
       }
 
+      // 27c: pins on another body's edges (a feature named), on an origin plane's sketch or a face's.
+      for (const sk of a.doc().sketches) if (sk.pins?.some((x) => x.feature !== undefined)) reach(sk.face ? "pin-other-body" : "pin-origin-plane");
       if (process.env.FISSION_TRACE) console.log(done.at(-1), JSON.stringify(drawnById(a, shownSketches(a.doc(), editing)).entries().map(([id, d]) => `${id}${d.lost ? " lost" : ""}`).toArray()), a.doc().timeline.features.map((f) => f.intent.type + (f.suppressed ? "-off" : "")).join(","));
       // ---- the checks
       if (errors.length) return fail(`thrown: ${errors.join(" | ")}`);
@@ -402,6 +407,35 @@ function diff(a: DesignDocument, b: DesignDocument): string {
   return `kept: ${canonical(a.kept)}\n  settled: ${canonical(b.kept)}`;
 }
 
+/** Every point of the drawn mesh, each once per mesh point: a flat face's corners are among them. */
+const meshPoints = (mesh: DisplayMesh): number[][] => Array.from({ length: mesh.positions.length / 3 }, (_, i) => [mesh.positions[3 * i], mesh.positions[3 * i + 1], mesh.positions[3 * i + 2]]);
+
+/**
+ * The drawn mesh's corners: each place where three faces or more meet
+ * (to a nanometre), once. A flat-sided body's vertices are; a round
+ * edge's tessellation points (two faces) and a face's inner points are
+ * not, so a pick from these is a target the sketch can snap to.
+ */
+function meshCorners(mesh: DisplayMesh): number[][] {
+  const faces = new Map<string, { p: number[]; on: Set<number> }>();
+  mesh.triangle_faces.forEach((f, t) => {
+    for (let k = 0; k < 3; k++) {
+      const i = mesh.indices[3 * t + k];
+      const p = [mesh.positions[3 * i], mesh.positions[3 * i + 1], mesh.positions[3 * i + 2]];
+      const key = p.map((x) => Math.round(x * 1e6)).join(",");
+      (faces.get(key) ?? faces.set(key, { p, on: new Set() }).get(key)!).on.add(f);
+    }
+  });
+  return [...faces.values()].filter((c) => c.on.size >= 3).map((c) => c.p);
+}
+
+/** Every corner of every body drawn, in the open sketch's (x, y): seen straight along its normal (27c). None with no sketch open. */
+function seenCorners(a: App): [number, number][] {
+  const plane = a.drawings().find((d) => d.editing)?.plane;
+  const mesh = a.mesh();
+  return plane && mesh ? meshCorners(mesh).map((p) => toSketch(p, plane)) : [];
+}
+
 /**
  * On the open sketch: a circle or a rectangle, its first click on one of
  * the face's corners (from the mesh drawn, a hair off, so it snaps there and
@@ -412,9 +446,11 @@ async function drawOnFace(a: App, r: () => number, pick: <T>(xs: readonly T[]) =
   const plane = a.drawings().find((d) => d.editing)?.plane;
   const mesh = a.mesh();
   if (!plane || !mesh) return;
-  const all = face === undefined ? Array.from({ length: mesh.positions.length / 3 }, (_, i) => [mesh.positions[3 * i], mesh.positions[3 * i + 1], mesh.positions[3 * i + 2]]) : facePoints(mesh, face);
+  const all = face === undefined ? meshPoints(mesh) : facePoints(mesh, face);
   const on = all.filter((p) => Math.abs(dot([p[0] - plane.origin[0], p[1] - plane.origin[1], p[2] - plane.origin[2]], plane.normal)) < 1e-3);
-  const corner = on.length > 0 && r() < 0.7 ? toSketch(pick(on), plane) : null;
+  // 27c: now and then a corner of any body drawn (another face, another body, or one after the sketch, which offers nothing), seen along the normal.
+  const any = r() < 0.3;
+  const corner = any ? (pick(seenCorners(a)) ?? null) : on.length > 0 && r() < 0.7 ? toSketch(pick(on), plane) : null;
   const at: [number, number] = corner ? [corner[0] + 0.03, corner[1] - 0.02] : [Math.round(r() * 60) - 10, Math.round(r() * 40) - 5];
   const size = 2 + Math.floor(r() * 6);
   if (r() < 0.6) {
@@ -456,7 +492,7 @@ test(`seeded: ${SEEDS} sessions × ${STEPS} steps of face sketches, pins, Edit f
     const failure = await faceSession(seed, STEPS);
     assert.equal(failure, null);
   }
-  for (const k of ["face-sketch", "face-extrude", "origin-sketch", "edit-feature", "shape", "shape-lose", "type", "suppress", "marker", "delete", "edit-sketch", "undo", "undo-redo", "reopen", "lost", "lost-moved"])
+  for (const k of ["face-sketch", "face-extrude", "origin-sketch", "edit-feature", "shape", "shape-lose", "type", "suppress", "marker", "delete", "edit-sketch", "undo", "undo-redo", "reopen", "lost", "lost-moved", "pin-other-body", "pin-origin-plane"])
     assert.ok((REACHED[k] ?? 0) >= 2, `${k} reached ${REACHED[k] ?? 0} times: ${JSON.stringify(REACHED)}`);
 });
 

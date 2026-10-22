@@ -88,14 +88,14 @@ test("hand-worked: one pinned point ambiguous and one lost: both held, counted a
       cause: "point-lost",
       points: 2,
       message:
-        "Sketch 1: a point snapped to an edge of its face has lost that edge, so it stays where it was. " +
-        "Sketch 1: a point snapped to an edge of its face is on an edge that is now more than one edge, so it stays where it was rather than guess",
+        "Sketch 1: a point snapped to an edge has lost that edge, so it stays where it was. " +
+        "Sketch 1: a point snapped to an edge is on an edge that is now more than one edge, so it stays where it was rather than guess",
     });
     // Only the ambiguous one pinned: one point, ambiguous, its one sentence.
     const sketch = doc.sketches.find((s) => s.id === made.id)!;
     const onlyMiddle: DesignDocument = { ...doc, sketches: doc.sketches.map((s) => (s === sketch ? { ...s, pins: s.pins!.filter((p) => p.name === "front+top") } : s)) };
     const m = (await rebuildTimeline(onlyMiddle, renamed, twoFronts)).results[made.id] as { points?: unknown };
-    assert.deepEqual(m.points, { cause: "point-ambiguous", points: 1, message: "Sketch 1: a point snapped to an edge of its face is on an edge that is now more than one edge, so it stays where it was rather than guess" });
+    assert.deepEqual(m.points, { cause: "point-ambiguous", points: 1, message: "Sketch 1: a point snapped to an edge is on an edge that is now more than one edge, so it stays where it was rather than guess" });
   } finally {
     await cache.clear();
     await renamed.clear();

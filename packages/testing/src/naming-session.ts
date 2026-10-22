@@ -405,6 +405,8 @@ export type RandomStep =
   | { op: "unproject"; pick: number }
   /** A feature the face sketch's pin or a projection names, deleted (rule 13: it asks first). */
   | { op: "delete-ref"; pick: number }
+  /** A feature the face sketch's pin or a projection names, its suppression turned the other way (rule 13: it greys the sketch; step 27c). */
+  | { op: "suppress-ref"; pick: number }
   /** An edge the face sketch already holds, projected again (rule 12: nothing changes). */
   | { op: "project-again"; pick: number }
   /** A drag across a link (rule 13): the face sketch before a feature it names, or such a feature after the sketch. */
@@ -491,6 +493,7 @@ const WEIGHTS_27: [RandomStep["op"], number][] = [
   ["project", 10],
   ["unproject", 3],
   ["delete-ref", 4],
+  ["suppress-ref", 3],
   ["project-again", 2],
   ["reorder-across", 3],
   ["move-other", 9],
@@ -514,6 +517,7 @@ function randomStep27(r: SeededRandom, pinsOnly: boolean): RandomStep {
     case "reorder-early":
     case "unproject":
     case "delete-ref":
+    case "suppress-ref":
     case "project-again":
       return { op, pick: r.next() };
     case "reorder-across":
@@ -657,12 +661,14 @@ export function resolveRandom(doc: NamingDoc, step: RandomStep): NamingStep | nu
     }
     case "pin":
     case "project": {
-      // On the face sketch while it is on a cap, built, and on a face found (rule 13: of the extrudes before it, with lines).
+      // On the face sketch while it is on a cap, built, and on a face found (rule 13: of the extrudes before it, with
+      // lines, and drawn: one suppressed or greyed is not shown, so there is nothing of it to snap to or pick, step 27c).
       const s = kind("face-sketch")[0];
       if (s?.kind !== "face-sketch" || !onFoundCap(doc, s)) return null;
       const at = doc.items.indexOf(s);
+      const shown = rebuildNaming(doc).results;
       const f = pickOf(
-        doc.items.slice(0, at).filter((i) => i.kind === "extrude" && outlineLines(doc, i.id) !== null),
+        doc.items.slice(0, at).filter((i) => i.kind === "extrude" && outlineLines(doc, i.id) !== null && shown[i.id]?.kind === "solid"),
         step.pick,
       );
       if (f === undefined) return null;
@@ -701,6 +707,11 @@ export function resolveRandom(doc: NamingDoc, step: RandomStep): NamingStep | nu
       const s = kind("face-sketch")[0];
       const f = s ? pickOf([...new Set(refsOf(s))].filter((id) => doc.items.some((i) => i.id === id)), step.pick) : undefined;
       return f ? edit({ op: "delete", item: f }) : null;
+    }
+    case "suppress-ref": {
+      const s = kind("face-sketch")[0];
+      const f = s ? pickOf(doc.items.filter((i) => refsOf(s).includes(i.id)), step.pick) : undefined;
+      return f && f.kind === "extrude" ? edit({ op: "suppress", item: f.id, on: f.suppressed !== true }) : null;
     }
     case "move-other":
     case "redraw-other": {

@@ -335,7 +335,7 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
     const { kept: old, ...rest } = after;
     let doc = after;
     if (JSON.stringify(old ?? {}) !== JSON.stringify(next)) doc = Object.keys(next).length === 0 ? rest : { ...rest, kept: next };
-    const faces = doc.timeline.features.filter(isFaceSketch).length;
+    const faces = doc.timeline.features.filter((f) => placedOnBodies(doc, f)).length;
     if (faces === 0) return doc;
     // Held placements and followed points, decided on the document with its kept shapes settled, pass after pass on the
     // design the last pass made, until nothing changes: a sketch held, or a point followed, moves what is built on it, so
@@ -349,7 +349,10 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
       for (const content of doc.sketches) {
         const r = now[content.id];
         if (content.face === undefined || r?.status !== "built") {
-          sketches.push(content);
+          // 27c: a sketch on an origin plane with pinned points follows them too.
+          const followed = content.face === undefined ? followedSketch(content, r) : content;
+          changed ||= followed !== content;
+          sketches.push(followed);
           continue;
         }
         const { held, ...face } = content.face;
@@ -370,13 +373,17 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
   });
 }
 
+/** Whether sketch item `f` lies on or follows a body: on a face (26c), or with points pinned to edges (27c). */
+const placedOnBodies = (doc: DesignDocument, f: Feature): boolean => isFaceSketch(f) || (isSketchItem(f) && doc.sketches.find((s) => s.id === f.id)?.pins !== undefined);
+
 /**
- * Every item of `doc` up to its last sketch on a face, built with nothing
- * suppressed and no marker, without freeing anything: where each face
- * sketch would lie with everything on (none for a document without one).
+ * Every item of `doc` up to its last sketch on a face or with pins,
+ * built with nothing suppressed and no marker, without freeing anything:
+ * where each face sketch would lie, and each pinned point would be, with
+ * everything on (none for a document without one).
  */
 async function placeOpen(doc: DesignDocument, cache: BodyCache, kernel: KernelCalls): Promise<Record<string, FeatureResult>> {
-  const last = doc.timeline.features.filter(isFaceSketch).at(-1);
+  const last = doc.timeline.features.filter((f) => placedOnBodies(doc, f)).at(-1);
   if (last === undefined) return {};
   const features = doc.timeline.features.map((f) => (f.suppressed ? { ...f, suppressed: false } : f));
   return (await buildTimeline({ ...doc, timeline: { features, marker: last.id } }, cache, kernel)).results;
@@ -431,9 +438,9 @@ function bodiesAtOnce(doc: DesignDocument, cache: BodyCache, kernel: KernelCalls
   const building = buildingItems(doc);
   for (const f of doc.timeline.features) {
     if (isSketchItem(f) || !building.has(f)) continue;
-    // A sketch on a face is placed on its face as built, so its extrude waits for the loop.
+    // A sketch on a face is placed on its face as built, and a pinned point (27c) follows its body, so its extrude waits for the loop.
     const on = isSketchExtrude(f) ? index.items.get(f.intent.parameters.sketch as string) : undefined;
-    if (on !== undefined && isFaceSketch(on)) continue;
+    if (on !== undefined && (isFaceSketch(on) || index.sketches.get(on.id)?.pins !== undefined)) continue;
     const ask = isSketchExtrude(f)
       ? extrudeSpec(kernel, doc, f, index, on && originPlacement(on)).then((made) => ("status" in made ? undefined : cache.body(made.spec)))
       : Promise.resolve().then(() => cache.body(specOf(doc, f)));
@@ -455,15 +462,27 @@ const XY_PLACEMENT: SketchPlacement = { plane: planeOf("XY"), side: 1 };
  * when a file has none) with "plane lost" (no face of that name, the
  * feature gone or not built, or the face no longer flat) or "plane
  * ambiguous" (two or more faces would have the name; never one of them).
+ * From 27c, on any plane, greyed too while a feature a pin names is (rule
+ * 13, after the face's own), and placed, its pinned points followed
+ * (`followPins`); held, they are not judged (the plane's warning says it
+ * all, as the naming model's rule 10).
  */
 async function placeSketch(f: Feature, done: Record<string, FeatureResult>, cache: BodyCache, index: DocIndex): Promise<FeatureResult> {
-  if (!isFaceSketch(f)) return { status: "built", placement: originPlacement(f) ?? XY_PLACEMENT };
+  const content = index.sketches.get(f.id)!;
+  const featureId = isFaceSketch(f) ? faceFeature(f.intent.parameters.plane as string)! : null;
+  // Q3 and rule 13: the face's feature first, then each a pin names, in order.
+  for (const id of [...new Set([...(featureId === null ? [] : [featureId]), ...(content.pins ?? []).flatMap((p) => p.feature ?? [])])]) {
+    const on = done[id];
+    if (on?.status === "suppressed") return { status: "greyed", by: id };
+    if (on?.status === "greyed") return { status: "greyed", by: on.by };
+  }
+  if (featureId === null) {
+    const placement = originPlacement(f) ?? XY_PLACEMENT;
+    return { status: "built", placement, ...(await followPins(f, index, done, cache, placement.plane, null)) };
+  }
   const plane = f.intent.parameters.plane as string;
-  const p = index.sketches.get(f.id)!.face!;
-  const featureId = faceFeature(plane)!;
+  const p = content.face!;
   const on = done[featureId];
-  if (on?.status === "suppressed") return { status: "greyed", by: featureId };
-  if (on?.status === "greyed") return { status: "greyed", by: on.by };
   let cause: PlaneWarning["cause"] = "plane-lost";
   if (on?.status === "built" && on.body !== undefined && on.spec !== undefined) {
     const view = await cache.view(on.body);
@@ -473,21 +492,13 @@ async function placeSketch(f: Feature, done: Record<string, FeatureResult>, cach
     const outward = face === null ? null : view.face_normals[face];
     if (face !== null && outward) {
       const placement = { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side };
-      return { status: "built", placement, ...followPins(f, index, view, names, placement.plane) };
+      return { status: "built", placement, ...(await followPins(f, index, done, cache, placement.plane, featureId)) };
     }
     if (sharedBy(ref, names) > 1) cause = "plane-ambiguous";
   }
   return { status: "built", placement: { plane: squared(p.held ?? p.frame)!, side: p.side }, plane: { cause, face: plane, message: planeWords(cause, f.provenance.self.label) } };
 }
 
-/**
- * A face sketch's pinned points on its face's body as built now (step 26f,
- * Q4): each found one where its vertex or edge is now (`pinned`; the
- * sketch's content in `index` takes those places, so the extrude built
- * from it uses them), each one not found left where it was, counted in a
- * warning ("point-lost" when any lost its edge, else "point-ambiguous").
- * Nothing for a sketch without pins.
- */
 /** Sketch `content` with each of its pinned points where `r` (its result in a rebuild) found it (26f), or `content` itself when none moved. */
 export function followedSketch(content: Sketch, r: FeatureResult | undefined): Sketch {
   if (r?.status !== "built" || !r.pinned) return content;
@@ -512,13 +523,37 @@ export function followedDoc(doc: DesignDocument, build: TimelineBuild): DesignDo
   return moved ? { ...doc, sketches } : doc;
 }
 
-function followPins(f: Feature, index: DocIndex, view: BodyView, names: BodyNames, plane: Plane): { pinned?: { point: string; at: SketchXY }[]; points?: PointWarning } {
+/**
+ * A sketch's pinned points on their bodies as built now (step 26f, Q4; any
+ * earlier body's from 27c, rule 11): each found one where its vertex or
+ * edge is now, seen along the sketch's normal through `plane` (`pinned`;
+ * the sketch's content in `index` takes those places, so the extrude built
+ * from it uses them), each one not found left where it was, counted in a
+ * warning ("point-lost" when any lost its edge, else "point-ambiguous"). A
+ * pin's body is that of its feature (`SketchPin.feature`, or left out
+ * `face`, the sketch's face's feature, null on an origin plane) in `done`:
+ * none (deleted, failed or not built) loses the point. Nothing for a
+ * sketch without pins.
+ */
+async function followPins(f: Feature, index: DocIndex, done: Record<string, FeatureResult>, cache: BodyCache, plane: Plane, face: string | null): Promise<{ pinned?: { point: string; at: SketchXY }[]; points?: PointWarning }> {
   const content = index.sketches.get(f.id)!;
   if (!content.pins) return {};
+  const bodies = new Map<string, { view: BodyView; names: BodyNames } | null>();
+  const bodyOf = async (id: string) => {
+    if (!bodies.has(id)) {
+      const r = done[id];
+      const built = r?.status === "built" && r.body !== undefined && r.spec !== undefined ? r : null;
+      const view = built && (await cache.view(built.body!));
+      bodies.set(id, built && view ? { view, names: featureNames(id, { spec: built.spec!, curves: built.curves }, view) } : null);
+    }
+    return bodies.get(id)!;
+  };
   const pinned: { point: string; at: SketchXY }[] = [];
   const held = { "point-lost": 0, "point-ambiguous": 0 };
   for (const pin of content.pins) {
-    const now = pinNow(pin, view, names, plane);
+    const feature = pin.feature ?? face;
+    const body = feature === null ? null : await bodyOf(feature);
+    const now = body === null ? ({ cause: "point-lost" } as const) : pinNow(pin, body.view, body.names, plane);
     if ("at" in now) pinned.push({ point: pin.point, at: now.at });
     else held[now.cause]++;
   }
