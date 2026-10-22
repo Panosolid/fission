@@ -28,10 +28,11 @@
 // nothing suppressed and no marker, as the naming model's `settle` does.
 
 import { KernelError, type BodyHandle, type BodySpec, type BodyView, type Feature, type KernelCalls, type KernelInput, type Outline, type Plane, type SketchXY } from "@fission/core";
-import { buildingItems, isSketchExtrude, isSketchItem, keptOf, specOf, type DesignDocument, type KeptShape, type Sketch, type SketchPlane } from "./document.ts";
+import { buildingItems, isSketchExtrude, isSketchItem, keptOf, sketchInputs, specOf, type DesignDocument, type KeptShape, type Sketch, type SketchPlane } from "./document.ts";
 import { faceFeature, faceReference, frameNow, frameOf, isFaceSketch, planeWords, squared, type PlaneWarning, type SketchPlacement } from "./face-sketch.ts";
 import { pinNow, pointWords, type PointWarning } from "./face-edges.ts";
 import { featureNames, type BodyNames } from "./naming.ts";
+import { edgeNamed, edgeShape, madeKind, profileCurves, placesOf, projectionWords, type HeldCause, type ProjectionWarning } from "./projection.ts";
 import { resolveReference, sharedBy } from "./references.ts";
 import { planeOf, sketchCurves } from "./sketch.ts";
 
@@ -72,6 +73,9 @@ export type FeatureResult =
       /** A face sketch's pinned points that found their edge, where they are now (26f), and why the others are held. */
       pinned?: { point: string; at: SketchXY }[];
       points?: PointWarning;
+      /** Step 27d: each projection that found its edge, where its points are now (and a circle's radius), and why the others are held. */
+      projected?: { id: string; points: { point: string; at: SketchXY }[]; radius?: number }[];
+      projections?: ProjectionWarning;
     }
   | { status: "suppressed" }
   /** Built on a suppressed item (`by`), directly or through others (Q3; from 26e an extrude of a suppressed sketch too): off, with no warning, until it is unsuppressed. */
@@ -198,20 +202,24 @@ export class BodyCache {
   }
 }
 
-const idsOf = (content: Pick<Sketch, "curves">): CurveIds => ({
-  line: content.curves.filter((c) => c.kind === "line").map((c) => c.id),
-  arc: content.curves.filter((c) => c.kind === "arc").map((c) => c.id),
-  circle: content.curves.filter((c) => c.kind === "circle").map((c) => c.id),
-});
+/** The ids of the curves a sketch's outline is asked from (from 27d without a projected edge that joins none: `profileCurves`). */
+function idsOf(content: Pick<Sketch, "points" | "curves" | "projected">): CurveIds {
+  const curves = profileCurves(content);
+  return {
+    line: curves.filter((c) => c.kind === "line").map((c) => c.id),
+    arc: curves.filter((c) => c.kind === "arc").map((c) => c.id),
+    circle: curves.filter((c) => c.kind === "circle").map((c) => c.id),
+  };
+}
 
 /** The sketch curves a kernel answer names (line, arc and circle inputs), as ids. */
 const namedCurves = (inputs: readonly KernelInput[], ids: CurveIds): string[] =>
   inputs.flatMap((i) => (i.input === "line" || i.input === "arc" || i.input === "circle" ? (ids[i.input][i.index] ?? []) : []));
 
-/** What a sketch's points and curves make: the outline, or why there is none, from the kernel's fields. */
-async function outlineOf(kernel: KernelCalls, content: KeptShape): Promise<{ outline: Outline } | { lost: "open-outline" | "invalid-outline"; message: string; curves: string[]; refused?: true }> {
+/** What a sketch's points and curves make (its projected ones only where they join, 27d): the outline, or why there is none, from the kernel's fields. */
+async function outlineOf(kernel: KernelCalls, content: KeptShape & Pick<Sketch, "projected">): Promise<{ outline: Outline } | { lost: "open-outline" | "invalid-outline"; message: string; curves: string[]; refused?: true }> {
   const ids = idsOf(content);
-  const c = sketchCurves({ id: "", points: content.points, curves: content.curves, constraints: [] });
+  const c = sketchCurves(content);
   try {
     const out = await kernel.call("sketch_outline", c.lines, c.circles, c.arcs);
     if ("closed" in out) return { outline: out.closed };
@@ -261,8 +269,8 @@ function outlinesAtOnce(kernel: KernelCalls, docs: DesignDocument[]): KernelCall
     }
     return answer;
   };
-  const curvesOf = (content: KeptShape) => {
-    const c = sketchCurves({ id: "", points: content.points, curves: content.curves, constraints: [] });
+  const curvesOf = (content: KeptShape & Pick<Sketch, "projected">) => {
+    const c = sketchCurves(content);
     return [c.lines, c.circles, c.arcs];
   };
   for (const doc of docs) {
@@ -293,8 +301,8 @@ async function makesOutline(kernel: KernelCalls, doc: DesignDocument, sketchId: 
  * a sketch on a face whose name finds no face or two in `after` holds the
  * placement it had in `before` (if it holds none yet), and forgets it once
  * its face is back; from 26f, each point pinned to its face's edge goes
- * where that edge is now, judged the same way (`followPins`), and stays
- * where it was when the edge is gone. The same rules as the model's `settle`: suppression
+ * where that edge is now, judged the same way (`follow`), and stays
+ * where it was when the edge is gone; from 27d each projection likewise. The same rules as the model's `settle`: suppression
  * and the marker don't count, so a greyed sketch keeps nothing while its
  * face is there, and one whose face went while it was greyed keeps where
  * it was. `after` itself when nothing changes.
@@ -329,7 +337,8 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
       else if (was !== undefined && (await makesOutline(kernel, before, sketch))) {
         const item = beforeItems.get(sketch)!;
         const placement = isFaceSketch(item) ? await wasAt(sketch) : (originPlacement(item) ?? undefined);
-        next[f.id] = placement ? { points: was.points, curves: was.curves, placement } : { points: was.points, curves: was.curves };
+        const shape = keptCurves(was);
+        next[f.id] = placement ? { ...shape, placement } : shape;
       }
     }
     const { kept: old, ...rest } = after;
@@ -373,8 +382,24 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
   });
 }
 
-/** Whether sketch item `f` lies on or follows a body: on a face (26c), or with points pinned to edges (27c). */
-const placedOnBodies = (doc: DesignDocument, f: Feature): boolean => isFaceSketch(f) || (isSketchItem(f) && doc.sketches.find((s) => s.id === f.id)?.pins !== undefined);
+/**
+ * What an extrude keeps of a sketch it loses: its points and curves, or
+ * from 27d, for a sketch with projections, the curves its outline was made
+ * of (`profileCurves`) and the points they are drawn from, each now an
+ * ordinary curve of the kept shape (a kept shape follows nothing).
+ */
+function keptCurves(was: Sketch): KeptShape {
+  if (!was.projected) return { points: was.points, curves: was.curves };
+  const curves = profileCurves(was);
+  const used = new Set(curves.flatMap((c) => (c.kind === "line" ? [c.start, c.end] : c.kind === "circle" ? [c.centre] : [c.start, c.end, c.centre])));
+  return { points: was.points.filter((p) => used.has(p.id)), curves };
+}
+
+/** Whether a sketch follows a body: points pinned to edges (27c), or edges projected (27d). */
+const follows = (content: Sketch | undefined): boolean => content?.pins !== undefined || content?.projected !== undefined;
+
+/** Whether sketch item `f` lies on or follows a body: on a face (26c), or with points pinned to edges (27c) or edges projected (27d). */
+const placedOnBodies = (doc: DesignDocument, f: Feature): boolean => isFaceSketch(f) || (isSketchItem(f) && follows(doc.sketches.find((s) => s.id === f.id)));
 
 /**
  * Every item of `doc` up to its last sketch on a face or with pins,
@@ -440,7 +465,7 @@ function bodiesAtOnce(doc: DesignDocument, cache: BodyCache, kernel: KernelCalls
     if (isSketchItem(f) || !building.has(f)) continue;
     // A sketch on a face is placed on its face as built, and a pinned point (27c) follows its body, so its extrude waits for the loop.
     const on = isSketchExtrude(f) ? index.items.get(f.intent.parameters.sketch as string) : undefined;
-    if (on !== undefined && (isFaceSketch(on) || index.sketches.get(on.id)?.pins !== undefined)) continue;
+    if (on !== undefined && (isFaceSketch(on) || follows(index.sketches.get(on.id)))) continue;
     const ask = isSketchExtrude(f)
       ? extrudeSpec(kernel, doc, f, index, on && originPlacement(on)).then((made) => ("status" in made ? undefined : cache.body(made.spec)))
       : Promise.resolve().then(() => cache.body(specOf(doc, f)));
@@ -463,22 +488,22 @@ const XY_PLACEMENT: SketchPlacement = { plane: planeOf("XY"), side: 1 };
  * feature gone or not built, or the face no longer flat) or "plane
  * ambiguous" (two or more faces would have the name; never one of them).
  * From 27c, on any plane, greyed too while a feature a pin names is (rule
- * 13, after the face's own), and placed, its pinned points followed
- * (`followPins`); held, they are not judged (the plane's warning says it
+ * 13, after the face's own; from 27d a projection's too), and placed, its
+ * pinned points and projections followed (`follow`); held, they are not judged (the plane's warning says it
  * all, as the naming model's rule 10).
  */
 async function placeSketch(f: Feature, done: Record<string, FeatureResult>, cache: BodyCache, index: DocIndex): Promise<FeatureResult> {
   const content = index.sketches.get(f.id)!;
   const featureId = isFaceSketch(f) ? faceFeature(f.intent.parameters.plane as string)! : null;
-  // Q3 and rule 13: the face's feature first, then each a pin names, in order.
-  for (const id of [...new Set([...(featureId === null ? [] : [featureId]), ...(content.pins ?? []).flatMap((p) => p.feature ?? [])])]) {
+  // Q3 and rule 13: the face's feature first, then each a pin names, then each a projection names (27d), in order.
+  for (const id of sketchInputs(f, content)) {
     const on = done[id];
     if (on?.status === "suppressed") return { status: "greyed", by: id };
     if (on?.status === "greyed") return { status: "greyed", by: on.by };
   }
   if (featureId === null) {
     const placement = originPlacement(f) ?? XY_PLACEMENT;
-    return { status: "built", placement, ...(await followPins(f, index, done, cache, placement.plane, null)) };
+    return { status: "built", placement, ...(await follow(f, index, done, cache, placement.plane, null)) };
   }
   const plane = f.intent.parameters.plane as string;
   const p = content.face!;
@@ -492,19 +517,37 @@ async function placeSketch(f: Feature, done: Record<string, FeatureResult>, cach
     const outward = face === null ? null : view.face_normals[face];
     if (face !== null && outward) {
       const placement = { plane: frameNow(squared(p.frame)!, outward, view.face_centroids[face]), side: p.side };
-      return { status: "built", placement, ...(await followPins(f, index, done, cache, placement.plane, featureId)) };
+      return { status: "built", placement, ...(await follow(f, index, done, cache, placement.plane, featureId)) };
     }
     if (sharedBy(ref, names) > 1) cause = "plane-ambiguous";
   }
   return { status: "built", placement: { plane: squared(p.held ?? p.frame)!, side: p.side }, plane: { cause, face: plane, message: planeWords(cause, f.provenance.self.label) } };
 }
 
-/** Sketch `content` with each of its pinned points where `r` (its result in a rebuild) found it (26f), or `content` itself when none moved. */
+/**
+ * Sketch `content` with each of its pinned points where `r` (its result in
+ * a rebuild) found it (26f), and each projection that found its edge where
+ * that edge is seen now, a circle's radius too (27d); `content` itself
+ * when nothing moved.
+ */
 export function followedSketch(content: Sketch, r: FeatureResult | undefined): Sketch {
-  if (r?.status !== "built" || !r.pinned) return content;
-  const to = new Map(r.pinned.map((p) => [p.point, p.at]));
-  if (!content.points.some((p) => to.has(p.id) && (to.get(p.id)![0] !== p.x || to.get(p.id)![1] !== p.y))) return content;
-  return { ...content, points: content.points.map((p) => (to.has(p.id) ? { ...p, x: to.get(p.id)![0], y: to.get(p.id)![1] } : p)) };
+  if (r?.status !== "built" || (!r.pinned && !r.projected)) return content;
+  return movedTo(content, [...(r.pinned ?? []), ...(r.projected ?? []).flatMap((q) => q.points)], (r.projected ?? []).flatMap((q) => (q.radius === undefined ? [] : [{ projection: q.id, radius: q.radius }])));
+}
+
+/** `content` with these points at these places and these projected circles at these radii; `content` itself when none changes. */
+function movedTo(content: Sketch, points: readonly { point: string; at: SketchXY }[], radii: readonly { projection: string; radius: number }[]): Sketch {
+  const to = new Map(points.map((p) => [p.point, p.at]));
+  const made = new Map((content.projected ?? []).map((q) => [q.id, q.made]));
+  const r = new Map(radii.flatMap((x) => (made.has(x.projection) ? [[made.get(x.projection)!, x.radius] as const] : [])));
+  const moves = content.points.some((p) => to.has(p.id) && (to.get(p.id)![0] !== p.x || to.get(p.id)![1] !== p.y));
+  const grows = content.curves.some((c) => c.kind === "circle" && r.has(c.id) && r.get(c.id) !== c.radius);
+  if (!moves && !grows) return content;
+  return {
+    ...content,
+    points: moves ? content.points.map((p) => (to.has(p.id) ? { ...p, x: to.get(p.id)![0], y: to.get(p.id)![1] } : p)) : content.points,
+    curves: grows ? content.curves.map((c) => (c.kind === "circle" && r.has(c.id) ? { ...c, radius: r.get(c.id)! } : c)) : content.curves,
+  };
 }
 
 /**
@@ -535,9 +578,9 @@ export function followedDoc(doc: DesignDocument, build: TimelineBuild): DesignDo
  * none (deleted, failed or not built) loses the point. Nothing for a
  * sketch without pins.
  */
-async function followPins(f: Feature, index: DocIndex, done: Record<string, FeatureResult>, cache: BodyCache, plane: Plane, face: string | null): Promise<{ pinned?: { point: string; at: SketchXY }[]; points?: PointWarning }> {
+async function follow(f: Feature, index: DocIndex, done: Record<string, FeatureResult>, cache: BodyCache, plane: Plane, face: string | null): Promise<Partial<Extract<FeatureResult, { status: "built" }>>> {
   const content = index.sketches.get(f.id)!;
-  if (!content.pins) return {};
+  if (!follows(content)) return {};
   const bodies = new Map<string, { view: BodyView; names: BodyNames } | null>();
   const bodyOf = async (id: string) => {
     if (!bodies.has(id)) {
@@ -550,21 +593,41 @@ async function followPins(f: Feature, index: DocIndex, done: Record<string, Feat
   };
   const pinned: { point: string; at: SketchXY }[] = [];
   const held = { "point-lost": 0, "point-ambiguous": 0 };
-  for (const pin of content.pins) {
+  for (const pin of content.pins ?? []) {
     const feature = pin.feature ?? face;
     const body = feature === null ? null : await bodyOf(feature);
     const now = body === null ? ({ cause: "point-lost" } as const) : pinNow(pin, body.view, body.names, plane);
     if ("at" in now) pinned.push({ point: pin.point, at: now.at });
     else held[now.cause]++;
   }
-  const at = new Map(pinned.map((p) => [p.point, p.at]));
-  if (content.points.some((p) => at.has(p.id) && (at.get(p.id)![0] !== p.x || at.get(p.id)![1] !== p.y)))
-    index.sketches.set(f.id, { ...content, points: content.points.map((p) => (at.has(p.id) ? { ...p, x: at.get(p.id)![0], y: at.get(p.id)![1] } : p)) });
-  const n = held["point-lost"] + held["point-ambiguous"];
-  if (n === 0) return { pinned };
+  // Step 27d (rule 12): each projection where its edge is seen now, when it is still seen as what it made; else held.
+  const projected: { id: string; points: { point: string; at: SketchXY }[]; radius?: number }[] = [];
+  const lost: { id: string; cause: HeldCause }[] = [];
+  for (const q of content.projected ?? []) {
+    const body = await bodyOf(q.feature);
+    const found = body === null ? ({ cause: "projection-lost" } as const) : edgeNamed(body.names, body.view.edges, q.edge);
+    if ("cause" in found) {
+      lost.push({ id: q.id, cause: found.cause });
+      continue;
+    }
+    const shape = edgeShape(body!.view, found.edge, plane);
+    if ("refused" in shape || shape.kind !== madeKind(content, q)) {
+      lost.push({ id: q.id, cause: "projection-changed" });
+      continue;
+    }
+    projected.push({ id: q.id, ...placesOf(content, q, shape) });
+  }
   const label = f.provenance.self.label;
+  const followed = movedTo(content, [...pinned, ...projected.flatMap((q) => q.points)], projected.flatMap((q) => (q.radius === undefined ? [] : [{ projection: q.id, radius: q.radius }])));
+  if (followed !== content) index.sketches.set(f.id, followed);
+  const n = held["point-lost"] + held["point-ambiguous"];
   const words = (["point-lost", "point-ambiguous"] as const).filter((c) => held[c] > 0).map((c) => pointWords(c, held[c], label));
-  return { pinned, points: { cause: held["point-lost"] > 0 ? "point-lost" : "point-ambiguous", points: n, message: words.join(". ") } };
+  return {
+    ...(content.pins ? { pinned } : {}),
+    ...(n > 0 ? { points: { cause: held["point-lost"] > 0 ? "point-lost" : "point-ambiguous", points: n, message: words.join(". ") } } : {}),
+    ...(content.projected ? { projected } : {}),
+    ...(lost.length > 0 ? { projections: projectionWords(lost, content, label) } : {}),
+  };
 }
 
 async function buildFeature(doc: DesignDocument, f: Feature, done: Record<string, FeatureResult>, cache: BodyCache, kernel: KernelCalls, index: DocIndex): Promise<FeatureResult> {

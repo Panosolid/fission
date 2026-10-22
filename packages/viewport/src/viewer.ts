@@ -35,6 +35,8 @@ interface ViewHost {
   /** Which way the edited sketch faces against its plane's normal (SketchDrawing.side), for Look At. */
   sketchSide(): 1 | -1;
   sketchPointer(pointer: SketchPointer): void;
+  /** Whether the edited sketch asks which body edge or face is under the pointer (step 27d, the Project tool: SketchDrawing editing.picks). */
+  sketchPicks(): boolean;
   /** The offered origin planes on screen (showPlanes), to be clicked. */
   planeMeshes(): THREE.Mesh[];
   /** While planes are offered (showPlanes), the body's faces that can be picked with them (26d); null when none are offered. */
@@ -131,7 +133,7 @@ export class ViewportView {
       if (!start || start.id !== e.pointerId || !isClick(start, { x: e.clientX, y: e.clientY })) return;
       // Sketching: a click places a point on the sketch's plane, it picks nothing.
       const plane = this.host.sketchPlane();
-      if (plane) return this.host.sketchPointer({ kind: "click", ...this.pointerOn(e.clientX, e.clientY, plane) });
+      if (plane) return this.host.sketchPointer({ kind: "click", ...this.pointerOn(e.clientX, e.clientY, plane), ...this.sketchPick(e.clientX, e.clientY) });
       // Picking where a sketch goes: the face under the pointer, else the nearest offered plane, never an edge (26d).
       if (this.host.offeredFaces()) return this.host.pick({ ...this.planeTarget(e.clientX, e.clientY), edge: null, shift: e.shiftKey });
       const edge = this.edgeAt(e.clientX, e.clientY);
@@ -145,7 +147,12 @@ export class ViewportView {
       this.queuedHover = requestAnimationFrame(() => {
         this.queuedHover = 0;
         const plane = this.host.sketchPlane();
-        if (plane) return this.host.sketchPointer(pointer ? { kind: "move", ...this.pointerOn(pointer.x, pointer.y, plane) } : { kind: "move", at: null });
+        if (plane) {
+          // The Project tool (27d): what a click would project lights as a hover does; any other tool lights nothing.
+          const under = pointer ? this.sketchPick(pointer.x, pointer.y) : {};
+          this.host.setHover(under.face ?? null, under.edge ?? null);
+          return this.host.sketchPointer(pointer ? { kind: "move", ...this.pointerOn(pointer.x, pointer.y, plane), ...under } : { kind: "move", at: null });
+        }
         if (!pointer || !this.host.picking()) {
           this.host.setPlaneHover(null);
           return this.host.setHover(null, null);
@@ -312,6 +319,13 @@ export class ViewportView {
   }
 
   /** Where a point on screen meets a sketch plane and the size of a pixel there (sketch-view's pixelSize). */
+  /** While the edited sketch asks for picks (27d): the body edge under a point on screen, else its face; nothing otherwise. */
+  private sketchPick(clientX: number, clientY: number): { edge?: number | null; face?: number | null } {
+    if (!this.host.sketchPicks()) return {};
+    const edge = this.edgeAt(clientX, clientY);
+    return { edge, face: edge === null ? this.faceAt(clientX, clientY) : null };
+  }
+
   private pointerOn(clientX: number, clientY: number, plane: Plane): { at: SketchXY | null; pixel?: number } {
     const at = this.onPlane(clientX, clientY, plane);
     const pixel = at ? pixelSize(at, this.onPlane(clientX + 1, clientY, plane), this.onPlane(clientX, clientY + 1, plane)) : undefined;
@@ -601,7 +615,7 @@ export class ViewportView {
 }
 
 /** The sketch colours (sRGB): the edited sketch's lines bright, finished ones quieter, the grid faint, the axes red (x) and green (y). */
-const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, lost: 0xff6b6b, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
+const SKETCH_COLOURS = { line: 0x6cc4ff, finished: 0x8b95a3, projected: 0xc77dff, projectedFinished: 0x9d6fc4, lost: 0xff6b6b, preview: 0xffb454, snap: 0x4dff88, point: 0xffffff, grid: 0xaab4c3, axisX: 0xe5534b, axisY: 0x57ab5a, plane: 0x6cc4ff, planeOff: 0x8b95a3 };
 /**
  * How opaque the sketch grid's major lines are (minor ones fade in up to
  * this as they spread apart, sketch-view's minorStrength): light and see-
@@ -679,6 +693,8 @@ export class Viewer implements SharedViewport {
   private sketches = new THREE.Group();
   private editedPlane: Plane | null = null;
   private editedSide: 1 | -1 = 1;
+  /** Whether the edited sketch asks for picks (27d: SketchDrawing editing.picks). */
+  private editedPicks = false;
   private sketchHandler: ((pointer: SketchPointer) => void) | null = null;
   /** The origin planes drawn for picking (showPlanes). */
   private planes = new THREE.Group();
@@ -719,6 +735,7 @@ export class Viewer implements SharedViewport {
       sketchPlane: () => (this.sketchHandler ? this.editedPlane : null),
       sketchSide: () => this.editedSide,
       sketchPointer: (pointer) => this.sketchHandler?.(pointer),
+      sketchPicks: () => this.sketchHandler !== null && this.editedPlane !== null && this.editedPicks,
       planeMeshes: () => this.planeHits,
       offeredFaces: () => this.pickFaces,
       setPlaneHover: (plane) => this.setPlaneHover(plane),
@@ -819,17 +836,21 @@ export class Viewer implements SharedViewport {
    * colour, is drawn over it. A finished one whose plane is lost (26e) is
    * red and drawn after the body (LOST_SKETCH_ORDER): it most often lies on
    * the edges of the extrude built from it, and the warning must show
-   * there. Replaces what was drawn.
+   * there. Edges projected into a sketch (27d) are drawn in a colour of
+   * their own, brighter while it is edited, their points as dots.
+   * Replaces what was drawn.
    */
   showSketches(drawings: readonly SketchDrawing[]) {
     clearGroup(this.sketches);
     this.editedPlane = null;
     this.editedSide = 1;
+    this.editedPicks = false;
     this.gridFor = null;
     this.editedWorld = [];
     this.finishedWorld = [];
     let lines = 0;
     let lost = 0;
+    let projected = 0;
     for (const d of drawings) {
       const at = (p: SketchXY) => toWorld(d.plane, p);
       const segments = (pairs: readonly (readonly [SketchXY, SketchXY])[], colour: number, order: number) => {
@@ -841,9 +862,24 @@ export class Viewer implements SharedViewport {
         l.renderOrder = order;
         this.sketches.add(l);
       };
+      const dots = (points: readonly SketchXY[], colour: number, order: number) => {
+        if (points.length === 0) return;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(points.flatMap((p) => at(p)), 3));
+        const finished = order === FINISHED_SKETCH_ORDER;
+        const dot = new THREE.Points(g, new THREE.PointsMaterial({ color: colour, size: 7, sizeAttenuation: false, ...(finished ? {} : { depthTest: false, transparent: true }) }));
+        dot.renderOrder = order;
+        this.sketches.add(dot);
+      };
       lines += d.lines.length;
+      const shown = d.projected ?? { lines: [], points: [] };
+      projected += shown.lines.length + shown.points.length;
+      const projectedWorld = [...shown.lines.flatMap(([a, b]) => [at(a), at(b)]), ...shown.points.map(at)];
       if (!d.editing) {
-        this.finishedWorld.push(...d.lines.flatMap(([a, b]) => [at(a), at(b)]));
+        this.finishedWorld.push(...d.lines.flatMap(([a, b]) => [at(a), at(b)]), ...projectedWorld);
+        // 27d: projected edges in their own colour (red with the rest when the sketch is lost).
+        segments(shown.lines, d.lost ? SKETCH_COLOURS.lost : SKETCH_COLOURS.projectedFinished, d.lost ? LOST_SKETCH_ORDER : FINISHED_SKETCH_ORDER);
+        dots(shown.points, d.lost ? SKETCH_COLOURS.lost : SKETCH_COLOURS.projectedFinished, FINISHED_SKETCH_ORDER);
         // 26e: a sketch whose plane is lost red, where it stays.
         if (d.lost) segments(d.lines, SKETCH_COLOURS.lost, LOST_SKETCH_ORDER);
         else segments(d.lines, SKETCH_COLOURS.finished, FINISHED_SKETCH_ORDER);
@@ -852,9 +888,11 @@ export class Viewer implements SharedViewport {
       }
       this.editedPlane = d.plane;
       this.editedSide = d.side === -1 ? -1 : 1;
+      this.editedPicks = d.editing.picks === true;
       this.gridFor = { plane: d.plane, step: d.editing.gridSnap ? d.editing.grid : null };
-      this.editedWorld = [...d.lines.flatMap(([a, b]) => [at(a), at(b)]), ...d.editing.points.map(at)];
+      this.editedWorld = [...d.lines.flatMap(([a, b]) => [at(a), at(b)]), ...d.editing.points.map(at), ...projectedWorld];
       segments(d.lines, SKETCH_COLOURS.line, 3);
+      segments(shown.lines, SKETCH_COLOURS.projected, 3);
       if (d.editing.preview.length > 0) segments(d.editing.preview, SKETCH_COLOURS.preview, 4);
       if (d.editing.points.length > 0) {
         const g = new THREE.BufferGeometry();
@@ -874,6 +912,8 @@ export class Viewer implements SharedViewport {
     const xy = (p: SketchXY) => `${p[0]},${p[1]}`;
     this.element.dataset.sketchLines = String(lines);
     this.element.dataset.sketchLost = String(lost);
+    this.element.dataset.sketchProjected = String(projected);
+    this.element.dataset.sketchPicks = String(this.editedPicks);
     this.element.dataset.sketchPoints = edited ? edited.points.map(xy).join(" ") : "";
     this.element.dataset.sketchPreview = edited ? edited.preview.map((s) => s.map(xy).join(" ")).join(" | ") : "";
     this.element.dataset.sketchSnap = edited?.snap?.label ?? "";

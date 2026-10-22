@@ -65,7 +65,18 @@ export interface SketchDrawing {
    * profile. Absent means drawn as usual.
    */
   lost?: true;
-  editing?: { grid: number; gridSnap?: boolean; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[]; snap?: { label: string; marks: readonly (readonly [SketchXY, SketchXY])[] } };
+  /**
+   * Edges of bodies projected into it (step 27d), drawn in a colour of
+   * their own: its projected curves as segments, and the points of edges
+   * seen end on. Absent means none. Not in `lines`.
+   */
+  projected?: { lines: readonly (readonly [SketchXY, SketchXY])[]; points: readonly SketchXY[] };
+  /**
+   * `picks` (step 27d, the Project tool): while it is edited, a click or a
+   * hover also says which body edge or face is under the pointer
+   * (SketchPointer `edge`, `face`), and lights it as a hover does.
+   */
+  editing?: { grid: number; gridSnap?: boolean; points: readonly SketchXY[]; preview: readonly (readonly [SketchXY, SketchXY])[]; snap?: { label: string; marks: readonly (readonly [SketchXY, SketchXY])[] }; picks?: true };
 }
 
 /** An origin plane drawn small at the origin to be picked (Create sketch); one not offered is drawn faint and can't be clicked. */
@@ -85,6 +96,13 @@ export interface SketchPointer {
   kind: "move" | "click";
   at: SketchXY | null;
   pixel?: number;
+  /**
+   * While the edited sketch asks for picks (SketchDrawing editing.picks,
+   * step 27d): the body edge under the pointer, else its face, as a pick
+   * names them (joined indices); null for none. Absent otherwise.
+   */
+  edge?: number | null;
+  face?: number | null;
 }
 
 /**

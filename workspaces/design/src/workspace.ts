@@ -29,7 +29,8 @@ import { isFaceSketch } from "./face-sketch.ts";
 import { droppedNote, highlightOf, panelFocus, selectionRows, survivors } from "./selection.ts";
 import { joinBodies, shownBodies, type Scene, type ShownBody } from "./scene.ts";
 import { readProfileReference } from "./references.ts";
-import { addFaceSketch, addSketch, askOutline, outlineSourceOf, pinNewPoints, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane, sketchSide } from "./sketch.ts";
+import { addFaceSketch, addSketch, askOutline, outlineSourceOf, pinNewPoints, projectEdges, SKETCH_STEPS, sketchCurves, sketchItem, sketchPlane, sketchSide } from "./sketch.ts";
+import { PROJECT_AGAIN, projectPick } from "./projection.ts";
 import { sketchEdgeTargets } from "./face-edges.ts";
 import { sketchableFaces, sketchSpot, type SketchSpot } from "./face-pick.ts";
 import { rounding, snapOnSketch, withSnap, type Snap } from "./snap.ts";
@@ -1200,6 +1201,15 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   const onSketchPointer = (pointer: SketchPointer) => {
     if (mode.kind !== "edit") return;
     const at = pointer.at;
+    // Step 27d: the Project tool snaps nothing and places nothing; a click projects what the viewport says is under it.
+    if (mode.tool.kind === "project") {
+      ++moves;
+      hovered = lastMove = null;
+      mode.snap = null;
+      mode.pointer = at;
+      if (pointer.kind === "click") projectAt(pointer);
+      return drawSketches();
+    }
     if (pointer.kind === "move") {
       const move = ++moves;
       if (!at) {
@@ -1273,6 +1283,43 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (done.drew) await showOutline();
     });
   };
+
+  /**
+   * A click with the Project tool (27d): the edge under the pointer, else
+   * every edge of the face there, of a body before the sketch, projected
+   * into it as one undo step ("Project"), in turn with the clicks before it
+   * (each on the document the last left); settled as a click is, so an
+   * extrude of the sketch keeps its shape if this breaks its outline. What
+   * was refused, left out or projected already is said in the panel.
+   */
+  function projectAt(pointer: SketchPointer) {
+    const changes = toolChanges;
+    clicks = clicks.then(async () => {
+      if (mode.kind !== "edit" || mode.tool.kind !== "project" || toolChanges !== changes) return;
+      const id = mode.tool.sketch;
+      const before = designDoc();
+      const pick = projectPick(before, id, lastScene, sketchPlane(before, id, placedNow), pointer);
+      let made: ReturnType<typeof projectEdges>;
+      try {
+        made = projectEdges(before, id, pick.edges);
+      } catch (e) {
+        return sketchBox.showError(e instanceof Error ? e.message : String(e));
+      }
+      sketchBox.showError(pick.note ?? (pick.edges.length > 0 && made.ids.length === 0 ? PROJECT_AGAIN : ""));
+      if (made.ids.length === 0) return;
+      let next: DesignDocument;
+      try {
+        next = await settleKept(kernel, before, made.doc, bodies);
+      } catch (e) {
+        return sketchBox.showError(e instanceof Error ? e.message : String(e));
+      }
+      // Undo, Escape or a tool change while the kernel looked: the click was for a sketch that is no longer there.
+      if (mode.kind !== "edit" || toolChanges !== changes || designDoc() !== before) return;
+      applySketchEdit(next, SKETCH_STEPS.project, id);
+      drawSketches();
+      await showOutline();
+    });
+  }
 
   /**
    * Enter in a typed box (SF4): the point placed where the locks and the

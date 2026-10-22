@@ -40,12 +40,16 @@ import {
   faceFeature,
   facePlane,
   findInScene,
+  followedSketch,
+  edgeName,
   greyedItems,
   joinBodies,
   movePoint,
   movePointOnto,
   pinNewPoints,
   planDelete,
+  projectEdges,
+  projectPick,
   readDesignDocument,
   readDesignReference,
   rebuildTimeline,
@@ -57,13 +61,14 @@ import {
   shownBodies,
   sketchEdgeTargets,
   suppressItem,
+  unproject,
   type DesignDocument,
   type EdgeTarget,
   type LineEnd,
   type TimelineBuild,
 } from "@fission/design";
 import type { Point } from "./timeline-model.ts";
-import type { FaceName, NamingApplied, NamingOp, NamingRebuild, NamingResult, NamingWarning, PinName, Vec3 } from "./naming-model.ts";
+import type { EdgeName, FaceName, NamingApplied, NamingOp, NamingRebuild, NamingResult, NamingWarning, PinName, Vec3 } from "./naming-model.ts";
 import type { NamingSubject } from "./naming-session.ts";
 
 /** Bugs planted in the subject's side, each caught by a check (journeys/naming.journey.ts). */
@@ -141,6 +146,21 @@ function pinMatches(t: EdgeTarget, face: FaceName, pin: PinName): boolean {
   if (pin.at === "middle") return t.kind === "midpoint" && t.name === capEdge(pin.line);
   const parts = t.name.split("&");
   return t.kind === "endpoint" && parts.includes(capEdge(pin.before)) && parts.includes(capEdge(pin.after));
+}
+
+/**
+ * Whether `name`, a projection's name of an edge (Design's projection.ts
+ * `edgeName`), is the model's edge (rule 12): a cap's edge along line
+ * `line` is named by its two faces with no order, "end+side:line-6"; an
+ * upright by which end of each side's line meets there (27b: line
+ * `before` ends at the corner, `after` starts there, as drawOutline draws
+ * them).
+ */
+function edgeMatches(name: string, edge: EdgeName): boolean {
+  const side = (line: string) => `side:${encodeURIComponent(line)}`;
+  const parts = name.split("+");
+  if (edge.at === "cap-edge") return name === [edge.cap, side(edge.line)].sort().join("+");
+  return parts.length === 2 && parts.includes(`${side(edge.before)}@end`) && parts.includes(`${side(edge.after)}@start`);
 }
 
 /** Design on `kernel` as a subject without cuts (the circle extruded as a new body), with bugs planted. */
@@ -235,9 +255,22 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
       case "set-distance":
         doc = setExtrudeFlip(setExtrudeDistance(doc, Math.abs(op.value), op.item), op.value < 0, op.item);
         return { state: { doc, meta }, made: [] };
-      case "project":
+      case "project": {
+        // Step 27d: the edge picked on the scene the app draws (by its joined index, as a click on it would give), taken as the Project tool takes it.
+        const b = await build(doc);
+        const scene = joinBodies(await shownBodies(doc, b, cache));
+        const k = scene.bodies.findIndex((x) => x.feature === op.edge.feature);
+        const body = scene.bodies[k];
+        const e = body ? Array.from({ length: body.view.edges }, (_, i) => i).find((i) => { const n = edgeName(body.names, i); return n !== null && edgeMatches(n, op.edge); }) : undefined;
+        if (e === undefined) throw new Error(`harness: Design shows no edge ${JSON.stringify(op.edge)}`);
+        const r = b.results[op.sketch];
+        const pick = projectPick(doc, op.sketch, scene, r?.status === "built" ? r.placement?.plane : undefined, { edge: scene.edgeStart[k] + e });
+        if (pick.edges.length !== 1) throw new Error(`harness: Design's Project tool takes ${pick.edges.length} edges for ${JSON.stringify(op.edge)}: ${pick.note}`);
+        const made = projectEdges(doc, op.sketch, pick.edges);
+        return { state: { doc: made.doc, meta }, made: made.ids };
+      }
       case "unproject":
-        throw new Error("harness: Design projects no edges until step 27d");
+        return { state: { doc: unproject(doc, op.sketch, op.projection), meta }, made: [] };
       case "set-circle": {
         const m = meta[op.sketch];
         if (!("circle" in m)) throw new Error(`harness: ${op.sketch} has no circle`);
@@ -296,8 +329,26 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
       else if (r.placement !== undefined) {
         const p = r.placement.plane;
         // A pin's warning in the model's terms by its cause (the harness compares no more); "point-ambiguous" never matches the model, which has none.
-        const warning: NamingWarning | undefined = r.plane ? { cause: r.plane.cause, face: faceNameOf(r.plane.face) } : r.points ? ({ cause: r.points.cause, pin: { at: "middle", line: "" } } as NamingWarning) : undefined;
-        results[id] = { kind: "sketch", placement: { origin: p.origin, x: p.xAxis, normal: p.normal, side: r.placement.side }, ...(warning ? { warning } : {}) };
+        // Then (27d) the projections held, by id; "projection-ambiguous" never matches either.
+        const warning: NamingWarning | undefined = r.plane
+          ? { cause: r.plane.cause, face: faceNameOf(r.plane.face) }
+          : r.points
+            ? ({ cause: r.points.cause, pin: { at: "middle", line: "" } } as NamingWarning)
+            : r.projections
+              ? ({ cause: r.projections.cause, projections: r.projections.projections } as NamingWarning)
+              : undefined;
+        // Each projection where the rebuild put it (or held it): a line's two ends, or an edge seen end on's one point.
+        const content = doc.sketches.find((s) => s.id === id);
+        const now = content && followedSketch(content, r);
+        const at = (q: string): Point => {
+          const pt = now!.points.find((x) => x.id === q)!;
+          return [pt.x, pt.y];
+        };
+        const projected = now?.projected?.map((q) => {
+          const c = now.curves.find((x) => x.id === q.made);
+          return { id: q.id, at: c === undefined ? [at(q.made)] : c.kind === "line" ? [at(c.start), at(c.end)] : c.kind === "circle" ? [at(c.centre)] : [at(c.start), at(c.end), at(c.centre)] };
+        });
+        results[id] = { kind: "sketch", placement: { origin: p.origin, x: p.xAxis, normal: p.normal, side: r.placement.side }, ...(warning ? { warning } : {}), ...(projected ? { projected } : {}) };
       } else {
         const view = views.get(id);
         if (view === undefined) throw new Error(`harness: ${id} built a body the scene doesn't show`);

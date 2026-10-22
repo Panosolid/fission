@@ -23,7 +23,7 @@
 import type { Feature, Plane, SketchArc, SketchDrawing, SketchXY, OriginPlane, ViewName } from "@fission/core";
 import { greyedItems, type DesignDocument, type Sketch, type SketchArcCurve, type SketchLineCurve, type SketchPlane } from "./document.ts";
 import { centreClick, centreHover, centrePreview, type CentreArcTool } from "./centre-arc.ts";
-import { drawArc, drawCircle, drawLine, drawRectangle, planeFor, planeOf, pointAt, SKETCH_STEPS, sketchCurves, type LineEnd } from "./sketch.ts";
+import { curvesOf, drawArc, drawCircle, drawLine, drawRectangle, planeFor, planeOf, pointAt, SKETCH_STEPS, type LineEnd } from "./sketch.ts";
 
 export { pointAt };
 
@@ -63,8 +63,14 @@ export interface TangentTool {
   from: string | null;
 }
 
+/** The Project tool on one sketch (step 27d): it places no points; a click projects the body edge or face under it (projection.ts `projectPick`, the workspace's). */
+export interface ProjectTool {
+  kind: "project";
+  sketch: string;
+}
+
 export type { CentreArcTool };
-export type SketchTool = LineTool | RectangleTool | CircleTool | ArcTool | TangentTool | CentreArcTool;
+export type SketchTool = LineTool | RectangleTool | CircleTool | ArcTool | TangentTool | CentreArcTool | ProjectTool;
 export type ToolKind = SketchTool["kind"];
 
 /**
@@ -79,6 +85,7 @@ export const SKETCH_TOOLS: readonly { kind: ToolKind; label: string; key?: strin
   { kind: "arc", label: "3-point arc", key: "A", group: "Arc" },
   { kind: "centre", label: "Centre arc", group: "Arc" },
   { kind: "tangent", label: "Tangent arc", key: "T", group: "Arc" },
+  { kind: "project", label: "Project", key: "P" },
 ];
 
 /** A tool of this kind on a sketch, nothing clicked yet. */
@@ -86,6 +93,7 @@ export function startTool(kind: ToolKind, sketch: string): SketchTool {
   if (kind === "line" || kind === "tangent") return { kind, sketch, from: null };
   if (kind === "arc") return { kind, sketch, start: null, end: null };
   if (kind === "centre") return { kind, sketch, centre: null, start: null, swept: 0 };
+  if (kind === "project") return { kind, sketch };
   return kind === "rectangle" ? { kind, sketch, corner: null } : { kind, sketch, centre: null };
 }
 
@@ -97,7 +105,7 @@ function pendingClicks(tool: SketchTool): SketchXY[] {
   if (tool.kind === "line") return tool.from !== null && typeof tool.from !== "string" ? [tool.from] : [];
   if (tool.kind === "arc") return [tool.start, tool.end].filter((p) => p !== null);
   if (tool.kind === "centre") return [tool.centre, tool.start].filter((p) => p !== null);
-  if (tool.kind === "tangent") return [];
+  if (tool.kind === "tangent" || tool.kind === "project") return [];
   const at = tool.kind === "rectangle" ? tool.corner : tool.centre;
   return at ? [at] : [];
 }
@@ -150,6 +158,8 @@ export function clickAt<T extends SketchTool>(doc: DesignDocument, tool: T, at: 
   if (tool.kind === "arc") return arcClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "tangent") return tangentClick(doc, tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
   if (tool.kind === "centre") return centreClick(doc, sketchOf(doc, tool.sketch), tool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
+  // The Project tool places nothing where it is clicked: the workspace projects what is under the pointer (27d).
+  if (tool.kind === "project") return { doc, tool, drew: false };
   return lineClick(doc, tool as LineTool, at) as { doc: DesignDocument; tool: T; drew: boolean; note?: string };
 }
 
@@ -489,7 +499,7 @@ export function previewLine(doc: DesignDocument, tool: LineTool | null, pointer:
  * draws nothing).
  */
 export function previewSegments(doc: DesignDocument, tool: SketchTool | null, pointer: SketchXY | null): (readonly [SketchXY, SketchXY])[] {
-  if (!tool || !pointer) return [];
+  if (!tool || !pointer || tool.kind === "project") return [];
   if (tool.kind === "line") {
     const line = previewLine(doc, tool, pointer);
     return line ? [line] : [];
@@ -526,7 +536,10 @@ export function previewSegments(doc: DesignDocument, tool: SketchTool | null, po
  * the preview. A sketch on a face is drawn where the last rebuild placed
  * it (`placed`, by sketch id; sketch.ts `planeFor`); one on a back or
  * bottom face says it faces against its frame's normal (`side` −1, 26d),
- * so Look At looks at it from outside the body.
+ * so Look At looks at it from outside the body. Its projected curves and
+ * points (27d) are drawn apart (`projected`), in their own colour; with
+ * the Project tool the viewport is asked which edge or face is under the
+ * pointer (`picks`).
  */
 export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool; grid: number; pointer: SketchXY | null; gridSnap?: boolean } | null, placed?: ReadonlyMap<string, Plane>, lost: ReadonlySet<string> = new Set()): SketchDrawing[] {
   // Each sketch's plane from its item, found by id once (security audit S2: a search per sketch took the timeline's length squared).
@@ -546,24 +559,29 @@ export function sketchDrawings(doc: DesignDocument, editing: { tool: SketchTool;
   return doc.sketches.filter((s) => !off(s)).map((s) => {
     const plane: Plane = planeFor(items.get(s.id), s, placed);
     const side = s.face?.side === -1 ? ({ side: -1 } as const) : {};
-    const curves = sketchCurves(s);
-    const lines = [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
+    const made = new Set((s.projected ?? []).map((p) => p.made));
+    const segmentsOf = (curves: ReturnType<typeof curvesOf>) => [...curves.lines.map((l) => [l.a, l.b] as const), ...curves.circles.flatMap((c) => circleSegments(c.centre, c.radius)), ...curves.arcs.flatMap(arcSegments)];
+    const lines = segmentsOf(curvesOf(s.points, s.curves.filter((c) => !made.has(c.id))));
+    const projected =
+      made.size === 0 ? {} : { projected: { lines: segmentsOf(curvesOf(s.points, s.curves.filter((c) => made.has(c.id)))), points: s.points.filter((p) => made.has(p.id)).map((p): SketchXY => [p.x, p.y]) } };
     // 26e: a sketch held with its plane lost is drawn red where it stays (the rebuild's plane warnings, `lost`).
-    if (editing?.tool.sketch !== s.id) return lost.has(s.id) ? { plane, ...side, lines, lost: true as const } : { plane, ...side, lines };
+    if (editing?.tool.sketch !== s.id) return lost.has(s.id) ? { plane, ...side, lines, ...projected, lost: true as const } : { plane, ...side, lines, ...projected };
     const points: SketchXY[] = s.points.map((p) => [p.x, p.y]);
     const tool = editing.tool;
     for (const at of pendingClicks(tool)) if (!s.points.some((p) => p.x === at[0] && p.y === at[1])) points.push([at[0], at[1]]);
-    return { plane, ...side, lines, editing: { grid: editing.grid, gridSnap: editing.gridSnap ?? false, points, preview: previewSegments(doc, tool, editing.pointer) } };
+    return { plane, ...side, lines, ...projected, editing: { grid: editing.grid, gridSnap: editing.gridSnap ?? false, points, preview: previewSegments(doc, tool, editing.pointer), ...(tool.kind === "project" ? { picks: true as const } : {}) } };
   });
 }
 
 
-/** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", "2 lines, 1 arc and 1 circle", or "Nothing drawn yet" when empty. */
+/** What the sketch holds, in words for its status: "3 lines", "1 circle", "4 lines and 2 circles", "2 lines, 1 arc and 1 circle", "1 circle and 2 projected edges" (27d), or "Nothing drawn yet" when empty. */
 export function curveCount(sketch: Sketch): string {
+  const made = new Set((sketch.projected ?? []).map((p) => p.made));
   const count = (kind: string, word: string) => {
-    const n = sketch.curves.filter((c) => c.kind === kind).length;
+    const n = sketch.curves.filter((c) => c.kind === kind && !made.has(c.id)).length;
     return n ? `${n} ${word}${n === 1 ? "" : "s"}` : "";
   };
-  const words = [count("line", "line"), count("arc", "arc"), count("circle", "circle")].filter(Boolean);
+  const projected = made.size === 0 ? "" : `${made.size} projected edge${made.size === 1 ? "" : "s"}`;
+  const words = [count("line", "line"), count("arc", "arc"), count("circle", "circle"), projected].filter(Boolean);
   return words.length ? [words.slice(0, -1).join(", "), words.at(-1)].filter(Boolean).join(" and ") : "Nothing drawn yet";
 }

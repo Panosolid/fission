@@ -126,11 +126,16 @@ const vecClose = (a: Vec3, b: Vec3) => a.every((x, k) => close(x, b[k]));
 const warnKey = (w: NamingWarning | undefined) =>
   w === undefined ? "none" : "input" in w ? `${w.cause}:${w.input}` : "face" in w ? `${w.cause}:${faceKeyOf(w.face)}` : "projections" in w ? `${w.cause}:${w.projections}` : w.cause;
 const pointsClose = (a: readonly Point[], b: readonly Point[]) => a.length === b.length && a.every((p, k) => close(p[0], b[k][0]) && close(p[1], b[k][1]));
-/** What differs between two sketches' projected edges (rule 12; none is an empty list), or null. */
+/**
+ * What differs between two sketches' projected edges (rule 12; none is an
+ * empty list), or null. A projected line is a segment, with no way round:
+ * its ends match either way (Design's runs the way the body's edge does,
+ * the model's the way its outline line does).
+ */
 function projectedDiff(got: { id: string; at: Point[] }[] = [], want: { id: string; at: Point[] }[] = []): string | null {
   const ids = (l: { id: string }[]) => l.map((q) => q.id).join();
   if (ids(got) !== ids(want)) return `projections [${ids(got)}], want [${ids(want)}]`;
-  const k = want.findIndex((q, j) => !pointsClose(got[j].at, q.at));
+  const k = want.findIndex((q, j) => !pointsClose(got[j].at, q.at) && !(q.at.length === 2 && pointsClose(got[j].at, [q.at[1], q.at[0]])));
   return k < 0 ? null : `${want[k].id} at ${JSON.stringify(got[k].at)}, want ${JSON.stringify(want[k].at)}`;
 }
 /** What differs between two placements, or null. */

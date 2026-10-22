@@ -294,6 +294,7 @@ const FACE = "workspaces/design/src/face-sketch.ts";
 const SKETCH = "workspaces/design/src/sketch.ts";
 const ASK = "workspaces/design/src/delete-ask.ts";
 const EDGES = "workspaces/design/src/face-edges.ts";
+const PROJECTION = "workspaces/design/src/projection.ts";
 
 /** A plant in Design's sketch on a face (step 26c), and the naming model's bug it is the same mistake as, when it is one. */
 export interface NamingPlant extends Plant {
@@ -430,7 +431,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   },
   "kept-lies-flat": {
     what: "an extrude keeping a deleted sketch that was not on XY keeps its points only, so it is laid on XY",
-    edits: [{ file: REBUILD, find: "        next[f.id] = placement ? { points: was.points, curves: was.curves, placement } : { points: was.points, curves: was.curves };", replace: "        next[f.id] = placement ? { points: was.points, curves: was.curves } : { points: was.points, curves: was.curves };" }],
+    edits: [{ file: REBUILD, find: "        next[f.id] = placement ? { ...shape, placement } : shape;", replace: "        next[f.id] = shape;" }],
     run: ["naming"],
     caught: "hand-worked: the XZ sketch deleted",
     why: "the hand-worked XZ delete comes first in the journey; the seeded sessions catch it too (a face sketch deleted under its cylinder)",
@@ -453,7 +454,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   "lost-pin-silent": {
     fault: "lost-pin-silent",
     what: "a pinned point whose edge is gone stays put without a word",
-    edits: [{ file: REBUILD, find: "  if (n === 0) return { pinned };", replace: "  if (n >= 0) return { pinned };" }],
+    edits: [{ file: REBUILD, find: '  const n = held["point-lost"] + held["point-ambiguous"];', replace: "  const n = 0;" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
@@ -467,7 +468,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   "pin-survives-move": {
     fault: "pin-survives-move",
     what: "a pinned point moved by hand keeps its pin, so the next settle puts it back on the edge",
-    edits: [{ file: SKETCH, find: "  return sketch.pins ? withPins(doc, moved, sketch.pins.filter((p) => p.point !== pointId)) : withSketch(doc, moved);", replace: "  return withSketch(doc, moved);" }],
+    edits: [{ file: SKETCH, find: "  return sketch.pins ? withRefs(doc, moved, sketch.pins.filter((p) => p.point !== pointId)) : withSketch(doc, moved);", replace: "  return withSketch(doc, moved);" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
@@ -529,7 +530,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   },
   "pin-not-settled": {
     what: "neither the settle nor the app writes a pinned point's new place into the sketch, so what is drawn and saved stays behind what is built",
-    edits: [{ file: REBUILD, find: "  const to = new Map(r.pinned.map((p) => [p.point, p.at]));", replace: "  const to = new Map<string, SketchXY>();" }],
+    edits: [{ file: REBUILD, find: "  return movedTo(content, [...(r.pinned ?? []), ...(r.projected ?? []).flatMap((q) => q.points)], ", replace: "  return movedTo(content, [...(r.projected ?? []).flatMap((q) => q.points)], " }],
     run: ["naming"],
     caught: "seeded",
   },
@@ -543,21 +544,24 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   },
   "ref-not-dependency": {
     fault: "ref-not-dependency",
-    what: "a pin's feature is not one the sketch depends on, so a drag across the link is allowed and deleting the body doesn't ask",
-    edits: [{ file: SKETCH, find: "  const dependsOn = [...new Set([...(face === null ? [] : [face]), ...pins.flatMap((p) => p.feature ?? [])])];", replace: "  const dependsOn = face === null ? [] : [face];" }],
+    what: "a pin's (or, from 27d, a projection's) feature is not one the sketch depends on, so a drag across the link is allowed and deleting the body doesn't ask",
+    edits: [{ file: SKETCH, find: "  const dependsOn = [...new Set([...(face === null ? [] : [face]), ...pins.flatMap((p) => p.feature ?? []), ...projected.map((p) => p.feature)])];", replace: "  const dependsOn = face === null ? [] : [face];" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
   "pin-never-greys": {
     what: "a sketch is greyed only by its face's feature, so one pinned to a suppressed body is built, its point lost, instead of greyed (rule 13)",
-    edits: [{ file: REBUILD, find: "  for (const id of [...new Set([...(featureId === null ? [] : [featureId]), ...(content.pins ?? []).flatMap((p) => p.feature ?? [])])]) {", replace: "  for (const id of featureId === null ? [] : [featureId]) {" }],
+    edits: [{ file: REBUILD, find: "  for (const id of sketchInputs(f, content)) {", replace: "  for (const id of sketchInputs(f, { projected: content.projected })) {" }],
     run: ["naming"],
     caught: "seeded",
     why: "no hand-worked case suppresses a pinned body (27a's suppress case is a projection's, 27d's); the seeded sessions' suppress-ref steps do",
   },
   "greys-ignore-pins": {
     what: "the timeline's own reading of what is greyed (document.ts, for the bar, the browser and which bodies are shown) leaves pins out, so it disagrees with the rebuild about a sketch pinned to a suppressed body",
-    edits: [{ file: DOCUMENT, find: "  return [...new Set([...(face === null ? [] : [face]), ...(content?.pins ?? []).flatMap((p) => p.feature ?? [])])];", replace: "  return face === null ? [] : [face];" }],
+    edits: [
+      { file: DOCUMENT, find: "sketchInputs(f, document.sketches.find((s) => s.id === f.id))", replace: "sketchInputs(f, { projected: document.sketches.find((s) => s.id === f.id)?.projected })" },
+      { file: DOCUMENT, find: "sketchInputs(f, contents.get(f.id))", replace: "sketchInputs(f, { projected: contents.get(f.id)?.projected })" },
+    ],
     run: ["naming"],
     caught: "seeded",
   },
@@ -567,5 +571,69 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     run: ["naming"],
     caught: "Design offers no",
     why: "the naming harness snaps onto the target the model names, and finds none to snap onto before any check runs",
+  },
+  // Step 27d: edges projected into a sketch (rule 12).
+  "projection-stays-put": {
+    fault: "projection-stays-put",
+    what: "a projection is never followed: its curve stays where it was projected, whatever its edge does",
+    edits: [{ file: REBUILD, find: "    projected.push({ id: q.id, ...placesOf(content, q, shape) });", replace: "    projected.push({ id: q.id, points: [] });" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "lost-projection-silent": {
+    fault: "lost-projection-silent",
+    what: "a projection whose edge is gone stays put without a word",
+    edits: [{ file: REBUILD, find: "    ...(lost.length > 0 ? { projections: projectionWords(lost, content, label) } : {}),", replace: "" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "lost-projection-moves": {
+    fault: "lost-projection-moves",
+    what: "a projection whose edge is gone has its points sent to the sketch's origin",
+    edits: [
+      { file: REBUILD, find: "      lost.push({ id: q.id, cause: found.cause });", replace: "      lost.push({ id: q.id, cause: found.cause }), projected.push({ id: q.id, points: madePoints(content, q).map((point) => ({ point, at: [0, 0] as SketchXY })) });" },
+      { file: REBUILD, find: 'import { edgeNamed, edgeShape, madeKind, profileCurves,', replace: 'import { edgeNamed, edgeShape, madeKind, madePoints, profileCurves,' },
+    ],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "projection-wrong-line": {
+    fault: "projection-wrong-line",
+    what: "a projection follows the edge after the one its name finds, so the rebuild moves it onto its neighbour",
+    edits: [{ file: PROJECTION, find: "  if (found.length === 1) return { edge: found[0] };", replace: "  if (found.length === 1) return { edge: (found[0] + 1) % count };" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "projection-doubled": {
+    fault: "projection-doubled",
+    what: "an edge projected twice into the same sketch is added twice",
+    edits: [{ file: SKETCH, find: "    if (projected.some((p) => p.feature === e.feature && p.edge === e.edge)) continue;", replace: "" }],
+    run: ["naming"],
+    caught: "seeded",
+    why: "no hand-worked case projects one edge twice; the seeded sessions' project steps do",
+  },
+  "projection-not-settled": {
+    what: "neither the settle nor the app writes a projection's new place into the sketch, so what is drawn and saved stays behind what is built",
+    edits: [{ file: REBUILD, find: "  return movedTo(content, [...(r.pinned ?? []), ...(r.projected ?? []).flatMap((q) => q.points)], ", replace: "  return movedTo(content, [...(r.pinned ?? [])], " }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "projection-world-xy": {
+    what: "a straight edge is projected by dropping its world z, which is right only for a sketch on XY",
+    edits: [{ file: PROJECTION, find: "    const [a, b] = [inSketch(s3, plane), inSketch(e3, plane)];", replace: "    const [a, b] = [[s3[0], s3[1]] as SketchXY, [e3[0], e3[1]] as SketchXY];" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "projections-in-outline": {
+    what: "every projected curve is part of the sketch's outline, so a projected edge snapped to (not closed by the sketch's own lines) breaks the outline",
+    edits: [{ file: PROJECTION, find: "  return curves.filter((_, k) => joined.has(k));", replace: "  return [...curves];" }],
+    run: ["naming"],
+    caught: "Fusion answers",
+  },
+  "projection-never-greys": {
+    what: "a sketch is greyed by its face's feature and its pins' only, so one projecting a suppressed body's edge is built, its projection lost, instead of greyed (rule 13)",
+    edits: [{ file: REBUILD, find: "  for (const id of sketchInputs(f, content)) {", replace: "  for (const id of sketchInputs(f, { pins: content.pins })) {" }],
+    run: ["naming"],
+    caught: "Fusion answers",
   },
 };
