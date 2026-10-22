@@ -286,8 +286,11 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      - run: npx playwright install --with-deps chromium
+      # Retries and time limits for apt's stalls: see the script.
+      - name: Install the browser (chromium)
         working-directory: apps/fission
+        timeout-minutes: 20
+        run: ../../.github/scripts/install-browser.sh chromium
       - name: Journeys against the baseline
         working-directory: apps/fission
         env:
