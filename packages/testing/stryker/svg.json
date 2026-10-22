@@ -1,0 +1,27 @@
+{
+  "$comment": "Mutation testing of core's SVG reading and writing (model/svg.ts). Run through run.sh, from packages/core.",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --experimental-strip-types --no-warnings --test test/svg.test.ts"
+  },
+  "mutate": [
+    "src/model/svg.ts"
+  ],
+  "reporters": [
+    "clear-text",
+    "json"
+  ],
+  "jsonReporter": {
+    "fileName": "../../node_modules/.cache/stryker/svg.json"
+  },
+  "clearTextReporter": {
+    "allowColor": false,
+    "logTests": false,
+    "reportMutants": false
+  },
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [
+    "node_modules"
+  ],
+  "timeoutMS": 30000
+}

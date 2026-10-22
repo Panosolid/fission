@@ -385,3 +385,19 @@ test("seeded random outlines: every piece and the viewBox agree with an independ
   }
   assert.ok(arcs > 2000, `enough arcs were tried (${arcs})`);
 });
+
+test("too few corners: the error counts them in good English, 0 corners and 1 corner", () => {
+  // Kills `n === 1 ? "" : "s"` => true and "s" => "": 0 needs the plural, 1 must not have it.
+  assert.throws(() => outlineToSvg({ outer: path([]), holes: [] }), { message: "the outline can't be written as SVG: it has 0 corners, and a closed path needs at least 2" });
+  assert.throws(() => outlineToSvg({ outer: path([1, 2]), holes: [] }), { message: "the outline can't be written as SVG: it has 1 corner, and a closed path needs at least 2" });
+});
+
+test("hand-worked: a bulge on a piece of zero length draws a straight step, not an arc of radius 0", () => {
+  // Kills `c === 0` => false. Corners (0,0) (0,0) (10,0) (0,10), bulges 0.5 then 0: the first
+  // piece goes nowhere (c = 0), so its bulge can't make a circle (r = c(1 + b²)/(4|b|) = 0) and
+  // it is written L0 0; then L10 0 and the closing Z after (0,10), flipped to (0,-10). The box
+  // is 0..10 both ways.
+  const svg = outlineToSvg({ outer: path([0, 0, 0, 0, 10, 0, 0, 10], [0.5, 0, 0, 0]), holes: [] });
+  assert.equal(attr(svg.text, "d"), "M0 0L0 0L10 0L0 -10Z");
+  assert.equal(attr(svg.text, "viewBox"), "0 -10 10 10");
+});

@@ -26,7 +26,8 @@ name: Random testing
 # (.github/scripts/file_issues.py: new kinds get an issue, known ones a
 # comment, fixed ones that come back on main are reopened) and opens one for
 # new mutation survivors. A journeys job walks the magic-moment journeys
-# against tests/baseline.json (X8b) and its lines go into summary.txt.
+# against tests/baseline.json (X8b) and its lines go into summary.txt, as do
+# the ts-mutants job's (TypeScript mutation testing, packages/testing/stryker).
 # Scheduled runs only fire from the default branch.
 on:
   schedule:
@@ -304,8 +305,53 @@ jobs:
           path: ${{ runner.temp }}/journeys/
           if-no-files-found: ignore
 
+  # TypeScript mutation testing (packages/testing/stryker/run.sh), one job
+  # per target (the list must match run.sh's, as collect-results.sh's does;
+  # packages/testing/test/stryker-config.test.ts checks): red on a survivor
+  # no test kills and explained.json doesn't explain, or an explanation for
+  # one that no longer survives; the lines go into summary.txt either way.
+  ts-mutants:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [core, design, storage, model, svg, viewport, ai]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run kernel
+        working-directory: apps/fission
+      - name: Mutation testing, ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+          OUT: ${{ runner.temp }}/ts-mutants
+        run: |
+          mkdir -p "$OUT"
+          set -o pipefail
+          packages/testing/stryker/run.sh "$TARGET" 2>&1 | tee "$OUT/$TARGET.log" | grep -E '^(UNEXPLAINED|explained\.json lists|[a-z]+: [0-9]+ survivors|[0-9]+ problem)' | tee "$OUT/$TARGET.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ts-mutants-${{ matrix.target }}
+          path: ${{ runner.temp }}/ts-mutants/
+          if-no-files-found: ignore
+
   collect:
-    needs: [gate, plan, test, test-second-leg, mutants, journeys]
+    needs: [gate, plan, test, test-second-leg, mutants, journeys, ts-mutants]
     if: always() && needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
