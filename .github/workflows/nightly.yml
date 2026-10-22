@@ -286,19 +286,11 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      # apt-get inside --with-deps can stall on the Ubuntu mirror (it hung
-      # #251's and #252's runs for 13 minutes): retry and time out each
-      # fetch, and retry the whole install up to three times.
+      # Retries and time limits for apt's stalls: see the script.
       - name: Install the browser (chromium)
         working-directory: apps/fission
         timeout-minutes: 20
-        run: |
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null
-          for i in 1 2 3; do
-            timeout -k 15 300 npx playwright install --with-deps chromium && break
-            [ "$i" = 3 ] && exit 1
-            sleep 15
-          done
+        run: ../../.github/scripts/install-browser.sh chromium
       - name: Journeys against the baseline
         working-directory: apps/fission
         env:

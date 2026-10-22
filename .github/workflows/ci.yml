@@ -388,19 +388,11 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      # apt-get inside --with-deps can stall on the Ubuntu mirror (it hung
-      # #251's and #252's runs for 13 minutes): retry and time out each
-      # fetch, and retry the whole install up to three times.
+      # Retries and time limits for apt's stalls: see the script.
       - name: Install the browser (chromium)
         working-directory: apps/fission
         timeout-minutes: 20
-        run: |
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null
-          for i in 1 2 3; do
-            timeout -k 15 300 npx playwright install --with-deps chromium && break
-            [ "$i" = 3 ] && exit 1
-            sleep 15
-          done
+        run: ../../.github/scripts/install-browser.sh chromium
       - run: node e2e/shard.mjs ${{ matrix.shard }} 3
         working-directory: apps/fission
       # A golden image that no longer matches leaves the actual image and a diff (red where different).
@@ -441,19 +433,11 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      # apt-get inside --with-deps can stall on the Ubuntu mirror (it hung
-      # #251's and #252's runs for 13 minutes): retry and time out each
-      # fetch, and retry the whole install up to three times.
+      # Retries and time limits for apt's stalls: see the script.
       - name: Install the browser (chromium)
         working-directory: apps/fission
         timeout-minutes: 20
-        run: |
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null
-          for i in 1 2 3; do
-            timeout -k 15 300 npx playwright install --with-deps chromium && break
-            [ "$i" = 3 ] && exit 1
-            sleep 15
-          done
+        run: ../../.github/scripts/install-browser.sh chromium
       - run: node e2e/smoke.mjs
         working-directory: apps/fission
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -521,19 +505,11 @@ jobs:
       - run: npm ci
       - run: npm run build
         working-directory: apps/fission
-      # apt-get inside --with-deps can stall on the Ubuntu mirror (it hung
-      # #251's and #252's runs for 13 minutes): retry and time out each
-      # fetch, and retry the whole install up to three times.
+      # Retries and time limits for apt's stalls: see the script.
       - name: Install the browser (${{ matrix.browser }})
         working-directory: apps/fission
         timeout-minutes: 20
-        run: |
-          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/80-retries > /dev/null
-          for i in 1 2 3; do
-            timeout -k 15 300 npx playwright install --with-deps ${{ matrix.browser }} && break
-            [ "$i" = 3 ] && exit 1
-            sleep 15
-          done
+        run: ../../.github/scripts/install-browser.sh ${{ matrix.browser }}
       # Firefox finds no GL driver headless on CI: it runs with a window on a
       # virtual screen, drawing with Mesa's software GL (e2e/browser.mjs).
       - if: matrix.browser == 'firefox'
