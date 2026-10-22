@@ -45,12 +45,15 @@ import {
   partDocument,
   partFeature,
   partOf,
+  projectEdges,
   reorderItem,
   SKETCH_PLANES,
   specOf,
   suppressItem,
+  unproject,
   withPart,
   type DesignDocument,
+  type EdgeToProject,
   type KeptShape,
 } from "@fission/design";
 import { renderWorkspace } from "@fission/render";
@@ -210,7 +213,37 @@ export function timelineEdits(r: SeededRandom, start: DesignDocument): DesignDoc
       }
     }
   }
+  // Step 27d: edges of a solid before a sketch projected into it, sometimes one taken out again.
+  if (r.next() < 0.35) doc = projectSome(r, doc);
   return doc;
+}
+
+/**
+ * `doc` with one to three edges of a solid item before one of its sketches
+ * projected into it (27d), as Design's own `projectEdges` makes them: what
+ * each is seen as is made up here (the loader never asks the kernel), a
+ * line, a point, a circle or an arc, under names Design gives or not; and
+ * sometimes one taken out again (`unproject`). `doc` itself when no sketch
+ * has a solid before it.
+ */
+function projectSome(r: SeededRandom, doc: DesignDocument): DesignDocument {
+  const items = doc.timeline.features;
+  const open = items.flatMap((s, i) => (isSketchItem(s) ? [{ s, solids: items.slice(0, i).filter((f) => !isSketchItem(f)) }] : [])).filter((x) => x.solids.length > 0);
+  if (open.length === 0) return doc;
+  const { s, solids } = pick(r, open);
+  const at = (): [number, number] => [below(r, 100) - 50, below(r, 100) / 10];
+  const edges = Array.from({ length: 1 + below(r, 3) }, (): EdgeToProject => {
+    const k = r.next();
+    const [x, y] = at();
+    const radius = (1 + below(r, 200)) / 10;
+    const shape: EdgeToProject["shape"] =
+      k < 0.45 ? { kind: "line", a: [x, y], b: [x + 1 + below(r, 40), y - below(r, 40)] } : k < 0.65 ? { kind: "point", at: [x, y] } : k < 0.85 ? { kind: "circle", centre: [x, y], radius } : { kind: "arc", start: [x + radius, y], end: [x, y + radius], centre: [x, y] };
+    return { feature: pick(r, solids).id, edge: pick(r, ["front+top", "back+right", "side:line-4+top", "side:line-4@end+side:arc-6@start", `e${below(r, 1000)}`]), shape };
+  });
+  let next = projectEdges(doc, s.id, edges).doc;
+  const held = next.sketches.find((x) => x.id === s.id)?.projected;
+  if (held && r.next() < 0.2) next = unproject(next, s.id, pick(r, held).id);
+  return next;
 }
 
 /**
@@ -386,23 +419,38 @@ interface ModelItem {
  * "start": none) and not suppressed, and an extrude of a sketch also
  * needs its sketch item to build, or, when that sketch is gone, a kept
  * shape under the extrude's id. The kernel judges outlines later; a file
- * can't say whether one closes.
+ * can't say whether one closes. From 27d a sketch is greyed (built on a
+ * suppressed item, Q3 and rule 13) while an item its projections or pins
+ * name is suppressed or greyed, and an extrude of a suppressed or greyed
+ * sketch is greyed (26e): neither builds.
  */
 export function buildModel(design: unknown): { building: string[]; part: string | null } {
-  const d = design as { timeline: { features: ModelItem[]; marker?: string }; kept?: Record<string, unknown> };
+  const d = design as { timeline: { features: ModelItem[]; marker?: string }; kept?: Record<string, unknown>; sketches?: { id: string; pins?: { feature?: string }[]; projected?: { feature: string }[] }[] };
   const items = d.timeline.features;
   const marker = d.timeline.marker;
   const place = new Map<string, number>();
   items.forEach((f, i) => place.has(f.id) || place.set(f.id, i));
   const end = marker === undefined ? items.length : marker === "start" ? 0 : place.get(marker)! + 1;
   const live = (i: number) => i < end && !items[i].suppressed;
+  const named = new Map<string, string[]>();
+  for (const s of d.sketches ?? []) if (!named.has(s.id)) named.set(s.id, [...(s.pins ?? []).flatMap((p) => p.feature ?? []), ...(s.projected ?? []).map((p) => p.feature)]);
+  const greyed = new Set<string>();
   const building: string[] = [];
   let part: string | null = null;
   for (const [i, f] of items.entries()) {
     if (!live(i)) continue;
+    if (f.intent.type === "sketch" && (named.get(f.id) ?? []).some((id) => place.has(id) && (items[place.get(id)!].suppressed || greyed.has(id)))) {
+      greyed.add(f.id);
+      continue;
+    }
     if (f.intent.type === "extrude" && Object.hasOwn(f.intent.parameters, "sketch")) {
       const at = place.get(f.intent.parameters.sketch as string);
       const sketch = at !== undefined && items[at].intent.type === "sketch" ? at : undefined;
+      // Built on a suppressed or greyed sketch it is greyed too (26e), so what projects its edges is greyed in turn.
+      if (sketch !== undefined && (items[sketch].suppressed || greyed.has(items[sketch].id))) {
+        greyed.add(f.id);
+        continue;
+      }
       if (sketch === undefined ? !(d.kept !== undefined && Object.hasOwn(d.kept, f.id)) : !live(sketch)) continue;
     }
     building.push(f.id);
@@ -522,7 +570,7 @@ export function shrink(text: string, kind: string, readers: readonly DataReader[
 }
 
 /** The timelines an opened file can hold (25b), each of which a round must reach. */
-const timelineCounts = () => ({ openedKept: 0, openedKeptSketchThere: 0, openedSuppressed: 0, openedMarkerOnItem: 0, openedFailedExtrude: 0, openedSeveralExtrudes: 0 });
+const timelineCounts = () => ({ openedProjected: 0, openedGreyedByProjection: 0, openedKept: 0, openedKeptSketchThere: 0, openedSuppressed: 0, openedMarkerOnItem: 0, openedFailedExtrude: 0, openedSeveralExtrudes: 0 });
 
 function countTimeline(design: DesignDocument, counts: ReturnType<typeof timelineCounts>) {
   const { features, marker } = design.timeline;
@@ -530,6 +578,8 @@ function countTimeline(design: DesignDocument, counts: ReturnType<typeof timelin
   const extrudes = features.filter(isSketchExtrude);
   const building = buildingItems(design);
   const end = marker === undefined ? features.length : marker === "start" ? 0 : features.findIndex((f) => f.id === marker) + 1;
+  if (design.sketches.some((s) => s.projected !== undefined)) counts.openedProjected++;
+  if (design.sketches.some((s) => s.projected?.some((p) => features.some((f) => f.id === p.feature && f.suppressed)))) counts.openedGreyedByProjection++;
   if (kept.length > 0) counts.openedKept++;
   // A kept shape while its sketch is still there: the sketch lost its outline (open-outline).
   if (extrudes.some((f) => kept.includes(f.id) && features.some((s) => s.id === f.intent.parameters.sketch))) counts.openedKeptSketchThere++;
