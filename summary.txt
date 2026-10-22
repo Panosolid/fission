@@ -32,14 +32,14 @@ Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, 
   PENDING Part to simulation and back: waits for Simulate (S3), parameters (34, I18)
 journeys/flags.txt lists every FLAG line so far.
 
-Fuzzing (the STL reader, the project loader, the sketch-extrude and timeline sessions and the kernel fuzz targets), all runs so far (updated 2026-10-22 00:26 UTC)
-  hours of fuzzing: 22.5
-  timeline rounds 9, inputs 22500, rounds that found something 0, last: none yet
-  placed   rounds 5, inputs 142031, rounds that found something 0, last: none yet
-  sessions rounds 6926, inputs 13852000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
-  stl      rounds 11690, inputs 23380000, rounds that found something 0, last: none yet
-  extrude  rounds 5, inputs 205464, rounds that found something 0, last: none yet
-  sketch   rounds 5, inputs 607385, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
-  project  rounds 24660, inputs 49320000, rounds that found something 4, last: 4116269961039615875 (commit 0a2363b on main)
+Fuzzing (the STL reader, the project loader, the sketch-extrude and timeline sessions and the kernel fuzz targets), all runs so far (updated 2026-10-22 12:35 UTC)
+  hours of fuzzing: 34.3
+  timeline rounds 30, inputs 75000, rounds that found something 0, last: none yet
+  placed   rounds 6, inputs 180824, rounds that found something 0, last: none yet
+  sessions rounds 10553, inputs 21106000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
+  stl      rounds 16710, inputs 33420000, rounds that found something 0, last: none yet
+  extrude  rounds 6, inputs 273570, rounds that found something 0, last: none yet
+  sketch   rounds 6, inputs 813435, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
+  project  rounds 41588, inputs 83176000, rounds that found something 4, last: 4116269961039615875 (commit 0a2363b on main)
 fuzz/log.csv has one line per round; fuzz/failures/seed-<seed>/ has each failing round's
 fuzz-report.txt and its shrunk failing inputs.
