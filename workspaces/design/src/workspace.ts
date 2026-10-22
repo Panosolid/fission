@@ -334,9 +334,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   // rebuild.ts): a feature whose spec is unchanged keeps its body, and
   // bodies no feature holds are freed. Rebuilds run one after another, so
   // one never frees a body another is about to show.
+  // Settling an edit (26c, 26g) places its face sketches on these bodies too, reusing what is built: a body is never
+  // held twice, and the ones a settle builds that no rebuild keeps are freed once it ends (BodyCache.using).
   const bodies = new BodyCache(kernel);
-  // Its own bodies for settling a sketch edit's held placements (26c), kept between clicks so each settles without building the timeline again; clicks settle one after another.
-  const settleBodies = new BodyCache(kernel);
   let rebuilds: Promise<unknown> = Promise.resolve();
   const build = latestOnly((doc: DesignDocument) => {
     const next = rebuilds.then(() => buildPart(doc));
@@ -456,6 +456,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   async function update(label?: string, mergeKey?: string, next?: DesignDocument) {
     const kind = shape;
+    // A size no file can hold ("Infinity" where the box takes it as typed) is refused, as Edit feature refuses it: the
+    // design keeps its last sizes (hunt 26g: it took the size, its undo step couldn't be saved, and nothing said so).
+    const bad = next === undefined && loaded === undefined ? parameterRows(kind).find((r) => r.shown && !Number.isFinite(Number(inputs[SIZE_KEYS.indexOf(r.key)].value))) : undefined;
+    if (bad) return panel.showError(`Type the ${kind === "sketch-extrude" ? "distance" : bad.label.toLowerCase()} in mm.`);
     viewport.clearOverlay(STL_OVERLAY); // it described the part before this edit
     panel.setShape(kind);
     // The panel edits the part's one solid feature, keeping the sketches; the
@@ -647,9 +651,6 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    * Sketch clicks and deletes settle themselves before they are recorded.
    */
   let unsettled: DesignDocument | null = null;
-  /** Its own bodies for settling those edits, one after another (never with the clicks' `settleBodies`: each frees what it didn't use). */
-  const editBodies = new BodyCache(kernel);
-  let editSettles: Promise<unknown> = Promise.resolve();
   /**
    * `doc`, the design just recorded, settled against `unsettled` and taken
    * into the edit's own undo step (the typing in a box still one step), or
@@ -665,11 +666,9 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       unsettled = null;
       return doc;
     }
-    const run = editSettles.then(() => settleKept(kernel, from, doc, editBodies));
-    editSettles = run.catch(() => {});
     let next: DesignDocument;
     try {
-      next = await run;
+      next = await settleKept(kernel, from, doc, bodies);
     } catch {
       return doc; // the rebuild says what failed
     }
@@ -1213,7 +1212,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       let next = pinNewPoints(before, done.doc, done.tool.sketch, edges);
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, next, settleBodies);
+          next = await settleKept(kernel, before, next, bodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }
@@ -1247,7 +1246,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       let next = pinNewPoints(before, done.doc, done.tool.sketch, edgeTargets(done.tool.sketch));
       if (done.drew) {
         try {
-          next = await settleKept(kernel, before, next, settleBodies);
+          next = await settleKept(kernel, before, next, bodies);
         } catch (e) {
           return sketchBox.showError(e instanceof Error ? e.message : String(e));
         }
@@ -1383,8 +1382,6 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       if (!putAwayByRestore) editingSketch = null;
       sleep();
       void bodies.close();
-      void settleBodies.close();
-      void editBodies.close();
       viewport.showSketches([]);
       typed.element.remove();
       hint.element.remove();

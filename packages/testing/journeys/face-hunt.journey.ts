@@ -8,7 +8,12 @@
 //      show a box's own sizes, never the extrude's distance as its height;
 //   3. a sketch after the rollback marker is not drawn (the reference app
 //      hides everything after it), so a face sketch never shows at a place
-//      its face has left.
+//      its face has left;
+//   5. settling a sketch click or an edit holds no bodies of its own in the
+//      kernel (the monkey's seed 8): the kernel never holds more bodies
+//      than the design builds;
+//   6. a size no file can hold (Infinity) is refused in the panel, as Edit
+//      feature refuses it, not taken into a design that can't be saved.
 // Run with `npm run journeys` after the app build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -155,5 +160,68 @@ test("3. a sketch after the rollback marker is not drawn, so a face sketch never
   const [, sketch] = a.doc().timeline.features.map((f) => f.id);
   await a.menu(sketch, "marker");
   assert.deepEqual(drawn(a), [{ origin: [0, 0, 40], lost: false }]);
+  assert.ok(await a.close());
+});
+
+test("5. settling a click or an edit holds no bodies of its own: the kernel holds just the bodies the design builds", async () => {
+  // The monkey's seed 8, shrunk: Create sketch, a face picked, then "Infinity" typed as the height. Each body the
+  // design builds is held once (its BodyCache); settling a face sketch's edits built the box again on caches of its
+  // own and kept it, so the kernel held a body the Bodies group didn't list.
+  const a = await app(partDocument("box", 40, 30, 20));
+  assert.equal(await a.bodies(), 1, "the box");
+  // A circle on the top (z = 20): each click settles (the box placed again, to place the sketch). Still the box alone.
+  a.$("#create-sketch")!.click();
+  await a.settle();
+  await a.pick({ face: faceWhere(a.mesh()!, (p) => p[2] === 20) });
+  await a.key("sketch-circle");
+  await a.click(15, 10);
+  await a.click(18, 10);
+  assert.equal(await a.bodies(), 1, "after a click on the face sketch");
+  await a.finish();
+  assert.equal(await a.bodies(), 1, "after Finish Sketch");
+  // The height typed: 25 builds a box 25 high in place of the 20 one (settled against the 20 one): one body.
+  const height = a.$("#height") as HTMLInputElement;
+  height.value = "25";
+  height.dispatchEvent(new a.window.Event("input") as unknown as Event);
+  await a.settle();
+  assert.equal(await a.bodies(), 1, "after a typed height");
+  assert.deepEqual(drawn(a), [{ origin: [0, 0, 25], lost: false }], "the sketch went up with the top");
+  // "Infinity" typed into the box: a browser's number box reads it as empty, so 0, which the kernel refuses (its words
+  // shown): nothing builds, and the kernel holds nothing.
+  height.value = "";
+  height.dispatchEvent(new a.window.Event("input") as unknown as Event);
+  await a.settle();
+  assert.equal(a.error(), "height must be between 0.001 and 1000000 mm, got 0");
+  assert.equal(await a.bodies(), 0, "after a size the kernel refuses");
+  assert.ok(await a.close());
+});
+
+test("6. a size typed that no file can hold is refused, as Edit feature refuses it: the design keeps its sizes", async () => {
+  // Where a box takes "Infinity" as typed (this DOM does; a browser's number box reads it as empty), the design took
+  // it: its undo step couldn't be saved ("is Infinity, not a number a file can hold"), and nothing was built or said.
+  const a = await app(partDocument("box", 40, 30, 20));
+  const sizes = () => a.doc().timeline.features[0].intent.parameters;
+  const undo = a.history.undoLabel();
+  for (const [box, words] of [["height", "Type the height in mm."], ["width", "Type the width in mm."], ["depth", "Type the depth in mm."]] as const) {
+    for (const typed of ["Infinity", "-Infinity", "1e999"]) {
+      const input = a.$(`#${box}`) as HTMLInputElement;
+      const was = input.value;
+      input.value = typed;
+      input.dispatchEvent(new a.window.Event("input") as unknown as Event);
+      await a.settle();
+      assert.equal(a.error(), words, `${typed} in ${box}`);
+      assert.deepEqual(sizes(), { width: 40, depth: 30, height: 20 }, `${typed} in ${box}: the design keeps its sizes`);
+      input.value = was;
+    }
+  }
+  assert.equal(a.history.undoLabel(), undo, "no undo step");
+  // A good size after: taken, and the refusal goes.
+  const height = a.$("#height") as HTMLInputElement;
+  height.value = "25";
+  height.dispatchEvent(new a.window.Event("input") as unknown as Event);
+  await a.settle();
+  assert.deepEqual(sizes(), { width: 40, depth: 30, height: 25 });
+  assert.equal(a.error(), "");
+  assert.equal(await a.bodies(), 1);
   assert.ok(await a.close());
 });

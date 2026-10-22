@@ -93,7 +93,9 @@ export interface TimelineBuild {
 /**
  * Bodies kept in the kernel by spec: the same spec gives the same handle
  * without building again, and `keepOnly` frees every other one. One cache
- * per document view; `clear` frees all of it.
+ * per document view; `clear` frees all of it. Uses of it may overlap
+ * (`using`: the app's rebuilds and its settling, 26g): nothing is freed
+ * while one runs, so none frees a body another is using.
  */
 const CLOSED = "Design was closed, so nothing more is built";
 
@@ -105,6 +107,10 @@ export class BodyCache {
   private building = new Map<string, Promise<BodyHandle>>();
   /** Set by `close`: nothing more is built, and a body answered after it is freed at once, not kept. */
   private closed = false;
+  /** Uses running now (`using`): while any is, `keepOnly` only says what to keep, and the last to end frees the rest. */
+  private uses = 0;
+  /** The bodies the last `keepOnly` kept (none before the first). */
+  private wanted = new Set<BodyHandle>();
   private kernel: KernelCalls;
   constructor(kernel: KernelCalls) {
     this.kernel = kernel;
@@ -145,15 +151,36 @@ export class BodyCache {
     return entry.view;
   }
 
-  /** Frees every body but these. */
+  /** Frees every body but these: now, or once the last use running ends. */
   async keepOnly(handles: Iterable<BodyHandle>): Promise<void> {
-    const keep = new Set(handles);
-    for (const [key, b] of this.bodies)
-      if (!keep.has(b.handle)) {
-        this.bodies.delete(key);
-        this.keys.delete(b.handle);
-        await this.kernel.call("body_free", b.handle);
-      }
+    this.wanted = new Set(handles);
+    await this.freeUnwanted();
+  }
+
+  /**
+   * `use`, its bodies kept until it ends: then, with no other use running,
+   * every body the last `keepOnly` didn't keep is freed (all it built
+   * itself, unless a `keepOnly` kept them meanwhile).
+   */
+  async using<T>(use: () => Promise<T>): Promise<T> {
+    this.uses++;
+    try {
+      return await use();
+    } finally {
+      this.uses--;
+      await this.freeUnwanted();
+    }
+  }
+
+  private async freeUnwanted(): Promise<void> {
+    for (const [key, b] of this.bodies) {
+      // A use began while the kernel freed the last one: its bodies (and these) wait for it to end.
+      if (this.uses > 0) return;
+      if (this.wanted.has(b.handle)) continue;
+      this.bodies.delete(key);
+      this.keys.delete(b.handle);
+      await this.kernel.call("body_free", b.handle);
+    }
   }
 
   clear(): Promise<void> {
@@ -272,20 +299,16 @@ async function makesOutline(kernel: KernelCalls, doc: DesignDocument, sketchId: 
  * face is there, and one whose face went while it was greyed keeps where
  * it was. `after` itself when nothing changes.
  *
- * Placing face sketches builds bodies: on `cache` when given (a cache the
- * caller keeps for settling only, never the one drawn from: it keeps only
- * the bodies this settle used), else on one of its own, freed after.
+ * Placing face sketches builds bodies: on `cache` when given (it may be
+ * the one drawn from, even while it rebuilds: bodies built already are
+ * reused, and the ones this settle built and no rebuild keeps are freed
+ * after, `BodyCache.using`), else on one of its own, freed after.
  */
 export async function settleKept(calls: KernelCalls, before: DesignDocument, after: DesignDocument, cache?: BodyCache): Promise<DesignDocument> {
   // Every outline `after` needs asked at once; `before`'s, needed only for a sketch just lost, as they come.
   const kernel = outlinesAtOnce(calls, [after]);
   const bodies = cache ?? new BodyCache(calls);
-  const used: BodyHandle[] = [];
-  const placed = async (doc: DesignDocument) => {
-    const results = await placeOpen(doc, bodies, kernel);
-    used.push(...handlesOf(results));
-    return results;
-  };
+  const placed = (doc: DesignDocument) => placeOpen(doc, bodies, kernel);
   let was: Promise<Record<string, FeatureResult>> | undefined;
   /** Where a face sketch lay in `before` with nothing suppressed and no marker. */
   const wasAt = async (id: string) => {
@@ -293,7 +316,7 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
     const r = (await was)[id];
     return r?.status === "built" ? r.placement : undefined;
   };
-  try {
+  return bodies.using(async () => {
     const beforeItems = indexOf(before).items;
     const next: Record<string, KeptShape> = {};
     for (const f of after.timeline.features) {
@@ -344,10 +367,7 @@ export async function settleKept(calls: KernelCalls, before: DesignDocument, aft
       doc = { ...doc, sketches };
     }
     return doc;
-  } finally {
-    if (cache === undefined) await bodies.clear();
-    else await bodies.keepOnly(used);
-  }
+  });
 }
 
 /**
@@ -368,9 +388,11 @@ async function placeOpen(doc: DesignDocument, cache: BodyCache, kernel: KernelCa
  * feature's result is its handle or why it has none.
  */
 export async function rebuildTimeline(doc: DesignDocument, cache: BodyCache, calls: KernelCalls): Promise<TimelineBuild> {
-  const build = await buildTimeline(doc, cache, calls);
-  await cache.keepOnly(handlesOf(build.results));
-  return build;
+  return cache.using(async () => {
+    const build = await buildTimeline(doc, cache, calls);
+    await cache.keepOnly(handlesOf(build.results));
+    return build;
+  });
 }
 
 /** The bodies a rebuild's results hold. */
