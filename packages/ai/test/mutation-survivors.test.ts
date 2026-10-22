@@ -490,3 +490,22 @@ test("choosing a model: each kind's suggestion beats the first listed", () => {
   assert.equal(chooseModel({ kind: "in-browser" }, list("Qwen2.5-1.5B-Instruct-q4f16_1-MLC")), "Qwen2.5-1.5B-Instruct-q4f16_1-MLC");
   assert.equal(chooseModel({ kind: "browser-built-in" }, list("qwen2.5:1.5b", "claude-haiku-5-5", "Qwen2.5-1.5B-Instruct-q4f16_1-MLC")), "first");
 });
+
+test("leftovers from the second run: blank addresses, default vendors, names in errors, and Ollama-only tag matching", async () => {
+  // Kills hosted's `endpoint?.trim()` => `endpoint` (spaces only is no address), listing's
+  // default vendor "anthropic" => "", `vendor === "openai"` => true in a provider's name for an
+  // 'other' address, hostedProvider's unknown-vendor check and message, the in-browser
+  // provider's structuredOutput, buildContext's selection `?? []`, and chooseModel's
+  // `settings.kind === "ollama"` => true (only Ollama reads "x" as "x:latest").
+  assert.throws(() => otherEndpoint("   "), /give the provider's address/);
+  const { fetch } = fakeServer(() => ({ json: { data: [{ id: "claude-x" }] } }));
+  assert.deepEqual(await listHostedModels({ keys: keysFor("https://api.anthropic.com"), fetch }), ["claude-x"]);
+  const other = hostedProvider({ vendor: "other", endpoint: "https://llm.example/v1", model: "m", keys: memoryKeyStore(), fetch });
+  assert.deepEqual(await other.check(), { ok: false, reason: "no API key is saved for https://llm.example" });
+  assert.throws(() => hostedProvider({ vendor: "nope" as never, keys: memoryKeyStore(), fetch }), { message: 'unknown API provider "nope"' });
+  assert.equal(inBrowserProvider({ gpu: undefined, loadWebLLM: async () => webllm("x") }).structuredOutput, true);
+  const c = buildContext(emptyProject(), { workspace: "design", graph: new DependencyGraph() });
+  assert.deepEqual([c.selection, c.graph.dependsOnSelection], [[], []]);
+  assert.equal(chooseModel({ kind: "api-key", vendor: "openai", model: "x" }, ["first", "x:latest"]), "first");
+  assert.equal(chooseModel({ kind: "ollama", model: "x" }, ["first", "x:latest"]), "x:latest");
+});

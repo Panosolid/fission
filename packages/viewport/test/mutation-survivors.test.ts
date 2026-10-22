@@ -201,3 +201,15 @@ test("a pane reads back the sketch pointer handler it set, and null once it is c
   pane.onSketchPointer = null;
   assert.equal(pane.onSketchPointer, null);
 });
+
+test("leftovers from the second run: an x too large with a finite y, the y axis off a grid left of it, every corner", () => {
+  // Kills rayOnPlane's `isFinite(x) && isFinite(y)` => `||`: on a ground plane whose x axis is
+  // (1, 1, 0)/√2, the hit at (1.5e308, 1.5e308) has x = 3e308/√2, past the largest double, and y = 0.
+  const diagonal: Plane = { origin: [0, 0, 0], xAxis: [Math.SQRT1_2, Math.SQRT1_2, 0], normal: [0, 0, 1] };
+  assert.equal(rayOnPlane([1.5e308, 1.5e308, 1], [0, 0, -1], diagonal), null);
+  // Kills `0 <= x1` => true: centred on (−1000, 0) the grid runs x −1300..−700, left of the y axis.
+  assert.equal(sketchGrid([-1000, 0], 0.125, 10_000)!.axes.y, null);
+  // Kills each corner's signs => their opposite.
+  const corners = { "top-front-left": [-1, -1, 1], "top-front-right": [1, -1, 1], "top-back-left": [-1, 1, 1], "top-back-right": [1, 1, 1], "bottom-front-left": [-1, -1, -1], "bottom-front-right": [1, -1, -1], "bottom-back-left": [-1, 1, -1], "bottom-back-right": [1, 1, -1] } as const;
+  for (const [name, d] of Object.entries(corners)) assert.deepEqual(viewDirection(name as keyof typeof corners), d, name);
+});
