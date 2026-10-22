@@ -14,6 +14,10 @@
 //     without waiting for the quiet moment. A save that stores a state at
 //     least as new as the journal's removes the journal entry; one that
 //     stores an older state leaves it.
+//   - Given the undo history to follow, every change to it is a change to
+//     the project too (hunt 26h): above all an amend, a change no one
+//     records (a face sketch settled, a pinned point followed once the
+//     kernel answers), which can come after the edit was stored.
 
 import { projectToJson, type Project } from "@fission/core";
 import type { ProjectStore } from "./store.ts";
@@ -39,6 +43,14 @@ export interface AutosaveOptions {
   timers?: Timers;
   /** Where `leaving()` keeps changes the store doesn't hold yet (the browser's localStorage); null keeps none. */
   journal?: JournalStorage | null;
+  /**
+   * The undo history (core history.ts): each change to it is taken as
+   * `changed()`, until `stop()`, unless it leaves the project as the store
+   * holds it (a fresh history, a mount's amend that fills in nothing).
+   */
+  follows?: { onChange(listener: () => void): () => void } | null;
+  /** The store already holds `project()` as it is now (it was just opened from there). */
+  stored?: boolean;
 }
 
 export interface Autosave {
@@ -71,14 +83,20 @@ export function startAutosave(
   id: string,
   project: () => Project,
   onStatus: (status: AutosaveStatus) => void = () => {},
-  { quietMs = QUIET_MS, timers = globalThis, journal = null }: AutosaveOptions = {},
+  { quietMs = QUIET_MS, timers = globalThis, journal = null, follows = null, stored: opened = false }: AutosaveOptions = {},
 ): Autosave {
   let timer: unknown = null;
   let inFlight = false;
   let again = false;
   let stopped = false;
   /** The text last written, so an unchanged project is not written again. */
-  let written: string | null = null;
+  let written: string | null = (() => {
+    try {
+      return opened ? projectToJson(project()) : null;
+    } catch {
+      return null;
+    }
+  })();
   // Changes are counted, so the store and the journal can be compared:
   // `version` is the number of changes so far, `storedVersion` the count
   // the store holds the project as of (the project opened counts as 0), and
@@ -150,14 +168,28 @@ export function startAutosave(
     else if (timer === null) report({ state: "saved" });
   }
 
+  function changed() {
+    if (stopped) return;
+    version++;
+    if (timer !== null) timers.clearTimeout(timer);
+    timer = timers.setTimeout(() => void save(), quietMs);
+    report({ state: "saving" });
+  }
+  /** A history change: a change unless the project is what the store holds, with no save waiting or running. */
+  function followed() {
+    if (timer === null && !inFlight && storedVersion === version) {
+      try {
+        if (projectToJson(project()) === written) return;
+      } catch {
+        // can't be written: changed() reports it when it saves
+      }
+    }
+    changed();
+  }
+  const unfollow = follows?.onChange(followed) ?? (() => {});
+
   return {
-    changed() {
-      if (stopped) return;
-      version++;
-      if (timer !== null) timers.clearTimeout(timer);
-      timer = timers.setTimeout(() => void save(), quietMs);
-      report({ state: "saving" });
-    },
+    changed,
     leaving() {
       if (stopped || storedVersion === version) return true;
       let kept = journalVersion === version;
@@ -181,6 +213,7 @@ export function startAutosave(
       if (timer !== null) timers.clearTimeout(timer);
       timer = null;
       stopped = true;
+      unfollow();
     },
   };
 }

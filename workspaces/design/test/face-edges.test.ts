@@ -158,6 +158,24 @@ test("hunt 26g: a pin whose name is not found is lost, or ambiguous when its edg
   assert.deepEqual(pinNow({ point: "p", kind: "centre", name: "side+top" }, cyl, nameBody("feature-1", cyl, () => null), TOP), { at: [0, 0] });
 });
 
+test("hunt 26h: a middle's pin between two sides ('A>B') is found the other way round ('B>A') only when its own name finds nothing, and is ambiguous when that is two edges'", () => {
+  // The box's edge between the front and right, renamed as two sides' edge "side:f>side:r", its middle at
+  // (40, 0, 10): (40, 0) through the top's frame.
+  const { view, names } = box();
+  const e = names.edges.indexOf("front+right");
+  const sides = (name: string) => ({ ...names, edges: names.edges.map((n, i) => (i === e ? name : n)) });
+  const pin = (name: string, kind: "midpoint" | "centre" = "midpoint") => ({ point: "p", kind, name });
+  assert.deepEqual(pinNow(pin("side:f>side:r"), view, sides("side:f>side:r"), TOP), { at: [40, 0] }, "by its name");
+  assert.deepEqual(pinNow(pin("side:r>side:f"), view, sides("side:f>side:r"), TOP), { at: [40, 0] }, "the outline turned over: the other way round");
+  // A set ("+") is never turned round, and neither is a centre's pin.
+  assert.deepEqual(pinNow(pin("right+front"), view, names, TOP), { cause: "point-lost" });
+  assert.deepEqual(pinNow(pin("side:r>side:f", "centre"), view, sides("side:f>side:r"), TOP), { cause: "point-lost" });
+  // Gone both ways round, and "side:f>side:r" now two edges' name: ambiguous, never one of them.
+  const two = { ...sides("x"), shared: { faces: names.shared.faces, edges: new Map([["side:f>side:r", 2]]) } };
+  assert.deepEqual(pinNow(pin("side:r>side:f"), view, two, TOP), { cause: "point-ambiguous" });
+  assert.deepEqual(pinNow(pin("side:r>side:f"), view, { ...two, shared: names.shared }, TOP), { cause: "point-lost" });
+});
+
 test("hunt 26g: the targets a sketch is offered come from its own face on the bodies shown, and none for an origin plane, no scene, no frame or a face not found", () => {
   const { view, names } = box();
   const scene = onlyBody(view, names);

@@ -186,12 +186,18 @@ test("5. settling a click or an edit holds no bodies of its own: the kernel hold
   await a.settle();
   assert.equal(await a.bodies(), 1, "after a typed height");
   assert.deepEqual(drawn(a), [{ origin: [0, 0, 25], lost: false }], "the sketch went up with the top");
-  // "Infinity" typed into the box: a browser's number box reads it as empty, so 0, which the kernel refuses (its words
-  // shown): nothing builds, and the kernel holds nothing.
+  // "Infinity" typed into the box: a browser's number box reads it as empty, which the panel refuses (26h, Ben's Fusion
+  // answer 8): the design keeps its 25 high box, still one body.
   height.value = "";
   height.dispatchEvent(new a.window.Event("input") as unknown as Event);
   await a.settle();
-  assert.equal(a.error(), "height must be between 0.001 and 1000000 mm, got 0");
+  assert.equal(a.error(), "Type the height in mm.");
+  assert.equal(await a.bodies(), 1, "after a size the panel refuses");
+  // 0.0001: a number the panel takes and the kernel refuses (its words shown): nothing builds, and the kernel holds nothing.
+  height.value = "0.0001";
+  height.dispatchEvent(new a.window.Event("input") as unknown as Event);
+  await a.settle();
+  assert.equal(a.error(), "height must be between 0.001 and 1000000 mm, got 0.0001");
   assert.equal(await a.bodies(), 0, "after a size the kernel refuses");
   assert.ok(await a.close());
 });

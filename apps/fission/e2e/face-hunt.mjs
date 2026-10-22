@@ -5,12 +5,15 @@
 //   - Sphere: the box has no flat face now, so the circle's plane is lost
 //     and it is drawn red where it last was, z = 40, not where it was
 //     first drawn, z = 20 (pixel probes on the rim at both heights, from
-//     the front view); one Undo brings the box back;
+//     the front view), and framed with the sphere (26h); one Undo brings
+//     the box back;
 //   - the marker stepped back onto the box: the sketch is after it, so it
 //     is not drawn at all (no lines), and forward again it is;
 //   - the circle extruded 10 (the extrude is the part, "Extrude by 10"),
 //     then the marker at the start: nothing builds, and the size boxes are
 //     a fresh box's 40, 30, 20, not 10 as a height.
+// And (26h) the height box typed 0, -5 and emptied: each refused in words,
+// nothing recorded or saved, and 20 back once the box is left.
 // Points on screen come from the app's own camera (?test-hooks) through
 // the pinhole sums face-sketch.mjs works out. Screenshots go to E2E_SHOTS
 // when set. Run with `npm run e2e` (after `npm run build`); Firefox and
@@ -31,7 +34,13 @@ if (shots) mkdirSync(shots, { recursive: true });
 async function fresh(width = 1280, touch = false) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
-  await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
+  // A fresh project on the page's first load only, so a reload opens what was saved.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("face-hunt-wiped")) return;
+    sessionStorage.setItem("face-hunt-wiped", "1");
+    indexedDB.deleteDatabase("fission");
+    localStorage.clear();
+  });
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
@@ -152,6 +161,14 @@ try {
       await top(page);
       await shapeButton(page, "Sphere", tap);
       await until(page, () => Number(document.querySelector("#viewport").dataset.sketchLost) > 0, null, "the circle drawn lost");
+      // A new part is framed with the lost circle in (hunt 26h; before, the body alone, and at 375 px the circle sat under the view
+      // cube): the box round the sphere (−20..20 each way) and the circle (5 round c at z = 40) is, for c = (20, 15), 45 × 40 × 60,
+      // so the radius is √(45² + 40² + 60²) / 2 = 85 / 2 = 42.5, not the sphere's own √(3 · 40²) / 2 ≈ 34.6 (to within the
+      // sphere's mesh, whose extremes may fall between its vertices).
+      const lo = [Math.min(-20, c[0] - 5), Math.min(-20, c[1] - 5), -20];
+      const hi = [Math.max(20, c[0] + 5), Math.max(20, c[1] + 5), 40];
+      const want = Math.hypot(...hi.map((h, k) => h - lo[k])) / 2;
+      await until(page, (w) => Math.abs(Number(document.querySelector("#viewport").dataset.framedRadius) - w) < 0.5, want, `the lost circle framed with the sphere (radius ${want})`);
       // The front view: the sphere (⌀40 round the origin) in the middle, the circle at z = 40 an ellipse above it (the camera is
       // level with the sphere's centre), at z = 20 one level with the sphere's top.
       await press(page, '[data-view="front"]', tap);
@@ -195,6 +212,40 @@ try {
       await until(page, () => !document.querySelector("#no-part").hidden, null, "no body");
       assert.deepEqual(await page.$$eval("#width, #depth, #height", (els) => els.map((e) => e.value)), ["40", "30", "20"]);
       await shot(page, `face-hunt-no-body-${width}`);
+      await page.context().close();
+    });
+    await check(`${width} px${tap ? " with taps" : ""}: a size box emptied, 0 or -5 is refused, records and saves nothing, and its last size comes back when left (26h)`, async () => {
+      const page = await fresh(width, tap);
+      const undoTitle = () => page.getAttribute("#undo", "title");
+      const before = await undoTitle();
+      const height = page.locator("#height");
+      await height.scrollIntoViewIfNeeded();
+      // Typed as a person types: into the box, its text selected, key by key ("-" alone reads as empty in a number box).
+      await (tap ? height.tap() : height.click());
+      for (const [typed, words] of [["0", "The height must be more than 0 mm."], ["-5", "The height must be more than 0 mm."]]) {
+        await height.selectText();
+        await page.keyboard.type(typed);
+        await until(page, (w) => document.querySelector("#error")?.textContent === w, words, `"${typed}" says why`);
+      }
+      await height.selectText();
+      await page.keyboard.press("Backspace");
+      await until(page, () => document.querySelector("#error")?.textContent === "Type the height in mm.", null, "an empty box says what to type");
+      await shot(page, `face-hunt-size-refused-${width}`);
+      assert.equal(await page.textContent("#volume"), "24,000 mm³", "the box is still 40 × 30 × 20");
+      assert.equal(await undoTitle(), before, "no undo step");
+      // Leaving the box for the next one (a click, or a tap at 375 px; WebKit keeps focus in a box when a tap lands on
+      // plain text, and Firefox in CI left the box still focused after a Tab): 20 comes back, and the words go.
+      const next = page.locator("#width");
+      await (tap ? next.tap() : next.click());
+      await until(page, () => document.querySelector("#height").value === "20" && document.querySelector("#error").textContent === "", null, "20 back, no words").catch(async (e) => {
+        const now = await page.evaluate(() => ({ height: document.querySelector("#height").value, error: document.querySelector("#error").textContent, focus: document.activeElement?.id }));
+        throw new Error(`${e.message}: ${JSON.stringify(now)}`);
+      });
+      // Nothing was saved either: the page reloaded opens the 20 high box.
+      await page.waitForTimeout(1500);
+      await page.reload();
+      await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      assert.equal(await page.inputValue("#height"), "20");
       await page.context().close();
     });
   }

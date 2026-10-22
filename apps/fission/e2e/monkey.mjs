@@ -352,7 +352,14 @@ async function act(s, a) {
       await page.waitForTimeout(800); // the store writes after a change; a user closing the tab at once is another matter
       await page.reload(); // to the workspace on screen (its #link), so the timeline may not be there
       // Ready means the last project is open again, not just the kernel: Save before that writes a file without the design (a bug of its own, found by seed 124 under load, reproduced with the CPU slowed 8×).
-      await page.waitForFunction(() => /kernel v/.test(document.getElementById("version")?.textContent ?? "") && (location.hash !== "#design" || document.querySelector("#timeline li[data-item]") !== null), null, { timeout: 20000 });
+      // An empty design has no timeline rows to wait for (seed 32 reloaded one and waited forever), only the bar.
+      const design = JSON.parse(before).workspaces?.design;
+      const empty = !design || (design.timeline?.features?.length ?? 0) + (design.sketches?.length ?? 0) === 0;
+      await page.waitForFunction(
+        (empty) => /kernel v/.test(document.getElementById("version")?.textContent ?? "") && (location.hash !== "#design" || document.querySelector(empty ? "#timeline .timeline-marker" : "#timeline li[data-item]") !== null),
+        empty,
+        { timeout: 20000 },
+      );
       if (!(await page.evaluate(() => location.hash === "#design"))) await page.waitForTimeout(1500);
       await settle(page);
       same("a reload brings the project back", before, await save(s));

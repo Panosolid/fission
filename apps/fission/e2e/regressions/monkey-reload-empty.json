@@ -1,0 +1,14 @@
+{
+  "seed": 32,
+  "what": "A file opened with part of it dropped (a valid file whose design is empty), then a reload: the tester waited for a timeline row that an empty design never has and gave up after 20 s (seed 32 at 150 steps, 26h; the app was right); the reload now waits for the timeline bar when the design is empty",
+  "actions": [
+    {
+      "do": "open",
+      "edit": "drop",
+      "at": 280
+    },
+    {
+      "do": "reload"
+    }
+  ]
+}

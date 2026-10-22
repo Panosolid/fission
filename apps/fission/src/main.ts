@@ -522,11 +522,15 @@ const saveStatus = (s: AutosaveStatus) => {
 const newId = () => globalThis.crypto?.randomUUID?.() ?? `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 /** False once the browser has shown it can't keep projects: then nothing autosaves, and Save/Open use files. */
 let canKeep = true;
-function keep(id: string) {
+/** Keeps the open project in the store under `id` from now on; `stored` when it was just opened from there as it is. */
+function keep(id: string, stored = false) {
   keepOnChange = null;
   autosave?.stop();
   if (!canKeep) return;
-  autosave = startAutosave(store, id, () => ctx.project, saveStatus, { journal: local });
+  // Following the undo history: an amend (a face sketch settled, a pinned point followed once the kernel answers) is a
+  // change no one records, and it can come after the edit was stored (hunt 26h). One that changes nothing (the history
+  // started afresh on a reopened project) is not.
+  autosave = startAutosave(store, id, () => ctx.project, saveStatus, { journal: local, follows: ctx.history, stored });
   document.body.dataset.projectId = id; // read by the e2e test
 }
 /** A new project in place of the last one, kept once it is changed (`keepOnChange`). */
@@ -847,7 +851,7 @@ async function start() {
     } else if (newest) {
       guard.opening(newest);
       ctx.project = await store.open(newest);
-      keep(newest);
+      keep(newest, true);
       saveStatus({ state: "saved" });
       opened = newest;
     } else keep(newId());

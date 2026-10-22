@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LOOK_AT_EMPTY_RADIUS, lookAtFraming, needsRefit, selectionFraming } from "../src/framing.ts";
+import { LOOK_AT_EMPTY_RADIUS, lookAtFraming, needsRefit, partFraming, selectionFraming } from "../src/framing.ts";
 
 test("camera re-frames when the body stops fitting or becomes a speck", () => {
   const at = (x: number, y: number, z: number, radius: number) => ({ centre: [x, y, z] as [number, number, number], radius });
@@ -60,4 +60,26 @@ test("Look At with nothing to frame, or one point, frames 50 mm round it; points
   assert.deepEqual(lookAtFraming([], [1, 2, 3]), { centre: [1, 2, 3], radius: LOOK_AT_EMPTY_RADIUS });
   assert.deepEqual(lookAtFraming([[4, 4, 0], [4, 4, 0]], [0, 0, 0]), { centre: [4, 4, 0], radius: LOOK_AT_EMPTY_RADIUS });
   assert.deepEqual(lookAtFraming([[NaN, 0, 0], [0, 0, 0], [6, 8, 0]], [0, 0, 0]), { centre: [3, 4, 0], radius: 5 });
+});
+
+test("hand-worked: Fit frames the box round the body and every finished sketch, a lost one too (hunt 26h)", () => {
+  // A 40 × 30 × 20 box from the origin alone: centre (20, 15, 10), radius half the diagonal, √(40² + 30² + 20²) / 2 = √2900 / 2.
+  const body = [
+    [0, 0, 0],
+    [40, 30, 20],
+  ];
+  const alone = partFraming(body);
+  assert.deepEqual(alone.centre, [20, 15, 10]);
+  assert.ok(Math.abs(alone.radius - Math.sqrt(2900) / 2) < 1e-12);
+  // With a sketch held at x = 60 (its face gone), a circle round (60, 15, 10) of radius 3: the box is now 0..60 in x,
+  // so the centre is (30, 15, 10) and the radius √(60² + 30² + 20²) / 2 = √4900 / 2 = 35.
+  const both = partFraming([...body, [60, 12, 10], [60, 18, 10], [60, 15, 7], [60, 15, 13]]);
+  assert.deepEqual(both.centre, [30, 15, 10]);
+  assert.equal(both.radius, 35);
+  // A sketch inside the body's box changes nothing.
+  assert.deepEqual(partFraming([...body, [10, 10, 0], [30, 20, 0]]), alone);
+  // Nothing, or nothing that is a point: radius 0 (nothing to frame); NaN and short points are skipped.
+  assert.deepEqual(partFraming([]), { centre: [0, 0, 0], radius: 0 });
+  assert.deepEqual(partFraming([[NaN, 0, 0], [1, 2]]), { centre: [0, 0, 0], radius: 0 });
+  assert.deepEqual(partFraming([...body, [Infinity, 0, 0]]), alone);
 });
