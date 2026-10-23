@@ -16,7 +16,7 @@ Renumbering of 2026-10-23 (owner's ask: the numbers run in build order again, as
 | 45 | 35 | Coplanar faces, touching edges, shared vertices |
 | 29 | 36 | Constraint solver core |
 | 46 | 37 | Plane–cylinder intersection |
-| 47 | 38 | Cylinder–cylinder, plane–sphere |
+| 47 | 38 | Cylinder–cylinder, plane–sphere (47f, the general crossing finder added by the outside review, is 38f) |
 | 48 | 39 | Extrude modes |
 | 50 | 40 | Full topological naming (50a is now 40a) |
 | 55 | 41 | Chamfer |
@@ -105,7 +105,7 @@ Test infrastructure (in place before booleans, which are built against it)
 - [ ] 30. Overnight fuzzing + simulated-user bot (Tier 3), extended as each new feature lands
 
 Booleans
-- [x] B0. Boolean design review (before 31; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. Decisions written and confirmed by the owner 2026-10-16 in kernel/CLAUDE.md, "Boolean design (B0 decisions)", with the boolean test plan. Still to do: an outside reviewer reads them; this is the first piece of the boolean work, a fresh high-effort review thread with no stake in the decisions, before any of 31 is written. From an expert's review of the B-rep (2026-10-16):
+- [x] B0. Boolean design review (before 31; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. Decisions written and confirmed by the owner 2026-10-16 in kernel/CLAUDE.md, "Boolean design (B0 decisions)", with the boolean test plan. The outside review (B0r) was done 2026-10-23 as a fresh high-effort thread: verdicts in `docs/progress/booleans.md`, clarifications in the B0 section (sum of tolerances, one authority, inputs up to MIN_FEATURE / 2, the general crossing finder 38f before fillets). From an expert's review of the B-rep (2026-10-16):
   - P-curves: store each edge's curve in every face's uv space, or write down why uv computed on demand from the 3D edge is exact for the supported surfaces (and when that stops holding: 37–38, NURBS).
   - Model contract: closed, manifold solids only, stated as a rule (validate's "every edge used exactly twice" follows from it). What a boolean does with a non-manifold result (two boxes touching along an edge): an error, or separate bodies (35).
   - Bodies with several pieces and with voids (a subtraction that splits a part or seals a hollow): how Body and Shell represent them, and what validate and the inside-out check then require.
@@ -132,6 +132,7 @@ Curved booleans and extrude modes
   - [ ] 38c. Cylinder–cylinder booleans in general position (a small pipe through a big one), Steinmetz solid volume check
   - [ ] 38d. The equal-radius tee (two crossing ellipses, four edges at one vertex) and nearly-equal radii (parametrisation switch), at 0.9×/1.1× of the snap threshold
   - [ ] 38e. Tangent cases: cylinder tangent to a plane, to a cylinder, sphere kissing a face; oracle comparison over all of 38
+  - [ ] 38f. The general crossing finder (B0r, 2026-10-23; after 38e and the kernel half of 51, before 41): a procedural curve for surface pairs with no closed form (cylinder–torus, plane–torus, cones), defined by its two surfaces and seed points, every point re-solved by Newton to within tolerance; needed because fillets trim their own pieces against each other and a cut through a filleted part meets a torus. Substeps: `docs/progress/booleans.md`
 - [ ] 39. Extrude modes. 39a: join, cut, intersect and new body in Design's Extrude; the naming harness's cut cases (Ben's Fusion answers 1–7, Q6 a sketch on a cut's floor, and the split face) then run on Design for real instead of only on the model, and the ambiguous-name path (25a4) gets real split faces. 39b: symmetric, to-face, taper (taper makes slanted planes and cones, so after 51)
 - [ ] Later: an optional "keep as separate bodies" for union/subtract results that only touch along an edge or at a vertex (B0 decision 2)
 
@@ -142,7 +143,7 @@ Robustness, pulled forward (right after 39a, so names survive booleans before mo
 Chamfer and fillets (the end of the front-loaded hard block, right after 38b–38e)
 - [ ] 41. Chamfer (with 42–43, the end of the front-loaded hard block, right after 38b–38e; see the build-order note)
 - [ ] 42. Fillet between planar faces
-- [ ] 43. Fillet planar–curved, edge chains
+- [ ] 43. Fillet planar–curved, edge chains (needs 38f, the general crossing finder, and 51's kernel half, cones and tori: a fillet along a cylinder–plane edge is a torus piece that must be trimmed against its neighbours)
 
 Sketcher, continued (after the hard block; see the build-order note above)
 - [ ] 44. Profile detection (closed regions, nested); an extrude names its region by the ids of the curves around it, never by an index (docs/document-model.md, section 3)
