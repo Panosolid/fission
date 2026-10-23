@@ -12,7 +12,7 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.27.11 (2026-10-23)
 
-- Fix (#262): a project file listing the same sketch twice in Design's sketches list, the second copy with a broken "projected" field (text instead of a list), wasn't refused when opened; the reader looked past the second copy, which was then read further on and gave a raw engine error. Now a sketch listed twice is refused on opening with "Design sketch … is listed twice in the sketches list". Checked by a failing-first unit test, the old "first copy wins" test now checking that both orders are refused, the fuzzer's saved file kept as a permanent regression case, and mutation testing of the file reader.
+- Fix (#262): a project file listing the same sketch twice in Design's sketches list, the second copy with a broken "projected" field (text instead of a list), wasn't refused when opened; the reader looked past the second copy, which was then read further on and gave a raw engine error. Now a sketch listed twice is refused on opening with "Design sketch … is listed twice in the sketches list". Checked by a failing-first unit test, the old "first copy wins" test now checking that both orders are refused, the fuzzer's saved file kept as a permanent regression case, and the file reader's mutation-testing range widened to cover the new lines.
 
 ## 0.27.9 (2026-10-23)
 
