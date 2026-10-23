@@ -373,21 +373,25 @@ class Measured:
                              and not any(all(value(r, p) >= 0 for p, _ in cell) for r in shadows[s]))
 
         owners = [{s for s, hs in enumerate(self.spaces) if any(j == jj for jj, _ in hs)} for j in range(len(self.planes))]
-        lines = list(bounds)
-        cells = [(poly, live(poly, range(len(self.solids))))]
+        # Planes meeting this one along the same line (three planes through
+        # one line) split it once, for every solid owning any of them.
+        cuts = {}
         for j, (m, c) in enumerate(self.planes):
             if j == i or not any(cross(m, n)):
                 continue
             line = line_of(m, c)
             if line[0] < 0 or (line[0] == 0 and line[1] < 0):
                 line = tuple(-x for x in line)
-            if line in lines:
-                continue
+            if line not in bounds:
+                cuts.setdefault(line, set()).update(owners[j])
+        lines = list(bounds)
+        cells = [(poly, live(poly, range(len(self.solids))))]
+        for line, owned in cuts.items():
             lines.append(line)
             lid = len(lines) - 1
             split = []
             for cell, solids in cells:
-                vals = [value(line, p) for p, _ in cell] if solids & owners[j] else [0]
+                vals = [value(line, p) for p, _ in cell] if solids & owned else [0]
                 if all(v <= 0 for v in vals) or all(v >= 0 for v in vals):
                     split.append((cell, solids))
                 else:

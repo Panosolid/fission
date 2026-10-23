@@ -282,6 +282,25 @@ class Lines(unittest.TestCase):
         self.assertFalse(judge.run([dict(lines[0], intent="bodies:2")], model_answers=True, out=out))
         self.assertIn("meant bodies:2, the model says bodies:1", out.getvalue())
 
+    def test_a_model_failing_its_own_check_fails_the_run(self):
+        # The 30c long run stopped dead on such a line; now it is listed
+        # and the run fails, and the other lines are still judged.
+        lines = [line(boxes(A), boxes(ON_TOP), "union"), line(boxes(A), boxes(ON_TOP), "intersect")]
+        real, calls = judge.box_model.judge_cells, []
+
+        def first_fails(*args):
+            calls.append(1)
+            if len(calls) == 1:
+                raise AssertionError("a crease has 3 faces")
+            return real(*args)
+
+        with mock.patch.object(judge.box_model, "judge_cells", first_fails):
+            out = io.StringIO()
+            self.assertFalse(judge.run(lines, model_answers=True, out=out))
+        self.assertIn("1 agree, 0 disagree, 0 beyond the judge, 0 on a band's edge, 1 a model failed", out.getvalue())
+        self.assertIn("line 1 (boxes", out.getvalue())
+        self.assertIn("a model failed its own check: a crease has 3 faces", out.getvalue())
+
     def test_command_line(self):
         ln = line(boxes(A), boxes(ON_TOP), "union")
         with tempfile.TemporaryDirectory() as d:

@@ -734,7 +734,7 @@ PLANTS = {
 def run(lines, model_answers=False, planted=False, occ=False, out=None):
     """Judge `lines` (dicts); prints a summary and returns True when all is well."""
     out = out or sys.stdout
-    agree, disagree, beyond, on_edge, wrong_intent = 0, [], [], [], []
+    agree, disagree, beyond, on_edge, wrong_intent, crashed = 0, [], [], [], [], []
     caught = {k: [0, 0] for k in PLANTS}
     occ_seen = 0
     kinds = {}
@@ -748,6 +748,11 @@ def run(lines, model_answers=False, planted=False, occ=False, out=None):
             continue
         except ModelError as e:
             beyond.append(f"{name}: {e}")
+            continue
+        except AssertionError as e:
+            # A model's own check failed: the model is wrong, so the line
+            # can't be judged and the run fails (saved as a model test).
+            crashed.append(f"{name}: a model failed its own check: {e}")
             continue
         if model_answers or planted:
             answer = model_answer(w.result)
@@ -778,19 +783,20 @@ def run(lines, model_answers=False, planted=False, occ=False, out=None):
                 else:
                     disagree.append(f"{name}: planted {kind} not caught: {json.dumps(wrong)[:300]}")
     print(f"Judged {len(lines)} lines ({', '.join(f'{k} {v}' for k, v in sorted(kinds.items(), key=str))}): "
-          f"{agree} agree, {len(disagree)} disagree, {len(beyond)} beyond the judge, {len(on_edge)} on a band's edge", file=out)
+          f"{agree} agree, {len(disagree)} disagree, {len(beyond)} beyond the judge, {len(on_edge)} on a band's edge, "
+          f"{len(crashed)} a model failed", file=out)
     if model_answers or planted:
         print(f"Intents: {len(wrong_intent)} wrong", file=out)
     if occ:
         print(f"OpenCascade: {occ_seen} lines compared (not non-manifold or pinched)", file=out)
     if planted:
         print("Planted: " + ", ".join(f"{k} {c}/{t}" for k, (c, t) in caught.items()), file=out)
-    for msg in disagree + beyond + on_edge + wrong_intent:
+    for msg in crashed + disagree + beyond + on_edge + wrong_intent:
         print("  " + msg, file=out)
     unused = [k for k, (_, t) in caught.items() if planted and not t]
     for k in unused:
         print(f"  planted {k} applied to no line", file=out)
-    return not disagree and not beyond and not wrong_intent and not unused and not (on_edge and (model_answers or planted))
+    return not crashed and not disagree and not beyond and not wrong_intent and not unused and not (on_edge and (model_answers or planted))
 
 
 def main(argv):
