@@ -577,7 +577,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
   "projection-stays-put": {
     fault: "projection-stays-put",
     what: "a projection is never followed: its curve stays where it was projected, whatever its edge does",
-    edits: [{ file: REBUILD, find: "    projected.push({ id: q.id, ...placesOf(content, q, shape) });", replace: "    projected.push({ id: q.id, points: [] });" }],
+    edits: [{ file: REBUILD, find: "    projected.push({ id: q.id, ...placesOf(content, q, shape, cornerOrder(body!.view, found.edge, corners) !== null) });", replace: "    projected.push({ id: q.id, points: [] });" }],
     run: ["naming"],
     caught: "Fusion answers",
   },
@@ -593,7 +593,7 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     what: "a projection whose edge is gone has its points sent to the sketch's origin",
     edits: [
       { file: REBUILD, find: "      lost.push({ id: q.id, cause: found.cause });", replace: "      lost.push({ id: q.id, cause: found.cause }), projected.push({ id: q.id, points: madePoints(content, q).map((point) => ({ point, at: [0, 0] as SketchXY })) });" },
-      { file: REBUILD, find: 'import { edgeNamed, edgeShape, madeKind, profileCurves,', replace: 'import { edgeNamed, edgeShape, madeKind, madePoints, profileCurves,' },
+      { file: REBUILD, find: 'import { cornerOrder, edgeNamed, edgeShape, madeKind, profileCurves,', replace: 'import { cornerOrder, edgeNamed, edgeShape, madeKind, madePoints, profileCurves,' },
     ],
     run: ["naming"],
     caught: "Fusion answers",
@@ -643,5 +643,31 @@ export const NAMING_PLANTS: Record<string, NamingPlant> = {
     edits: [{ file: REBUILD, find: "  for (const id of sketchInputs(f, content)) {", replace: "  for (const id of sketchInputs(f, { pins: content.pins })) {" }],
     run: ["naming"],
     caught: "Fusion answers",
+  },
+  // Step 27e: what the bug hunt found, each planted back.
+  "projection-ends-by-kernel": {
+    what: "a projected line runs the way the kernel runs its edge, so a flipped extrude swaps its ends and a line drawn from one end swings onto the other",
+    edits: [{ file: PROJECTION, find: '  if (view.edge_types[e] !== "line" || !n0 || !n1 || n0 === n1) return null;', replace: "  return null;" }],
+    run: ["naming"],
+    caught: "projection-hunt: C3:",
+    why: "with no names a flip is put right by the least move (C passes); only a corner moved past the other end tells them apart",
+  },
+  "projection-ends-nearest": {
+    what: "a followed line's ends always go to the nearer places, never by its corners' names, so a corner moved past the line's other end swaps them",
+    edits: [{ file: PROJECTION, find: "    const [a, b] = named || moved(shape.a, shape.b) <= moved(shape.b, shape.a) ? [shape.a, shape.b] : [shape.b, shape.a];", replace: "    const [a, b] = moved(shape.a, shape.b) <= moved(shape.b, shape.a) ? [shape.a, shape.b] : [shape.b, shape.a];" }],
+    run: ["naming"],
+    caught: "projection-hunt: C3:",
+  },
+  "projection-ends-swap": {
+    what: "a followed line's ends go in the shape's order with no least-move check, so a round edge seen edge on whose axis turns over swaps them",
+    edits: [{ file: PROJECTION, find: "    const [a, b] = named || moved(shape.a, shape.b) <= moved(shape.b, shape.a) ? [shape.a, shape.b] : [shape.b, shape.a];", replace: "    const [a, b] = [shape.a, shape.b];" }],
+    run: ["naming"],
+    caught: "projection-hunt: C2:",
+  },
+  "projection-traced-twice": {
+    what: "a projected curve lying on another is kept in the outline, so tracing a projected face (or projecting the face under it) makes four ends meet at each corner",
+    edits: [{ file: PROJECTION, find: "  for (const c of sketch.curves) if (projected.has(c.id) && !kept.some((k) => onCurve(c, k, where))) kept.push(c);", replace: "  for (const c of sketch.curves) if (projected.has(c.id)) kept.push(c);" }],
+    run: ["naming"],
+    caught: "projection-hunt: A:",
   },
 };

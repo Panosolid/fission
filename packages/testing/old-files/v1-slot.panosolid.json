@@ -1,0 +1,72 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Slot",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "profiles": [
+        {
+          "depth": 20,
+          "id": "profile-1",
+          "kind": "slot",
+          "plane": {
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "xAxis": [
+              1,
+              0,
+              0
+            ]
+          },
+          "width": 50
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [
+              "profile-1"
+            ],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "distance": 10,
+                "profile": "profile-1"
+              },
+              "summary": "Extrude: Slot with round ends profile 50 × 20 mm, by 10 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "profile-1",
+                  "label": "Slot with round ends profile",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (extrude)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 1
+    }
+  }
+}

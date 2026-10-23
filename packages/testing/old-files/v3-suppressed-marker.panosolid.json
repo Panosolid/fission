@@ -1,0 +1,154 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Rolled back",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 8,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "centre": "point-5",
+              "id": "circle-6",
+              "kind": "circle",
+              "radius": 20
+            }
+          ],
+          "id": "sketch-4",
+          "points": [
+            {
+              "id": "point-5",
+              "x": 100,
+              "y": 0
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "depth": 30,
+                "height": 20,
+                "width": 40
+              },
+              "summary": "Box: 40 × 30 × 20 mm",
+              "type": "box"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (box)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [],
+            "id": "feature-2",
+            "intent": {
+              "parameters": {
+                "diameter": 20,
+                "height": 30
+              },
+              "summary": "Cylinder: ⌀20 × 30 mm",
+              "type": "cylinder"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-2",
+                "label": "Feature 2 (cylinder)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": true
+          },
+          {
+            "dependsOn": [],
+            "id": "feature-3",
+            "intent": {
+              "parameters": {
+                "diameter": 30
+              },
+              "summary": "Sphere: ⌀30 mm",
+              "type": "sphere"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-3",
+                "label": "Feature 3 (sphere)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [],
+            "id": "sketch-4",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 1 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-4",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-4"
+            ],
+            "id": "feature-7",
+            "intent": {
+              "parameters": {
+                "distance": 4,
+                "sketch": "sketch-4"
+              },
+              "summary": "Extrude Sketch 1 by 4 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-4",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-7",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ],
+        "marker": "feature-3"
+      },
+      "version": 3
+    }
+  }
+}
