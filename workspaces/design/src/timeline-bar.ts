@@ -358,11 +358,54 @@ export function swallowClick(list: HTMLElement) {
 }
 
 /**
+ * How far (px) above or below the bar's row a drag may be let go and still drop (timeline hunt, finding 7): further
+ * away, over the view say, letting go calls it off. Two of the row's 32 px heights, and some, so a finger drifting up
+ * off a phone's thin bar still drops.
+ */
+export const DROP_REACH = 72;
+
+/** Whether a pointer at screen height `y` is too far from a row spanning `top`..`bottom` for a drag to drop there. */
+export function awayFromBar(y: number, top: number, bottom: number): boolean {
+  return y < top - DROP_REACH || y > bottom + DROP_REACH;
+}
+
+/** The drags on a bar now under way (at most one): Escape, which reaches Design through the shortcut table, calls them off. */
+const drags = new Set<() => boolean>();
+
+/** Escape (Design's clear-selection shortcut): calls off a drag on a bar, if one is under way, and says whether it did. */
+export function callOffDrag(): boolean {
+  return [...drags].map((off) => off()).some(Boolean);
+}
+
+/**
+ * While a press on the bar is `dragging` (timeline hunt, finding 7): Escape (`callOffDrag`, from the shortcut table,
+ * as no workspace hears keys on the page itself) or a right-click calls the drag off (`off`), and the menu opens
+ * nowhere else. A press that hasn't become a drag yet keeps both (a finger's long press opens the item's menu).
+ * Returns what stops listening.
+ */
+export function callOff(document: Document, dragging: () => boolean, off: () => void): () => void {
+  const escape = () => dragging() && (off(), true);
+  const menu = (e: Event) => {
+    if (!dragging()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    off();
+  };
+  drags.add(escape);
+  document.addEventListener("contextmenu", menu, true);
+  return () => {
+    drags.delete(escape);
+    document.removeEventListener("contextmenu", menu, true);
+  };
+}
+
+/**
  * The marker dragged (24f5): a press on it that moves DRAG_PIXELS or more
  * follows the pointer, the marker standing where it would drop (`dropIndex`
  * on the items' edges as they are now) and the items after it greyed; let
  * go, the place is `act`ed on as a marker drop. A press that moves less is
- * no drag; a drag the browser cancels (`cancel`) changes nothing. The list
+ * no drag; a drag the browser cancels (`cancel`), Escape, a right-click,
+ * or letting go far from the bar (`awayFromBar`) changes nothing. The list
  * holds the pointer, so the marker can move about inside it.
  */
 function dragMarker(list: HTMLElement, marker: HTMLElement, act: (a: BarAction) => void, cancel: () => void) {
@@ -387,17 +430,30 @@ function dragMarker(list: HTMLElement, marker: HTMLElement, act: (a: BarAction) 
         else delete li.dataset.rolledBack;
       });
     };
-    const stop = (e: PointerEvent) => {
-      if (e.pointerId !== down.pointerId) return;
+    const end = () => {
       list.removeEventListener("pointermove", move);
       list.removeEventListener("pointerup", stop);
       list.removeEventListener("pointercancel", stop);
+      unlisten();
       delete list.dataset.dragging;
+    };
+    const stop = (e: PointerEvent) => {
+      if (e.pointerId !== down.pointerId) return;
+      end();
       if (place === null) return;
       swallowClick(list);
-      if (e.type === "pointerup") act({ kind: "marker", place });
+      const r = list.getBoundingClientRect();
+      if (e.type === "pointerup" && !awayFromBar(e.clientY, r.top, r.bottom)) act({ kind: "marker", place });
       else cancel();
     };
+    const unlisten = callOff(
+      list.ownerDocument,
+      () => place !== null,
+      () => {
+        end();
+        cancel();
+      },
+    );
     list.addEventListener("pointermove", move);
     list.addEventListener("pointerup", stop);
     list.addEventListener("pointercancel", stop);

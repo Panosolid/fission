@@ -10,7 +10,7 @@
 // scrolls the row and taps between items (24f5).
 
 import type { DesignDocument } from "./document.ts";
-import { barEdges, barEdit, dropIndex, isDrag, swallowClick, type BarAction, type ItemEdges } from "./timeline-bar.ts";
+import { awayFromBar, barEdges, barEdit, callOff, dropIndex, isDrag, swallowClick, type BarAction, type ItemEdges } from "./timeline-bar.ts";
 
 /** What dropping an item at a place would do, shown while it is dragged: it stays (its own place), it moves, or it is refused with the message. */
 export type DropState = { kind: "stays" } | { kind: "moves" } | { kind: "refused"; message: string };
@@ -35,6 +35,9 @@ export function gapX(edges: readonly ItemEdges[], place: number): number {
   return (edges[place - 1].right + edges[place].left) / 2;
 }
 
+/** The words while a dragged item is far from the bar, where letting go calls the drag off. */
+export const AWAY_WORDS = "Let go here to leave it where it was";
+
 /** What an item's drag needs from the bar. */
 export interface ItemDrag {
   doc: DesignDocument;
@@ -56,7 +59,10 @@ export interface ItemDrag {
  * that isn't picked drag nothing. While dragged the item is dimmed, a line
  * stands at the place it would drop (`dropIndex` on the items as laid
  * out), red with the refusal's words when it can't go there. The click a
- * drag's release makes is dropped, as the marker's is.
+ * drag's release makes is dropped, as the marker's is. Escape, a
+ * right-click, or letting go far from the bar (`awayFromBar`, the line
+ * saying so meanwhile) calls the drag off: nothing moves (timeline hunt,
+ * finding 7).
  */
 export function dragItem(row: HTMLElement, list: HTMLElement, li: HTMLElement, o: ItemDrag) {
   li.addEventListener("pointerdown", (down) => {
@@ -66,17 +72,19 @@ export function dragItem(row: HTMLElement, list: HTMLElement, li: HTMLElement, o
     let place: number | null = null;
     let line: HTMLElement | null = null;
     let note: HTMLElement | null = null;
+    /** Whether the pointer is far enough from the bar that letting go calls the drag off. */
+    let away = false;
     const show = (p: number) => {
-      const state = dropState(o.doc, o.id, p, o.editing);
+      const state: DropState | { kind: "away" } = away ? { kind: "away" } : dropState(o.doc, o.id, p, o.editing);
       const rowLeft = row.getBoundingClientRect().left;
       const listLeft = list.getBoundingClientRect().left - rowLeft;
       const x = listLeft + gapX(barEdges(list), p) - list.scrollLeft;
       line!.style.left = `${x - 1}px`;
       line!.dataset.place = String(p); // read by the e2e test
-      line!.dataset.state = state.kind;
-      if (state.kind === "refused") {
+      line!.dataset.state = note!.dataset.state = state.kind;
+      if (state.kind === "refused" || state.kind === "away") {
         note!.hidden = false;
-        note!.textContent = state.message;
+        note!.textContent = state.kind === "away" ? AWAY_WORDS : state.message;
         // Above the line, kept inside the row.
         const w = note!.offsetWidth;
         note!.style.left = `${Math.max(4, Math.min(x - w / 2, row.clientWidth - w - 4))}px`;
@@ -100,22 +108,39 @@ export function dragItem(row: HTMLElement, list: HTMLElement, li: HTMLElement, o
         row.append(line, note);
       }
       e.preventDefault();
+      const r = row.getBoundingClientRect();
+      away = awayFromBar(e.clientY, r.top, r.bottom);
       place = dropIndex(barEdges(list), e.clientX - list.getBoundingClientRect().left, list.scrollLeft);
       show(place);
     };
-    const stop = (e: PointerEvent) => {
-      if (e.pointerId !== down.pointerId) return;
+    /** Stops listening and takes the drag's marks away; whether there was a drag. */
+    const end = () => {
       li.removeEventListener("pointermove", move);
       li.removeEventListener("pointerup", stop);
       li.removeEventListener("pointercancel", stop);
-      if (place === null) return;
+      unlisten();
+      if (place === null) return false;
       li.classList.remove("timeline-reorder-dragged");
       line?.remove();
       note?.remove();
+      return true;
+    };
+    const stop = (e: PointerEvent) => {
+      if (e.pointerId !== down.pointerId) return;
+      if (!end()) return;
       swallowClick(list);
-      if (e.type === "pointerup") o.act({ kind: "item", id: o.id, place });
+      const r = row.getBoundingClientRect();
+      if (e.type === "pointerup" && !awayFromBar(e.clientY, r.top, r.bottom)) o.act({ kind: "item", id: o.id, place: place! });
       else o.cancel();
     };
+    const unlisten = callOff(
+      document,
+      () => place !== null,
+      () => {
+        end();
+        o.cancel();
+      },
+    );
     // The item holds the pointer from the press, so the moves and the release come back to it wherever the
     // pointer goes, and a press with no drag is still a click on the item (it picks it).
     try {

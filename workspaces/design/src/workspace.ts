@@ -16,7 +16,7 @@ import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, rowReferences, type BrowserNode } from "./browser.ts";
-import { showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
+import { callOffDrag, showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
 import { deleteAsk } from "./delete-ask.ts";
@@ -1482,6 +1482,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     // Escape clears the selection; Copy with one profile selected runs Copy as SVG (shortcuts.ts).
     shortcut(id) {
       if (!shown) return false; // the shell only asks while shown; never act asleep
+      // Escape during a drag on the timeline bar calls the drag off, and only that (timeline hunt, finding 7).
+      if (id === "clear-selection" && callOffDrag()) return true;
       // Escape with the Create menu open closes the menu, and only that.
       if (id === "clear-selection" && sketchBar.menuOpen) return sketchBar.closeMenu(), true;
       // Escape in the sketch tool: leaves the plane prompt, or ends the line, rectangle, circle, arc or tangent arc being drawn.
