@@ -307,7 +307,7 @@ jobs:
           path: ${{ runner.temp }}/journeys/
           if-no-files-found: ignore
 
-  # The golden models (step 28b, packages/testing/nightly/golden.ts): every
+  # The golden models (step 28b, packages/testing/golden/nightly.ts): every
   # model in tests/golden that builds today rebuilt in 50 shuffled rounds on
   # one kernel, each checked against its hand-worked answers and against its
   # own first rebuild, then timed and counted against tests/baseline.json

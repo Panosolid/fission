@@ -1,5 +1,5 @@
 // The golden models' rebuild time and success, for tests/baseline.json
-// (step 28b; src/golden-rebuild.ts runs them): for each model that builds
+// (step 28b; golden/rebuild.ts runs them): for each model that builds
 // today, `golden_<model>` (dashes as underscores) with
 // - `kernel_calls`: every kernel call one rebuild from nothing makes, exact
 //   (the frees after it are the runner's tidying, not the app's, and aren't
@@ -10,11 +10,11 @@
 // and `golden_models.failed_percent`: the models whose rebuild differs from
 // their hand-worked answers, as a percent of those run (0 is a 100% success
 // rate; any rise fails). Measured by baseline/app.ts on every pull request
-// and by nightly/golden.ts each night.
+// and by golden/nightly.ts each night.
 
 import type { BodyView, KernelCalls } from "@fission/core";
 import type { GoldenExpect } from "../src/golden.ts";
-import { checkGolden, goldenDesign, measureGolden } from "../src/golden-rebuild.ts";
+import { checkGolden, goldenDesign, measureGolden } from "../golden/rebuild.ts";
 import { calibration, fastest, relative } from "./calibration.ts";
 
 /** The metric name a model's lines go under: "l-bracket" is "golden_l_bracket". */

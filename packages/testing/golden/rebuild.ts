@@ -4,13 +4,13 @@
 // expectations are written, then checked against them and through a save
 // and reopen. Shared by journeys/golden.journey.ts (every pull request),
 // baseline/golden.ts (rebuild time and success for tests/baseline.json)
-// and nightly/golden.ts (step 28b, the nightly run).
+// and golden/nightly.ts (step 28b, the nightly run).
 
 import { readdirSync, readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { projectFromJson, projectToJson, type GeometryReference, type KernelCalls, type Project, type StableId } from "@fission/core";
 import { BodyCache, bodyRows, designWorkspace, findInScene, isFaceSketch, joinBodies, rebuildTimeline, shownBodies, type DesignDocument } from "@fission/design";
-import { bodyTolerance, compare, plan, planeGap, readExpect, shellCount, type GoldenExpect, type Measured, type Vec3 } from "./golden.ts";
+import { bodyTolerance, compare, plan, planeGap, readExpect, shellCount, type GoldenExpect, type Measured, type Vec3 } from "../src/golden.ts";
 
 export const GOLDEN_DIR = new URL("../../../tests/golden/", import.meta.url);
 

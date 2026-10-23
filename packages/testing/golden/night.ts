@@ -1,5 +1,5 @@
 // The golden models' nightly run (step 28b; .github/workflows/nightly.yml,
-// job golden, through nightly/golden.ts): every model that builds today
+// job golden, through golden/nightly.ts): every model that builds today
 // rebuilt `rounds` times on one kernel, in an order shuffled by the seed
 // each round, so a model is rebuilt after every other one. Each rebuild is
 // checked against its hand-worked answers (`checkGolden`), and against
@@ -15,9 +15,9 @@
 // `random-testing` issue.
 
 import type { BodyView, KernelCalls } from "@fission/core";
-import type { GoldenExpect, Measured } from "./golden.ts";
-import { checkGolden, firstDifference } from "./golden-rebuild.ts";
-import { seeded } from "./index.ts";
+import type { GoldenExpect, Measured } from "../src/golden.ts";
+import { checkGolden, firstDifference } from "./rebuild.ts";
+import { seeded } from "../src/index.ts";
 
 export interface GoldenFailure {
   /** The model, or "the run" for what no one model did (a leaked body). */

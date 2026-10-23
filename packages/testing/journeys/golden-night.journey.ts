@@ -1,5 +1,5 @@
 // The golden models' nightly run on the real kernel (step 28b;
-// src/golden-night.ts, nightly/golden.ts, baseline/golden.ts): a clean
+// golden/night.ts, golden/nightly.ts, baseline/golden.ts): a clean
 // night passes with every model's kernel calls as worked out by hand and
 // tests/baseline.json holds them; then the run as the nightly job starts
 // it, with each planted bug (`GOLDEN_FAULTS`), must fail, write the folder
@@ -14,8 +14,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildable } from "../src/golden-rebuild.ts";
-import { goldenNight, shuffled } from "../src/golden-night.ts";
+import { buildable } from "../golden/rebuild.ts";
+import { goldenNight, shuffled } from "../golden/night.ts";
 import { seeded } from "../src/index.ts";
 import { goldenMetric, goldenMetrics } from "../baseline/golden.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
@@ -68,7 +68,7 @@ function night(fault?: string) {
   try {
     const { FISSION_GOLDEN_FAULT: _, ...outside } = process.env;
     const env = { ...outside, FISSION_SEED: "3", FISSION_GOLDEN_ROUNDS: "2", FISSION_GOLDEN_TIMING_RUNS: "1", FISSION_GOLDEN_OUT: join(dir, "golden"), ...(fault ? { FISSION_GOLDEN_FAULT: fault } : {}) };
-    const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "nightly/golden.ts"], { cwd: join(ROOT, "packages/testing"), env, encoding: "utf8" });
+    const run = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", "golden/nightly.ts"], { cwd: join(ROOT, "packages/testing"), env, encoding: "utf8" });
     const folder = join(dir, "golden", "seed-golden-3");
     const report = existsSync(join(folder, "golden-report.txt")) ? readFileSync(join(folder, "golden-report.txt"), "utf8") : null;
     const measured = JSON.parse(readFileSync(join(dir, "golden", "measured.json"), "utf8")) as Record<string, number>;

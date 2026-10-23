@@ -199,7 +199,7 @@ class Folders(unittest.TestCase):
         self.assertEqual(list(found.values()), [[("11", ROTATE_A.strip()), ("22", ROTATE_B.strip())]])
 
 
-# The shape packages/testing/src/golden-night.ts writes (step 28b);
+# The shape packages/testing/golden/night.ts writes (step 28b);
 # journeys/golden-night.journey.ts feeds a real one through this script.
 GOLDEN_A = """Golden models, seed 7: 20 rounds of 6 models (tests/golden), 2 failed
 failure: l-bracket: Body 1 (feature-15): volume 48000.048 is not 48000 (40*30*40 ...) | first in round 3 (order: gear, l-bracket); replay: FISSION_SEED=7 FISSION_GOLDEN_ROUNDS=20 npm run golden -w @fission/testing

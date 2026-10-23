@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { projectFromJson, projectToJson, type BodyView, type KernelCalls } from "@fission/core";
 import { designWorkspace, type DesignDocument } from "@fission/design";
 import { bodyTolerance, compare, LINEAR, plan, type GoldenExpect } from "../src/golden.ts";
-import { goldenDesign as designOf, goldenExpects as expects, goldenFiles as projectFiles, measureGolden, openGolden as open } from "../src/golden-rebuild.ts";
+import { goldenDesign as designOf, goldenExpects as expects, goldenFiles as projectFiles, measureGolden, openGolden as open } from "../golden/rebuild.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
 
 const kernel = nodeKernel();

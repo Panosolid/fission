@@ -33,7 +33,7 @@ import { READERS } from "../src/project-fuzz.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { namingRate } from "./naming.ts";
 import { goldenMetrics, volumeOff } from "./golden.ts";
-import { buildable } from "../src/golden-rebuild.ts";
+import { buildable } from "../golden/rebuild.ts";
 import { BodyCache, countingKernel, editFirst, REBUILD_FAULTS, rebuildPart, showEdit, type RebuildFault } from "./rebuild.ts";
 import { seeded } from "../src/index.ts";
 import { calibration, fastest } from "./calibration.ts";

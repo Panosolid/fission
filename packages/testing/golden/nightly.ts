@@ -1,4 +1,4 @@
-// The golden models' nightly run (step 28b; src/golden-night.ts has the
+// The golden models' nightly run (step 28b; golden/night.ts has the
 // checks; .github/workflows/nightly.yml, job golden): FISSION_GOLDEN_ROUNDS
 // rounds (default 20) of every model that builds today, shuffled by
 // FISSION_SEED (decimal; a fresh random one if unset), then each model's
@@ -17,8 +17,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { goldenMetrics } from "../baseline/golden.ts";
-import { buildable } from "../src/golden-rebuild.ts";
-import { GOLDEN_FAULTS, goldenNight, goldenReport, plantGoldenFault, replay, type GoldenFault } from "../src/golden-night.ts";
+import { buildable } from "./rebuild.ts";
+import { GOLDEN_FAULTS, goldenNight, goldenReport, plantGoldenFault, replay, type GoldenFault } from "./night.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
 
 const roundsText = process.env.FISSION_GOLDEN_ROUNDS?.trim() || "20";

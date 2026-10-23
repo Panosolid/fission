@@ -1,5 +1,5 @@
 // The golden models' nightly run without the kernel (step 28b,
-// src/golden-night.ts, baseline/golden.ts): the shuffle, hand-worked and
+// golden/night.ts, baseline/golden.ts): the shuffle, hand-worked and
 // against every order counted over seeded shuffles; where two answers
 // first differ; the failed percent; and the report file_issues.py reads.
 // The run itself, on the real kernel with planted bugs, is
@@ -7,8 +7,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { firstDifference } from "../src/golden-rebuild.ts";
-import { goldenReport, replay, shuffled, type GoldenNight } from "../src/golden-night.ts";
+import { firstDifference } from "../golden/rebuild.ts";
+import { goldenReport, replay, shuffled, type GoldenNight } from "../golden/night.ts";
 import { failedPercent, goldenMetric } from "../baseline/golden.ts";
 import { seeded } from "../src/index.ts";
 
