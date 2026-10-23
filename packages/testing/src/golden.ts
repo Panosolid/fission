@@ -13,6 +13,13 @@
 // number is written as arithmetic ("5 * (60*40 - 2*pi*6^2)") with the
 // working beside it (`why`), so a reader can check it without running
 // anything.
+//
+// A model that needs a later step (`from`) is written before that step
+// exists (28a2), so it also carries its `recipe`: the steps a user takes,
+// in words and numbers, each naming the timeline item it makes, so the
+// step's thread makes exactly that project file. A body may have voids
+// (`shells`), and an item may be expected to fail with words (`refused`),
+// as the boolean rules in docs/progress/booleans.md say.
 
 import type { BodyView } from "@fission/core";
 
@@ -32,7 +39,8 @@ export interface BodyExpect {
   item: string;
   volume: Worked;
   area: Worked;
-  topology: { faces: number; edges: number; vertices: number; why: string };
+  /** `shells`: the outer shell and one per void (B0 decision 3); left out, 1. */
+  topology: { faces: number; edges: number; vertices: number; shells?: number; why: string };
   /** The smallest axis-aligned box round the body, [low, high] corners. */
   box: { is: [Triple, Triple]; why: string };
   /** The largest tolerance any vertex or edge of the body may carry (LINEAR, 1e-5 mm, for every model we make ourselves). */
@@ -57,14 +65,37 @@ export interface PinExpect {
   at: { is: Triple; why: string };
 }
 
+/** One step of a recipe: what the user does, in words and numbers, and the timeline item it makes, by the id Design gives it. */
+export interface RecipeStep {
+  do: string;
+  makes?: string;
+}
+
+/** A timeline item that must fail, and words its message must hold (each, ignoring case), with the reason it must. */
+export interface RefusedExpect {
+  item: string;
+  says: string[];
+  why: string;
+}
+
 export interface GoldenExpect {
   model: string;
   what: string;
   /** The step this model needs, when it is later than today's (it runs from the day that step lands, `LANDED`). */
   from?: string;
+  /**
+   * How a user makes the model, for a model written before its step
+   * exists (required with `from`). Item ids follow Design's one counter
+   * (each sketch, sketch point, line, circle and feature takes the next
+   * number; a deleted item's number isn't reused), and every item an
+   * expectation names is made by some step.
+   */
+  recipe?: RecipeStep[];
   bodies: BodyExpect[];
   sketches: SketchExpect[];
   pins: PinExpect[];
+  /** Items that must fail with words, as a cut leaving a face thinner than 1 µm must; every other item builds cleanly. */
+  refused?: RefusedExpect[];
 }
 
 /**
@@ -92,12 +123,48 @@ export const NORMAL_ABS = 1e-9;
 /** The kernel's linear tolerance (kernel/src/tolerance.rs LINEAR): every entity carries it until step 31 gives each its own. */
 export const LINEAR = 1e-5;
 
-const FUNCTIONS: Record<string, (x: number) => number> = { sqrt: Math.sqrt, sin: Math.sin, cos: Math.cos, tan: Math.tan, atan: Math.atan };
+/**
+ * The complete elliptic integrals of the first and second kind,
+ * K(k) = ∫₀^{π/2} dθ / √(1 − k² sin²θ) and E(k) = ∫₀^{π/2} √(1 − k² sin²θ) dθ,
+ * of the modulus k (not the parameter m = k²), by the arithmetic-geometric
+ * mean: a₀ = 1, b₀ = √(1 − k²), c₀ = k; aₙ₊₁ = (aₙ + bₙ)/2, bₙ₊₁ = √(aₙbₙ),
+ * cₙ₊₁ = (aₙ − bₙ)/2; then K = π / (2a∞) and E = K (1 − Σ 2ⁿ⁻¹ cₙ²)
+ * (Abramowitz and Stegun 17.6). The mean converges quadratically, so 32
+ * rounds is far past the last digit (six reach it for k = 0.99). A pipe
+ * tee's crossing (two cylinders of radii a < R at right angles) has its
+ * volumes and areas in these, with k = a / R. Outside 0 ≤ k ≤ 1 both are
+ * NaN, and K(1) is infinite, so `evaluate` refuses them.
+ */
+export function elliptic(k: number): { K: number; E: number } {
+  if (!(k >= 0 && k <= 1)) return { K: NaN, E: NaN };
+  if (k === 1) return { K: Infinity, E: 1 };
+  let [a, b, c] = [1, Math.sqrt(1 - k * k), k];
+  let weight = 0.5;
+  let sum = weight * c * c;
+  for (let n = 0; n < 32; n++) {
+    [a, b, c] = [(a + b) / 2, Math.sqrt(a * b), (a - b) / 2];
+    weight *= 2;
+    sum += weight * c * c;
+  }
+  const K = Math.PI / (2 * a);
+  return { K, E: K * (1 - sum) };
+}
+
+const FUNCTIONS: Record<string, (x: number) => number> = {
+  sqrt: Math.sqrt,
+  sin: Math.sin,
+  cos: Math.cos,
+  tan: Math.tan,
+  atan: Math.atan,
+  ellipk: (k) => elliptic(k).K,
+  ellipe: (k) => elliptic(k).E,
+};
 
 /**
  * The value of hand-worked arithmetic: numbers (1e-5 too), + − * /, ^
  * (right to left, binding tighter than a leading minus: -2^2 is −4), pi,
- * sqrt, sin, cos, tan and atan of a bracketed argument, brackets. Anything
+ * sqrt, sin, cos, tan, atan, ellipk and ellipe (`elliptic`) of a bracketed
+ * argument, brackets. Anything
  * else throws, naming where it stopped; so does a result that isn't a
  * finite number. A plain number is itself.
  */
@@ -175,7 +242,12 @@ export function evaluate(e: Expr): number {
 
 const triple = (t: Triple): Vec3 => [evaluate(t[0]), evaluate(t[1]), evaluate(t[2])];
 
-/** Reads an expect.json's text: refused (thrown, naming where) unless every field is there, every `why` says something, and every number evaluates. */
+/**
+ * Reads an expect.json's text: refused (thrown, naming where) unless every
+ * field is there, every `why` says something, and every number evaluates;
+ * a model with `from` needs its recipe, and every item it names (a body's,
+ * a sketch's, a pin's sketch, a refused item) must be one a step makes.
+ */
 export function readExpect(text: string, file: string): GoldenExpect {
   const data = JSON.parse(text) as GoldenExpect;
   const bad = (where: string, what: string): never => {
@@ -210,6 +282,22 @@ export function readExpect(text: string, file: string): GoldenExpect {
   word(data.what, "what");
   if (data.from !== undefined) word(data.from, "from");
   for (const key of ["bodies", "sketches", "pins"] as const) if (!Array.isArray(data[key])) bad(key, "must be a list");
+  if (data.from !== undefined && data.recipe === undefined) bad("recipe", `must say how a user makes the model, which waits for step ${data.from}`);
+  const made = new Set<string>();
+  if (data.recipe !== undefined) {
+    if (!Array.isArray(data.recipe) || data.recipe.length === 0) bad("recipe", "must list its steps");
+    data.recipe.forEach((r, i) => {
+      if (!isObject(r) || typeof r.do !== "string" || r.do.trim().length < 3) bad(`recipe[${i}]`, "must say what the user does in do");
+      if (r.makes === undefined) return;
+      word(r.makes, `recipe[${i}].makes`);
+      if (made.has(r.makes)) bad(`recipe[${i}].makes`, `${r.makes} is made by an earlier step too`);
+      made.add(r.makes);
+    });
+  }
+  // With a recipe, every item named is one its steps make.
+  const madeBy = (id: string, where: string) => {
+    if (data.recipe !== undefined && !made.has(id)) bad(where, `${id} is made by no step of the recipe`);
+  };
   if (data.bodies.length === 0 && data.from === undefined) bad("bodies", "must list at least one body");
   data.bodies.forEach((b, i) => {
     const at = `bodies[${i}]`;
@@ -221,6 +309,8 @@ export function readExpect(text: string, file: string): GoldenExpect {
     num(b.tolerance, `${at}.tolerance`);
     why(b.topology, `${at}.topology`);
     for (const k of ["faces", "edges", "vertices"] as const) if (!Number.isInteger(b.topology[k]) || b.topology[k] < 0) bad(`${at}.topology.${k}`, "must be a count");
+    if (b.topology.shells !== undefined && (!Number.isInteger(b.topology.shells) || b.topology.shells < 1)) bad(`${at}.topology.shells`, "must be a count of at least 1");
+    madeBy(b.item, `${at}.item`);
     why(b.box, `${at}.box`);
     if (!Array.isArray(b.box.is) || b.box.is.length !== 2) bad(`${at}.box`, "must be two corners");
     three(b.box.is[0], `${at}.box.is[0]`);
@@ -230,6 +320,7 @@ export function readExpect(text: string, file: string): GoldenExpect {
     const at = `sketches[${i}]`;
     word(s.sketch, `${at}.sketch`);
     word(s.face, `${at}.face`);
+    madeBy(s.sketch, `${at}.sketch`);
     why(s.plane, `${at}.plane`);
     three(s.plane.normal, `${at}.plane.normal`);
     three(s.plane.point, `${at}.plane.point`);
@@ -238,9 +329,22 @@ export function readExpect(text: string, file: string): GoldenExpect {
     const at = `pins[${i}]`;
     for (const k of ["sketch", "point", "kind", "name"] as const) word(p[k], `${at}.${k}`);
     if (p.feature !== undefined) word(p.feature, `${at}.feature`);
+    madeBy(p.sketch, `${at}.sketch`);
     why(p.at, `${at}.at`);
     three(p.at.is, `${at}.at.is`);
   });
+  if (data.refused !== undefined) {
+    if (!Array.isArray(data.refused)) bad("refused", "must be a list");
+    data.refused.forEach((r, i) => {
+      const at = `refused[${i}]`;
+      if (!isObject(r)) bad(at, "must be an object");
+      word(r.item, `${at}.item`);
+      madeBy(r.item, `${at}.item`);
+      if (!Array.isArray(r.says) || r.says.length === 0) bad(`${at}.says`, "must list the words its message holds");
+      r.says.forEach((w, j) => word(w, `${at}.says[${j}]`));
+      why(r, at);
+    });
+  }
   return data;
 }
 
@@ -293,6 +397,31 @@ export function planeGap(view: Pick<BodyView, "face_normals" | "face_centroids" 
 }
 
 /**
+ * How many shells the body has: its faces fall into groups joined by the
+ * edges between them (each edge joins the two faces it bounds), and each
+ * group is one closed shell, the outer one or a void (B0 decision 3). An
+ * edge not used once each way (null, only in a body that failed
+ * validation) joins nothing.
+ */
+export function shellCount(view: Pick<BodyView, "faces" | "edge_faces">): number {
+  const up = Array.from({ length: view.faces }, (_, f) => f);
+  const root = (f: number): number => {
+    while (up[f] !== f) f = up[f] = up[up[f]];
+    return f;
+  };
+  let shells = view.faces;
+  for (const pair of view.edge_faces) {
+    if (!pair) continue;
+    const [a, b] = [root(pair[0]), root(pair[1])];
+    if (a !== b) {
+      up[a] = b;
+      shells--;
+    }
+  }
+  return shells;
+}
+
+/**
  * The largest tolerance the body's vertices and edges carry. The kernel
  * gives each its own at step 31 (kernel/CLAUDE.md, B0 decision 5); until
  * then validation holds every one to LINEAR, so a body that validated
@@ -311,6 +440,7 @@ export interface MeasuredBody {
   faces: number;
   edges: number;
   vertices: number;
+  shells: number;
   box: [Vec3, Vec3];
   tolerance: number;
   gap: number;
@@ -343,17 +473,29 @@ export interface Measured {
   bodies: MeasuredBody[];
   sketches: MeasuredSketch[];
   pins: MeasuredPin[];
-  /** Every item that didn't build cleanly: failed, off, or built with a warning (a golden model has none). */
+  /** Every item that built but not cleanly: off, or built with a warning (a golden model has none). */
   trouble: string[];
+  /** Every item that failed, with its message. */
+  failed: { item: string; message: string }[];
 }
 
-const near = (got: number, want: number, rel = REL) => Math.abs(got - want) <= rel * Math.max(1, Math.abs(want));
+// Relative to the answer's own size, however small: a 1 µm cube's volume is 1e-9 mm³ (28a2 found the old floor of 1 let it be 2e-9).
+const near = (got: number, want: number, rel = REL) => Math.abs(got - want) <= rel * Math.abs(want);
 const within = (got: readonly number[], want: readonly number[], abs: number) => got.every((g, k) => Math.abs(g - want[k]) <= abs);
 const show = (v: readonly number[]) => `(${v.join(", ")})`;
 
 /** Every way a rebuild differs from the hand-worked answers, in words; empty when it matches. */
 export function compare(want: GoldenExpect, got: Measured): string[] {
   const out: string[] = [...got.trouble];
+  for (const f of got.failed) {
+    const w = want.refused?.find((r) => r.item === f.item);
+    if (!w) out.push(`${f.item} failed: ${f.message}`);
+    else {
+      const missing = w.says.filter((word) => !f.message.toLowerCase().includes(word.toLowerCase()));
+      if (missing.length > 0) out.push(`${f.item} failed, but its message "${f.message}" doesn't say ${missing.map((m) => `"${m}"`).join(", ")}`);
+    }
+  }
+  for (const w of want.refused ?? []) if (!got.failed.some((f) => f.item === w.item)) out.push(`${w.item} built, but must be refused: ${w.why}`);
   const key = (b: { body: string; item: string }) => `${b.body} (${b.item})`;
   if (JSON.stringify(got.bodies.map(key)) !== JSON.stringify(want.bodies.map(key))) out.push(`bodies ${got.bodies.map(key).join(", ") || "none"}, not ${want.bodies.map(key).join(", ") || "none"}`);
   for (const w of want.bodies) {
@@ -369,6 +511,8 @@ export function compare(want: GoldenExpect, got: Measured): string[] {
     const counts = [g.faces, g.edges, g.vertices];
     const wanted = [w.topology.faces, w.topology.edges, w.topology.vertices];
     if (counts.some((c, k) => c !== wanted[k])) out.push(`${at}: faces, edges, vertices ${counts.join(", ")}, not ${wanted.join(", ")}`);
+    const shells = w.topology.shells ?? 1;
+    if (g.shells !== shells) out.push(`${at}: ${g.shells} shells, not ${shells}`);
     const box = [triple(w.box.is[0]), triple(w.box.is[1])];
     if (!within(g.box[0], box[0], POINT_ABS) || !within(g.box[1], box[1], POINT_ABS)) out.push(`${at}: box ${show(g.box[0])} to ${show(g.box[1])}, not ${show(box[0])} to ${show(box[1])}`);
     if (g.tolerance > tolerance) out.push(`${at}: carries a tolerance of ${g.tolerance} mm, more than the ${tolerance} it may`);

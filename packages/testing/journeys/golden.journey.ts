@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { projectFromJson, projectToJson, type BodyView, type GeometryReference, type KernelCalls, type StableId } from "@fission/core";
 import { BodyCache, bodyRows, designWorkspace, findInScene, isFaceSketch, joinBodies, rebuildTimeline, shownBodies, type DesignDocument } from "@fission/design";
-import { bodyTolerance, compare, LINEAR, plan, planeGap, readExpect, type GoldenExpect, type Measured, type Vec3 } from "../src/golden.ts";
+import { bodyTolerance, compare, LINEAR, plan, planeGap, readExpect, shellCount, type GoldenExpect, type Measured, type Vec3 } from "../src/golden.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
 
 const DIR = new URL("../../../tests/golden/", import.meta.url);
@@ -44,12 +44,13 @@ async function measure(doc: DesignDocument, calls: KernelCalls = kernel): Promis
     const ms = performance.now() - start;
     const scene = joinBodies(shown);
     const trouble: string[] = [];
+    const failures: Measured["failed"] = [];
     const failed = new Set<string>();
     for (const id of build.order) {
       const r = build.results[id];
       if (r.status === "failed") {
         failed.add(id);
-        trouble.push(`${id} failed: ${r.message}`);
+        failures.push({ item: id, message: r.message });
       } else if (r.status !== "built") trouble.push(`${id} is ${r.status}`);
       else for (const w of [r.warning, r.plane, r.source, r.points, r.projections]) if (w) trouble.push(`${id} warns: ${w.message}`);
     }
@@ -64,6 +65,7 @@ async function measure(doc: DesignDocument, calls: KernelCalls = kernel): Promis
         faces: v.faces,
         edges: v.edges,
         vertices: v.vertices,
+        shells: shellCount(v),
         box: v.bounds,
         tolerance: bodyTolerance(v),
         gap: planeGap(v),
@@ -106,7 +108,7 @@ async function measure(doc: DesignDocument, calls: KernelCalls = kernel): Promis
         return { sketch: s.id, point: pin.point, kind: pin.kind, name: pin.name, ...(pin.feature !== undefined ? { feature: pin.feature } : {}), at };
       }),
     );
-    return { got: { bodies, sketches, pins, trouble }, ms };
+    return { got: { bodies, sketches, pins, trouble, failed: failures }, ms };
   } finally {
     await cache.clear();
   }
@@ -159,6 +161,23 @@ test("a planted wrong expectation fails: a volume a millionth out, a face's name
   // A pin's name, and where the point lands.
   const pin = planted("stepped-boss", (e) => (e.pins[0].name = "end+side:circle-3"));
   assert.match(compare(pin, got).join("\n"), /^sketch-6\/point-7: pinned to centre end\+side:circle-4, not centre end\+side:circle-3$/m);
+  // A void that isn't there (28a2's hollow box says 2).
+  const shells = planted("stepped-boss", (e) => (e.bodies[0].topology.shells = 2));
+  assert.match(compare(shells, got).join("\n"), /^Body 1 \(feature-1\): 1 shells, not 2$/m);
+});
+
+test("a refusal is checked on a real rebuild: the L bracket's extrude made 2 km long fails with the kernel's words", async () => {
+  const doc = designOf("l-bracket");
+  const extrude = doc.timeline.features.find((f) => f.id === "feature-15")!;
+  extrude.intent.parameters.distance = 2e6;
+  const { got } = await measure(doc);
+  assert.deepEqual(got.bodies, [], "the only body failed");
+  const want = (says: string[]): GoldenExpect => ({ ...expects().find((e) => e.model === "l-bracket")!, bodies: [], refused: [{ item: "feature-15", says, why: "2 km is past MAX_SIZE, 1 km" }] });
+  assert.deepEqual(compare(want(["extrude distance", "1000000 mm"]), got), []);
+  assert.match(compare(want(["1 µm"]), got).join("\n"), /^feature-15 failed, but its message ".*" doesn't say "1 µm"$/m);
+  // And expecting a refusal of a model that builds fails.
+  const { got: built } = await measure(designOf("l-bracket"));
+  assert.match(compare({ ...expects().find((e) => e.model === "l-bracket")!, refused: [{ item: "feature-15", says: ["km"], why: "a test" }] }, built).join("\n"), /^feature-15 built, but must be refused: a test$/m);
 });
 
 /** The real kernel with one bug planted in its views (as body-store.journey.ts plants them), the rest of its answers untouched. */
@@ -192,4 +211,6 @@ test("bugs planted in the kernel's answers are caught on the real models", async
   await caught("stepped-boss", (v) => ({ ...v, face_normals: v.face_normals.map((n) => (n && n[2] === 1 ? [0, 0, -1] : n)) as BodyView["face_normals"] }), /sketch-2: face:feature-1\/top faces \(0, 0, -1\)/);
   // A validation error the kernel reports.
   await caught("bracket-two-holes", (v) => ({ ...v, errors: ["edge 3 is 1e-4 mm off face 2"] }), /fails validation: edge 3/);
+  // The edges round the kernel's face 0 lost (each said used other than once each way): that face falls away from the rest, two shells.
+  await caught("l-bracket", (v) => ({ ...v, edge_faces: v.edge_faces.map((pair) => (pair?.includes(0) ? null : pair)) }), /^Body 1 \(feature-15\): 2 shells, not 1$/m);
 });

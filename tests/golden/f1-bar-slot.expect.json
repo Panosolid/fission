@@ -1,0 +1,110 @@
+{
+  "model": "f1-bar-slot",
+  "what": "Ben's Fusion check F1: a 100 × 20 × 10 bar cut through by a slot at x 30–40, an Extrude cut, leaving two bodies. The far piece, x 40–100, keeps Body 1: walking the bar's faces in the order they were made, the first wholly in one piece is the side x = 100, from the rectangle's second line (40a rule 1); the near piece, x 0–30, is Body 2.",
+  "from": "39a",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool: click (0, 0), then (100, 20) (points 3, 4, 6, 8; lines 5, 7, 9, 10: line 5 the side y = 0, line 7, the second, the side x = 100)."
+    },
+    {
+      "do": "Extrude the sketch 10 (z 0 to 10): Body 1, the bar.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-12"
+    },
+    {
+      "do": "Rectangle tool: click (30, −5), then (40, 25): the slot, past both of the bar's long sides (points and lines 13 to 20; seen along Z the bar offers its corners and its edges' middles (50, 0), (50, 20), (0, 10), (100, 10), none here)."
+    },
+    {
+      "do": "Extrude the sketch 10 (z 0 to 10) as a Cut; objects to cut: Body 1 (the visible body it overlaps, 39a1).",
+      "makes": "feature-21"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-21",
+      "volume": {
+        "is": "60*20*10",
+        "why": "the far piece, x 40..100: 60 × 20 × 10"
+      },
+      "area": {
+        "is": "2*(60*20 + 60*10 + 20*10)",
+        "why": "a 60 × 20 × 10 box: 2(1200 + 600 + 200)"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: the slot's wall x = 40 closes the piece; 8 − 12 + 6 = 2"
+      },
+      "box": {
+        "is": [
+          [
+            40,
+            0,
+            0
+          ],
+          [
+            100,
+            20,
+            10
+          ]
+        ],
+        "why": "from the slot's far wall to the bar's end"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    },
+    {
+      "body": "Body 2",
+      "item": "feature-21",
+      "volume": {
+        "is": "30*20*10",
+        "why": "the near piece, x 0..30: 30 × 20 × 10"
+      },
+      "area": {
+        "is": "2*(30*20 + 30*10 + 20*10)",
+        "why": "a 30 × 20 × 10 box: 2(600 + 300 + 200)"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: the slot's wall x = 30 closes the piece; 8 − 12 + 6 = 2"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            30,
+            20,
+            10
+          ]
+        ],
+        "why": "from the bar's start to the slot's near wall"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

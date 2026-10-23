@@ -1,0 +1,109 @@
+{
+  "model": "bracket-extrude-cuts",
+  "what": "The bracket with two holes made as a user would once Extrude cuts exist: the ready-made box 80 × 40 × 6, then two holes r 6 round (20, 20) and (60, 20), each a circle sketched on its top and extruded down through it as a Cut. The same solid as bracket-two-holes, which makes the holes in its profile.",
+  "from": "39a",
+  "recipe": [
+    {
+      "do": "Start a new part with its ready-made box 80 × 40 × 6 from the origin: Body 1.",
+      "makes": "feature-1"
+    },
+    {
+      "do": "Create Sketch on the box's top face (z = 6).",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Circle tool: click the centre (20, 20), then (26, 20) for r 6 (point 3, circle 4). The top's corners and edge middles (40, 0), (40, 40), (0, 20), (80, 20) are elsewhere, so nothing is pinned."
+    },
+    {
+      "do": "Extrude the sketch 6, flipped (down through the plate), as a Cut on Body 1.",
+      "makes": "feature-5"
+    },
+    {
+      "do": "Create Sketch on the box's top face, which has the first hole in it now.",
+      "makes": "sketch-6"
+    },
+    {
+      "do": "Circle tool: click the centre (60, 20), then (66, 20) for r 6 (point 7, circle 8). The first hole offers its centre (20, 20) and its circles' vertices, none here."
+    },
+    {
+      "do": "Extrude the sketch 6, flipped, as a Cut on Body 1.",
+      "makes": "feature-9"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-9",
+      "volume": {
+        "is": "6*(80*40 - 2*pi*6^2)",
+        "why": "the 80 × 40 outline less two discs r 6, 6 thick"
+      },
+      "area": {
+        "is": "2*(80*40 - 2*pi*6^2) + (2*80 + 2*40)*6 + 2*(2*pi*6*6)",
+        "why": "two caps with holes, four outer sides round 240 by 6, two hole walls 2π·6 round by 6 (bracket-two-holes' answer: the same solid)"
+      },
+      "topology": {
+        "faces": 8,
+        "edges": 16,
+        "vertices": 12,
+        "why": "2 caps, 4 sides, 2 hole walls (each a cut's side, a cylinder with no seam edge and two loops); 4 + 4 outer edges round the caps, 4 along, and each hole's 2 circles; 8 outer corners and a vertex on each hole circle. V − E + F − (L − F) = 12 − 16 + 8 − (14 − 8) = −2 = 2(1 shell − 2 holes through)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            80,
+            40,
+            6
+          ]
+        ],
+        "why": "the plate from the origin; the holes are inside it"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): the hole's circles are where the plate's top and bottom meet cylinders square to them, exact circles, so nothing measures past LINEAR"
+      }
+    }
+  ],
+  "sketches": [
+    {
+      "sketch": "sketch-2",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          6
+        ],
+        "why": "the plate's top at z = 6, which the cuts put holes in, leaving one face with its name (40a rule 2)"
+      }
+    },
+    {
+      "sketch": "sketch-6",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          6
+        ],
+        "why": "the same top, with the first hole in it by then"
+      }
+    }
+  ],
+  "pins": []
+}
