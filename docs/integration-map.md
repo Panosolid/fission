@@ -16,12 +16,12 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
-| 1 | Design → Slice | bodies on a print plate; hole intent (so holes print round) | Solid, re-tessellated by Slice at the printer's resolution (Mesh only when the source is a mesh) | printability overlay (overhangs, thin walls), print time and weight as Data | plate update cheap, slicing expensive | P1 (after 33) |
-| 2 | Design → Laser | planar faces, sketches, sheet-metal flat patterns | Outline (exact lines, arcs, later splines) | none; kerf and sheet thickness are Design parameters (row 30) | cheap | L1 (after 31); flat patterns after 83 |
-| 3 | Design → Manufacture | bodies as parts in a setup; faces and edges picked for strategies; feature intent (a hole feature becomes a drilling cycle) | Solid, faces and edges by stable id | machinability overlay (internal corners sharper than the smallest tool) | toolpaths expensive | M1–M2 (after 50) |
-| 4 | Design → Simulate | bodies; loads and fixtures on faces by stable id; materials | Solid, meshed by S2 | stress, displacement and safety-factor overlays; results as Data | expensive | S1–S3 (after 50) |
-| 5 | Simulate → Design | a parameter sweep ("thinnest wall with safety factor ≥ 2") | Data (parameter values) | the chosen value is offered as a previewed parameter edit | expensive | S3 + step 34 |
-| 6 | Design → Render | bodies, appearances, saved camera views | Solid, tessellated at render quality | none | preview cheap, final render expensive | R1–R3 (after 33) |
+| 1 | Design → Slice | bodies on a print plate; hole intent (so holes print round) | Solid, re-tessellated by Slice at the printer's resolution (Mesh only when the source is a mesh) | printability overlay (overhangs, thin walls), print time and weight as Data | plate update cheap, slicing expensive | P1 (after 48) |
+| 2 | Design → Laser | planar faces, sketches, sheet-metal flat patterns | Outline (exact lines, arcs, later splines) | none; kerf and sheet thickness are Design parameters (row 30) | cheap | L1 (after 48); flat patterns after 83 |
+| 3 | Design → Manufacture | bodies as parts in a setup; faces and edges picked for strategies; feature intent (a hole feature becomes a drilling cycle) | Solid, faces and edges by stable id | machinability overlay (internal corners sharper than the smallest tool) | toolpaths expensive | M1–M2 (after 40) |
+| 4 | Design → Simulate | bodies; loads and fixtures on faces by stable id; materials | Solid, meshed by S2 | stress, displacement and safety-factor overlays; results as Data | expensive | S1–S3 (after 40) |
+| 5 | Simulate → Design | a parameter sweep ("thinnest wall with safety factor ≥ 2") | Data (parameter values) | the chosen value is offered as a previewed parameter edit | expensive | S3 + step 50 |
+| 6 | Design → Render | bodies, appearances, saved camera views | Solid, tessellated at render quality | none | preview cheap, final render expensive | R1–R3 (after 48) |
 | 7 | Design ↔ Circuit | board outline from a face or sketch; mounting holes linked both ways with screw posts; the board and its components as bodies inside the enclosure | Outline (outline); Solid (board and parts, back into Design as a linked component) | collision warnings as overlays on both sides | interference check cheap | E3 (after 75; collisions use 76) |
 
 ## The 2D workspaces
@@ -62,7 +62,7 @@ Document, Sheet and Slides are planned workspaces (roadmap W, T and U), late in 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
 | 39 | Design → Document | design views, drawing views, parameters as text, one view per timeline step for build instructions | Image or Outline for views, Data for parameters | none | cheap | W2–W3 + 77 for drawings |
-| 40 | Design ↔ Sheet | parameters and measured values (volume, mass, size) into cells; a cell that owns a parameter drives the design | Data | edits to Design parameters are previewed commands | cheap | T2 + 34 |
+| 40 | Design ↔ Sheet | parameters and measured values (volume, mass, size) into cells; a cell that owns a parameter drives the design | Data | edits to Design parameters are previewed commands | cheap | T2 + 50 |
 | 41 | Sheet → Document and Slides | tables and charts | Data (tables), Image (charts) | none | cheap | T3 + W2 / U2 |
 | 42 | Design → Slides | a live 3D part on a slide, and views | Solid (tessellated for the slide), Image for views | none | cheap | U2 |
 | 43 | Render → Document and Slides | rendered pictures | Image (marked out of date when the scene changes) | none | expensive | R2 + W2 / U2 |
@@ -83,7 +83,7 @@ Document, Sheet and Slides are planned workspaces (roadmap W, T and U), late in 
 | 27 | One undo history; an edit in one workspace undoes from any | all | 20, timeline edits at 24 |
 | 28 | Units | all | done |
 | 29 | One materials library: appearance (Render), mechanical (Simulate), print settings (Slice), power and speed (Laser), stock and feeds (Manufacture) | all making workspaces | I3 with 62 |
-| 30 | Parameters: Design parameters used anywhere (kerf, thickness, board size, wall thickness in a sweep) | all | 34 + I18 |
+| 30 | Parameters: Design parameters used anywhere (kerf, thickness, board size, wall thickness in a sweep) | all | 50 + I18 |
 | 31 | One bill of materials from Design components and Circuit parts, placeable in Layout as a table | Design, Circuit, Layout | 74 + E1 |
 | 32 | Project-wide search ("M3" finds every M3 hole, screw and pad) over feature intent | all | I14, once two workspaces are real |
 | 33 | Dependency graph and staleness across workspaces | all | done in core; each row above adds its nodes |

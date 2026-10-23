@@ -4,7 +4,7 @@
 // under an Arc row that opens a menu of its own), the tools sit
 // beside it as buttons (the one in use pressed), and a big Finish Sketch
 // stands at the right. Modify and Inspect groups join as their tools
-// arrive (trim and offset: steps 31 to 33); none is shown before it has a
+// arrive (trim and offset: step 48); none is shown before it has a
 // tool. The workspace drives it; the toolbar only shows what it is given
 // and reports clicks. Styles: src/styles/sketchbar.css.
 

@@ -2,7 +2,7 @@
 //
 // Finite element analysis on the kernel's exact geometry: static stress first, then thermal and modal.
 // It will refer to Design's geometry by stable IDs and never copy it, so a
-// design change flows straight through. Work starts after CAD step 50 (booleans and full topological naming), so loads stay on the right faces.
+// design change flows straight through. Work starts after CAD step 40 (booleans and full topological naming), so loads stay on the right faces.
 
 import type { BodyReference, FaceReference, WorkspacePlugin } from "@fission/core";
 import { showPlaceholder } from "@fission/ui";
@@ -33,7 +33,7 @@ export const simulateWorkspace: WorkspacePlugin = {
       title: "Simulate",
       summary: "Finite element analysis on the kernel's exact geometry: static stress first, then thermal and modal.",
       plans: ["Static stress, then thermal and modal studies", "Materials from the shared library (density, stiffness, strength)", "Loads and constraints placed on design faces by reference: they follow the face when the design changes", "Meshing from the exact geometry", "Results: stress, displacement and safety factor drawn in the shared viewport"],
-      startsAfter: "after CAD step 50 (booleans and full topological naming), so loads stay on the right faces",
+      startsAfter: "after CAD step 40 (booleans and full topological naming), so loads stay on the right faces",
     });
     return { unmount: () => ctx.properties.replaceChildren() };
   },

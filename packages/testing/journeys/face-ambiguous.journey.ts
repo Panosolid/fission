@@ -1,5 +1,5 @@
 // Ambiguous face names in Design's rebuild (26g's mutation testing found
-// no test reached them: today only booleans, from step 44 on, can give two
+// no test reached them: today only booleans, from step 34 on, can give two
 // faces one name). On the real kernel, with its views read through a
 // stand-in that renames a 40 × 30 × 20 box's back face "front", so two
 // faces are "front" and the top's front and back edges are both

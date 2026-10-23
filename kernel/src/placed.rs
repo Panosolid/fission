@@ -6,7 +6,7 @@
 //! exactly what it was, and rounding from far-away trips or many turns
 //! lands only on where the body is, never on its shape. The world
 //! geometry is made on demand (`baked`), e.g. for the model-space check,
-//! and once for good where two bodies meet (booleans, step 44). Face areas
+//! and once for good where two bodies meet (booleans, step 34). Face areas
 //! and centroids (`face_masses`) are measured on the local geometry too,
 //! with only each centroid carried into the world.
 

@@ -4,7 +4,7 @@ Progress file for one workstream (rules: root CLAUDE.md, "Workstreams and where 
 
 Done: nothing yet; the plan was designed with the owner on 2026-10-22.
 
-Next: P0a, from `main`, once CAD step 33 is done (owner's decision: Slice starts right after 33, ahead of Render or taking turns with it).
+Next: P0a, from `main`, once CAD step 48 is done (owner's decision: Slice starts right after 48, ahead of Render or taking turns with it).
 
 ## How to work on this workstream
 
@@ -16,7 +16,7 @@ Next: P0a, from `main`, once CAD step 33 is done (owner's decision: Slice starts
 
 ## Decisions (owner's, 2026-10-22, unless marked default)
 
-1. **Mesh first, exact later (a known compromise, to be removed by P9).** Slice works on a triangle mesh made from each exact body at the printer's resolution, as every common slicer does, so it needs no kernel step past 33. A round hole then prints as a many-sided polygon, as it does in other slicers. P9 replaces this with sectioning the exact body (true arcs, G2/G3 moves) once the kernel's intersection steps 41–46 land; the mesh path stays for mesh bodies (STL imports, lithophanes).
+1. **Mesh first, exact later (a known compromise, to be removed by P9).** Slice works on a triangle mesh made from each exact body at the printer's resolution, as every common slicer does, so it needs no kernel step past 48. A round hole then prints as a many-sided polygon, as it does in other slicers. P9 replaces this with sectioning the exact body (true arcs, G2/G3 moves) once the kernel's intersection steps 31–35 and 37 land; the mesh path stays for mesh bodies (STL imports, lithophanes).
 2. **The engine is Rust beside the kernel, compiled to WebAssembly (default).** Layer cutting, offsets and infill are geometry; they use the kernel's `fmath.rs`, its tolerances in `tolerance.rs` (no new epsilons elsewhere) and K1's offsets, and never panic on any input (bad input is `InvalidInput`). It runs in a worker so the app never freezes; the app reaches it only through the kernel bridge.
 3. **File only.** Slice saves a G-code file and never sends a job to a printer. Sending comes much later (P14), only behind the shared confirmation screen (I15); Bambu also locks down sending jobs over the network.
 4. **The first printer is the owner's Bambu Lab P1S with an AMS (four spools).** The first G-code flavour is Bambu's, written as the `.gcode.3mf` file Bambu Studio and the printer's SD card take (the G-code plus the plate's metadata and checksum, checked against a file Bambu Studio writes for the same part), with that model's own start routine. Plain Marlin and Klipper follow. The first real test print is on the owner's printer. Because of the AMS, multi-colour (P8) comes right after the fundamentals.

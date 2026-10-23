@@ -6,7 +6,7 @@
 //! times, has exactly the shape (and volume and area) it started with. Its
 //! position carries the rounding of the shift: at 100 km out that is ~15 nm,
 //! far below LINEAR. Placements are baked into geometry only where two
-//! bodies must share coordinates (booleans, step 44).
+//! bodies must share coordinates (booleans, step 34).
 //!
 //! The rotation is a unit quaternion, renormalised after every composition,
 //! so it stays a true rotation however many turns are composed (a 3×3

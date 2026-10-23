@@ -2,7 +2,7 @@
 //
 // Downstream workspaces never copy geometry. They point at Design's bodies,
 // faces and edges by stable IDs from topological naming (scheme chosen at
-// roadmap step 24, full naming at step 50), and re-resolve those IDs every
+// roadmap step 24, full naming at step 40), and re-resolve those IDs every
 // time the design changes.
 
 /** A topological-naming ID, e.g. "face created by feature X, from profile edge Y, side Z". */
