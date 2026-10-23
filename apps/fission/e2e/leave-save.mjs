@@ -135,6 +135,46 @@ try {
     await context.close();
   });
 
+  // The hunt's follow-up: Open (or a drop, the same path) within the quiet moment after an edit stopped the old
+  // project's autosave, which dropped the waiting save, so the stored old project lacked its last edit.
+  await check("a width typed and a file opened at once, still Saving…: the old project is stored with the width, the file opens as a new project", async () => {
+    const { context, page } = await fresh(1280);
+    const old = await page.evaluate(() => document.body.dataset.projectId);
+    // A file of the box made 60 wide, from Save: V = 60 · 30 · 20 = 36,000 mm³.
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click("#save")]);
+    const file = JSON.parse(await download.path().then((p) => import("node:fs").then((fs) => fs.readFileSync(p, "utf8"))));
+    file.workspaces.design.timeline.features[0].intent.parameters.width = 60;
+    await typeWidth(page, "50", false);
+    await volume(page, "30,000 mm³"); // 50 · 30 · 20
+    assert.equal(await status(page), "saving", "opened before autosave's quiet moment");
+    await page.setInputFiles("#open-file", { name: "sixty.panosolid.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(file)) });
+    await volume(page, "36,000 mm³");
+    await until(page, (o) => document.body.dataset.projectId && document.body.dataset.projectId !== o, old, "the file kept as a new project");
+    await until(page, () => document.querySelector("#save-status").dataset.state === "saved", null, "the file stored");
+    // The old project, read straight from the store: the width typed before Open.
+    const width = () =>
+      page.evaluate(
+        (id) =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open("fission", 1);
+            r.onerror = () => reject(r.error);
+            r.onsuccess = () => {
+              const get = r.result.transaction("kv").objectStore("kv").get(`project/${id}`);
+              get.onsuccess = () => {
+                const v = typeof get.result === "string" ? JSON.parse(get.result) : get.result;
+                resolve(v?.workspaces?.design?.timeline?.features?.[0]?.intent?.parameters?.width ?? null);
+              };
+              get.onerror = () => reject(get.error);
+            };
+          }),
+        old,
+      );
+    for (let i = 0; i < 50 && (await width()) !== 50; i++) await page.waitForTimeout(100);
+    assert.equal(await width(), 50, "the old project holds its last width");
+    assert.deepEqual(await journal(page), [], "no journal entry left");
+    await context.close();
+  });
+
   await check("a burst of widths and the tab closed: no question asked, a new tab opens the last width", async () => {
     const { context, page } = await fresh(1280);
     const asked = [];

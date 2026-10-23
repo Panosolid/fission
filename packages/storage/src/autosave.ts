@@ -67,6 +67,14 @@ export interface Autosave {
   leaving(): boolean;
   /** Stops for good: a waiting save is dropped, one in flight finishes. */
   stop(): void;
+  /**
+   * Stops for good, keeping every change: the project as it is now, when the
+   * store doesn't hold it yet, goes to the journal at once and is stored
+   * after any save in flight. For a project being replaced (another opened,
+   * a new one started) within the quiet moment of its last change, which
+   * `stop()` would drop (timeline hunt follow-up).
+   */
+  finish(): void;
 }
 
 /** One second: long enough that typing a number is one save. A page going sooner keeps its changes through `leaving()`. */
@@ -87,6 +95,8 @@ export function startAutosave(
 ): Autosave {
   let timer: unknown = null;
   let inFlight = false;
+  /** Settles when the save in flight (if any) has finished, either way. */
+  let flight: Promise<void> = Promise.resolve();
   let again = false;
   let stopped = false;
   /** The text last written, so an unchanged project is not written again. */
@@ -153,7 +163,12 @@ export function startAutosave(
     inFlight = true;
     let failure: string | null = null;
     try {
-      await store.save(id, JSON.parse(text) as Project); // exactly the state checked above
+      const saving = store.save(id, JSON.parse(text) as Project); // exactly the state checked above
+      flight = saving.then(
+        () => {},
+        () => {},
+      );
+      await saving;
       written = text;
       stored(v);
     } catch (e) {
@@ -187,6 +202,12 @@ export function startAutosave(
     changed();
   }
   const unfollow = follows?.onChange(followed) ?? (() => {});
+  function stop() {
+    if (timer !== null) timers.clearTimeout(timer);
+    timer = null;
+    stopped = true;
+    unfollow();
+  }
 
   return {
     changed,
@@ -209,11 +230,39 @@ export function startAutosave(
       } else if (!inFlight) void save(); // the last save failed: try once more
       return kept;
     },
-    stop() {
-      if (timer !== null) timers.clearTimeout(timer);
-      timer = null;
-      stopped = true;
-      unfollow();
+    stop,
+    finish() {
+      if (stopped) return;
+      const v = version;
+      let text: string | null = null;
+      if (storedVersion !== v) {
+        try {
+          text = projectToJson(project()); // now: the project read later is the one replacing it
+        } catch {
+          // can't be written: nothing to keep that the store could hold
+        }
+      }
+      stop();
+      if (text === null) return;
+      if (text === written) return stored(v);
+      if (journal) {
+        try {
+          journal.setItem(key, text); // kept now, should the page go before the store's save
+          journalVersion = v;
+        } catch {
+          // storage full: the store's save below is all there is
+        }
+      }
+      const last = text;
+      void flight.then(async () => {
+        try {
+          await store.save(id, JSON.parse(last) as Project);
+          written = last;
+          stored(v);
+        } catch {
+          // kept in the journal (when it could be written), put back on the next visit
+        }
+      });
     },
   };
 }

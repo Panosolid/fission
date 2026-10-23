@@ -10,9 +10,13 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
-## 0.27.6 (2026-10-23)
+## 0.27.7 (2026-10-23)
 
 - Fix (found by a seeded thin-crescent hunt, part of the known-bugs sweep): a crescent 63 m long and 1 µm wide at its middle, its two horns meeting almost tangent, took 52 s to extrude, though the answer was right. Each arc needs about 124,000 chords there to keep clear of the other, so each wall is a very long, very thin strip of points, and the triangulation library's fast loader goes quadratic on strips like that (and on points round a circle about their centre): 21 s per wall. Faces with more than 2048 points are now triangulated by adding the points one at a time in a fixed shuffled order with a search hierarchy, which stays fast for any shape; smaller faces are meshed exactly as before, so every baseline mesh, allocation count and memory peak is unchanged. The crescent now extrudes in 2.3 s. Checked by a timing test that failed before the fix (60,000 points on a 1000 × 0.01 strip took 2.6 s against 61 ms for the same count round a circle; now within 2 times), hand-worked tests (a strip's N − 2 triangles and area 10; the crescent's volume worked to 50 digits from its two arcs' segments; the shuffle's order worked by hand; the switch at 2048 and 2049 points), and 3,990 seeded crescents and off-centre rings up to 90 km out with no panic, no wrong refusal and every mesh closed.
+
+## 0.27.6 (2026-10-23)
+
+- Fix (timeline bug hunt follow-up): an edit made less than a second before opening a file, dropping one, or starting a new project was lost from the old project, because replacing the project stopped its autosave and threw away the save that was still waiting for its one-second quiet moment. Autosave now finishes instead: the project as it is goes to the unsaved-changes journal at once and to the store after any save already under way, so the stored old project keeps its last edit and the new project never overwrites it. Checked by a browser check that types a width, opens a file while the status still says Saving…, and reads the old project back from the browser's store (it failed before the fix), and by hand-worked unit tests (0.9× the quiet moment, a save in flight, the journal full, the store failing, nothing changed, changed and back).
 
 ## 0.27.5 (2026-10-23)
 

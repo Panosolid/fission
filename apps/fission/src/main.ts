@@ -525,7 +525,7 @@ let canKeep = true;
 /** Keeps the open project in the store under `id` from now on; `stored` when it was just opened from there as it is. */
 function keep(id: string, stored = false) {
   keepOnChange = null;
-  autosave?.stop();
+  autosave?.finish();
   if (!canKeep) return;
   // Following the undo history: an amend (a face sketch settled, a pinned point followed once the kernel answers) is a
   // change no one records, and it can come after the edit was stored (hunt 26h). One that changes nothing (the history
@@ -535,7 +535,7 @@ function keep(id: string, stored = false) {
 }
 /** A new project in place of the last one, kept once it is changed (`keepOnChange`). */
 function keepOnFirstChange() {
-  autosave?.stop();
+  autosave?.finish(); // the last project keeps a change made within the quiet moment
   autosave = null;
   keepOnChange = newId();
 }
@@ -584,7 +584,9 @@ function replaceProject(project: Project) {
 function openProject(text: string) {
   const project = projectFromJson(text, workspaces);
   const id = newId();
-  autosave?.stop(); // the old project is kept as it was; nothing of the new one is stored yet
+  // The old project is kept as it was, its last change too (finish, not stop: one made within the quiet moment
+  // before Open was dropped, timeline hunt follow-up); nothing of the new one is stored yet.
+  autosave?.finish();
   autosave = null;
   guard.finished(); // the last project, if it was still opening, didn't freeze the tab
   fileStatus("");
