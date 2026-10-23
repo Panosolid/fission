@@ -39,3 +39,20 @@ test("two solid items with one id are refused the same way, naming the id", () =
   d.nextId = 8;
   assert.equal(refusedWith(d), null);
 });
+
+// Issue #262 (project-loader fuzzing): a file listing Sketch 1's content twice,
+// the second copy with `projected: ""`, was refused with the engine's own
+// "(s.projected ?? []).map is not a function". Only the first copy was checked
+// (the second was looked past), so the second's text reached the id count.
+// A sketch's content listed twice is now refused as that, before either is read.
+test("a sketch's content listed twice is refused as that, not with an engine message", () => {
+  const s = addSketch(partDocument("box", 40, 30, 20));
+  const d = clone(drawRectangle(s.doc, s.id, [0, 0], [10, 10]).doc) as DesignDocument;
+  assert.equal(refusedWith(d), null, "the file as saved opens");
+  // By hand: Sketch 1 is sketch-2; a second copy of its content with a projections field that is text, as the fuzzer's.
+  d.sketches.push({ ...clone(d.sketches[0]), projected: "" as unknown as [] });
+  assert.equal(refusedWith(d), "Design sketch sketch-2 is listed twice in the sketches list");
+  // A plain second copy (nothing malformed in it) is refused the same way: it was silently ignored before.
+  d.sketches[1] = clone(d.sketches[0]);
+  assert.equal(refusedWith(d), "Design sketch sketch-2 is listed twice in the sketches list");
+});

@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.27.11 (2026-10-23)
+
+- Fix (#262): a project file listing the same sketch twice in Design's sketches list, the second copy with a broken "projected" field (text instead of a list), wasn't refused when opened; the reader looked past the second copy, which was then read further on and gave a raw engine error. Now a sketch listed twice is refused on opening with "Design sketch … is listed twice in the sketches list". Checked by a failing-first unit test, the old "first copy wins" test now checking that both orders are refused, the fuzzer's saved file kept as a permanent regression case, and mutation testing of the file reader.
+
 ## 0.27.9 (2026-10-23)
 
 - Fix (two leftovers from the timeline bug hunt): a drag on the timeline bar, of an item or of the marker, couldn't be called off: Escape did nothing, letting go over the 3D view still dropped it at the place under the pointer, and a right-click opened the item menu while the drag went on. Now Escape, a right-click, or letting go more than 72 px above or below the bar calls the drag off, nothing is recorded and the bar is drawn as it was; while the pointer is that far away, an item's drag line says "Let go here to leave it where it was". And a file giving one Design id to two items was refused with the wrong reason ("a sketch with no content"); it now says "Design id … is used twice". Checked by hand-worked unit tests (letting go 0.9× and 1.1× of 72 px from the bar; Escape and right-click for an item and the marker; a long press that isn't a drag still opens the menu), a failing-first test of the file message, the marker's browser check now pressing Escape mid-drag and letting go 200 px above the bar at 1280 and 375 px (it fails with the fix taken out), and mutation testing of the file reader (no new survivor; a check made redundant by the new one was removed).
