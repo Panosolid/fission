@@ -1,0 +1,45 @@
+{
+  "model": "gear",
+  "what": "A gear-like outline on XY, extruded 10: 24 teeth, each tip an arc on r 50 over half a pitch (π/24), each root an arc on r 44 over the other half, joined by radial lines, every arc round the origin (96 curves: drawn with Design's document functions, as no one would click them).",
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-243",
+      "volume": {
+        "is": "10*pi*(50^2 + 44^2)/2",
+        "why": "each arc with the origin makes a sector and each radial line points at the origin, adding nothing: 24 tip sectors of ½·50²·π/24 and 24 root sectors of ½·44²·π/24, so π(50² + 44²)/2 = 2218π mm², swept 10"
+      },
+      "area": {
+        "is": "2*pi*(50^2 + 44^2)/2 + 10*(pi*(50 + 44) + 2*24*(50 - 44))",
+        "why": "two caps of 2218π, and sides 10 tall round the outline: the tips 24 · 50 · π/24 = 50π, the roots 44π, and 48 radial lines of 6"
+      },
+      "topology": {
+        "faces": 98,
+        "edges": 288,
+        "vertices": 192,
+        "why": "2 caps and 96 sides; 96 edges round each cap and 96 along; 96 corners on each cap (192 − 288 + 98 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            -50,
+            -50,
+            0
+          ],
+          [
+            50,
+            50,
+            10
+          ]
+        ],
+        "why": "tips start at k · 2π/24, so tips start at 0, π/2, π and 3π/2 (k = 0, 6, 12, 18): the outline reaches ±50 on x and y; z from the sketch at 0 up 10"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

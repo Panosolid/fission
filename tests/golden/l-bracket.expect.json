@@ -1,0 +1,45 @@
+{
+  "model": "l-bracket",
+  "what": "An L drawn with the line tool on the front plane XZ through (0, 0), (60, 0), (60, 6), (6, 6), (6, 40), (0, 40), extruded 30 (the starting box deleted first).",
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-15",
+      "volume": {
+        "is": "(60*6 + 6*34)*30",
+        "why": "the L as a 60 × 6 foot and a 6 × 34 upright on it, 564 mm², swept 30"
+      },
+      "area": {
+        "is": "2*(60*6 + 6*34) + (60 + 6 + 54 + 34 + 6 + 40)*30",
+        "why": "two L caps and six sides: the outline's lengths 60, 6, 54, 34, 6, 40 (200 round), each 30 deep"
+      },
+      "topology": {
+        "faces": 8,
+        "edges": 18,
+        "vertices": 12,
+        "why": "6 sides and 2 caps; 6 edges round each cap and 6 along; 6 corners on each cap (12 − 18 + 8 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            -30,
+            0
+          ],
+          [
+            60,
+            0,
+            40
+          ]
+        ],
+        "why": "XZ's sketch x is X and y is Z; its normal is X × Z = −Y, so the extrude runs from y = 0 to −30"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

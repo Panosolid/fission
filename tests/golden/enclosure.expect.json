@@ -1,0 +1,379 @@
+{
+  "model": "enclosure",
+  "what": "An open box: an 80 × 60 × 3 floor (the box) and four walls 3 thick and 40 tall, each a rectangle drawn on the floor's top with the rectangle tool (front (0, 0)–(80, 3), back (0, 57)–(80, 60), left (0, 3)–(3, 57), right (77, 3)–(80, 57)) and extruded 40. Clicks on corners snapped and pinned them. Five bodies: no booleans join them yet.",
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-1",
+      "volume": {
+        "is": "80*60*3",
+        "why": "the floor 80 × 60 × 3"
+      },
+      "area": {
+        "is": "2*(80*60 + 80*3 + 60*3)",
+        "why": "two 80 × 60 faces, two 80 × 3, two 60 × 3"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            80,
+            60,
+            3
+          ]
+        ],
+        "why": "a box sits on the origin"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 2",
+      "item": "feature-11",
+      "volume": {
+        "is": "80*3*40",
+        "why": "a 80 × 3 rectangle on the floor's top swept 40"
+      },
+      "area": {
+        "is": "2*(80*3 + 80*40 + 3*40)",
+        "why": "two 80 × 3 caps, two 80 × 40 sides and two 3 × 40"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a rectangle swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            3
+          ],
+          [
+            80,
+            3,
+            43
+          ]
+        ],
+        "why": "the rectangle (0, 0) to (80, 3), from the floor's top z = 3 up 40"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 3",
+      "item": "feature-21",
+      "volume": {
+        "is": "80*3*40",
+        "why": "a 80 × 3 rectangle on the floor's top swept 40"
+      },
+      "area": {
+        "is": "2*(80*3 + 80*40 + 3*40)",
+        "why": "two 80 × 3 caps, two 80 × 40 sides and two 3 × 40"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a rectangle swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            57,
+            3
+          ],
+          [
+            80,
+            60,
+            43
+          ]
+        ],
+        "why": "the rectangle (0, 57) to (80, 60), from the floor's top z = 3 up 40"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 4",
+      "item": "feature-31",
+      "volume": {
+        "is": "3*54*40",
+        "why": "a 3 × 54 rectangle on the floor's top swept 40"
+      },
+      "area": {
+        "is": "2*(3*54 + 3*40 + 54*40)",
+        "why": "two 3 × 54 caps, two 3 × 40 sides and two 54 × 40"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a rectangle swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            3,
+            3
+          ],
+          [
+            3,
+            57,
+            43
+          ]
+        ],
+        "why": "the rectangle (0, 3) to (3, 57), from the floor's top z = 3 up 40"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 5",
+      "item": "feature-41",
+      "volume": {
+        "is": "3*54*40",
+        "why": "a 3 × 54 rectangle on the floor's top swept 40"
+      },
+      "area": {
+        "is": "2*(3*54 + 3*40 + 54*40)",
+        "why": "two 3 × 54 caps, two 3 × 40 sides and two 54 × 40"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a rectangle swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            77,
+            3,
+            3
+          ],
+          [
+            80,
+            57,
+            43
+          ]
+        ],
+        "why": "the rectangle (77, 3) to (80, 57), from the floor's top z = 3 up 40"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    }
+  ],
+  "sketches": [
+    {
+      "sketch": "sketch-2",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          3
+        ],
+        "why": "the floor's +Z face, its top, at z = 3 facing up (the walls' start caps lie on it too, but are other features' faces)"
+      }
+    },
+    {
+      "sketch": "sketch-12",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          3
+        ],
+        "why": "the floor's +Z face, its top, at z = 3 facing up (the walls' start caps lie on it too, but are other features' faces)"
+      }
+    },
+    {
+      "sketch": "sketch-22",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          3
+        ],
+        "why": "the floor's +Z face, its top, at z = 3 facing up (the walls' start caps lie on it too, but are other features' faces)"
+      }
+    },
+    {
+      "sketch": "sketch-32",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          3
+        ],
+        "why": "the floor's +Z face, its top, at z = 3 facing up (the walls' start caps lie on it too, but are other features' faces)"
+      }
+    }
+  ],
+  "pins": [
+    {
+      "sketch": "sketch-2",
+      "point": "point-3",
+      "kind": "endpoint",
+      "name": "front+left&front+top&left+top",
+      "at": {
+        "is": [
+          0,
+          0,
+          3
+        ],
+        "why": "the front wall's first click (0, 0) is the floor's top corner where its front (−Y), left (−X) and top meet: a corner is named by its edges, each by its two faces (sorted, +), the three sorted and joined by &"
+      }
+    },
+    {
+      "sketch": "sketch-2",
+      "point": "point-4",
+      "kind": "endpoint",
+      "name": "front+right&front+top&right+top",
+      "at": {
+        "is": [
+          80,
+          0,
+          3
+        ],
+        "why": "the rectangle's corner (80, 0) the tool made, on the floor's front right top corner"
+      }
+    },
+    {
+      "sketch": "sketch-12",
+      "point": "point-16",
+      "kind": "endpoint",
+      "name": "back+right&back+top&right+top",
+      "at": {
+        "is": [
+          80,
+          60,
+          3
+        ],
+        "why": "the back wall's second click (80, 60), the floor's back (+Y) right (+X) top corner"
+      }
+    },
+    {
+      "sketch": "sketch-12",
+      "point": "point-18",
+      "kind": "endpoint",
+      "name": "back+left&back+top&left+top",
+      "at": {
+        "is": [
+          0,
+          60,
+          3
+        ],
+        "why": "the corner (0, 60) the tool made, the floor's back left top corner"
+      }
+    },
+    {
+      "sketch": "sketch-22",
+      "point": "point-23",
+      "kind": "endpoint",
+      "feature": "feature-11",
+      "name": "side:line-10+start&side:line-10@start+side:line-9@end&side:line-9+start",
+      "at": {
+        "is": [
+          0,
+          3,
+          3
+        ],
+        "why": "the left wall's (0, 3) is the front wall's bottom corner there: in the front wall's rectangle, line-9 runs (80, 3) to (0, 3) and line-10 (0, 3) to (0, 0), so the corner is line-9's end and line-10's start; its edges are each side with the start cap, and the upright between the sides, named by those curve ends (27b), sorted"
+      }
+    },
+    {
+      "sketch": "sketch-22",
+      "point": "point-28",
+      "kind": "endpoint",
+      "feature": "feature-21",
+      "name": "side:line-15+start&side:line-15@start+side:line-20@end&side:line-20+start",
+      "at": {
+        "is": [
+          0,
+          57,
+          3
+        ],
+        "why": "the back wall's corner (0, 57): its line-20 runs (0, 60) to (0, 57) and line-15 (0, 57) to (80, 57), so line-20's end and line-15's start, at the start cap"
+      }
+    },
+    {
+      "sketch": "sketch-32",
+      "point": "point-34",
+      "kind": "endpoint",
+      "feature": "feature-11",
+      "name": "side:line-7+start&side:line-7@end+side:line-9@start&side:line-9+start",
+      "at": {
+        "is": [
+          80,
+          3,
+          3
+        ],
+        "why": "the right wall's (80, 3), the front wall's corner where line-7 ((80, 0) to (80, 3)) ends and line-9 starts"
+      }
+    },
+    {
+      "sketch": "sketch-32",
+      "point": "point-36",
+      "kind": "endpoint",
+      "feature": "feature-21",
+      "name": "side:line-15+start&side:line-15@end+side:line-17@start&side:line-17+start",
+      "at": {
+        "is": [
+          80,
+          57,
+          3
+        ],
+        "why": "the back wall's corner (80, 57), where line-15 ((0, 57) to (80, 57)) ends and line-17 starts"
+      }
+    }
+  ]
+}

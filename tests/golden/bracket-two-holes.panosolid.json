@@ -1,0 +1,74 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Bracket with two holes",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 2,
+      "profiles": [
+        {
+          "depth": 40,
+          "id": "profile-1",
+          "kind": "plate",
+          "plane": {
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "xAxis": [
+              1,
+              0,
+              0
+            ]
+          },
+          "width": 80
+        }
+      ],
+      "sketches": [],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [
+              "profile-1"
+            ],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "distance": 6,
+                "profile": "profile-1"
+              },
+              "summary": "Extrude: Plate with two round holes profile 80 × 40 mm, by 6 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "profile-1",
+                  "label": "Plate with two round holes profile",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (extrude)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 3
+    }
+  }
+}
