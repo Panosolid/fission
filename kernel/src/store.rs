@@ -26,11 +26,14 @@
 //! - A body is stored with the display mesh its validation made, so its
 //!   view and STL never tessellate it again, and give exactly what
 //!   `view_of` and `stl_of` give for the same spec.
+//! - Its STEP file (`step`, step 29b3) is the placed body's, in world
+//!   coordinates, as `step_write::write` writes the baked body, so the
+//!   oracle reads exactly the body the app shows.
 
 use crate::api_error::{ApiError, ErrorKind};
 use crate::mesh::Mesh;
 use crate::ops::Input;
-use crate::{build_meshed, placed, stl, view_parts, BodySpec, Built, BodyView, StlFile};
+use crate::{build_meshed, placed, stl, step_write, view_parts, BodySpec, Built, BodyView, StlFile};
 use std::collections::BTreeMap;
 
 /// A stored body's number. 0 is never one.
@@ -124,6 +127,16 @@ impl BodyStore {
             stl::export(&world, name)
         };
         Ok(StlFile { bytes: out.bytes, rounding: out.rounding, warning: out.warning })
+    }
+
+    /// A stored body as a STEP AP214 file (`step_write::write`), placed
+    /// where the app shows it: the oracle's way to read the app's own
+    /// bodies with OpenCascade (step 29b3). The store holds only valid
+    /// single-shell bodies today, so the writer's refusals can't happen
+    /// yet; one would come back as `InvalidInput` with the writer's words.
+    pub fn step(&self, handle: Handle) -> Result<String, ApiError> {
+        let (placed, _) = self.get(handle)?;
+        step_write::write(&placed.baked()).map_err(ApiError::from)
     }
 
     /// Lets a body go. Its handle is never handed out again.
@@ -265,6 +278,66 @@ mod tests {
         let h = store.build(BodySpec::Extrude { profile: rect(), distance: 2.0, frame: None, flip: false }).unwrap();
         // 30·10 − π·2² = 300 − 4π, by 2: 600 − 8π.
         assert!(rel_eq(store.view(h).unwrap().volume, 600.0 - 8.0 * PI, FP_REL));
+    }
+
+    /// The corners a STEP file's vertices sit at (each `VERTEX_POINT`'s
+    /// `CARTESIAN_POINT`), sorted.
+    fn step_vertices(text: &str) -> Vec<[f64; 3]> {
+        let mut points = BTreeMap::new();
+        let mut corners = vec![];
+        for line in text.lines() {
+            let Some((id, rest)) = line.split_once(" = ") else { continue };
+            if let Some(xyz) = rest.strip_prefix("CARTESIAN_POINT('',(").and_then(|r| r.strip_suffix("));")) {
+                let c: Vec<f64> = xyz.split(',').map(|x| x.parse().unwrap()).collect();
+                points.insert(id.to_string(), [c[0], c[1], c[2]]);
+            } else if let Some(p) = rest.strip_prefix("VERTEX_POINT('',").and_then(|r| r.strip_suffix(");")) {
+                corners.push(points[p]);
+            }
+        }
+        corners.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        corners
+    }
+
+    #[test]
+    fn a_stored_bodys_step_file_is_the_placed_body_written_by_hand() {
+        let mut store = BodyStore::new();
+        // A unit box is make_box(1, 1, 1): the file is the one checked by
+        // hand line by line (tests/step/unit_cube.step, step_write.rs).
+        let h = store.build(cube(1.0)).unwrap();
+        let box_file = store.step(h).unwrap();
+        assert_eq!(box_file, step_write::write(&crate::ops::primitives::make_box(1.0, 1.0, 1.0).unwrap()).unwrap());
+        // The unit square drawn on the front plane (origin 0, x (1, 0, 0),
+        // normal (0, −1, 0)), extruded 1 the other way (flip). The plane's
+        // y is normal × x = (−1·0 − 0·0, 0·1 − 0·0, 0·0 − (−1)·1) = (0, 0, 1),
+        // so sketch (u, v) is world (u, 0, v), and the flipped extrude goes
+        // along −normal = +y: the cube [0, 1]³ again, its eight corners
+        // every 0/1 triple. The placement turns by a rotation worked out
+        // from the frame, so the corners carry a few ulps of rounding
+        // (2.2e-16 seen): within 1e-12 mm, far below LINEAR.
+        let front = crate::FrameIn { origin: [0.0, 0.0, 0.0], x: [1.0, 0.0, 0.0], normal: [0.0, -1.0, 0.0] };
+        let square = ProfileIn { outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0], bulges: vec![] }, holes: vec![] };
+        let p = store.build(BodySpec::Extrude { profile: square, distance: 1.0, frame: Some(front), flip: true }).unwrap();
+        let placed_file = store.step(p).unwrap();
+        let mut want = vec![];
+        for k in 0..8 {
+            want.push([(k & 1) as f64, (k >> 1 & 1) as f64, (k >> 2 & 1) as f64]);
+        }
+        want.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let near = |got: Vec<[f64; 3]>| got.len() == 8 && got.iter().zip(&want).all(|(g, w)| (0..3).all(|i| (g[i] - w[i]).abs() < 1e-12));
+        let placed_corners = step_vertices(&placed_file);
+        assert!(near(placed_corners.clone()), "{placed_corners:?}");
+        assert_eq!(step_vertices(&box_file), want);
+        // Six faces, each written once; the local body (before placing) sits
+        // at z in [−1, 0] (flipped on its own plane), so its file differs:
+        // the store wrote the placed one.
+        assert_eq!(placed_file.matches("= ADVANCED_FACE(").count(), 6);
+        let (built, _) = store.get(p).unwrap();
+        assert!(!near(step_vertices(&step_write::write(&built.body).unwrap())));
+        assert_eq!(placed_file, step_write::write(&built.baked()).unwrap());
+        // A freed or never-made handle is refused like the other calls.
+        store.free(h).unwrap();
+        assert_eq!(store.step(h).unwrap_err().kind, ErrorKind::UnknownBody);
+        assert_eq!(store.step(99).unwrap_err().kind, ErrorKind::UnknownBody);
     }
 
     #[test]

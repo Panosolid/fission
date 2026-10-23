@@ -40,8 +40,22 @@ export const goldenDesign = (model: string) => openGolden(model).workspaces.desi
 
 const cross = (a: readonly number[], b: readonly number[]): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
-/** A rebuild of `doc` through Design on `calls`, measured as the expectations are written, and how long the rebuild took. */
-export async function measureGolden(doc: DesignDocument, calls: KernelCalls): Promise<{ got: Measured; ms: number }> {
+/** One shown body's STEP file (step 29b3, `body_step`), or why the kernel wouldn't write it. */
+export interface GoldenStep {
+  /** The browser's row and the item that builds it, as `Measured.bodies`. */
+  body: string;
+  item: string;
+  step: string | null;
+  step_refused: string | null;
+}
+
+/**
+ * A rebuild of `doc` through Design on `calls`, measured as the
+ * expectations are written, and how long the rebuild took; with `steps`,
+ * each shown body's STEP file too (after the clock stops, so the times and
+ * kernel calls the baseline counts are as without).
+ */
+export async function measureGolden(doc: DesignDocument, calls: KernelCalls, options: { steps?: boolean } = {}): Promise<{ got: Measured; ms: number; steps?: GoldenStep[] }> {
   const cache = new BodyCache(calls);
   try {
     const start = performance.now();
@@ -114,7 +128,24 @@ export async function measureGolden(doc: DesignDocument, calls: KernelCalls): Pr
         return { sketch: s.id, point: pin.point, kind: pin.kind, name: pin.name, ...(pin.feature !== undefined ? { feature: pin.feature } : {}), at };
       }),
     );
-    return { got: { bodies, sketches, pins, trouble, failed: failures }, ms };
+    const got = { bodies, sketches, pins, trouble, failed: failures };
+    if (!options.steps) return { got, ms };
+    const steps: GoldenStep[] = [];
+    for (const [i, s] of shown.entries()) {
+      const r = build.results[s.feature];
+      const handle = r?.status === "built" ? r.body : undefined;
+      let step: string | null = null;
+      let refused: string | null = handle === undefined ? "no body in the kernel for this row" : null;
+      if (handle !== undefined) {
+        try {
+          step = await calls.call("body_step", handle);
+        } catch (e) {
+          refused = e instanceof Error ? e.message : String(e);
+        }
+      }
+      steps.push({ body: bodies[i].body, item: s.feature, step, step_refused: refused });
+    }
+    return { got, ms, steps };
   } finally {
     await cache.clear();
   }
@@ -126,14 +157,14 @@ export async function measureGolden(doc: DesignDocument, calls: KernelCalls): Pr
  * the same document; empty `problems` when it matches. A rebuild that
  * throws is a problem too, never a crash of the run.
  */
-export async function checkGolden(want: GoldenExpect, calls: KernelCalls): Promise<{ problems: string[]; got: Measured | null; ms: number }> {
+export async function checkGolden(want: GoldenExpect, calls: KernelCalls, options: { steps?: boolean } = {}): Promise<{ problems: string[]; got: Measured | null; ms: number; steps?: GoldenStep[] }> {
   try {
     const doc = goldenDesign(want.model);
-    const { got, ms } = await measureGolden(doc, calls);
+    const { got, ms, steps } = await measureGolden(doc, calls, options);
     const problems = compare(want, got);
     const again = projectFromJson(projectToJson(openGolden(want.model)), [designWorkspace]).workspaces.design;
     if (!isDeepStrictEqual(again, doc)) problems.push("a save and reopen changed it");
-    return { problems, got, ms };
+    return { problems, got, ms, steps };
   } catch (e) {
     return { problems: [`the rebuild threw: ${e instanceof Error ? e.message : String(e)}`], got: null, ms: NaN };
   }

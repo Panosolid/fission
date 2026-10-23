@@ -350,6 +350,38 @@ jobs:
             grep -E '^(\|[^-]|[0-9]+ metric)' "$OUT/baseline.txt" >>"$OUT/report.txt" || true
           fi
           exit $code
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: always()
+        with:
+          python-version: "3.12"
+      # Step 29b3: every shown body's STEP file, as the kernel wrote it, read
+      # by OpenCascade and judged against the models' hand-worked answers
+      # (prototypes/oracle/golden_step.py); a finding is a failure folder
+      # with golden-report.txt, which file_issues.py files like the rest.
+      # Then its self-test: one round with a face flipped in every file,
+      # which must be caught in every body.
+      - name: Golden models' STEP files read by OpenCascade
+        if: always()
+        env:
+          OUT: ${{ runner.temp }}/golden
+          PLANTED: ${{ runner.temp }}/golden-planted
+        run: |
+          [ -f "$OUT/golden-step.jsonl" ] || { echo "no STEP files: the golden run stopped first"; exit 1; }
+          pip install -q cadquery-ocp mpmath
+          code=0
+          python3 prototypes/oracle/golden_step.py "$OUT/golden-step.jsonl" "$RUNNER_TEMP/golden-step-report.txt" >"$RUNNER_TEMP/golden-step.txt" || code=$?
+          cat "$RUNNER_TEMP/golden-step.txt"
+          head -1 "$RUNNER_TEMP/golden-step.txt" >>"$OUT/report.txt"
+          if [ -f "$RUNNER_TEMP/golden-step-report.txt" ]; then
+            dir="$OUT/seed-golden-step-${{ github.run_id }}"
+            mkdir -p "$dir"
+            mv "$RUNNER_TEMP/golden-step-report.txt" "$dir/golden-report.txt"
+          fi
+          FISSION_STEP_FAULT=1 FISSION_SEED=1 FISSION_GOLDEN_ROUNDS=1 FISSION_GOLDEN_TIMING_RUNS=1 FISSION_GOLDEN_OUT="$PLANTED" \
+            npm run golden -w @fission/testing >/dev/null || code=$?
+          python3 prototypes/oracle/golden_step.py "$PLANTED/golden-step.jsonl" --planted >"$RUNNER_TEMP/golden-planted.txt" || code=$?
+          tail -1 "$RUNNER_TEMP/golden-planted.txt"
+          exit $code
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

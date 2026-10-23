@@ -17,7 +17,13 @@ loop:
   far its 3D curve is from its faces;
 - a seam on a face of a cylinder or sphere that has none (OpenCascade
   needs a seam on every face that wraps round; the kernel, like STEP,
-  doesn't).
+  doesn't);
+- each such pcurve moved by a whole turn where it was fitted a turn away
+  from its neighbours on a cylinder or sphere (FixShifted; step 29b3: two
+  good bodies of the stateful harness, a 121° arc 28 long and a 517 m
+  column, read invalid with nearly twice their volume until it was on).
+  A shift by the period is the same curve on the same surface, so it can
+  neither turn a face nor reorder a loop.
 Every other repair is switched off (`_heal`).
 
 A body passes when:
@@ -73,7 +79,7 @@ WIRE_MODES = ["FixAddCurve3dMode", "FixAddPCurveMode", "FixConnectedMode", "FixD
               "FixRemovePCurveMode", "FixReorderMode", "FixReversed2dMode", "FixSameParameterMode", "FixSeamMode",
               "FixSelfIntersectingEdgeMode", "FixSelfIntersectionMode", "FixShiftedMode", "FixSmallMode",
               "FixTailMode", "FixVertexToleranceMode", "ModifyRemoveLoopMode"]
-WIRE_ON = {"FixEdgeCurvesMode", "FixAddPCurveMode", "FixSameParameterMode"}
+WIRE_ON = {"FixEdgeCurvesMode", "FixAddPCurveMode", "FixSameParameterMode", "FixShiftedMode"}
 
 
 @dataclass

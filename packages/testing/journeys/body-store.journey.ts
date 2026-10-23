@@ -14,6 +14,13 @@ import { seeded, type SeededRandom } from "../src/index.ts";
 
 const close = (a: number, b: number) => Math.abs(a - b) <= 1e-12 * Math.abs(b);
 
+/** A STEP file's corners, each VERTEX_POINT's CARTESIAN_POINT as "x,y,z", sorted. */
+function stepCorners(step: string): string[] {
+  const points = new Map<string, string>();
+  for (const m of step.matchAll(/^(#\d+) = CARTESIAN_POINT\('',\(([^()]+)\)\);$/gm)) points.set(m[1], m[2].split(",").map(Number).join(","));
+  return [...step.matchAll(/^#\d+ = VERTEX_POINT\('',(#\d+)\);$/gm)].map((m) => points.get(m[1]) ?? "missing").sort();
+}
+
 /** The KernelError a call rejects with (fails if it resolves or throws anything else). */
 async function refusal(call: Promise<unknown>): Promise<KernelError> {
   try {
@@ -37,6 +44,12 @@ test("a stored 40 × 30 × 20 box gives hand-worked numbers, the same view and S
   assert.deepEqual(view, await kernel.call("make_box", 40, 30, 20));
   const stl = await kernel.call("body_stl", box, "part");
   assert.deepEqual(stl, await kernel.call("export_stl", spec, "part"));
+  // Its STEP file (step 29b3): make_box's box runs from (0, 0, 0) to
+  // (40, 30, 20), so its eight VERTEX_POINTs are every corner
+  // {0, 40} × {0, 30} × {0, 20}, and it has six faces.
+  const step = await kernel.call("body_step", box);
+  assert.deepEqual(stepCorners(step), [0, 40].flatMap((x) => [0, 30].flatMap((y) => [0, 20].map((z) => `${x},${y},${z}`))).sort());
+  assert.equal(step.match(/= ADVANCED_FACE\(/g)?.length, 6);
   await kernel.call("body_free", box);
   assert.equal(await kernel.call("body_count"), before);
   // Gone for good: refused by name, and so is a second free.
@@ -45,6 +58,7 @@ test("a stored 40 × 30 × 20 box gives hand-worked numbers, the same view and S
   assert.deepEqual(gone.inputs, [{ input: "param", name: "body" }]);
   assert.equal(gone.message, `body ${box} is not in the kernel (it was freed, or never made)`);
   assert.equal((await refusal(kernel.call("body_free", box))).kind, "unknown-body");
+  assert.equal((await refusal(kernel.call("body_step", box))).kind, "unknown-body");
   // The next body never gets that handle again.
   const next = await kernel.call("body_build", spec);
   assert.ok(next > box);

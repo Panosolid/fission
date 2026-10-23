@@ -16,7 +16,11 @@ name: Fuzzing
 # sketch outline, moves and turns) with coverage-guided fuzzing
 # (kernel/fuzz/, cargo-fuzz on nightly Rust), every body their corpus builds
 # then compared with exact values and OpenCascade
-# (prototypes/oracle/fuzz_shapes.py).
+# (prototypes/oracle/fuzz_shapes.py). Both oracles also have OpenCascade
+# read every body from its STEP file as the kernel wrote it (step 29b3,
+# compare.py's step_issues), and each job then plants a flipped face in
+# every file of a short run (FISSION_STEP_FAULT), which must be caught in
+# every body (`--planted`), so a check that stopped working fails the job.
 #
 # Nightly at 23:10 UTC (7:10am Perth), after the random testing run
 # (nightly.yml, 15:00 to 22:35 UTC, collected by about 22:50) so the two
@@ -145,6 +149,15 @@ jobs:
             mv "$OUT/disagreements.txt" "$OUT/seed-oracle-${{ github.run_id }}/oracle-disagreements.txt"
             exit 1
           fi
+      # The STEP check's self-test: a minute of sessions with a face flipped
+      # in every file, each of which the oracle must report.
+      - name: The oracle catches a planted flipped face in every session's STEP file
+        if: always()
+        env:
+          PLANTED: ${{ runner.temp }}/planted
+        run: |
+          FISSION_STEP_FAULT=1 FISSION_FUZZ_SECONDS=60 FISSION_FUZZ_OUT="$PLANTED" npm run sessions -w @fission/testing
+          cd prototypes/oracle && python3 sketch_extrude.py "$PLANTED/oracle.jsonl" "$PLANTED/disagreements.txt" --planted
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -207,6 +220,18 @@ jobs:
             mv "$RUNNER_TEMP/disagreements.txt" "$dir/oracle-disagreements.txt"
             exit 1
           fi
+      # The STEP check's self-test: the saved seeds' bodies with a face
+      # flipped in every file, each of which the oracle must report.
+      - name: The oracle catches a planted flipped face in every fuzz body's STEP file
+        if: always()
+        working-directory: kernel
+        env:
+          FISSION_ORACLE_TARGET: ${{ matrix.target }}
+          FISSION_ORACLE_OUT: ${{ runner.temp }}/planted.jsonl
+          FISSION_STEP_FAULT: "1"
+        run: |
+          cargo test --test fuzz_corpus oracle_cases
+          python3 ../prototypes/oracle/fuzz_shapes.py "$FISSION_ORACLE_OUT" "$RUNNER_TEMP/planted.txt" --planted
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

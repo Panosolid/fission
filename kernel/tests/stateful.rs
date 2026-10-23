@@ -55,6 +55,9 @@ use fission_kernel::placed::Placed;
 use fission_kernel::sketch;
 use fission_kernel::stl;
 use fission_kernel::step_write;
+#[path = "support/step_file.rs"]
+mod step_file;
+use step_file::{flip_first_face, step_file};
 use fission_kernel::face_mass::{face_masses, FaceMass};
 use fission_kernel::geom::{Curve, Surface};
 use fission_kernel::topology::{Body, FaceRole, Piece as PieceId};
@@ -2776,43 +2779,6 @@ fn oracle_lines(slots: &[Slot]) -> String {
         out.push('\n');
     }
     out
-}
-
-/// The oracle's "step" and "step_refused": the body's STEP file (with the
-/// planted fault when FISSION_STEP_FAULT is set), or why the writer refused
-/// it.
-fn step_file(world: &Body) -> (Option<String>, Option<String>) {
-    match step_write::write(world) {
-        Ok(text) if std::env::var_os("FISSION_STEP_FAULT").is_some() => (Some(flip_first_face(&text)), None),
-        Ok(text) => (Some(text), None),
-        Err(e) => (None, Some(e.to_string())),
-    }
-}
-
-/// `text` with its first face's normal flipped (`ADVANCED_FACE`'s
-/// same_sense swapped) and nothing else changed: the planted fault
-/// FISSION_STEP_FAULT gives the oracle, which OpenCascade's checker must
-/// catch (prototypes/oracle/test_step_check.py plants the same one by hand).
-fn flip_first_face(text: &str) -> String {
-    let mut done = false;
-    let lines: Vec<String> = text
-        .lines()
-        .map(|l| {
-            if done || !l.contains("= ADVANCED_FACE(") {
-                return l.to_string();
-            }
-            done = true;
-            if let Some(head) = l.strip_suffix(",.T.);") {
-                format!("{head},.F.);")
-            } else if let Some(head) = l.strip_suffix(",.F.);") {
-                format!("{head},.T.);")
-            } else {
-                panic!("an ADVANCED_FACE line the writer doesn't write: {l}")
-            }
-        })
-        .collect();
-    assert!(done, "no face to flip");
-    lines.join("\n") + if text.ends_with('\n') { "\n" } else { "" }
 }
 
 struct RunReport {

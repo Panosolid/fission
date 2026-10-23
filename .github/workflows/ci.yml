@@ -135,6 +135,19 @@ jobs:
           found=$(sed -n 's/.* \([0-9]*\) disagreement(s)$/\1/p' target/endless-oracle.log)
           small=$(sed -n 's/^  \([0-9]*\) more with a radius under.*/\1/p' target/endless-oracle.log)
           [ -n "$bodies" ] && [ "$found" -gt 0 ] && [ $((found + small)) = "$bodies" ] || { echo "the planted fault was not caught in every body"; exit 1; }
+      # Step 29b3: the fuzzers' saved seeds build ~2,000 bodies; read from
+      # their STEP files they must all agree, and with a face planted
+      # flipped in every file, every one must be caught.
+      - name: The fuzz seeds' bodies read from their STEP files, clean and with a planted flipped face
+        if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
+        working-directory: kernel
+        run: |
+          FISSION_ORACLE_OUT=target/fuzz-oracle.jsonl cargo test -q --test fuzz_corpus oracle_cases
+          python3 ../prototypes/oracle/fuzz_shapes.py target/fuzz-oracle.jsonl >target/fuzz-oracle.log || { cat target/fuzz-oracle.log; exit 1; }
+          head -4 target/fuzz-oracle.log
+          FISSION_STEP_FAULT=1 FISSION_ORACLE_OUT=target/fuzz-planted.jsonl cargo test -q --test fuzz_corpus oracle_cases
+          python3 ../prototypes/oracle/fuzz_shapes.py target/fuzz-planted.jsonl --planted >target/fuzz-planted.log || { cat target/fuzz-planted.log; exit 1; }
+          tail -1 target/fuzz-planted.log
 
   # Mutation testing of the kernel code this change touches: every mutant
   # cargo mutants makes in the changed lines must be caught by a lib test
