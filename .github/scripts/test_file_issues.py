@@ -56,6 +56,19 @@ class Kinds(unittest.TestCase):
         self.assertEqual(oracle_kinds("line 1: {nonsense\n  faces: fission 6, occ 5\n")[0][0],
                          "OpenCascade disagrees, ?: faces")
 
+    def test_step_file_kinds(self):
+        # Step 29b2's checks of each body's STEP file are kinds of their own
+        # (the copy in brackets is part of the details, not the kind); a
+        # body under OpenCascade's small-feature limit, listed in an
+        # occ-rounding block, is none.
+        text = ('line 7: {"Box": {"w": "1.0", "d": "1.0", "h": "1.0"}}\n'
+                "  step validity: BRepCheck: invalid (faces [0], counted in file order) (as written)\n"
+                "  step write refused: only a valid body can be written to STEP: face 0 (as written)\n"
+                'occ-rounding, line 8: {"Cylinder": {"r": "0.001", "h": "3.0"}}\n'
+                "  OpenCascade's small-feature limit: step validity: BRepCheck: invalid (blown up 1024 times)\n")
+        self.assertEqual([k for k, _ in oracle_kinds(text)], ["OpenCascade disagrees, Box: step validity",
+                                                             "OpenCascade disagrees, Box: step write refused"])
+
     def test_a_crash_without_a_report_is_a_kind(self):
         got = kinds_of({"harness-output.txt": "running 1 test\nthread panicked at src/x.rs:1\nerror: test failed\n"})
         self.assertEqual(list(got), ["harness crashed without a report"])
