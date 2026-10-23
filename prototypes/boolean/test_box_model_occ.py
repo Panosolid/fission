@@ -47,12 +47,17 @@ def occ_solid(boxes):
 
 def occ_bodies(op, a, b):
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    algo = {"union": BRepAlgoAPI_Fuse, "subtract": BRepAlgoAPI_Cut, "intersect": BRepAlgoAPI_Common}[op]
+    return measure(algo(occ_solid(a), occ_solid(b)).Shape())
+
+
+def measure(shape):
+    """Per solid of an OpenCascade result, after UnifySameDomain: volume,
+    area and the counts (also used by test_convex_model_occ.py)."""
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
     from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX, TopAbs_WIRE
-    algo = {"union": BRepAlgoAPI_Fuse, "subtract": BRepAlgoAPI_Cut, "intersect": BRepAlgoAPI_Common}[op]
-    shape = algo(occ_solid(a), occ_solid(b)).Shape()
     unify = ShapeUpgrade_UnifySameDomain(shape, True, True, False)
     unify.Build()
     shape = unify.Shape()
