@@ -531,7 +531,13 @@ try {
       // Choosing another workspace for the pane takes the image away; Design is untouched.
       await p.selectOption("#split-choice", "render");
       await p.waitForFunction(() => document.querySelector("#split-viewport")?.dataset.image === undefined);
-      assert.ok(isBody(await at("#viewport", 0.5, 0.5)), "Design's pane after the image went");
+      // Mounting Render's pane resizes Design's canvas, which reads blank until its next frame is drawn, so allow 2 s for it.
+      let centre = await at("#viewport", 0.5, 0.5);
+      for (let tries = 0; !isBody(centre) && tries < 20; tries++) {
+        await p.waitForTimeout(100);
+        centre = await at("#viewport", 0.5, 0.5);
+      }
+      assert.ok(isBody(centre), "Design's pane after the image went");
     } finally {
       await p.close();
     }
