@@ -1,0 +1,77 @@
+{
+  "model": "km-plate",
+  "what": "A 100 × 60 × 10 plate a kilometre from the origin (x 1,000,000 to 1,000,100 mm), with a blind pocket 30 × 20 × 5 cut into its bottom: the modelling range's 1 km (kernel/CLAUDE.md, 'Supported modelling range'; a boolean brings both bodies near their overlap first, 34a).",
+  "from": "34",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the front plane XZ (sketch x is X, sketch y is Z, its normal −Y).",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool: click (1000000, 5), then (1000100, 15), typed (X 1,000,000..1,000,100, Z 5..15; points 3, 4, 6, 8, lines 5, 7, 9, 10)."
+    },
+    {
+      "do": "Extrude the sketch 60, flipped (along +Y, y 0 to 60): Body 1, the plate.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-12"
+    },
+    {
+      "do": "Rectangle tool: click (1000020, 20), then (1000050, 40), typed (points and lines 13 to 20). Seen along Z the plate offers its corners (1,000,000 or 1,000,100, 0 or 60) and edge middles (1,000,050, 0 or 60), (1,000,000 or 1,000,100, 30), none here."
+    },
+    {
+      "do": "Extrude the sketch 10 (z 0 to 10): Body 2, the pocket's tool, from below the plate (its bottom is z = 5) to its middle.",
+      "makes": "feature-21"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Cut, Keep tools off.",
+      "makes": "feature-22"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-22",
+      "volume": {
+        "is": "100*60*10 - 30*20*5",
+        "why": "the plate less the pocket, x 1,000,020..1,000,050, y 20..40, z 5..10 (the tool's z 0..5 is below the plate): 60000 − 3000"
+      },
+      "area": {
+        "is": "2*(100*60 + 100*10 + 60*10) + (2*30 + 2*20)*5",
+        "why": "the plate's 15200: the pocket's floor (30 × 20 at z = 10) gives back what its mouth takes out of the bottom, and its four walls add 100 round by 5 deep"
+      },
+      "topology": {
+        "faces": 11,
+        "edges": 24,
+        "vertices": 16,
+        "why": "the plate's 6 faces (its bottom with the pocket's mouth as a second loop) and the pocket's floor and 4 walls; 12 + 12 edges; 8 + 8 corners: V − E + F − (L − F) = 16 − 24 + 11 − (12 − 11) = 2"
+      },
+      "box": {
+        "is": [
+          [
+            1000000,
+            0,
+            5
+          ],
+          [
+            1000100,
+            60,
+            15
+          ]
+        ],
+        "why": "the plate's; the pocket is inside it"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): at 1 km a double resolves about 1.2e-10 mm, and the crossings are between planes at round numbers; a tolerance grown past LINEAR here would be precision lost to the distance, not allowed for"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

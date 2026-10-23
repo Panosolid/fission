@@ -1,0 +1,77 @@
+{
+  "model": "small-cube-halved",
+  "what": "A 2.2 µm cube with half of it cut away, leaving a block 1.1 µm thick, 1.1 × MIN_FEATURE, so it builds: micron-cube-halved's pair, at the bottom of the modelling range (kernel/CLAUDE.md).",
+  "from": "34",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool, zoomed in: click (0, 0.0022), then (0.0022, 0.0044) (x 0..2.2 µm, y 2.2..4.4 µm; points 3, 4, 6, 8, lines 5, 7, 9, 10)."
+    },
+    {
+      "do": "Extrude the sketch 0.0022 (z 0 to 2.2 µm): Body 1, the cube.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Create Sketch on the front plane XZ.",
+      "makes": "sketch-12"
+    },
+    {
+      "do": "Rectangle tool: click (0.0011, −0.0022), then (0.0066, 0.0044) (x 1.1..6.6 µm, z −2.2..4.4 µm; points and lines 13 to 20). Seen along Y the cube's nearest offered point is its bottom edge's middle (0.0011, 0), 2.2 µm away, so nothing is pinned."
+    },
+    {
+      "do": "Extrude the sketch 0.0088, flipped (along +Y, y 0 to 8.8 µm): Body 2, the tool, through the cube from x = 1.1 µm on.",
+      "makes": "feature-21"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Cut, Keep tools off.",
+      "makes": "feature-22"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-22",
+      "volume": {
+        "is": "0.0011*0.0022*0.0022",
+        "why": "the cube's half x 0..1.1 µm: 1.1 × 2.2 × 2.2 µm"
+      },
+      "area": {
+        "is": "2*(0.0011*0.0022 + 0.0011*0.0022 + 0.0022*0.0022)",
+        "why": "a 1.1 × 2.2 × 2.2 µm box: 2(2.42 + 2.42 + 4.84) µm²"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: the tool's wall x = 1.1 µm closes the half; 8 − 12 + 6 = 2"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0.0022,
+            0
+          ],
+          [
+            0.0011,
+            0.0044,
+            0.0022
+          ]
+        ],
+        "why": "the cube's from x = 0 to the tool's wall"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

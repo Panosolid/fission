@@ -1,0 +1,78 @@
+{
+  "model": "hollow-box",
+  "what": "The same 40 × 30 × 20 block with a 20 × 5 × 10 box wholly inside it cut away, at least 5 mm clear of every face: one body with a void (B0 decision 3: shells[0] the outside, a further shell facing in). The table has no facts at all here, so the classification is by the seeded ray.",
+  "from": "34",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool: click (−20, −15), then (20, 15) (points 3, 4, 6, 8 and lines 5, 7, 9, 10, the tool's order). Nothing is before it, so nothing is pinned."
+    },
+    {
+      "do": "Extrude the sketch 20 (towards +Z): Body 1, the block x −20..20, y −15..15, z 0..20, across the front and side planes.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Create Sketch on the front plane XZ (sketch x is X, sketch y is Z, its normal −Y).",
+      "makes": "sketch-12"
+    },
+    {
+      "do": "Rectangle tool: click (−10, 5), then (10, 15) (x −10..10, z 5..15; points and lines 13 to 20); seen along Y the block offers its corners (±20, 0 or 20), its edges' middles (0, 0), (0, 20), (±20, 0), (±20, 20), (±20, 10) and nothing else, so no point here is pinned."
+    },
+    {
+      "do": "Extrude the sketch 5, not flipped (along −Y, y 0 to −5): Body 2, the box x −10..10, y −5..0, z 5..15, inside the block (clear by 10 in x, 10 and 15 in y, 5 in z).",
+      "makes": "feature-21"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Cut, Keep tools off.",
+      "makes": "feature-22"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-22",
+      "volume": {
+        "is": "40*30*20 - 20*5*10",
+        "why": "the block less the box, all of it inside: 24000 − 1000"
+      },
+      "area": {
+        "is": "2*(40*30 + 40*20 + 30*20) + 2*(20*5 + 20*10 + 5*10)",
+        "why": "the block's outside, 5200, and the void's six walls facing in, 2(100 + 200 + 50) = 700: a body's area is every face's"
+      },
+      "topology": {
+        "faces": 12,
+        "edges": 24,
+        "vertices": 16,
+        "shells": 2,
+        "why": "two boxes' worth, touching nowhere: 6 + 6 faces, 12 + 12 edges, 8 + 8 corners; V − E + F = 16 − 24 + 12 = 4 = 2 × 2 shells (the outside and the void, no hole through)"
+      },
+      "box": {
+        "is": [
+          [
+            -20,
+            -15,
+            0
+          ],
+          [
+            20,
+            15,
+            20
+          ]
+        ],
+        "why": "the block's; the void is inside it"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

@@ -1,0 +1,85 @@
+{
+  "model": "drilled-block",
+  "what": "A 40 × 30 × 20 block (the ready-made box) drilled through by a hole r 5 round (20, 15): a circle sketched on its top, extruded down through it as a new body, and cut away. The hole's ends lie on the top and bottom (faces on each other, 35a), its wall is a plane–cylinder crossing (37).",
+  "from": "37",
+  "recipe": [
+    {
+      "do": "Start a new part with its ready-made box 40 × 30 × 20 from the origin: Body 1.",
+      "makes": "feature-1"
+    },
+    {
+      "do": "Create Sketch on the box's top face (z = 20).",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Circle tool: click the centre (20, 15), then (25, 15) for r 5 (point 3, circle 4). The top's middle is no corner, edge middle or centre, so nothing is pinned."
+    },
+    {
+      "do": "Extrude the sketch 20, flipped (down, z 20 to 0): Body 2, the drill.",
+      "makes": "feature-5"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Cut, Keep tools off.",
+      "makes": "feature-6"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-6",
+      "volume": {
+        "is": "40*30*20 - pi*5^2*20",
+        "why": "L·W·H − πr²H, the test plan's drilled hole: 24000 − 500π"
+      },
+      "area": {
+        "is": "2*(40*30 + 40*20 + 30*20) - 2*pi*5^2 + 2*pi*5*20",
+        "why": "the block's 5200 less the two discs r 5 taken from its top and bottom, and the hole's wall, 2π·5 round by 20: 5200 + 150π"
+      },
+      "topology": {
+        "faces": 7,
+        "edges": 14,
+        "vertices": 10,
+        "why": "the block's 6 faces and the hole's wall, the drill's side: a cylinder with no seam edge and two loops (kernel/CLAUDE.md, Conventions); the block's 12 edges and the hole's 2 circles, each one closed edge with one vertex; 8 corners and those 2. V − E + F − (L − F) = 10 − 14 + 7 − (10 − 7) = 0 = 2(1 shell − 1 hole through)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            40,
+            30,
+            20
+          ]
+        ],
+        "why": "the block's; the hole is inside it"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): the hole's circles are where the planes z = 0 and z = 20 meet the cylinder square to its axis, exact circles (B0 decision 4), so nothing measures past LINEAR"
+      }
+    }
+  ],
+  "sketches": [
+    {
+      "sketch": "sketch-2",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          20
+        ],
+        "why": "the box's top at z = 20, still one face with the hole in it, keeping its name (40a rule 2)"
+      }
+    }
+  ],
+  "pins": []
+}

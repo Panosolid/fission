@@ -1,0 +1,134 @@
+{
+  "model": "pipe-tee",
+  "what": "A pipe tee: a main pipe along X, outside r 10 and bore r 8, 60 long, and a branch up Z from its middle, outside r 6 and bore r 4, to z = 25; the outsides joined, then both bores cut. Each crossing is a smaller cylinder through a bigger one at right angles, in general position (38c).",
+  "from": "38c",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the side plane YZ (sketch x is Y, sketch y is Z, its normal +X).",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Circle tool: click the centre (0, 0), then (10, 0) for r 10 (point 3, circle 4)."
+    },
+    {
+      "do": "Extrude the sketch 60 (x 0 to 60): Body 1, the main pipe's outside.",
+      "makes": "feature-5"
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-6"
+    },
+    {
+      "do": "Circle tool: click the centre (30, 0), then (36, 0) for r 6 (point 7, circle 8). Seen along Z Body 1 offers its circles' centres (0, 0) and (60, 0) and their seam vertices, none here."
+    },
+    {
+      "do": "Extrude the sketch 25 (z 0 to 25): Body 2, the branch's outside; its start cap at z = 0 lies inside the main pipe, through its axis.",
+      "makes": "feature-9"
+    },
+    {
+      "do": "Create Sketch on the side plane YZ.",
+      "makes": "sketch-10"
+    },
+    {
+      "do": "Circle tool: click the centre (0, 0), then (8, 0) for r 8 (point 11, circle 12). The centre lands on Body 1's start circle's centre, which lies on the plane and is offered first (27c), so point 11 is pinned to it."
+    },
+    {
+      "do": "Extrude the sketch 60 (x 0 to 60): Body 3, the main bore.",
+      "makes": "feature-13"
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-14"
+    },
+    {
+      "do": "Circle tool: click the centre (30, 0), then (34, 0) for r 4 (point 15, circle 16). The centre lands on Body 2's start circle's centre at z = 0, on the plane, so point 15 is pinned to it."
+    },
+    {
+      "do": "Extrude the sketch 25 (z 0 to 25): Body 4, the branch's bore.",
+      "makes": "feature-17"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Join, Keep tools off.",
+      "makes": "feature-18"
+    },
+    {
+      "do": "Combine: target Body 1, tools Body 3 and Body 4, Cut, Keep tools off.",
+      "makes": "feature-19"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-19",
+      "volume": {
+        "is": "pi*10^2*60 + pi*6^2*25 - 4*10/3*((10^2 + 6^2)*ellipe(0.6) - (10^2 - 6^2)*ellipk(0.6)) - (pi*8^2*60 + pi*4^2*25 - 4*8/3*((8^2 + 4^2)*ellipe(0.5) - (8^2 - 4^2)*ellipk(0.5)))",
+        "why": "the outsides' union less the bores' union (the bores lie wholly inside the outsides). A branch r a standing on the axis of a main pipe r R overlaps it in the main's height above its axis, √(R² − y²), over the branch's disc: ∫ 2√(a² − y²)√(R² − y²) dy over −a..a, which with y = a sin t and k = a/R is (4R/3)[(R² + a²)E(k) − (R² − a²)K(k)], complete elliptic integrals of modulus k (at a = R it is 8R³/3, half the Steinmetz solid 16R³/3). Outsides: π·10²·60 + π·6²·25 less that for R 10, a 6, k 0.6; bores: π·8²·60 + π·4²·25 less that for R 8, a 4, k 0.5"
+      },
+      "area": {
+        "is": "2*pi*10*60 - 4*10^2*(ellipe(0.6) - (1 - 0.6^2)*ellipk(0.6)) + 2*pi*6*25 - 4*6*10*ellipe(0.6) + 2*pi*8*60 - 4*8^2*(ellipe(0.5) - (1 - 0.5^2)*ellipk(0.5)) + 2*pi*4*25 - 4*4*8*ellipe(0.5) + 2*pi*(10^2 - 8^2) + pi*(6^2 - 4^2)",
+        "why": "the main's outside 2π·10·60 less the patch the branch takes out of it, ∫ 2R√(a² − y²)/√(R² − y²) dy over −a..a (y = R sin φ round the main) = 4R²[E(k) − (1 − k²)K(k)]; the branch's outside 2π·6·25 less its part inside the main, ∫ a √(R² − a² sin²ψ) dψ round the branch = 4aR·E(k); the same for the bores (R 8, a 4, k 0.5), facing in; the main's two ends, rings π(10² − 8²) each, and the branch's top, a ring π(6² − 4²)"
+      },
+      "topology": {
+        "faces": 7,
+        "edges": 8,
+        "vertices": 8,
+        "why": "7 faces: the main's outside and bore, its two end rings, the branch's outside, bore and top ring. 8 edges, each closed with one vertex: the main's 4 end circles, the branch's 2 top circles, and the two crossings, outside with outside and bore with bore. With a < R a crossing goes once round the branch at height √(R² − a² sin²ψ), which never reaches a turning point (B0 decision 4: an edge is one branch of the crossing between turning points; parametrised round the smaller cylinder there are none), so each is one closed edge. Loops: the main's outside and bore 3 each (two ends and the crossing), the rings and the branch's outside and bore 2 each: 16. V − E + F − (L − F) = 8 − 8 + 7 − 9 = −2 = 2(1 shell − 2): the tee's three openings make two holes through"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            -10,
+            -10
+          ],
+          [
+            60,
+            10,
+            25
+          ]
+        ],
+        "why": "the main pipe x 0..60, y and z to ±10; the branch's top at z = 25"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): the crossings are exact in closed form (one square root, B0 decision 4) and the circles exact, so nothing measures past LINEAR"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": [
+    {
+      "sketch": "sketch-10",
+      "point": "point-11",
+      "kind": "centre",
+      "name": "side:circle-4+start",
+      "feature": "feature-5",
+      "at": {
+        "is": [
+          0,
+          0,
+          0
+        ],
+        "why": "the main bore's centre click on Body 1's start circle's centre, the origin: a centre is named by its edge, here the one between the side and the start cap (sorted, +), and the pin names feature-5 since the edge is on that feature's body, not a face the sketch is on"
+      }
+    },
+    {
+      "sketch": "sketch-14",
+      "point": "point-15",
+      "kind": "centre",
+      "name": "side:circle-8+start",
+      "feature": "feature-9",
+      "at": {
+        "is": [
+          30,
+          0,
+          0
+        ],
+        "why": "the branch bore's centre click on Body 2's start circle's centre, (30, 0) on the plane z = 0"
+      }
+    }
+  ]
+}

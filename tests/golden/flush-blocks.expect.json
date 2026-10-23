@@ -1,0 +1,114 @@
+{
+  "model": "flush-blocks",
+  "what": "Stacked blocks joined flush: the ready-made box 40 × 30 × 10 and a 40 × 12 × 10 block sketched on its top and standing flush with its front, left and right, joined into one L-shaped body. The second block's start cap lies on the first's top (faces on each other, 35a), and three of its sides lie on the first's, which merge (35c).",
+  "from": "35",
+  "recipe": [
+    {
+      "do": "Start a new part with its ready-made box 40 × 30 × 10 from the origin: Body 1.",
+      "makes": "feature-1"
+    },
+    {
+      "do": "Create Sketch on the box's top face (z = 10).",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool: click (0, 0), then (40, 12) (points 3, 4, 6, 8; lines 5, 7, 9, 10). Its corners (0, 0) and (40, 0) land on the top's front corners and are pinned there (points 3 and 4); (40, 12) and (0, 12) lie on the side edges but not at their middles (y = 15), so they aren't."
+    },
+    {
+      "do": "Extrude the sketch 10 (up, z 10 to 20): Body 2.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Join, Keep tools off.",
+      "makes": "feature-12"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-12",
+      "volume": {
+        "is": "40*30*10 + 40*12*10",
+        "why": "the two blocks, which share only the face between them: 12000 + 4800"
+      },
+      "area": {
+        "is": "2*(40*30 + 40*10 + 30*10) + 2*(40*12 + 40*10 + 12*10) - 2*(40*12)",
+        "why": "the blocks' areas, 3800 and 2000, less the 40 × 12 where the second stands on the first, gone from both: 4840; the same as the L's two ends, 2(30·10 + 12·10) = 840, and its six sides, 100 round by 40 = 4000"
+      },
+      "topology": {
+        "faces": 8,
+        "edges": 18,
+        "vertices": 12,
+        "why": "an L-shaped prism along X, its profile (y, z) (0, 0), (30, 0), (30, 10), (12, 10), (12, 20), (0, 20): 2 ends and 6 sides, 6 + 6 + 6 edges, 12 corners (12 − 18 + 8 = 2). The blocks' fronts (y = 0), lefts (x = 0) and rights (x = 40) each merge into one face (35c), the edges along where they met go, the uprights at the front corners join into one each, and the first block's top keeps only its back strip, y 12..30"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            40,
+            30,
+            20
+          ]
+        ],
+        "why": "the box below to y = 30, the block on it to z = 20"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    }
+  ],
+  "sketches": [
+    {
+      "sketch": "sketch-2",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the box's +Z face, its top at z = 10; after the join only its strip y 12..30 is left, one face, which keeps the name (40a rule 2: a face keeps its name when only its outline changes)"
+      }
+    }
+  ],
+  "pins": [
+    {
+      "sketch": "sketch-2",
+      "point": "point-3",
+      "kind": "endpoint",
+      "name": "front+left&front+top&left+top",
+      "at": {
+        "is": [
+          0,
+          0,
+          10
+        ],
+        "why": "the first click (0, 0), the box's front (−Y) left (−X) top corner, named as the enclosure's (a corner by its three edges, each by its two faces, sorted). The pin is found where the sketch is built, before the join takes that corner into the merged faces"
+      }
+    },
+    {
+      "sketch": "sketch-2",
+      "point": "point-4",
+      "kind": "endpoint",
+      "name": "front+right&front+top&right+top",
+      "at": {
+        "is": [
+          40,
+          0,
+          10
+        ],
+        "why": "the rectangle's corner (40, 0) the tool made, the box's front right top corner"
+      }
+    }
+  ]
+}

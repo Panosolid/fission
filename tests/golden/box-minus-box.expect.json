@@ -1,0 +1,77 @@
+{
+  "model": "box-minus-box",
+  "what": "A 40 × 30 × 20 block across the front and side planes (x −20..20, y −15..15, z 0..20) less a 20 × 25 × 20 box over its front right top corner: a corner notch 10 × 15 × 10. Each face of the tool crosses the block or misses it; none lies on one of the block's (that needs 35).",
+  "from": "34",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool: click (−20, −15), then (20, 15) (points 3, 4, 6, 8 and lines 5, 7, 9, 10, the tool's order). Nothing is before it, so nothing is pinned."
+    },
+    {
+      "do": "Extrude the sketch 20 (towards +Z): Body 1, the block x −20..20, y −15..15, z 0..20, across the front and side planes.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Create Sketch on the front plane XZ (sketch x is X, sketch y is Z, its normal −Y).",
+      "makes": "sketch-12"
+    },
+    {
+      "do": "Rectangle tool: click (10, 10), then (30, 30) (x 10..30, z 10..30; points and lines 13 to 20); seen along Y the block offers its corners (±20, 0 or 20), its edges' middles (0, 0), (0, 20), (±20, 0), (±20, 20), (±20, 10) and nothing else, so no point here is pinned."
+    },
+    {
+      "do": "Extrude the sketch 25, not flipped (along −Y, y 0 to −25): Body 2, the tool x 10..30, y −25..0, z 10..30.",
+      "makes": "feature-21"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Cut, Keep tools off (Fusion's default): Body 1 is the block with the notch, Body 2 is used up.",
+      "makes": "feature-22"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-22",
+      "volume": {
+        "is": "40*30*20 - 10*15*10",
+        "why": "the block less where the tool overlaps it: x 10..20 (the block ends at 20), y −15..0 (it begins at −15), z 10..20 (it ends at 20), 10 × 15 × 10: 24000 − 1500"
+      },
+      "area": {
+        "is": "2*(40*30 + 40*20 + 30*20)",
+        "why": "the block's area unchanged: the notch takes 15 × 10 off its right side (x = 20), 10 × 10 off its front (y = −15) and 10 × 15 off its top (z = 20), and its three walls x = 10 (15 × 10), y = 0 (10 × 10) and z = 10 (10 × 15) give the same back: 2(1200 + 800 + 600) = 5200"
+      },
+      "topology": {
+        "faces": 9,
+        "edges": 21,
+        "vertices": 14,
+        "why": "the block's 6 faces (its right side, front and top now L-shaped, 6 sides each, still one face each) and the notch's 3 walls; the block's 12 edges (the three into the corner shortened) and the notch's 9 (its box's 12 less the 3 along the block's edges at the corner, cut away); the block's corners less the one cut away, 7, and the notch's 7 others: 14 − 21 + 9 = 2, one shell, no hole through"
+      },
+      "box": {
+        "is": [
+          [
+            -20,
+            -15,
+            0
+          ],
+          [
+            20,
+            15,
+            20
+          ]
+        ],
+        "why": "the block's: the notch takes the corner (20, −15, 20), but (20, 15, 20), (−20, −15, 20) and (20, −15, 0) still reach each side"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

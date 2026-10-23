@@ -1,0 +1,77 @@
+{
+  "model": "far-wall-outside",
+  "what": "A 40 × 30 × 20 block (x 0..40, y 10..40) cut by a box running through it along Y and ending 0.5 µm past its back face, at y = 40.0005: a slot open at the top, x 10..30, from z = 5 up. The far wall lies between the tolerance and MIN_FEATURE outside the body; the middle band is judged on the result (booleans.md rule 1), where nothing is thin, so it builds.",
+  "from": "34",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool: click (0, 10), then (40, 40) (points 3, 4, 6, 8; lines 5, 7, 9, 10)."
+    },
+    {
+      "do": "Extrude the sketch 20 (z 0 to 20): Body 1, the block x 0..40, y 10..40, z 0..20.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Create Sketch on the front plane XZ (sketch x is X, sketch y is Z, its normal −Y).",
+      "makes": "sketch-12"
+    },
+    {
+      "do": "Rectangle tool: click (10, 5), then (30, 30) (x 10..30, z 5..30; points and lines 13 to 20). Seen along Y the block offers its corners (0 or 40, 0 or 20) and edge middles (20, 0), (20, 20), (0, 10), (40, 10), none here."
+    },
+    {
+      "do": "Type the extrude distance 40.0005 and flip it (along +Y, y 0 to 40.0005): Body 2, the tool, whose far wall is 0.0005 mm, 0.5 µm, past the block's back face y = 40.",
+      "makes": "feature-21"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Cut, Keep tools off.",
+      "makes": "feature-22"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-22",
+      "volume": {
+        "is": "30*(40*20 - 20*15)",
+        "why": "a U-shaped prism along Y, 30 long (y 10..40): the block's 40 × 20 end less the slot, 20 wide (x 10..30) and 15 deep (z 5..20)"
+      },
+      "area": {
+        "is": "2*(40*20 - 20*15) + (40 + 20 + 10 + 15 + 20 + 15 + 10 + 20)*30",
+        "why": "the U's two ends, 500 each, and its eight sides, 150 round the U, by 30: 1000 + 4500. Nothing of the tool past y = 40 is in the body"
+      },
+      "topology": {
+        "faces": 10,
+        "edges": 24,
+        "vertices": 16,
+        "why": "the U's two ends and eight sides (the top is two strips, x 0..10 and 30..40, which don't touch, so stay two faces); 8 + 8 + 8 edges; 8 + 8 corners: 16 − 24 + 10 = 2"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            10,
+            0
+          ],
+          [
+            40,
+            40,
+            20
+          ]
+        ],
+        "why": "the block's: the slot is open at the top, but the strips either side still reach z = 20"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

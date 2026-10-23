@@ -1,0 +1,123 @@
+{
+  "model": "micron-cube-halved",
+  "what": "A 1 µm cube, the smallest legal feature (MIN_FEATURE), with half of it cut away: the half left would be 0.5 µm thick, narrower than MIN_FEATURE, so the cut is refused with words and both bodies are kept as they were (booleans.md rule 1 and decision 6; Fusion check F3: a refused Combine keeps its bodies). Its pair, small-cube-halved, is left 1.1 µm thick and builds.",
+  "from": "34",
+  "recipe": [
+    {
+      "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
+    },
+    {
+      "do": "Create Sketch on the top plane XY.",
+      "makes": "sketch-2"
+    },
+    {
+      "do": "Rectangle tool, zoomed in: click (0, 0.001), then (0.001, 0.002) (x 0..1 µm, y 1..2 µm; points 3, 4, 6, 8, lines 5, 7, 9, 10)."
+    },
+    {
+      "do": "Extrude the sketch 0.001 (z 0 to 1 µm): Body 1, the cube.",
+      "makes": "feature-11"
+    },
+    {
+      "do": "Create Sketch on the front plane XZ.",
+      "makes": "sketch-12"
+    },
+    {
+      "do": "Rectangle tool: click (0.0005, −0.001), then (0.003, 0.002) (x 0.5..3 µm, z −1..2 µm; points and lines 13 to 20). Seen along Y the cube's nearest offered point is its bottom edge's middle (0.0005, 0), 1 µm from the first click, so nothing is pinned."
+    },
+    {
+      "do": "Extrude the sketch 0.004, flipped (along +Y, y 0 to 4 µm): Body 2, the tool, through the cube from x = 0.5 µm on.",
+      "makes": "feature-21"
+    },
+    {
+      "do": "Combine: target Body 1, tool Body 2, Cut, Keep tools off: refused.",
+      "makes": "feature-22"
+    }
+  ],
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-11",
+      "volume": {
+        "is": "0.001^3",
+        "why": "the 1 µm cube, kept as it was: 1e-9 mm³"
+      },
+      "area": {
+        "is": "6*0.001^2",
+        "why": "six faces 1 µm square"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0.001,
+            0
+          ],
+          [
+            0.001,
+            0.002,
+            0.001
+          ]
+        ],
+        "why": "the rectangle x 0..0.001, y 0.001..0.002, up 0.001"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    },
+    {
+      "body": "Body 2",
+      "item": "feature-21",
+      "volume": {
+        "is": "0.0025*0.004*0.003",
+        "why": "the tool kept too: 2.5 × 4 × 3 µm"
+      },
+      "area": {
+        "is": "2*(0.0025*0.004 + 0.0025*0.003 + 0.004*0.003)",
+        "why": "a 2.5 × 4 × 3 µm box: 2(10 + 7.5 + 12) µm²"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0.0005,
+            0,
+            -0.001
+          ],
+          [
+            0.003,
+            0.004,
+            0.002
+          ]
+        ],
+        "why": "the rectangle x 0.0005..0.003, z −0.001..0.002, swept y 0 to 0.004"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): every crossing here is between planes at round numbers, exact, so no intersection measures past LINEAR and nothing may grow (B0 decision 5: a crossing grows an entity only to what it measured)"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": [],
+  "refused": [
+    {
+      "item": "feature-22",
+      "says": [
+        "1 µm"
+      ],
+      "why": "what would be left, x 0..0.5 µm, is a block whose faces are 0.5 µm across: the middle band, between the tolerance and MIN_FEATURE, judged on the result, which is an error naming where with a message to make it at least 1 µm (booleans.md rule 1), never a 0.5 µm sliver"
+    }
+  ]
+}
