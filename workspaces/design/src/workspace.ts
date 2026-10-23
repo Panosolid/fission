@@ -1004,6 +1004,17 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Finish Sketch (the toolbar's or the panel's): back to modelling, the camera at the home view (as the owner's CAD suite does, not the view from before the sketch). */
   function finishSketch() {
     if (mode.kind !== "edit") return leaveSketch();
+    // A click still waiting for the kernel is drawn first, then the sketch closes: closed at once, the click's turn came
+    // for a sketch no longer open and it was dropped (a slow phone tapping fast lost its last circle; found in 27b).
+    if (waiting > 0) {
+      const finish = () => {
+        if (mode.kind !== "edit") return; // left meanwhile (Escape, Undo, another Finish)
+        leaveSketch();
+        viewport.setView("home");
+      };
+      clicks = clicks.then(finish, finish);
+      return;
+    }
     leaveSketch();
     viewport.setView("home");
   }
@@ -1207,6 +1218,13 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   let lastMove: { at: SketchXY; pixel: number | undefined; rounded: Promise<SketchXY> } | null = null;
   /** Clicks are handled one after another, each on the document the last one left. */
   let clicks = Promise.resolve();
+  /** How many clicks (typed Enters and projections too) wait their turn: Finish Sketch waits for them. */
+  let waiting = 0;
+  /** `turn` in line behind the clicks before it. */
+  const inTurn = (turn: () => Promise<void>) => {
+    waiting++;
+    clicks = clicks.then(turn).finally(() => void waiting--);
+  };
   const onSketchPointer = (pointer: SketchPointer) => {
     if (mode.kind !== "edit") return;
     const at = pointer.at;
@@ -1247,7 +1265,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     const took = locks;
     const movedAt = moves;
     lastMove = null; // an Enter from now on places from this click's point, or from a hover after it
-    clicks = clicks.then(async () => {
+    inTurn(async () => {
       if (mode.kind !== "edit") return;
       let rounded: SketchXY;
       try {
@@ -1303,7 +1321,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
    */
   function projectAt(pointer: SketchPointer) {
     const changes = toolChanges;
-    clicks = clicks.then(async () => {
+    inTurn(async () => {
       if (mode.kind !== "edit" || mode.tool.kind !== "project" || toolChanges !== changes) return;
       const id = mode.tool.sketch;
       const before = designDoc();
@@ -1349,7 +1367,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     unlock(true);
     drawSketches();
     const giveBack = () => void (mode.kind === "edit" && typed.restore(texts));
-    clicks = clicks.then(async () => {
+    inTurn(async () => {
       // A tool chosen (or Escape) since: the sizes were for the old tool, so the Enter is dropped, as a click is.
       if (mode.kind !== "edit" || toolChanges !== changes) return;
       // Where the pointer was as Enter was pressed: its last move, rounded and snapped on the sketch as it is now (the
