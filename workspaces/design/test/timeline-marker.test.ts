@@ -483,7 +483,7 @@ const WIRING_PLANTS: { name: string; find: string; replace: string; caught: stri
   // The tap's pick not stopped: the item it was moved onto is picked as well.
   { name: "tap-also-picks", find: "      e.stopPropagation(); // not a pick of the item the tap was moved onto\n", replace: "", caught: "picked" },
   // No redraw when the app records nothing: a dragged marker left where it was dropped.
-  { name: "no-redraw", find: "if (list.isConnected) showTimelineBar(slot, doc, wiring);", replace: "", caught: "the marker is drawn at place" },
+  { name: "no-redraw", find: "if (list.isConnected) showTimelineBar(slot, doc, { ...wiring, note: refused || null });", replace: "", caught: "the marker is drawn at place" },
   // The drag's greying not following the marker.
   { name: "preview-off-by-one", find: "if (i >= place!) li.dataset.rolledBack", replace: "if (i > place!) li.dataset.rolledBack", caught: "while dragged the greyed items" },
   // The buttons' clicks crossed: back sent as forward.

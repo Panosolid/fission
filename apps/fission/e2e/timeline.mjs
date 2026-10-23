@@ -1136,6 +1136,8 @@ try {
       assert.equal(await page.textContent("#volume"), layout.volume);
       await browserOpen();
       assert.deepEqual(await red(), ["feature-11", "sketch-2"]);
+      // Drawn red at every width: at 1280 px the floating rows' own colour once won over it.
+      assert.deepEqual(await page.$$eval(".tree-row.kept", (rows) => rows.map((r) => getComputedStyle(r).color)), ["rgb(255, 107, 107)", "rgb(255, 107, 107)"]);
       await browserClosed();
       assert.deepEqual(await drawn(page, layout), { box: true, square: true });
       await page.locator("#kept-warning").scrollIntoViewIfNeeded();
@@ -1336,6 +1338,86 @@ try {
       await until(page, () => document.body.dataset.selection === "face:feature-1/top", null, "still the top after Redo");
       await checkLit(35, "after Redo");
       assert.equal(await note(), "");
+      if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
+      await page.context().close();
+    });
+  }
+
+  // The timeline hunt's leftovers (/mnt/project-files/bug-hunts/timeline-2026-10-19.txt): finding 2 (at 375 px a
+  // pick scrolled the bar back to its start, so the picked item and its ⋯ went off the screen), finding 4 (at 375 px
+  // a refused bar action wrote its reason only to the error line, far below the screen), finding 13 (the item menu
+  // stayed open on Escape once the focus had left it), and failed rows of the browser's Timeline drawn red at 1280 px
+  // too (the floating rows' own colour won over the red).
+  for (const { width, tap } of [{ width: 1280, tap: false }, { width: 375, tap: true }]) {
+    await check(`the timeline hunt's leftovers: failed rows red, the bar keeps its scroll and shows the picked item's ⋯, a refusal on screen, Escape closes the menu wherever the focus is (${width} px${tap ? ", taps" : ""})`, async () => {
+      const page = await fresh(width, tap);
+      // Twelve items: the starting box and eleven more boxes, the last one too thin to build (0.0001 mm wide, under the kernel's 0.001).
+      const [download] = await Promise.all([page.waitForEvent("download"), page.evaluate(() => document.getElementById("save").click())]);
+      const saved = JSON.parse(await download.path().then((p) => import("node:fs").then((fs) => fs.readFileSync(p, "utf8"))));
+      const design = saved.workspaces.design;
+      const box = design.timeline.features[0];
+      for (let i = 0; i < 11; i++) {
+        const id = `feature-${100 + i}`;
+        const copy = structuredClone(box);
+        copy.id = id;
+        copy.provenance.self.id = id;
+        if (i === 10) copy.intent.parameters.width = 0.0001;
+        design.timeline.features.push(copy);
+      }
+      design.nextId = 200;
+      await page.setInputFiles("#open-file", { name: "twelve.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(saved)) });
+      await until(page, () => document.querySelectorAll("#timeline .timeline-bar-item").length === 12, null, "twelve items on the bar");
+      assert.deepEqual(await redRows(page), ["feature-110"]);
+      // Red as its item on the bar is (timeline-menu.css), whatever the width.
+      assert.equal(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="feature-110"]', (r) => getComputedStyle(r).color), "rgb(255, 107, 107)");
+      assert.notEqual(await page.$eval('#browser [data-node="timeline"] .tree-row[data-node="feature-109"]', (r) => getComputedStyle(r).color), "rgb(255, 107, 107)");
+
+      // Finding 2: the bar scrolled to its end, the last item picked: the bar stays where it was and the ⋯ is on the bar's screen.
+      const scroll = () => page.$eval("#timeline .timeline-bar", (l) => l.scrollLeft);
+      const onBar = (sel) => page.$eval("#timeline .timeline-bar", (l, s) => {
+        const r = l.querySelector(s).getBoundingClientRect();
+        const b = l.getBoundingClientRect();
+        return r.left >= b.left - 0.5 && r.right <= b.right + 0.5;
+      }, sel);
+      await page.$eval("#timeline .timeline-bar", (l) => (l.scrollLeft = l.scrollWidth));
+      const end = await scroll();
+      if (width === 375) assert.ok(end > 100, `the bar scrolls at 375 px (scrollLeft ${end})`);
+      await press(page, '#timeline [data-item="feature-109"]', tap);
+      await until(page, () => document.querySelector('#timeline [data-more="feature-109"]'), null, "the ⋯");
+      await rebuilt(page);
+      assert.ok((await scroll()) >= end - 1, `the bar kept its scroll (${end} before, ${await scroll()} after)`);
+      assert.ok(await onBar('[data-item="feature-109"]'), "the picked item is on the bar's screen");
+      assert.ok(await onBar('[data-more="feature-109"]'), "its ⋯ is on the bar's screen");
+
+      // Finding 13: the item menu, the focus moved out of it (as opening a file while it is up does), then Escape: it closes.
+      if (tap) await page.tap('#timeline [data-more="feature-109"]');
+      else await page.click('#timeline [data-item="feature-109"]', { button: "right" });
+      await until(page, () => document.getElementById("row-menu").open, null, "the item menu");
+      await page.evaluate(() => document.activeElement.blur());
+      assert.equal(await page.evaluate(() => document.activeElement.tagName), "BODY");
+      await page.keyboard.press("Escape");
+      await until(page, () => !document.getElementById("row-menu").open, null, "the menu closed by Escape with the focus on the page");
+      assert.deepEqual((await bar(page)).length, 13, "nothing changed");
+
+      // Finding 4: Go to the start while Sketch 1 is being edited is refused, and the words are on the screen beside the bar.
+      await press(page, "#create-sketch", tap);
+      await press(page, "#sketch-plane-XY", tap);
+      await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
+      // Off (aria-disabled) but still pressable, saying why: Playwright waits for an enabled element unless forced.
+      await (tap ? page.tap('#timeline [data-button="start"]', { force: true }) : page.click('#timeline [data-button="start"]', { force: true }));
+      const words = "The marker can't go before Sketch 1 while it is being edited: finish the sketch first";
+      await until(page, (w) => document.querySelector("#timeline .timeline-bar-note")?.textContent === w, words, "the refusal beside the bar");
+      const note = await page.$eval("#timeline .timeline-bar-note", (n) => {
+        const r = n.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, hidden: n.hidden, role: n.getAttribute("role") };
+      });
+      assert.equal(note.hidden, false);
+      assert.equal(note.role, "status");
+      assert.ok(note.top >= 0 && note.bottom <= 800 && note.left >= 0 && note.right <= width, `the refusal is on the screen: ${JSON.stringify(note)}`);
+      if (shots) await page.screenshot({ path: `${shots}/timeline-refusal-${width}.png` });
+      // The next bar action that does something takes the words away.
+      await press(page, '#timeline [data-item="feature-1"]', tap);
+      await until(page, () => !document.querySelector("#timeline .timeline-bar-note"), null, "the refusal gone after a pick");
       if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
       await page.context().close();
     });

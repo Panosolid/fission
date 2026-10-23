@@ -11,3 +11,6 @@
 .timeline-marker .timeline-marker-button:not(#none):hover { border-color: #4aa8ff; }
 .timeline-marker .timeline-marker-button:not(#none):focus-visible { outline: 2px solid #4aa8ff; outline-offset: 1px; }
 .timeline-marker .timeline-marker-button[aria-disabled="true"]:not(#none) { opacity: 0.4; cursor: default; border-color: #353a43; }
+/* Timeline hunt, finding 4: a refused bar action's words just above the bar,
+   where a phone (its error line far below the screen) can read them. */
+.timeline-marker .timeline-bar-note { position: absolute; left: 4px; right: 4px; bottom: 100%; margin-bottom: 4px; padding: 4px 8px; background: #3a2226; color: #ff9a9a; border: 1px solid #e0656d; border-radius: 4px; font-size: 12px; z-index: 2; pointer-events: none; }

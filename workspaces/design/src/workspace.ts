@@ -564,13 +564,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       onOpen: (id) => openItem(id),
       // 24f5: the playback buttons, the marker dragged and a tap between items, each one undo step.
       editing: editingId(),
+      // A refusal goes to the error line and back to the bar, which shows it beside itself (timeline hunt, finding 4).
       onAction: (a) => {
         if (a.kind === "menu") return;
+        let refused: string | undefined;
         try {
-          chooseBarAction(menuHost, a, editingId());
+          chooseBarAction({ ...menuHost, refuse: (message) => (menuHost.refuse(message), (refused = message)) }, a, editingId());
         } catch (err) {
           panel.showError(err instanceof Error ? err.message : String(err));
         }
+        return refused;
       },
     });
   }

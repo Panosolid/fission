@@ -1,6 +1,7 @@
 /* An extrude built from its kept shape (step 24d2, the owner's rule): the
    properties' warning, and the timeline rows of the extrude and its sketch
    in red with a warning mark, as the error line is. */
-.kept { color: #ff6b6b; }
+/* :not(#none) so a row's button keeps it over the base layout's `#workspace button` colour. */
+.kept:not(#none) { color: #ff6b6b; }
 .kept.kept-warning { border-left: 3px solid currentColor; padding-left: 8px; margin: 6px 0; }
 .kept[data-node]::after { content: " ⚠"; }

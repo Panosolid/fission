@@ -431,8 +431,14 @@ export interface BarWiring {
   picked?: string | null;
   /** The sketch being edited (24f5): a playback button that would put it after the marker is off and says why. */
   editing?: string | null;
-  /** A playback button, the marker dropped after a drag, a tap between items on a touch screen (24f5), or an item dropped after a drag (24f6): the bar redraws itself when this records nothing. */
-  onAction?(a: BarAction): void;
+  /**
+   * A playback button, the marker dropped after a drag, a tap between items on a touch screen (24f5), or an item
+   * dropped after a drag (24f6): the bar redraws itself when this records nothing, with the refusal's words, when
+   * it returns them, beside the bar (a phone's error line is far below the screen: timeline hunt, finding 4).
+   */
+  onAction?(a: BarAction): string | void;
+  /** The words of the last refused bar action, shown above the bar until it is drawn again. */
+  note?: string | null;
   /** A click or tap on an item: it is picked and its ⋯ shows (a phone's way to the menu). */
   onPick?(id: string): void;
   /** A double-click or double-tap on an item (25a3): Edit Sketch for a sketch, Edit feature for a solid. The second click picks nothing. */
@@ -458,8 +464,8 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
   // 24f5: every action goes to the app; one that records nothing (already there, or refused) leaves this
   // bar in place, perhaps with a drag's marker moved, so it is drawn again from the document.
   const act = (a: BarAction) => {
-    wiring.onAction?.(a);
-    if (list.isConnected) showTimelineBar(slot, doc, wiring);
+    const refused = wiring.onAction?.(a);
+    if (list.isConnected) showTimelineBar(slot, doc, { ...wiring, note: refused || null });
   };
   const markerRow = () => {
     const li = document.createElement("li");
@@ -576,5 +582,42 @@ export function showTimelineBar(slot: HTMLElement, doc: DesignDocument, wiring: 
   }
   row.className = "timeline-marker timeline-reorder";
   row.append(buttons, list);
+  if (wiring.note) {
+    const note = document.createElement("div");
+    note.className = "timeline-bar-note";
+    note.setAttribute("role", "status");
+    note.textContent = wiring.note;
+    row.append(note);
+  }
+  // Timeline hunt, finding 2: the list is new on every redraw, so it would start scrolled to 0, taking the item just
+  // picked (and its ⋯, a phone's only way to the menu) or the marker just moved out of sight. It keeps the old
+  // list's scroll, then brings the picked item's ⋯, or else a marker that moved, into view.
+  const old = slot.querySelector<HTMLElement>(":scope > .timeline-marker > .timeline-bar");
+  const scroll = old?.scrollLeft ?? 0;
+  const markerWas = lastMarkers.get(slot);
+  lastMarkers.set(slot, marker);
   slot.replaceChildren(row);
+  list.scrollLeft = scroll;
+  const shown = list.querySelector<HTMLElement>(".timeline-bar-more-slot") ?? (markerWas !== undefined && markerWas !== marker ? list.querySelector<HTMLElement>(".timeline-bar-marker") : null);
+  if (shown) {
+    // The picked item and its ⋯ together; measured from the start of the scrolled row, as `barEdges` measures.
+    const from = (shown.classList.contains("timeline-bar-more-slot") ? shown.previousElementSibling! : shown).getBoundingClientRect();
+    const to = shown.getBoundingClientRect();
+    const at = list.getBoundingClientRect().left - list.scrollLeft;
+    list.scrollLeft = inView(list.scrollLeft, list.clientWidth, from.left - at, to.right - at);
+  }
+}
+
+/** Where each slot's bar last had its marker, so a redraw knows the marker moved. */
+const lastMarkers = new WeakMap<HTMLElement, number>();
+
+/**
+ * The scroll that shows the span `left`..`right` (from the start of the scrolled content) in a view `width` wide
+ * now scrolled to `scroll`: unchanged when it is already in view, else the least move that brings it in (its start
+ * first when it is wider than the view).
+ */
+export function inView(scroll: number, width: number, left: number, right: number): number {
+  if (left < scroll || right - left > width) return Math.max(0, left);
+  if (right > scroll + width) return right - width;
+  return scroll;
 }

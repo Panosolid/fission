@@ -727,7 +727,10 @@ const shellShortcuts: Record<string, (e: Event) => boolean> = {
   },
 };
 function runShortcut(chord: Chord, e: Event) {
-  if (shortcutDialog.open) return; // the list is modal: Escape closes it, nothing else runs
+  // Every dialog the app opens is modal (the key list, the guide, Design's item menu and its questions): while one is
+  // open no shortcut runs, so Escape is the dialog's own and the browser closes it, wherever the focus went
+  // (timeline hunt, finding 13: the item menu stayed open once the focus had left it).
+  if (document.querySelector("dialog[open]")) return;
   const panes = panesInUse();
   const entry = shortcuts.lookup(chord, panes.map((p) => pool.showing(p)!));
   if (!entry || (!entry.inText && inText(e.target))) return;
