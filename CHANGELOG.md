@@ -12,6 +12,8 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.27.8 (2026-10-23)
 
+- Boolean plan: Ben's five Fusion checks are answered and written into `docs/progress/booleans.md` as rules, replacing the open questions. Which piece of a split body keeps its name (the piece holding the first face, in the order made, that lies wholly inside one piece). A Join of bodies that don't touch leaves separate bodies with no warning. A Cut that leaves nothing, or an Intersect with no shared volume, fails with words and keeps both bodies. A cut's bodies are fixed when it is made, so a later body is cut only if picked. A sketch on a face keeps its plane when only the face's outline changes. Docs only.
+
 - Fix (found in 27b, #251): on a slow phone, tapping a circle's rim and then Finish Sketch straight away lost the circle. Each tap waits its turn behind the kernel's rounding of the one before; Finish Sketch closed the sketch at once, so when the tap's turn came the sketch was no longer open and the tap was dropped. Finish Sketch now waits for the taps, typed Enters and projections made before it, draws them, then closes the sketch (Escape still drops a waiting tap, since it is a cancel). Checked by a new real-kernel journey (`journeys/finish-wait.journey.ts`) with the kernel held to make it slow: a circle's second tap then Finish keeps the circle (centre and radius worked by hand) as one undo step, and two line taps then Finish keep both lines in order; both failed before the fix. Finish with nothing waiting still closes in the same moment.
 
 ## 0.27.7 (2026-10-23)
