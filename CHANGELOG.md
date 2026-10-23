@@ -10,6 +10,10 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
+## 0.27.7 (2026-10-23)
+
+- Fix (found in 27b, #251): on a slow phone, tapping a circle's rim and then Finish Sketch straight away lost the circle. Each tap waits its turn behind the kernel's rounding of the one before; Finish Sketch closed the sketch at once, so when the tap's turn came the sketch was no longer open and the tap was dropped. Finish Sketch now waits for the taps, typed Enters and projections made before it, draws them, then closes the sketch (Escape still drops a waiting tap, since it is a cancel). Checked by a new real-kernel journey (`journeys/finish-wait.journey.ts`) with the kernel held to make it slow: a circle's second tap then Finish keeps the circle (centre and radius worked by hand) as one undo step, and two line taps then Finish keep both lines in order; both failed before the fix. Finish with nothing waiting still closes in the same moment.
+
 ## 0.27.6 (2026-10-23)
 
 - Fix (timeline bug hunt follow-up): an edit made less than a second before opening a file, dropping one, or starting a new project was lost from the old project, because replacing the project stopped its autosave and threw away the save that was still waiting for its one-second quiet moment. Autosave now finishes instead: the project as it is goes to the unsaved-changes journal at once and to the store after any save already under way, so the stored old project keeps its last edit and the new project never overwrites it. Checked by a browser check that types a width, opens a file while the status still says Saving…, and reads the old project back from the browser's store (it failed before the fix), and by hand-worked unit tests (0.9× the quiet moment, a save in flight, the journal full, the store failing, nothing changed, changed and back).
