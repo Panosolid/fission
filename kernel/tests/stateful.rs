@@ -2424,7 +2424,11 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 return Err(fail(format!("move by {to} well inside model space was refused"), vec![("primitive".into(), base)]));
             }
             if let Some(p) = &placed {
-                let m1 = measure(p, 0.0).map_err(|m| fail(m, vec![("placed".into(), p.baked())]))?;
+                // Its numbers went through where it was built and through
+                // the move, as for Move below (issue #240: a disc built at
+                // y = 964 m and moved back to y = 5 mm keeps the rounding
+                // of 964 m in its mesh).
+                let m1 = measure(p, reach(&m0).max(to.abs().max_element())).map_err(|m| fail(m, vec![("placed".into(), p.baked())]))?;
                 check_rigid(&m0, &m1, "placing").map_err(|m| fail(m, vec![("primitive".into(), base.clone()), ("placed".into(), p.baked())]))?;
             }
             record(op, placed.is_some());
@@ -2921,6 +2925,29 @@ fn bounds_round_at_the_size_they_were_built_at() {
     // At the world size alone, 68 · 64 · 2⁻⁵² · 4 ≈ 3.87e-12 ≪ 3.68e-9: the
     // old reading, which flagged it.
     let e = check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, 68.0).unwrap_err();
+    assert!(e.contains("miss mesh points"), "{e}");
+}
+
+/// Issue #240 (seed4e0a16a70d0e): a disc of radius ~1 mm, drawn as one
+/// bulge arc (bulge −3636.36…, chord 0.0011 mm) at y = 964 472.99 mm and
+/// moved by y = −964 467.99 mm. Exactly, with fractions, the chord lands at
+/// y = 4.999989000032656 and the arc's top is the chord plus its sagitta
+/// |bulge|·chord/2 = 1.9999998487499886: 6.999988848782644, the box's top
+/// to 1.3e-16. The top mesh point is 2.65e-11 higher: it was made at
+/// y ≈ 964 475, where one unit in the last place is 2⁻³³ ≈ 1.16e-10, so it
+/// is a quarter of a unit off, rounding, not a wrong box.
+#[test]
+fn a_moved_body_rounds_at_the_size_it_was_built_at() {
+    let lo = DVec3::new(0.0005500000000144833, 4.999989000032656, 0.0);
+    let hi = DVec3::new(2.0005500000000143, 6.999988848782644, 0.001);
+    let mlo = DVec3::new(0.0005500378125036232, 4.999989000032656, 0.0);
+    let mhi = DVec3::new(2.0005499621874963, 6.999988848809153, 0.001);
+    let sag = 0.02; // 2·max(DISPLAY_CHORD = 0.01, 1·(1 − cos(π/256)) ≈ 7.5e-5)
+    // Built at 964 475: slack 964475 · 64 · 2⁻⁵² · 4 ≈ 5.48e-8 ≫ 2.65e-11.
+    assert_eq!(check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, 964474.99486), Ok(()));
+    // At the moved body's own size, 7 · 64 · 2⁻⁵² · 4 ≈ 3.98e-13 ≪ 2.65e-11:
+    // the old reading (scale 0, so the box's own 7), which flagged it.
+    let e = check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, 7.0).unwrap_err();
     assert!(e.contains("miss mesh points"), "{e}");
 }
 
