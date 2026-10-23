@@ -1,7 +1,8 @@
 """One GitHub issue per kind of problem random testing finds.
 
 Called by collect-results.sh after a "Random testing" run is on the
-test-results branch, and by collect-fuzz.sh after a "Fuzzing" run (its
+test-results branch (with the golden models' golden/seed-golden-<seed>/
+golden-report.txt: one kind per failing model, step 28b), and by collect-fuzz.sh after a "Fuzzing" run (its
 fuzz-<target>/seed-<seed>/fuzz-report.txt: one kind per failure line). Every failure folder the run produced (endless.sh's
 seed-<seed>/: the harness report and the OpenCascade disagreements) is
 reduced to its kinds: a harness failure's kind is the operation and the
@@ -129,11 +130,26 @@ def fuzz_kinds(report):
     return kinds
 
 
+def golden_kinds(report):
+    """Kinds in the golden models' golden-report.txt (packages/testing/src/
+    golden-night.ts, step 28b): one 'failure: <model>: <first problem> |
+    <the rest>' line per failing model, numbers taken out as for the
+    harness, so one wrong volume on many nights is one kind."""
+    kinds = []
+    for line in report.splitlines()[1:]:
+        if line.startswith("failure: "):
+            kind = line[len("failure: "):].split(" | ", 1)[0]
+            kinds.append((f"golden model {numbers_out(kind).strip()[:150]}", line))
+    return kinds
+
+
 def kinds_of(folder_files):
     """{kind: example} for one failure folder, given {file name: text}."""
     found = []
     if "fuzz-report.txt" in folder_files:
         found += fuzz_kinds(folder_files["fuzz-report.txt"])
+    if "golden-report.txt" in folder_files:
+        found += golden_kinds(folder_files["golden-report.txt"])
     if "report.txt" in folder_files:
         found += harness_kinds(folder_files["report.txt"])
     if "oracle-disagreements.txt" in folder_files:
@@ -227,6 +243,24 @@ def texts(action, kind, hits, run_url, commit, branch):
             "one closed as not planned is not reported again."
         )
         return f"Fuzzing: {kind[len('fuzzing the '):]}"[:250], body
+    if action == "create" and kind.startswith("golden model "):
+        body = (
+            f"{MARK.format(key(kind))}\n"
+            f"The nightly golden models run found a model that no longer rebuilds to its hand-worked answers ({where}).\n\n"
+            f"**Kind:** {kind}\n\n"
+            f"Example (seed `{seed}`):\n{fenced(example)}\n\n"
+            f"Seen in {len(seeds)} run(s):\n{seed_list(seeds)}\n\n"
+            "The model is tests/golden/<model>.panosolid.json and its answers, with the working, are in "
+            "<model>.expect.json. `npm run journeys -w @fission/testing` (after `npm run kernel -w @fission/app`) "
+            "rebuilds every model once; the replay command in the example runs the night again, in the same order. "
+            "\"rebuilt differently\" means the same model gave two answers on one night (the kernel or Design depends on "
+            "what ran before). Work out by hand whether the answer or the code is wrong: an expectation changes only with "
+            "its working, and a code bug gets a regression test first.\n\n"
+            "Close this issue as completed once it is fixed, or as not planned "
+            "if it is not a bug (say why in a comment): a kind closed as fixed that comes back on main reopens it; "
+            "one closed as not planned is not reported again."
+        )
+        return f"Golden models: {kind[len('golden model '):]}"[:250], body
     if action == "create":
         body = (
             f"{MARK.format(key(kind))}\n"
@@ -250,18 +284,18 @@ def texts(action, kind, hits, run_url, commit, branch):
 
 
 def read_folders(incoming):
-    """{seed: {file name: text}} for every endless-*/seed-*/ and
-    fuzz-*/seed-*/ folder."""
+    """{seed: {file name: text}} for every endless-*/seed-*/,
+    fuzz-*/seed-*/ and golden/seed-golden-*/ folder."""
     folders = {}
     for run in sorted(os.listdir(incoming)):
-        if not run.startswith(("endless-", "fuzz-")):
+        if not run.startswith(("endless-", "fuzz-")) and run != "golden":
             continue
         for name in sorted(os.listdir(os.path.join(incoming, run))):
             path = os.path.join(incoming, run, name)
             if not (name.startswith("seed-") and os.path.isdir(path)):
                 continue
             files = {}
-            for f in ("report.txt", "oracle-disagreements.txt", "harness-output.txt", "fuzz-report.txt"):
+            for f in ("report.txt", "oracle-disagreements.txt", "harness-output.txt", "fuzz-report.txt", "golden-report.txt"):
                 p = os.path.join(path, f)
                 if os.path.isfile(p):
                     with open(p, errors="replace") as fh:

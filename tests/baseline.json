@@ -53,9 +53,20 @@
     "miss_percent": {
       "fail": 0,
       "why": "held references the naming sessions resolved otherwise than the model says (lost, moved, or found on two faces), as a percent of those checked, so 0 is a 100% naming success rate (step 25b4, packages/testing/baseline/naming.ts); any miss is a naming bug, so any rise from 0 fails (owner, 2026-10-21)"
+    },
+    "failed_percent": {
+      "fail": 0,
+      "why": "golden models whose rebuild differs from their hand-worked answers, as a percent of those that build today (step 28b, packages/testing/baseline/golden.ts), so 0 is a 100% golden success rate; any wrong answer is a bug, so any rise from 0 fails"
     }
   },
   "metrics": {
+    "app.golden_bracket_two_holes.kernel_calls": 2,
+    "app.golden_enclosure.kernel_calls": 14,
+    "app.golden_gear.kernel_calls": 3,
+    "app.golden_l_bracket.kernel_calls": 3,
+    "app.golden_models.failed_percent": 0,
+    "app.golden_stepped_boss.kernel_calls": 8,
+    "app.golden_thirty_features.kernel_calls": 47,
     "app.history_200_edits.relative_time": 0.0355,
     "app.history_200_edits.retained_bytes": 112672,
     "app.kernel_extrude_star.relative_time": 0.0263,

@@ -17,7 +17,12 @@
 //   (`REBUILD_FAULTS`), to see the check fail;
 // - `naming_sessions` (step 25b4, `naming.ts`): the naming success rate as
 //   `miss_percent` (0 is 100%) over the `references` checked;
-//   FISSION_BASELINE_FAULT=lose-refs plants a bug there.
+//   FISSION_BASELINE_FAULT=lose-refs plants a bug there;
+// - `golden_<model>` and `golden_models` (step 28b, `golden.ts`): each
+//   golden model's rebuild, timed as above and its kernel calls counted
+//   exactly, and `failed_percent`, the models whose answers are wrong
+//   (0 = 100% success); FISSION_BASELINE_FAULT=golden-volume plants a
+//   kernel bug there (every volume a millionth out).
 // Needs the WASM build (`npm run kernel` in apps/fission).
 // Run: node --expose-gc --experimental-strip-types --no-warnings packages/testing/baseline/app.ts
 import { readFileSync } from "node:fs";
@@ -27,8 +32,11 @@ import * as wasm from "../../core/src/kernel/wasm/fission_kernel.js";
 import { READERS } from "../src/project-fuzz.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { namingRate } from "./naming.ts";
+import { goldenMetrics, volumeOff } from "./golden.ts";
+import { buildable } from "../src/golden-rebuild.ts";
 import { BodyCache, countingKernel, editFirst, REBUILD_FAULTS, rebuildPart, showEdit, type RebuildFault } from "./rebuild.ts";
 import { seeded } from "../src/index.ts";
+import { calibration, fastest } from "./calibration.ts";
 
 const gc = (globalThis as { gc?: () => void }).gc;
 if (!gc) throw new Error("run with --expose-gc");
@@ -66,24 +74,6 @@ const OPERATIONS: Record<string, () => unknown> = {
   kernel_stl_sphere: () => wasm.export_stl({ sphere: { radius: 25 } }, "ball"),
 };
 
-function calibration() {
-  const r = seeded(1n);
-  const xs = Array.from({ length: 100_000 }, () => r.next());
-  xs.sort((a, b) => a - b);
-  return JSON.parse(JSON.stringify(xs.slice(0, 20_000))).length;
-}
-
-/** The fastest of `runs` runs: interruptions only ever add time, so the minimum is the steadiest. */
-const fastest = (f: () => unknown, runs: number) => {
-  let best = Infinity;
-  for (let i = 0; i < runs; i++) {
-    const t = process.hrtime.bigint();
-    f();
-    best = Math.min(best, Number(process.hrtime.bigint() - t));
-  }
-  return best;
-};
-
 for (const f of [calibration, ...Object.values(OPERATIONS)]) for (let i = 0; i < 3; i++) f(); // warm the JIT
 const out: Record<string, Record<string, number>> = {};
 const keep: { result?: unknown } = {};
@@ -113,8 +103,8 @@ out.kernel_memory = { wasm_bytes: exports.memory.buffer.byteLength };
 // the worker does). Each run moves the first sketch's corner the other
 // way, so every run is a real edit with one body to build.
 const planted = process.env.FISSION_BASELINE_FAULT;
-if (planted !== undefined && planted !== "lose-refs" && !(REBUILD_FAULTS as readonly string[]).includes(planted)) throw new Error(`FISSION_BASELINE_FAULT is ${planted}, not lose-refs or one of ${REBUILD_FAULTS.join(", ")}`);
-const fault = planted === "lose-refs" ? undefined : (planted as RebuildFault | undefined);
+if (planted !== undefined && planted !== "lose-refs" && planted !== "golden-volume" && !(REBUILD_FAULTS as readonly string[]).includes(planted)) throw new Error(`FISSION_BASELINE_FAULT is ${planted}, not lose-refs, golden-volume or one of ${REBUILD_FAULTS.join(", ")}`);
+const fault = planted === "lose-refs" || planted === "golden-volume" ? undefined : (planted as RebuildFault | undefined);
 {
   const kernel = countingKernel(nodeKernel());
   const cache = new BodyCache(kernel);
@@ -139,6 +129,8 @@ const fault = planted === "lose-refs" ? undefined : (planted as RebuildFault | u
   out.rebuild_20_arcs_edit_first = metrics;
   await cache.clear();
 }
+// The golden models (28b, baseline/golden.ts): each one's rebuild timed and its kernel calls counted, and how many fail their answers.
+Object.assign(out, await goldenMetrics(buildable(), planted === "golden-volume" ? volumeOff(nodeKernel()) : nodeKernel()));
 // The naming success rate (25b4): every held reference in seeded timeline sessions, counted against the model.
 out.naming_sessions = await namingRate(nodeKernel(), planted === "lose-refs" ? "lose-refs" : undefined);
 console.log(JSON.stringify(out, null, 2));

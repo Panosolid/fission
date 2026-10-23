@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-from file_issues import MARK, fuzz_kinds, gather, harness_kinds, key, kinds_of, oracle_kinds, plan, read_folders, texts, MAX_EXAMPLE  # noqa: E402
+from file_issues import MARK, fuzz_kinds, gather, golden_kinds, harness_kinds, key, kinds_of, oracle_kinds, plan, read_folders, texts, MAX_EXAMPLE  # noqa: E402
 
 # Lines copied from real reports on the test-results branch.
 ROTATE_A = ("  seed 0x12849982fbf1: step 3 (Rotate { target: 1, pivot: [0.0, 0.0, 0.0], axis: [1.0, 0.0, 0.0], "
@@ -197,6 +197,55 @@ class Folders(unittest.TestCase):
             found = gather(read_folders(d))
         # Two rounds, one kind; the mutants folder is not a random round.
         self.assertEqual(list(found.values()), [[("11", ROTATE_A.strip()), ("22", ROTATE_B.strip())]])
+
+
+# The shape packages/testing/src/golden-night.ts writes (step 28b);
+# journeys/golden-night.journey.ts feeds a real one through this script.
+GOLDEN_A = """Golden models, seed 7: 20 rounds of 6 models (tests/golden), 2 failed
+failure: l-bracket: Body 1 (feature-15): volume 48000.048 is not 48000 (40*30*40 ...) | first in round 3 (order: gear, l-bracket); replay: FISSION_SEED=7 FISSION_GOLDEN_ROUNDS=20 npm run golden -w @fission/testing
+failure: gear: rebuilt differently in round 2 than in round 1: bodies[0].volume: 1 then 2 | also: x; first in round 2 (order: l-bracket, gear); replay: FISSION_SEED=7
+"""
+GOLDEN_B = """Golden models, seed 99: 20 rounds of 6 models (tests/golden), 1 failed
+failure: l-bracket: Body 1 (feature-15): volume 48000.096 is not 48000 (40*30*40 ...) | first in round 1 (order: l-bracket); replay: FISSION_SEED=99
+"""
+
+
+class Golden(unittest.TestCase):
+    def test_one_kind_per_failing_model_with_the_numbers_out(self):
+        # Worked by hand from the report above: the text before " | ", with
+        # "golden model " in front and every number a # (a number takes the
+        # sign before it, so "feature-15" is "feature#", as the harness's are).
+        self.assertEqual([k for k, _ in golden_kinds(GOLDEN_A)], [
+            "golden model l-bracket: Body # (feature#): volume # is not # (#*#*# ...)",
+            "golden model gear: rebuilt differently in round # than in round #: bodies[#].volume: # then #",
+        ])
+        # Another night's wrong volume by another amount is the same kind.
+        self.assertEqual(golden_kinds(GOLDEN_B)[0][0], golden_kinds(GOLDEN_A)[0][0])
+        # The first line names the run; it is never a kind, nor is a line that isn't a failure.
+        self.assertEqual(golden_kinds("Golden models, seed 1: failure: not at the start\nanother line\n"), [])
+
+    def test_golden_folders_are_read_and_filed_as_their_own_issues(self):
+        with tempfile.TemporaryDirectory() as d:
+            for seed, text in (("golden-7", GOLDEN_A), ("golden-99", GOLDEN_B)):
+                os.makedirs(os.path.join(d, "golden", f"seed-{seed}"))
+                with open(os.path.join(d, "golden", f"seed-{seed}", "golden-report.txt"), "w") as f:
+                    f.write(text)
+            # report.txt next to the seed folders is the night's summary, not a failure.
+            with open(os.path.join(d, "golden", "report.txt"), "w") as f:
+                f.write("seed 7, ...\n")
+            found = gather(read_folders(d))
+        self.assertEqual(sorted((k, [s for s, _ in v]) for k, v in found.items()), [
+            ("golden model gear: rebuilt differently in round # than in round #: bodies[#].volume: # then #", ["golden-7"]),
+            ("golden model l-bracket: Body # (feature#): volume # is not # (#*#*# ...)", ["golden-7", "golden-99"]),
+        ])
+        kind = "golden model l-bracket: Body # (feature#): volume # is not # (#*#*# ...)"
+        self.assertEqual(plan(found, [], "main"), [("create", k, None) for k in sorted(found)])
+        title, body = texts("create", kind, found[kind], "RUN", "abc1234", "main")
+        self.assertEqual(title, "Golden models: l-bracket: Body # (feature#): volume # is not # (#*#*# ...)")
+        self.assertIn(MARK.format(key(kind)), body)
+        self.assertIn("tests/golden/<model>.panosolid.json", body)
+        self.assertIn("(failures/seed-golden-7/)", body)
+        self.assertIn("FISSION_SEED=7 FISSION_GOLDEN_ROUNDS=20 npm run golden", body)
 
 
 if __name__ == "__main__":

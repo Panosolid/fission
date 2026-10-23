@@ -27,7 +27,9 @@ name: Random testing
 # comment, fixed ones that come back on main are reopened) and opens one for
 # new mutation survivors. A journeys job walks the magic-moment journeys
 # against tests/baseline.json (X8b) and its lines go into summary.txt, as do
-# the ts-mutants job's (TypeScript mutation testing, packages/testing/stryker).
+# the ts-mutants job's (TypeScript mutation testing, packages/testing/stryker)
+# and the golden job's (the golden models, step 28b; a failing model files an
+# issue like a failing round).
 # Scheduled runs only fire from the default branch.
 on:
   schedule:
@@ -305,6 +307,56 @@ jobs:
           path: ${{ runner.temp }}/journeys/
           if-no-files-found: ignore
 
+  # The golden models (step 28b, packages/testing/nightly/golden.ts): every
+  # model in tests/golden that builds today rebuilt in 50 shuffled rounds on
+  # one kernel, each checked against its hand-worked answers and against its
+  # own first rebuild, then timed and counted against tests/baseline.json
+  # (baseline.py --only app.golden). Red on any wrong or changing answer, a
+  # leaked body or a metric past its margin; a failing model's folder files
+  # a random-testing issue (collect-results.sh, file_issues.py) and the
+  # lines go into summary.txt either way.
+  golden:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: wasm-pack
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run kernel
+        working-directory: apps/fission
+      - name: Golden models against their answers and tests/baseline.json
+        env:
+          OUT: ${{ runner.temp }}/golden
+          FISSION_GOLDEN_ROUNDS: "50"
+        run: |
+          mkdir -p "$OUT"
+          code=0
+          FISSION_SEED=$(date -u +%s) FISSION_GOLDEN_OUT="$OUT" npm run golden -w @fission/testing || code=$?
+          if [ -f "$OUT/measured.json" ]; then
+            python3 .github/scripts/baseline.py --measured "$OUT/measured.json" --only app.golden >"$OUT/baseline.txt" || code=$?
+            cat "$OUT/baseline.txt"
+            grep -E '^(\|[^-]|[0-9]+ metric)' "$OUT/baseline.txt" >>"$OUT/report.txt" || true
+          fi
+          exit $code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: golden
+          path: ${{ runner.temp }}/golden/
+          if-no-files-found: ignore
+
   # TypeScript mutation testing (packages/testing/stryker/run.sh), one job
   # per target (the list must match run.sh's, as collect-results.sh's does;
   # packages/testing/test/stryker-config.test.ts checks): red on a survivor
@@ -351,7 +403,7 @@ jobs:
           if-no-files-found: ignore
 
   collect:
-    needs: [gate, plan, test, test-second-leg, mutants, journeys, ts-mutants]
+    needs: [gate, plan, test, test-second-leg, mutants, journeys, golden, ts-mutants]
     if: always() && needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
