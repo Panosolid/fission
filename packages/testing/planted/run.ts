@@ -38,8 +38,8 @@ function runCheck(run: Plant["run"][number]): string | null {
     return JSON.parse(line).check;
   }
   if (run === "naming") {
-    // The naming journey (step 26c), then the half disc's (27b) and the projections' (27d), saving no regression for a bug planted on purpose (FISSION_PLANTED).
-    for (const journey of ["naming", "half-disc", "projection"]) {
+    // The naming journey (step 26c), then the half disc's (27b), the projections' (27d) and 27e's hunt's, saving no regression for a bug planted on purpose (FISSION_PLANTED).
+    for (const journey of ["naming", "half-disc", "projection", "projection-hunt"]) {
       const r = spawnSync(process.execPath, [...node, "--test", `journeys/${journey}.journey.ts`], { cwd: TESTING, encoding: "utf8", env: { ...process.env, FISSION_PLANTED: "1" } });
       if (r.status === 0) continue;
       const title = /^not ok \d+ - (.*)$/m.exec(r.stdout)?.[1] ?? "failed";

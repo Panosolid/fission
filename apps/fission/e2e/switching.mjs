@@ -145,6 +145,35 @@ try {
     }
   });
 
+  await check("a design that builds nothing (marker at the start) moved to the other pane and back keeps its timeline: no new box, no step (daily hunt 2026-10-23)", async () => {
+    const page = await fresh(1400);
+    const items = (pane) => page.$$eval(`${pane} [data-item]`, (els) => els.map((e) => e.dataset.item));
+    const undoTitle = () => page.getAttribute("#undo", "title");
+    try {
+      await page.click('#timeline [data-button="start"]');
+      await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "none");
+      const atStart = { items: await items("#timeline"), undo: await undoTitle() };
+      assert.deepEqual(atStart.items, ["feature-1"], "the box alone, rolled back");
+      await page.click("#split-toggle");
+      await page.waitForFunction(() => document.body.dataset.split === "image");
+      // Choosing the split pane's workspace in the switcher swaps the panes: Design is mounted again in the split pane.
+      await switchTo(page, "image");
+      await page.waitForFunction(() => document.body.dataset.split === "design");
+      await page.waitForTimeout(500);
+      assert.deepEqual(await items("#split-timeline"), atStart.items, "the split pane's timeline: no new box");
+      assert.equal(await page.textContent("#split-properties #volume"), "—", "nothing built");
+      assert.equal(await undoTitle(), atStart.undo, "no undo step");
+      await page.click("#split-close");
+      await switchTo(page, "design");
+      await page.waitForTimeout(500);
+      assert.deepEqual(await items("#timeline"), atStart.items, "back in the main pane: no new box");
+      assert.equal(await page.textContent("#properties #volume"), "—", "still nothing built");
+      assert.equal(await undoTitle(), atStart.undo, "still no undo step");
+    } finally {
+      await page.close();
+    }
+  });
+
   await check("no page errors", async () => assert.deepEqual(errors, []));
 } finally {
   await browser.close();

@@ -1,0 +1,141 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Flipped on a face",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 6,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "centre": "point-3",
+              "id": "circle-4",
+              "kind": "circle",
+              "radius": 5
+            }
+          ],
+          "face": {
+            "frame": {
+              "normal": [
+                0,
+                0,
+                1
+              ],
+              "origin": [
+                0,
+                0,
+                20
+              ],
+              "xAxis": [
+                1,
+                0,
+                0
+              ]
+            },
+            "side": 1
+          },
+          "id": "sketch-2",
+          "points": [
+            {
+              "id": "point-3",
+              "x": 20,
+              "y": 15
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "depth": 30,
+                "height": 20,
+                "width": 40
+              },
+              "summary": "Box: 40 × 30 × 20 mm",
+              "type": "box"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (box)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "feature-1"
+            ],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "face:feature-1/top"
+              },
+              "summary": "Sketch 1 on a face of Feature 1 (box)",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "feature-1",
+                  "label": "Feature 1 (box)",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-2"
+            ],
+            "id": "feature-5",
+            "intent": {
+              "parameters": {
+                "distance": 8,
+                "flip": true,
+                "sketch": "sketch-2"
+              },
+              "summary": "Extrude Sketch 1 by 8 mm, flipped",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-2",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-5",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 3
+    }
+  }
+}

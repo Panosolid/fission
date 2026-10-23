@@ -1,0 +1,39 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Ball",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "profiles": [],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "diameter": 30
+              },
+              "summary": "Sphere: ⌀30 mm",
+              "type": "sphere"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (sphere)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 1
+    }
+  }
+}

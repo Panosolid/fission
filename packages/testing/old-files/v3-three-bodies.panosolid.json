@@ -1,0 +1,166 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Three bodies",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 13,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "end": "point-5",
+              "id": "line-6",
+              "kind": "line",
+              "start": "point-4"
+            },
+            {
+              "end": "point-7",
+              "id": "line-8",
+              "kind": "line",
+              "start": "point-5"
+            },
+            {
+              "end": "point-9",
+              "id": "line-10",
+              "kind": "line",
+              "start": "point-7"
+            },
+            {
+              "end": "point-4",
+              "id": "line-11",
+              "kind": "line",
+              "start": "point-9"
+            }
+          ],
+          "id": "sketch-3",
+          "points": [
+            {
+              "id": "point-4",
+              "x": 100,
+              "y": 0
+            },
+            {
+              "id": "point-5",
+              "x": 110,
+              "y": 0
+            },
+            {
+              "id": "point-7",
+              "x": 110,
+              "y": 10
+            },
+            {
+              "id": "point-9",
+              "x": 100,
+              "y": 10
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "depth": 30,
+                "height": 20,
+                "width": 50
+              },
+              "summary": "Box: 50 × 30 × 20 mm",
+              "type": "box"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (box)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [],
+            "id": "feature-2",
+            "intent": {
+              "parameters": {
+                "diameter": 20,
+                "height": 30
+              },
+              "summary": "Cylinder: ⌀20 × 30 mm",
+              "type": "cylinder"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-2",
+                "label": "Feature 2 (cylinder)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [],
+            "id": "sketch-3",
+            "intent": {
+              "parameters": {
+                "plane": "XZ"
+              },
+              "summary": "Sketch 1 on the XZ plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-3",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-3"
+            ],
+            "id": "feature-12",
+            "intent": {
+              "parameters": {
+                "distance": 10,
+                "sketch": "sketch-3"
+              },
+              "summary": "Extrude Sketch 1 by 10 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-3",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-12",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 3
+    }
+  }
+}
