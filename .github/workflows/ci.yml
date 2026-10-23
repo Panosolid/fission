@@ -120,6 +120,21 @@ jobs:
         if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
       - run: python3 -m unittest discover -s prototypes/oracle -p 'test_*.py'
         if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
+      # Step 29b2: the nightly oracle reads every body from its STEP file.
+      # One round as the nightly runs it, with every file's first face
+      # planted flipped (FISSION_STEP_FAULT): every body must be a finding,
+      # except those OpenCascade can't read anyway (its small-feature limit,
+      # compare.py), and at least one must be.
+      - name: The oracle catches a planted flipped face in every STEP file
+        if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
+        working-directory: kernel
+        run: |
+          FISSION_STEP_FAULT=1 scripts/endless.sh 40 1 python3
+          head -4 target/endless-oracle.log
+          bodies=$(sed -n 's/^Oracle: \([0-9]*\) bodies.*/\1/p' target/endless-oracle.log)
+          found=$(sed -n 's/.* \([0-9]*\) disagreement(s)$/\1/p' target/endless-oracle.log)
+          small=$(sed -n 's/^  \([0-9]*\) more with a radius under.*/\1/p' target/endless-oracle.log)
+          [ -n "$bodies" ] && [ "$found" -gt 0 ] && [ $((found + small)) = "$bodies" ] || { echo "the planted fault was not caught in every body"; exit 1; }
 
   # Mutation testing of the kernel code this change touches: every mutant
   # cargo mutants makes in the changed lines must be caught by a lib test

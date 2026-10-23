@@ -15,6 +15,10 @@ OpenCascade is off is its own rounding, listed as "occ-rounding" at the end
 of the file but not counted as a disagreement (without mpmath, OpenCascade
 is the reference, as before).
 
+Each line also carries the body's STEP file (step 29b), which OpenCascade
+reads and checks as it is (step_check.py, `step_issues`), or why the
+kernel's writer refused it.
+
 Usage: python compare.py cases.jsonl [disagreements.txt]
 Needs: pip install cadquery-ocp
 """
@@ -42,6 +46,7 @@ from OCP.TopExp import TopExp_Explorer
 from OCP.gp import gp_Ax2, gp_Circ, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
 
 from pieces import pieces, signed_area
+import step_check
 
 try:
     import exact
@@ -54,6 +59,12 @@ except ImportError:  # pip install mpmath
 FACES = {"Box": (6, 6), "Cylinder": (3, 3), "Sphere": (2, 1)}
 
 REL = 1e-9  # OpenCascade's exact mass properties vs exact-in-theory values
+
+# A STEP body with a radius under this that OpenCascade can't read in any
+# exact copy is its limit, not a finding (`step_issues`): 1000 LINEAR, twice
+# the largest radius seen failing (5 µm).
+SMALL_FEATURE = 0.01
+SMALL_LIMIT = "OpenCascade's small-feature limit"
 
 
 def wire(ps, ccw):
@@ -164,6 +175,86 @@ def measure(shape):
     return vp.Mass(), sp.Mass(), lo_hi[:3], lo_hi[3:], faces
 
 
+def step_issues(case, rebuilt, ref, slack):
+    """The body as the kernel holds it, read from its STEP file (step 29b,
+    kernel/src/step_write.rs, step_check.py): OpenCascade's checker must
+    call it valid with every tolerance within LINEAR, it must have the
+    kernel's faces (a sphere is two here, the kernel's two halves, though
+    OpenCascade builds one), and its volume and area must be the exact
+    referee's within the harness's slacks. A body the harness held valid
+    that the writer refused is a finding too.
+
+    The file is judged as written and, when that fails and the part is far
+    out, as an exact copy of the same body moved home (`step_check.home`):
+    OpenCascade loses digits far out, and a real fault (a face turned, a
+    loop walked backwards, a gap over LINEAR) is in both alike, so the body
+    passes when either passes every check; a miss as written is then listed
+    with OpenCascade's rounding, not counted. When neither passes, the
+    home copy's problems are the finding, except in a body with a radius
+    under SMALL_FEATURE (below).
+
+    No copy is blown up to rescue a small feature: a 1 µm cylinder blown
+    up 1024 times reads valid with its exact volume, but so did one with a
+    cap planted flipped (29b2's planted-fault run in CI), so a pass there
+    proves nothing.
+
+    `rebuilt` is OpenCascade's own rebuild's (volume, area), the reference
+    without mpmath; with it, a miss no bigger than the rebuild's own miss of
+    the exact value (plus the slack) is OpenCascade's rounding, listed but
+    not counted, like compare's own."""
+    issues, occ_only = [], []
+    if case.get("step_refused") is not None:
+        issues.append(f"step write refused: {case['step_refused']}")
+    text = case.get("step")
+    if text is None:
+        return issues, occ_only  # refused, or a line from before step 29b
+    copies = [("as written", text, 1.0)]
+    moved, shift = step_check.home(text)
+    if any(shift):
+        copies.append((f"moved home by {shift}", moved, 1.0))
+    tried = []
+    for label, t, f in copies:
+        found, rounding = one_step_copy(case, step_check.check_text(t), rebuilt, ref, slack)
+        if not found:
+            occ_only += [f"{note} (as written; passes {label})" for _, notes in tried for note in notes if "validity" in note]
+            return issues, occ_only + rounding
+        tried.append((label, found))
+    label, found = tried[-1]
+    radii = [float(m.group(2)) for m in step_check.RADIUS.finditer(text)]
+    if radii and min(radii) < SMALL_FEATURE:
+        # OpenCascade's own limit (29b2's first runs: it lost the side of a
+        # 1 µm cylinder whose top circle's centre sat 3e-9 mm off the axis,
+        # 3,000 times inside LINEAR, and called it valid; every body it
+        # couldn't read had a radius of 1-5 µm): listed under its own
+        # heading, not counted, so it can't hide a fault in a body of
+        # ordinary size. Kept in view in docs/progress/booleans.md until
+        # something else checks such files.
+        return issues, occ_only + [f"{SMALL_LIMIT}: {note} ({label})" for note in found]
+    return issues + [f"{note} ({label})" for note in found], occ_only
+
+
+def one_step_copy(case, r, rebuilt, ref, slack):
+    """One copy's findings and OpenCascade-only misses (`step_issues`)."""
+    found, rounding = [f"step validity: {p}" for p in r.problems], []
+    if r.faces != case["faces"]:
+        found.append(f"step faces: OpenCascade read {r.faces}, the kernel has {case['faces']}")
+    for name, got, theirs, exact_value, allowed in (("step volume", r.volume, rebuilt[0], ref[0], slack[0]),
+                                                    ("step area", r.area, rebuilt[1], ref[1], slack[1])):
+        reference = theirs if exact_value is None else float(exact_value)
+        if abs(got - reference) <= allowed:
+            continue
+        note = f"{name}: OpenCascade read {got!r} from the file, {'exact' if exact_value is not None else 'its rebuild'} {reference!r}, allowed {allowed:.3g}"
+        # OpenCascade's rounding only when reading the file came out no
+        # worse than its own rebuild of the shape (29b2's planted-fault run:
+        # a rebuild a hair over the slack had excused a file that lost both
+        # caps of a 1 µm cylinder, 1,300 times the slack).
+        if exact_value is not None and abs(got - reference) <= abs(theirs - reference) + allowed:
+            rounding.append(note + f" (its rebuild {theirs!r} is off too)")
+        else:
+            found.append(note)
+    return found, rounding
+
+
 def compare(case):
     kind, shape, size = build(case["shape"])
     _, lo, hi, faces = measure(place(shape, case["matrix"]))[1:]
@@ -206,6 +297,9 @@ def compare(case):
             issues.append(f"{note}, allowed {slack:.3g}")
         elif verdict == "occ":
             occ_only.append(f"{note}, allowed {slack:.3g}")
+    more, more_occ = step_issues(case, (vol, area), (ev, ea), (vslack, aslack))
+    issues += more
+    occ_only += more_occ
     # The mesh checks below measure against the exact value when there is
     # one, so OpenCascade's rounding can't hide or fake a mesh error.
     who = "occ"
@@ -239,10 +333,11 @@ def compare(case):
 def main():
     path = sys.argv[1]
     out = sys.argv[2] if len(sys.argv) > 2 else None
-    total, bad, per_kind, lines, occ_lines = 0, 0, Counter(), [], []
+    total, bad, steps, per_kind, lines, occ_lines = 0, 0, 0, Counter(), [], []
     with open(path) as f:
         for n, line in enumerate(f, 1):
             case = json.loads(line)
+            steps += case.get("step") is not None
             try:
                 kind, issues, occ_only = compare(case)
             except Exception as e:  # an oracle crash is itself worth a look
@@ -255,9 +350,13 @@ def main():
             if occ_only:
                 occ_lines.append(f"occ-rounding, line {n}: {json.dumps(case['shape'])}\n  " + "\n  ".join(occ_only))
     print(f"Oracle: {total} bodies compared with OpenCascade, {bad} disagreement(s)")
+    print(f"  {steps} of them also read from their STEP files and checked (step 29b)")
     if exact is None:
         print("  (mpmath not installed: no exact referee, OpenCascade is the reference)")
-    print(f"  {len(occ_lines)} more where only OpenCascade was off the exact value (its own rounding, not counted)")
+    small = sum(1 for l in occ_lines if SMALL_LIMIT in l)
+    print(f"  {len(occ_lines) - small} more where only OpenCascade was off the exact value (its own rounding, not counted)")
+    print(f"  {small} more with a radius under {SMALL_FEATURE} mm that OpenCascade couldn't read from the STEP file "
+          f"in any copy (its small-feature limit, not counted)")
     for k, v in sorted(per_kind.items()):
         print(f"  {k:<9} {v}")
     for l in lines[:20]:

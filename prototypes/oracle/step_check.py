@@ -29,12 +29,21 @@ A body passes when:
   faces, so this holds the body to the kernel's own rule (every vertex on
   its edges and every edge on its faces within LINEAR).
 
+For a good body far out, which OpenCascade misreads (it loses digits
+there), `home` gives an exact copy of the same body moved home;
+compare.py's `step_issues` judges with it. `RADIUS` finds the radii, for
+compare.py's small-feature limit.
+
 Usage: python step_check.py body.step [more.step ...] (exit status 1 if
 any fails). Needs: pip install cadquery-ocp
 """
 
+import os
+import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
+from fractions import Fraction
 
 from OCP.BRep import BRep_Tool
 from OCP.BRepCheck import BRepCheck_Analyzer
@@ -158,6 +167,64 @@ def check(path):
     report.volume, report.area = volume.Mass(), area.Mass()
     report.faces = len(list(_shapes(shape, TopAbs_FACE)))
     return report
+
+
+def check_text(text):
+    """`check` of a file's text (OpenCascade reads only from a path)."""
+    fd, path = tempfile.mkstemp(suffix=".step")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        return check(path)
+    finally:
+        os.unlink(path)
+
+
+POINT = re.compile(r"^#(\d+) = CARTESIAN_POINT\('',\(([^,()]+),([^,()]+),([^,()]+)\)\);$", re.M)
+
+
+def _part21(x):
+    """A Part 21 real, as kernel/src/step_write.rs's `real` writes it: the
+    shortest decimal that reads back as `x`, with a decimal point and an
+    upper-case exponent."""
+    s = repr(x)
+    if "e" in s:
+        m, e = s.split("e")
+        return f"{m}{'' if '.' in m else '.'}E{e}"
+    return s
+
+
+def home(text):
+    """The same body moved home: every CARTESIAN_POINT less a shift, so its
+    volume and area can be measured where OpenCascade doesn't lose digits
+    (it integrates in the coordinates it is given: a profile 50-100 km out
+    lost up to 3x of its volume, compare.py's `centred`). Per axis the shift
+    is the middle of the corners' (VERTEX_POINTs') span, used only where the
+    part is farther out than its size (the corners' largest span; nearer in
+    there are no digits to win) and only if it moves every point in the file
+    exactly (checked in fractions; Sterbenz makes it so for a part farther
+    out than its own size), so the moved file is the same body, not a
+    rounded copy; directions, radii and the topology don't change. Returns
+    the text and the shift (0.0 on an axis left alone)."""
+    points = {m.group(1): [float(m.group(k)) for k in (2, 3, 4)] for m in POINT.finditer(text)}
+    corners = [points[k] for k in re.findall(r"VERTEX_POINT\('',#(\d+)\)", text) if k in points]
+    shift = [0.0, 0.0, 0.0]
+    if not corners:
+        return text, tuple(shift)
+    size = max(max(p[a] for p in corners) - min(p[a] for p in corners) for a in range(3))
+    for axis in range(3):
+        xs = [p[axis] for p in corners]
+        c = (min(xs) + max(xs)) / 2.0
+        if abs(c) > size and all(Fraction(p[axis]) - Fraction(c) == Fraction(p[axis] - c) for p in points.values()):
+            shift[axis] = c
+    moved = POINT.sub(lambda m: f"#{m.group(1)} = CARTESIAN_POINT('',(" + ",".join(
+        _part21(float(m.group(k + 2)) - shift[k]) for k in range(3)) + "));", text)
+    return moved, tuple(shift)
+
+
+
+# A circle's or round surface's radius (group 2).
+RADIUS = re.compile(r"^(#\d+ = (?:CIRCLE|CYLINDRICAL_SURFACE|SPHERICAL_SURFACE)\('',#\d+,)([^,()]+)\);$", re.M)
 
 
 def main():

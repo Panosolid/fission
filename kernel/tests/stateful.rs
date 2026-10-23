@@ -30,7 +30,9 @@
 //! - FISSION_STATEFUL_SEEDS  number of seeds (default 1)
 //! - FISSION_SEED            base seed (default 0x5EED)
 //! - FISSION_ORACLE_OUT      if set, append every final body to this JSONL
-//!   file for the OpenCascade oracle
+//!   file for the OpenCascade oracle, with the body's STEP file (step 29b)
+//! - FISSION_STEP_FAULT      if set, every STEP file given to the oracle has
+//!   its first face's normal flipped: a planted fault the oracle must report
 //!
 //! On failure the minimal chain is saved to tests/regressions/stateful/ (and
 //! replayed by `saved_regressions_still_pass` forever after), and a failure
@@ -52,6 +54,7 @@ use fission_kernel::tolerance::{self, ANGULAR, FRAME_SQUARE, LINEAR, MAX_COORD, 
 use fission_kernel::placed::Placed;
 use fission_kernel::sketch;
 use fission_kernel::stl;
+use fission_kernel::step_write;
 use fission_kernel::face_mass::{face_masses, FaceMass};
 use fission_kernel::geom::{Curve, Surface};
 use fission_kernel::topology::{Body, FaceRole, Piece as PieceId};
@@ -2755,6 +2758,10 @@ fn oracle_lines(slots: &[Slot]) -> String {
         let delta = tolerance::rounding_slack(reach(&m)) * s.steps.max(1) as f64;
         let shape = oracle_shape(&s.shape);
         let (curve_volume_slack, curve_area_slack) = curve_slacks(&shape);
+        // The body as the kernel holds it, placed, for OpenCascade to read
+        // and check (compare.py, step_check.py). The harness has already
+        // validated it, so a refusal is a finding, not a skip.
+        let (step, step_refused) = step_file(&world);
         let line = serde_json::json!({
             "shape": shape, "matrix": matrix, "faces": b.body.faces.len(),
             "volume": m.volume, "area": m.area, "exact_volume": m.exact.volume, "exact_area": m.exact.area, "lo": m.lo.to_array(), "hi": m.hi.to_array(), "max_deviation": dev,
@@ -2763,11 +2770,49 @@ fn oracle_lines(slots: &[Slot]) -> String {
             // For reading disagreements: how far the part has been and how
             // many operations it went through (rounding from there stays).
             "reached": s.reach, "steps": s.steps,
+            "step": step, "step_refused": step_refused,
         });
         out.push_str(&line.to_string());
         out.push('\n');
     }
     out
+}
+
+/// The oracle's "step" and "step_refused": the body's STEP file (with the
+/// planted fault when FISSION_STEP_FAULT is set), or why the writer refused
+/// it.
+fn step_file(world: &Body) -> (Option<String>, Option<String>) {
+    match step_write::write(world) {
+        Ok(text) if std::env::var_os("FISSION_STEP_FAULT").is_some() => (Some(flip_first_face(&text)), None),
+        Ok(text) => (Some(text), None),
+        Err(e) => (None, Some(e.to_string())),
+    }
+}
+
+/// `text` with its first face's normal flipped (`ADVANCED_FACE`'s
+/// same_sense swapped) and nothing else changed: the planted fault
+/// FISSION_STEP_FAULT gives the oracle, which OpenCascade's checker must
+/// catch (prototypes/oracle/test_step_check.py plants the same one by hand).
+fn flip_first_face(text: &str) -> String {
+    let mut done = false;
+    let lines: Vec<String> = text
+        .lines()
+        .map(|l| {
+            if done || !l.contains("= ADVANCED_FACE(") {
+                return l.to_string();
+            }
+            done = true;
+            if let Some(head) = l.strip_suffix(",.T.);") {
+                format!("{head},.F.);")
+            } else if let Some(head) = l.strip_suffix(",.F.);") {
+                format!("{head},.T.);")
+            } else {
+                panic!("an ADVANCED_FACE line the writer doesn't write: {l}")
+            }
+        })
+        .collect();
+    assert!(done, "no face to flip");
+    lines.join("\n") + if text.ends_with('\n') { "\n" } else { "" }
 }
 
 struct RunReport {
@@ -3680,4 +3725,52 @@ fn the_oracle_is_given_the_outline_a_sketch_drew_by_hand() {
     assert_eq!(oracle_shape(&plain), plain);
     let boxed = Shape::Box { w: Num(1.0), d: Num(2.0), h: Num(3.0) };
     assert_eq!(oracle_shape(&boxed), boxed);
+}
+
+#[test]
+fn the_oracle_is_given_each_body_as_a_step_file_of_where_it_is() {
+    // A 1 × 2 × 3 box moved by (100000, 0, 0): its file is the writer's file
+    // of the placed body, so its first corner, (0,0,0) before the move, is
+    // written as (100000.0, 0.0, 0.0).
+    let base = primitives::make_box(1.0, 2.0, 3.0).unwrap();
+    let moved = transform::translate(&Placed::new(base.clone()), DVec3::new(100_000.0, 0.0, 0.0)).unwrap();
+    let slot = placed_slot(&base, moved.clone(), glam::DAffine3::from_translation(DVec3::new(100_000.0, 0.0, 0.0)), 1);
+    let line: serde_json::Value = serde_json::from_str(oracle_lines(&[slot]).trim()).unwrap();
+    let step = line["step"].as_str().unwrap();
+    assert_eq!(step, step_write::write(&moved.baked()).unwrap());
+    assert!(step.contains("CARTESIAN_POINT('',(100000.0,0.0,0.0))"), "{step}");
+    assert!(line["step_refused"].is_null(), "{line}");
+}
+
+#[test]
+fn a_body_the_writer_refuses_reaches_the_oracle_as_a_refusal() {
+    // The oracle must hear about a refusal (compare.py counts it as a
+    // finding), not lose the body: a box with one face turned inside out
+    // fails validate, so the writer refuses it with words. (The harness
+    // never hands oracle_lines an invalid body, so this is step_file alone.)
+    let mut base = primitives::make_box(1.0, 1.0, 1.0).unwrap();
+    base.faces[0].sense = !base.faces[0].sense;
+    let (step, why) = step_file(&base);
+    assert!(step.is_none());
+    assert_eq!(why.unwrap(), step_write::write(&base).unwrap_err().to_string());
+    let (step, why) = step_file(&primitives::make_box(1.0, 1.0, 1.0).unwrap());
+    assert!(step.is_some() && why.is_none());
+}
+
+#[test]
+fn the_planted_step_fault_flips_one_face_and_nothing_else() {
+    // FISSION_STEP_FAULT's flip: exactly one line differs, the first
+    // ADVANCED_FACE, whose last argument (same_sense) swaps .T. and .F.;
+    // flipping again gives the file back.
+    let text = step_write::write(&primitives::make_box(1.0, 1.0, 1.0).unwrap()).unwrap();
+    let flipped = flip_first_face(&text);
+    let diff: Vec<(&str, &str)> = text.lines().zip(flipped.lines()).filter(|(a, b)| a != b).collect();
+    assert_eq!(text.lines().count(), flipped.lines().count());
+    assert_eq!(diff.len(), 1, "{diff:?}");
+    let (was, now) = diff[0];
+    let first = text.lines().find(|l| l.contains("= ADVANCED_FACE(")).unwrap();
+    assert_eq!(was, first);
+    let swap = |l: &str| if let Some(h) = l.strip_suffix(",.T.);") { format!("{h},.F.);") } else { format!("{},.T.);", l.strip_suffix(",.F.);").unwrap()) };
+    assert_eq!(now, swap(was));
+    assert_eq!(flip_first_face(&flipped), text);
 }
