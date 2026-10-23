@@ -25,7 +25,7 @@
 //! - Faces on other surfaces (NURBS, steps 63–64) are not checked yet.
 //! - A cylinder face bounded by anything other than lines along it and
 //!   circles round it can't be classified (booleans make such faces,
-//!   steps 46–47); points on it are not reported.
+//!   steps 37–38); points on it are not reported.
 //! - A shell wholly inside another (a body inside a body, not touching)
 //!   meets nothing, so it passes; voids come with booleans.
 //!
@@ -661,7 +661,7 @@ mod tests {
         let far = Profile::polygon(vec![DVec2::new(1e8 - 3.0, 0.0), DVec2::new(1e8, 0.0), DVec2::new(1e8, 2.0)], vec![]);
         extrude(&far, 1.0).unwrap();
         // The hand-built bodies (no `ops`): each is valid. (The sphere cap,
-        // slice and octant can't be meshed until step 47, so `validate`
+        // slice and octant can't be meshed until step 38, so `validate`
         // stops before this check; classify_on_a_sphere_octant tests them.)
         for b in [
             hand_cube(),

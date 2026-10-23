@@ -80,7 +80,7 @@ export const MAGIC_JOURNEYS: MagicJourney[] = [
     steps: ["model a part", "simulate it", "change a parameter", "rerun"],
     clickLimit: 6,
     secondsLimit: 30,
-    status: { waitsFor: "Simulate (S3), parameters (34, I18)" },
+    status: { waitsFor: "Simulate (S3), parameters (50, I18)" },
   },
 ];
 

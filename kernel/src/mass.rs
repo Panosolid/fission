@@ -43,7 +43,7 @@
 //!
 //! Known limit: a sphere face uses ±r·A + (c − o)·(vector area) and Gauss–
 //! Bonnet, which lose digits for a face much smaller than its sphere (a
-//! shallow cap). Only whole hemispheres exist until booleans (steps 46–47),
+//! shallow cap). Only whole hemispheres exist until booleans (steps 37–38),
 //! which must replace this with a stable form before making such faces.
 //!
 //! Mutation testing (`cargo mutants -f src/mass.rs`) leaves one survivor:
@@ -316,7 +316,7 @@ pub(crate) mod tests {
             assert_eq!(crate::validate::validate(&body), Ok(()), "{name}");
         }
         // Sphere faces other than caps can't be meshed yet (they arrive with
-        // booleans, steps 46–47). Everything else about these two passes:
+        // booleans, steps 37–38). Everything else about these two passes:
         // the only complaint is that one, for the curved face.
         for (name, body) in [("slice", hand_sphere_slice(5.0, -3.0, 4.0)), ("octant", hand_sphere_octant(2.0))] {
             let unsupported =

@@ -128,7 +128,7 @@ export function commandsMatch(actual: readonly Command[], expected: readonly Par
 
 /**
  * The part after these commands, as set_part's parameters. Until the
- * timeline (step 32) the part is one set_part: each command's parameters
+ * timeline (steps 24–25) the part is one set_part: each command's parameters
  * replace the ones it names and the rest are kept, as Design's run does.
  */
 export function partAfter(commands: readonly Partial<Command>[]): Record<string, unknown> {

@@ -602,7 +602,7 @@ mod tests {
         // have only ~2.5× headroom and booleans must treat them with care.
         // This fails for 10 nm at 10 km (shallow 3.1e-5), 1 nm at 1 km
         // (shallow 3.9e-6) and 1 nm at 10 km (steep 6.3e-7). Shallower
-        // crossings need tangent handling, whatever the tolerance (step 45).
+        // crossings need tangent handling, whatever the tolerance (step 35).
         let mut seed = 0x5eedu64;
         let mut f = move || {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);

@@ -19,7 +19,7 @@
 //!   theorem with P = −h²/2 gives ∬ h dθ dh = −½ ∮ h² dθ, so
 //!   ∬ h dA = −(s r/2) ∮ h² dθ; with P = −h m(θ) it gives
 //!   ∬ m dθ dh = −∮ h m dθ, so ∬ r m dA = −s r² ∮ h m dθ. Only circles
-//!   round the axis count (a line along the axis has dθ = 0; until step 46
+//!   round the axis count (a line along the axis has dθ = 0; until step 37
 //!   no other curve lies on a cylinder), and along one ∫ m dθ is
 //!   2 sin(Δθ/2) times m at the middle angle. Check: a half cylinder
 //!   wall (θ from 0 to π, h from 0 to H, s = +1) has loop pieces at h = 0

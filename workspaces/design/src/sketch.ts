@@ -322,7 +322,7 @@ const pinOf = (point: string, t: EdgeTarget, own: string | null): SketchPin => (
 /**
  * The sketch with point `pointId` moved exactly onto `target` and pinned
  * there (27c), in place of any pin it had: what dropping a dragged point
- * on a body's corner will do once points can be dragged (step 29); the
+ * on a body's corner will do once points can be dragged (step 36); the
  * naming harness moves a circle's centre onto a point with it. The same
  * document when the point is already there, pinned so.
  */

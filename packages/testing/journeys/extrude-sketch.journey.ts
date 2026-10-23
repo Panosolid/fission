@@ -242,7 +242,7 @@ test("hand-worked: a circle of radius 5 extruded 2 mm is πr²h = 50π mm³, and
   // A line beside it: its loose end is what to fix first, in the kernel's words.
   const withLine = drawLine(part, s.id, [20, 0], [30, 0]);
   await assert.rejects(build(withLine.doc), /^Error: Sketch 1 has no closed outline: the end at \(20, 0\) is not joined to another line or arc$/);
-  // A closed rectangle beside it: until regions (step 28) that is two loops.
+  // A closed rectangle beside it: until regions (step 44) that is two loops.
   const withSquare = drawRectangle(part, s.id, [20, 0], [30, 10]);
   await assert.rejects(build(withSquare.doc), /^Error: Sketch 1 has no closed outline: the sketch makes 2 separate loops; for now a sketch makes one outline$/);
   // Two circles likewise; deleting the line closes the sketch again.

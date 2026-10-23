@@ -82,7 +82,7 @@ export interface Sketch {
   id: string;
   points: SketchPoint[];
   curves: SketchCurve[];
-  /** Empty until the solver (step 29). */
+  /** Empty until the solver (step 36). */
   constraints: never[];
   /** Only for a sketch on a face (step 26c). */
   face?: SketchFace;
