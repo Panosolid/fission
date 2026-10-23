@@ -4,7 +4,7 @@ Progress file for one workstream (rules: root CLAUDE.md, "Workstreams and where 
 
 Done: nothing yet; the plan was designed with the owner on 2026-10-22 and 2026-10-23.
 
-Next: U1a, from `main`, once CAD step 27 is finished (owner's decision: the UI work runs during the break from roadmap coding after step 27, since it is styling and layout and doesn't clash with the sketch work).
+Next: U1a, from `main`, only when the owner says to start (roadmap coding is paused after step 27 and its bug sweep until he resumes it; the UI work is styling and layout, so it can run beside the sketch work once started).
 
 ## How to work on this workstream
 
