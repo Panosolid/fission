@@ -1,6 +1,6 @@
-tested commit 3d5b998 on claude/project-thread-wgp2vq, 2026-10-23 11:43 UTC (https://github.com/Panosolid/fission/actions/runs/39937431985)
-OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.13 s (baseline 1.23 s)
-OK Design: sketch to STL: 8 clicks (baseline 8), slowest 5.85 s (baseline 9.70 s)
+tested commit 9295960 on claude/project-thread-mojaro, 2026-10-23 15:44 UTC (https://github.com/Panosolid/fission/actions/runs/39970939404)
+OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.91 s (baseline 1.23 s)
+OK Design: sketch to STL: 8 clicks (baseline 8), slowest 4.67 s (baseline 9.70 s)
 PENDING Box to laser panels: waits for Laser (L1–L3), X13
 PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
 PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
