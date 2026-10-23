@@ -11,7 +11,7 @@
    works the contrast out); the panel's own see-through box is the base
    layout's (theme.css). Split view and phones keep the solid column. */
 @media (min-width: 641px) {
-  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) { --browser-block: rgba(28, 31, 36, 0.84); }
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) { --browser-block: rgba(28, 31, 36, 0.84); color: #e6e9ee; }
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) > summary { pointer-events: auto; margin: 0 0 4px; padding: 4px 8px; background: var(--browser-block); border: 1px solid #353a43; border-radius: 4px; }
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree summary,
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree-row:not(#none),
@@ -19,7 +19,8 @@
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree summary { padding: 2px 8px 2px 6px; font-size: 13px; text-transform: none; letter-spacing: 0; color: #c4cbd5; }
   /* A plain folder shape after the fold arrow marks a group. */
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree summary::before { content: ""; display: inline-block; width: 13px; height: 10px; margin: 0 6px 0 2px; vertical-align: -1px; background: currentColor; clip-path: polygon(0 0, 40% 0, 52% 22%, 100% 22%, 100% 100%, 0 100%); opacity: 0.75; }
-  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree-row:not(#none) { padding: 2px 8px; color: #e6e9ee; }
+  /* The rows' colour comes from the panel, not the rows, so a red row (a failed item, a kept shape) keeps its red. */
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree-row:not(#none) { padding: 2px 8px; }
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree summary:hover,
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree-row:not(#none):hover,
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .delete-ask-more:not(#none):hover { background: rgba(42, 46, 53, 0.96); }
