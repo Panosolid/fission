@@ -14,6 +14,8 @@ export interface BodyView {
   mesh: DisplayMesh;
   volume: number;
   area: number;
+  /** The smallest axis-aligned box round the body in the world, [low, high] corners (mm), exact for lines, circles and arcs (step 28a). */
+  bounds: [[number, number, number], [number, number, number]];
   vertices: number;
   edges: number;
   faces: number;

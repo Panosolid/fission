@@ -1,0 +1,243 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Stepped boss",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 10,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "centre": "point-3",
+              "id": "circle-4",
+              "kind": "circle",
+              "radius": 10
+            }
+          ],
+          "face": {
+            "frame": {
+              "normal": [
+                0,
+                0,
+                1
+              ],
+              "origin": [
+                0,
+                0,
+                10
+              ],
+              "xAxis": [
+                1,
+                0,
+                0
+              ]
+            },
+            "side": 1
+          },
+          "id": "sketch-2",
+          "points": [
+            {
+              "id": "point-3",
+              "x": 30,
+              "y": 20
+            }
+          ]
+        },
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "centre": "point-7",
+              "id": "circle-8",
+              "kind": "circle",
+              "radius": 5
+            }
+          ],
+          "face": {
+            "frame": {
+              "normal": [
+                0,
+                0,
+                1
+              ],
+              "origin": [
+                0,
+                0,
+                18
+              ],
+              "xAxis": [
+                1,
+                0,
+                0
+              ]
+            },
+            "side": 1
+          },
+          "id": "sketch-6",
+          "pins": [
+            {
+              "kind": "centre",
+              "name": "end+side:circle-4",
+              "point": "point-7"
+            }
+          ],
+          "points": [
+            {
+              "id": "point-7",
+              "x": 30,
+              "y": 20
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "feature-1",
+            "intent": {
+              "parameters": {
+                "depth": 40,
+                "height": 10,
+                "width": 60
+              },
+              "summary": "Box: 60 × 40 × 10 mm",
+              "type": "box"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "feature-1",
+                "label": "Feature 1 (box)",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "feature-1"
+            ],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "face:feature-1/top"
+              },
+              "summary": "Sketch 1 on a face of Feature 1 (box)",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "feature-1",
+                  "label": "Feature 1 (box)",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-2"
+            ],
+            "id": "feature-5",
+            "intent": {
+              "parameters": {
+                "distance": 8,
+                "sketch": "sketch-2"
+              },
+              "summary": "Extrude Sketch 1 by 8 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-2",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-5",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "feature-5"
+            ],
+            "id": "sketch-6",
+            "intent": {
+              "parameters": {
+                "plane": "face:feature-5/end"
+              },
+              "summary": "Sketch 2 on a face of Extrude 1",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "feature-5",
+                  "label": "Extrude 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "sketch-6",
+                "label": "Sketch 2",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-6"
+            ],
+            "id": "feature-9",
+            "intent": {
+              "parameters": {
+                "distance": 6,
+                "sketch": "sketch-6"
+              },
+              "summary": "Extrude Sketch 2 by 6 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-6",
+                  "label": "Sketch 2",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-9",
+                "label": "Extrude 2",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 3
+    }
+  }
+}

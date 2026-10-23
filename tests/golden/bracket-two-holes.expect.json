@@ -1,0 +1,45 @@
+{
+  "model": "bracket-two-holes",
+  "what": "The ready-made plate 80 × 40 × 6: two holes r 0.15 · 40 = 6 round (20, 20) and (60, 20), a quarter in from each end, cut as holes in its profile (as Extrude cuts once 39a lands: 28a2).",
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-1",
+      "volume": {
+        "is": "6*(80*40 - 2*pi*6^2)",
+        "why": "the 80 × 40 outline less two discs r 6, 6 thick"
+      },
+      "area": {
+        "is": "2*(80*40 - 2*pi*6^2) + (2*80 + 2*40)*6 + 2*(2*pi*6*6)",
+        "why": "two caps with holes, four outer sides round 240 by 6, two hole walls 2π·6 round by 6 (the holes' discs taken off the caps come back as walls: 6400 + 1440 = 7840)"
+      },
+      "topology": {
+        "faces": 8,
+        "edges": 16,
+        "vertices": 12,
+        "why": "2 caps, 4 sides, 2 hole walls; 4 + 4 outer edges round the caps, 4 along, and each hole's 2 circles; 8 outer corners and a seam vertex on each hole circle. V − E + F − (L − F) = 12 − 16 + 8 − (14 − 8) = −2 = 2(1 shell − 2 holes through)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            80,
+            40,
+            6
+          ]
+        ],
+        "why": "the plate from the origin; the holes are inside it"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    }
+  ],
+  "sketches": [],
+  "pins": []
+}

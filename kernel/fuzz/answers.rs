@@ -66,13 +66,15 @@ fn body(out: &mut String, body: &Body) {
     let ints: Vec<u8> = [&d.indices, &d.triangle_faces, &d.edge_line_edges].iter().flat_map(|v| v.iter().flat_map(|x| x.to_le_bytes())).collect();
     // Each face's role, exact area and centroid (step 24b).
     let faces: Vec<u8> = view.face_areas.iter().chain(view.face_centroids.iter().flatten()).flat_map(|x| x.to_bits().to_le_bytes()).collect();
+    // The exact box (step 28a).
+    let bounds: Vec<u8> = view.bounds.iter().flatten().flat_map(|x| x.to_bits().to_le_bytes()).collect();
     // The planted break `check.sh` proves the check with: one bit of the
     // volume, in one build only.
     #[cfg(same_answer_break)]
     let view = fission_kernel::BodyView { volume: f64::from_bits(view.volume.to_bits() ^ 1), ..view };
     let _ = write!(
         out,
-        " volume={} area={} v/e/f={}/{}/{} errors={:016x} display={:016x}/{:016x} roles={:016x} faces={:016x}",
+        " volume={} area={} v/e/f={}/{}/{} errors={:016x} display={:016x}/{:016x} roles={:016x} faces={:016x} bounds={:016x}",
         bits(view.volume),
         bits(view.area),
         view.vertices,
@@ -82,7 +84,8 @@ fn body(out: &mut String, body: &Body) {
         hash(&floats),
         hash(&ints),
         hash_debug(&view.face_roles),
-        hash(&faces)
+        hash(&faces),
+        hash(&bounds)
     );
     match tessellate(body, &TessOptions::DISPLAY) {
         Ok(mesh) => {

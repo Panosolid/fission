@@ -90,6 +90,11 @@ pub struct BodyView {
     /// Exact, from the B-rep (`mass::mass_properties`), not the mesh.
     pub volume: f64,
     pub area: f64,
+    /// The smallest axis-aligned box round the body in the world, [low,
+    /// high] corners (`Placed::bounds`: exact for lines, circles and arcs,
+    /// a sphere face boxed by its whole sphere). What a golden model's
+    /// hand-worked box is checked against (step 28a).
+    pub bounds: [[f64; 3]; 2],
     pub vertices: usize,
     pub edges: usize,
     pub faces: usize,
@@ -168,6 +173,8 @@ fn view_at(body: &Body, placement: &geom::Placement) -> Result<BodyView, ApiErro
 fn view_parts(body: &Body, placement: &geom::Placement, mesh: &mesh::Mesh, errors: Vec<String>) -> BodyView {
     let exact = mass::mass_properties(body);
     let faces = placed::placed_face_masses(body, placement);
+    // As `Placed::bounds`: a placed body is boxed as its baked geometry, since a turn's box isn't the turned box.
+    let (lo, hi) = if placement.is_identity() { body.bounds() } else { body.transformed(&placement.transform()).bounds() };
     // A plane's normal is the same everywhere on it, so any point will do.
     let normal = |f: usize| match body.faces[f].surface {
         geom::Surface::Plane { .. } => Some(placement.dir(body.face_normal_at(f, DVec3::ZERO)).to_array()),
@@ -177,6 +184,7 @@ fn view_parts(body: &Body, placement: &geom::Placement, mesh: &mesh::Mesh, error
         mesh: display::display_mesh_placed(body, mesh, placement),
         volume: exact.volume,
         area: exact.area,
+        bounds: [lo.to_array(), hi.to_array()],
         vertices: body.vertices.len(),
         edges: body.edges.len(),
         faces: body.faces.len(),
@@ -889,6 +897,31 @@ mod tests {
         for (a, b) in specs().into_iter().zip(specs()) {
             assert_eq!(json(view_of(a).unwrap()), json(view_placed(&build(b).unwrap()).unwrap()));
         }
+    }
+
+    #[test]
+    fn view_bounds_are_the_hand_worked_box() {
+        let bounds = |spec: BodySpec| view_placed(&build(spec).unwrap()).unwrap().bounds;
+        let near = |got: [[f64; 3]; 2], want: [[f64; 3]; 2]| {
+            let ok = got.iter().flatten().zip(want.iter().flatten()).all(|(g, w)| crate::tolerance::eq(*g, *w));
+            assert!(ok, "{got:?} vs {want:?}");
+        };
+        // A box 10 × 20 × 30 from the origin.
+        near(bounds(BodySpec::Box { width: 10.0, depth: 20.0, height: 30.0 }), [[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]]);
+        // A cylinder r 1, h 2 standing on the origin round +Z: its circles reach ±1 in x and y, though its only vertices are at x = 1.
+        near(bounds(BodySpec::Cylinder { radius: 1.0, height: 2.0 }), [[-1.0, -1.0, 0.0], [1.0, 1.0, 2.0]]);
+        // A ball r 3 round the origin: ±3, with one vertex on its equator at (3, 0, 0).
+        near(bounds(BodySpec::Sphere { radius: 3.0 }), [[-3.0; 3], [3.0; 3]]);
+        // A half disc: (0, 0) to (2, 0) with bulge 1 (half a turn counter-clockwise round (1, 0), so through (1, −1)), back by a line;
+        // extruded 3 on a frame at (100, 0, 0) whose x is +Y and normal +X, so the sketch's y is X × Y = +Z: sketch (u, v) is world
+        // (100, u, v) and the extrude runs to x = 103. The arc's lowest point (1, −1) is world z = −1, a point no vertex is at.
+        let half_disc = BodySpec::Extrude {
+            profile: ProfileIn { outer: BoundaryIn::Path { corners: vec![0.0, 0.0, 2.0, 0.0], bulges: vec![1.0, 0.0] }, holes: vec![] },
+            distance: 3.0,
+            frame: Some(FrameIn { origin: [100.0, 0.0, 0.0], x: [0.0, 1.0, 0.0], normal: [1.0, 0.0, 0.0] }),
+            flip: false,
+        };
+        near(bounds(half_disc), [[100.0, 0.0, -1.0], [103.0, 2.0, 0.0]]);
     }
 
     #[test]

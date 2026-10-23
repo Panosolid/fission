@@ -1,0 +1,856 @@
+{
+  "model": "thirty-features",
+  "what": "About 30 features for rebuild time (31 items): a 200 × 150 × 10 base, 14 sketches on its top, alternately a 20 × 20 square (rectangle tool) and a circle r 8, each extruded 5 + i for the i-th from 0, and a post r 5 tall 3 sketched on the first block's top. Sixteen bodies.",
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-1",
+      "volume": {
+        "is": "200*150*10",
+        "why": "the base 200 × 150 × 10"
+      },
+      "area": {
+        "is": "2*(200*150 + 200*10 + 150*10)",
+        "why": "two 200 × 150 faces, two 200 × 10, two 150 × 10"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            200,
+            150,
+            10
+          ]
+        ],
+        "why": "a box sits on the origin"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 2",
+      "item": "feature-11",
+      "volume": {
+        "is": "20*20*5",
+        "why": "block 1 of 14 on the base's top, centred (20, 25) (columns 40 apart from x = 20, rows 50 apart from y = 25), 5 tall (5 + 0): a 20 square swept 5"
+      },
+      "area": {
+        "is": "2*20*20 + 4*20*5",
+        "why": "two 20 × 20 caps and four 20 × 5 sides"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a square swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            10,
+            15,
+            10
+          ],
+          [
+            30,
+            35,
+            15
+          ]
+        ],
+        "why": "(20, 25) ± 10, from z = 10 up 5"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 3",
+      "item": "feature-15",
+      "volume": {
+        "is": "pi*8^2*6",
+        "why": "block 2 of 14 on the base's top, centred (60, 25) (columns 40 apart from x = 20, rows 50 apart from y = 25), 6 tall (5 + 1): a disc r 8 swept 6"
+      },
+      "area": {
+        "is": "2*pi*8^2 + 2*pi*8*6",
+        "why": "two discs r 8 and a side 2π·8 round, 6 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            52,
+            17,
+            10
+          ],
+          [
+            68,
+            33,
+            16
+          ]
+        ],
+        "why": "(60, 25) ± 8, from z = 10 up 6"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 4",
+      "item": "feature-25",
+      "volume": {
+        "is": "20*20*7",
+        "why": "block 3 of 14 on the base's top, centred (100, 25) (columns 40 apart from x = 20, rows 50 apart from y = 25), 7 tall (5 + 2): a 20 square swept 7"
+      },
+      "area": {
+        "is": "2*20*20 + 4*20*7",
+        "why": "two 20 × 20 caps and four 20 × 7 sides"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a square swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            90,
+            15,
+            10
+          ],
+          [
+            110,
+            35,
+            17
+          ]
+        ],
+        "why": "(100, 25) ± 10, from z = 10 up 7"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 5",
+      "item": "feature-29",
+      "volume": {
+        "is": "pi*8^2*8",
+        "why": "block 4 of 14 on the base's top, centred (140, 25) (columns 40 apart from x = 20, rows 50 apart from y = 25), 8 tall (5 + 3): a disc r 8 swept 8"
+      },
+      "area": {
+        "is": "2*pi*8^2 + 2*pi*8*8",
+        "why": "two discs r 8 and a side 2π·8 round, 8 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            132,
+            17,
+            10
+          ],
+          [
+            148,
+            33,
+            18
+          ]
+        ],
+        "why": "(140, 25) ± 8, from z = 10 up 8"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 6",
+      "item": "feature-39",
+      "volume": {
+        "is": "20*20*9",
+        "why": "block 5 of 14 on the base's top, centred (180, 25) (columns 40 apart from x = 20, rows 50 apart from y = 25), 9 tall (5 + 4): a 20 square swept 9"
+      },
+      "area": {
+        "is": "2*20*20 + 4*20*9",
+        "why": "two 20 × 20 caps and four 20 × 9 sides"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a square swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            170,
+            15,
+            10
+          ],
+          [
+            190,
+            35,
+            19
+          ]
+        ],
+        "why": "(180, 25) ± 10, from z = 10 up 9"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 7",
+      "item": "feature-43",
+      "volume": {
+        "is": "pi*8^2*10",
+        "why": "block 6 of 14 on the base's top, centred (20, 75) (columns 40 apart from x = 20, rows 50 apart from y = 25), 10 tall (5 + 5): a disc r 8 swept 10"
+      },
+      "area": {
+        "is": "2*pi*8^2 + 2*pi*8*10",
+        "why": "two discs r 8 and a side 2π·8 round, 10 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            12,
+            67,
+            10
+          ],
+          [
+            28,
+            83,
+            20
+          ]
+        ],
+        "why": "(20, 75) ± 8, from z = 10 up 10"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 8",
+      "item": "feature-53",
+      "volume": {
+        "is": "20*20*11",
+        "why": "block 7 of 14 on the base's top, centred (60, 75) (columns 40 apart from x = 20, rows 50 apart from y = 25), 11 tall (5 + 6): a 20 square swept 11"
+      },
+      "area": {
+        "is": "2*20*20 + 4*20*11",
+        "why": "two 20 × 20 caps and four 20 × 11 sides"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a square swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            50,
+            65,
+            10
+          ],
+          [
+            70,
+            85,
+            21
+          ]
+        ],
+        "why": "(60, 75) ± 10, from z = 10 up 11"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 9",
+      "item": "feature-57",
+      "volume": {
+        "is": "pi*8^2*12",
+        "why": "block 8 of 14 on the base's top, centred (100, 75) (columns 40 apart from x = 20, rows 50 apart from y = 25), 12 tall (5 + 7): a disc r 8 swept 12"
+      },
+      "area": {
+        "is": "2*pi*8^2 + 2*pi*8*12",
+        "why": "two discs r 8 and a side 2π·8 round, 12 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            92,
+            67,
+            10
+          ],
+          [
+            108,
+            83,
+            22
+          ]
+        ],
+        "why": "(100, 75) ± 8, from z = 10 up 12"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 10",
+      "item": "feature-67",
+      "volume": {
+        "is": "20*20*13",
+        "why": "block 9 of 14 on the base's top, centred (140, 75) (columns 40 apart from x = 20, rows 50 apart from y = 25), 13 tall (5 + 8): a 20 square swept 13"
+      },
+      "area": {
+        "is": "2*20*20 + 4*20*13",
+        "why": "two 20 × 20 caps and four 20 × 13 sides"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a square swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            130,
+            65,
+            10
+          ],
+          [
+            150,
+            85,
+            23
+          ]
+        ],
+        "why": "(140, 75) ± 10, from z = 10 up 13"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 11",
+      "item": "feature-71",
+      "volume": {
+        "is": "pi*8^2*14",
+        "why": "block 10 of 14 on the base's top, centred (180, 75) (columns 40 apart from x = 20, rows 50 apart from y = 25), 14 tall (5 + 9): a disc r 8 swept 14"
+      },
+      "area": {
+        "is": "2*pi*8^2 + 2*pi*8*14",
+        "why": "two discs r 8 and a side 2π·8 round, 14 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            172,
+            67,
+            10
+          ],
+          [
+            188,
+            83,
+            24
+          ]
+        ],
+        "why": "(180, 75) ± 8, from z = 10 up 14"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 12",
+      "item": "feature-81",
+      "volume": {
+        "is": "20*20*15",
+        "why": "block 11 of 14 on the base's top, centred (20, 125) (columns 40 apart from x = 20, rows 50 apart from y = 25), 15 tall (5 + 10): a 20 square swept 15"
+      },
+      "area": {
+        "is": "2*20*20 + 4*20*15",
+        "why": "two 20 × 20 caps and four 20 × 15 sides"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a square swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            10,
+            115,
+            10
+          ],
+          [
+            30,
+            135,
+            25
+          ]
+        ],
+        "why": "(20, 125) ± 10, from z = 10 up 15"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 13",
+      "item": "feature-85",
+      "volume": {
+        "is": "pi*8^2*16",
+        "why": "block 12 of 14 on the base's top, centred (60, 125) (columns 40 apart from x = 20, rows 50 apart from y = 25), 16 tall (5 + 11): a disc r 8 swept 16"
+      },
+      "area": {
+        "is": "2*pi*8^2 + 2*pi*8*16",
+        "why": "two discs r 8 and a side 2π·8 round, 16 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            52,
+            117,
+            10
+          ],
+          [
+            68,
+            133,
+            26
+          ]
+        ],
+        "why": "(60, 125) ± 8, from z = 10 up 16"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 14",
+      "item": "feature-95",
+      "volume": {
+        "is": "20*20*17",
+        "why": "block 13 of 14 on the base's top, centred (100, 125) (columns 40 apart from x = 20, rows 50 apart from y = 25), 17 tall (5 + 12): a 20 square swept 17"
+      },
+      "area": {
+        "is": "2*20*20 + 4*20*17",
+        "why": "two 20 × 20 caps and four 20 × 17 sides"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a square swept: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            90,
+            115,
+            10
+          ],
+          [
+            110,
+            135,
+            27
+          ]
+        ],
+        "why": "(100, 125) ± 10, from z = 10 up 17"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 15",
+      "item": "feature-99",
+      "volume": {
+        "is": "pi*8^2*18",
+        "why": "block 14 of 14 on the base's top, centred (140, 125) (columns 40 apart from x = 20, rows 50 apart from y = 25), 18 tall (5 + 13): a disc r 8 swept 18"
+      },
+      "area": {
+        "is": "2*pi*8^2 + 2*pi*8*18",
+        "why": "two discs r 8 and a side 2π·8 round, 18 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            132,
+            117,
+            10
+          ],
+          [
+            148,
+            133,
+            28
+          ]
+        ],
+        "why": "(140, 125) ± 8, from z = 10 up 18"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 16",
+      "item": "feature-103",
+      "volume": {
+        "is": "pi*5^2*3",
+        "why": "a post r 5 on block 1's top round its middle (20, 25), swept 3"
+      },
+      "area": {
+        "is": "2*pi*5^2 + 2*pi*5*3",
+        "why": "two discs r 5 and a side 2π·5 round, 3 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            15,
+            20,
+            15
+          ],
+          [
+            25,
+            30,
+            18
+          ]
+        ],
+        "why": "(20, 25) ± 5, from block 1's top z = 10 + 5 up 3"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    }
+  ],
+  "sketches": [
+    {
+      "sketch": "sketch-2",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-12",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-16",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-26",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-30",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-40",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-44",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-54",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-58",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-68",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-72",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-82",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-86",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-96",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the base's top, z = 10 facing up"
+      }
+    },
+    {
+      "sketch": "sketch-100",
+      "face": "face:feature-11/end",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          15
+        ],
+        "why": "block 1's far cap (role end), z = 10 + 5 facing up"
+      }
+    }
+  ],
+  "pins": []
+}

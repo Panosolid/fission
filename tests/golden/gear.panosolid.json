@@ -1,0 +1,1423 @@
+{
+  "formatVersion": 2,
+  "links": [],
+  "materials": [],
+  "name": "Gear",
+  "units": {
+    "length": "mm"
+  },
+  "workspaces": {
+    "design": {
+      "nextId": 244,
+      "profiles": [],
+      "sketches": [
+        {
+          "constraints": [],
+          "curves": [
+            {
+              "centre": "point-5",
+              "end": "point-4",
+              "id": "arc-6",
+              "kind": "arc",
+              "start": "point-3"
+            },
+            {
+              "end": "point-7",
+              "id": "line-8",
+              "kind": "line",
+              "start": "point-4"
+            },
+            {
+              "centre": "point-10",
+              "end": "point-9",
+              "id": "arc-11",
+              "kind": "arc",
+              "start": "point-7"
+            },
+            {
+              "end": "point-12",
+              "id": "line-13",
+              "kind": "line",
+              "start": "point-9"
+            },
+            {
+              "centre": "point-15",
+              "end": "point-14",
+              "id": "arc-16",
+              "kind": "arc",
+              "start": "point-12"
+            },
+            {
+              "end": "point-17",
+              "id": "line-18",
+              "kind": "line",
+              "start": "point-14"
+            },
+            {
+              "centre": "point-20",
+              "end": "point-19",
+              "id": "arc-21",
+              "kind": "arc",
+              "start": "point-17"
+            },
+            {
+              "end": "point-22",
+              "id": "line-23",
+              "kind": "line",
+              "start": "point-19"
+            },
+            {
+              "centre": "point-25",
+              "end": "point-24",
+              "id": "arc-26",
+              "kind": "arc",
+              "start": "point-22"
+            },
+            {
+              "end": "point-27",
+              "id": "line-28",
+              "kind": "line",
+              "start": "point-24"
+            },
+            {
+              "centre": "point-30",
+              "end": "point-29",
+              "id": "arc-31",
+              "kind": "arc",
+              "start": "point-27"
+            },
+            {
+              "end": "point-32",
+              "id": "line-33",
+              "kind": "line",
+              "start": "point-29"
+            },
+            {
+              "centre": "point-35",
+              "end": "point-34",
+              "id": "arc-36",
+              "kind": "arc",
+              "start": "point-32"
+            },
+            {
+              "end": "point-37",
+              "id": "line-38",
+              "kind": "line",
+              "start": "point-34"
+            },
+            {
+              "centre": "point-40",
+              "end": "point-39",
+              "id": "arc-41",
+              "kind": "arc",
+              "start": "point-37"
+            },
+            {
+              "end": "point-42",
+              "id": "line-43",
+              "kind": "line",
+              "start": "point-39"
+            },
+            {
+              "centre": "point-45",
+              "end": "point-44",
+              "id": "arc-46",
+              "kind": "arc",
+              "start": "point-42"
+            },
+            {
+              "end": "point-47",
+              "id": "line-48",
+              "kind": "line",
+              "start": "point-44"
+            },
+            {
+              "centre": "point-50",
+              "end": "point-49",
+              "id": "arc-51",
+              "kind": "arc",
+              "start": "point-47"
+            },
+            {
+              "end": "point-52",
+              "id": "line-53",
+              "kind": "line",
+              "start": "point-49"
+            },
+            {
+              "centre": "point-55",
+              "end": "point-54",
+              "id": "arc-56",
+              "kind": "arc",
+              "start": "point-52"
+            },
+            {
+              "end": "point-57",
+              "id": "line-58",
+              "kind": "line",
+              "start": "point-54"
+            },
+            {
+              "centre": "point-60",
+              "end": "point-59",
+              "id": "arc-61",
+              "kind": "arc",
+              "start": "point-57"
+            },
+            {
+              "end": "point-62",
+              "id": "line-63",
+              "kind": "line",
+              "start": "point-59"
+            },
+            {
+              "centre": "point-65",
+              "end": "point-64",
+              "id": "arc-66",
+              "kind": "arc",
+              "start": "point-62"
+            },
+            {
+              "end": "point-67",
+              "id": "line-68",
+              "kind": "line",
+              "start": "point-64"
+            },
+            {
+              "centre": "point-70",
+              "end": "point-69",
+              "id": "arc-71",
+              "kind": "arc",
+              "start": "point-67"
+            },
+            {
+              "end": "point-72",
+              "id": "line-73",
+              "kind": "line",
+              "start": "point-69"
+            },
+            {
+              "centre": "point-75",
+              "end": "point-74",
+              "id": "arc-76",
+              "kind": "arc",
+              "start": "point-72"
+            },
+            {
+              "end": "point-77",
+              "id": "line-78",
+              "kind": "line",
+              "start": "point-74"
+            },
+            {
+              "centre": "point-80",
+              "end": "point-79",
+              "id": "arc-81",
+              "kind": "arc",
+              "start": "point-77"
+            },
+            {
+              "end": "point-82",
+              "id": "line-83",
+              "kind": "line",
+              "start": "point-79"
+            },
+            {
+              "centre": "point-85",
+              "end": "point-84",
+              "id": "arc-86",
+              "kind": "arc",
+              "start": "point-82"
+            },
+            {
+              "end": "point-87",
+              "id": "line-88",
+              "kind": "line",
+              "start": "point-84"
+            },
+            {
+              "centre": "point-90",
+              "end": "point-89",
+              "id": "arc-91",
+              "kind": "arc",
+              "start": "point-87"
+            },
+            {
+              "end": "point-92",
+              "id": "line-93",
+              "kind": "line",
+              "start": "point-89"
+            },
+            {
+              "centre": "point-95",
+              "end": "point-94",
+              "id": "arc-96",
+              "kind": "arc",
+              "start": "point-92"
+            },
+            {
+              "end": "point-97",
+              "id": "line-98",
+              "kind": "line",
+              "start": "point-94"
+            },
+            {
+              "centre": "point-100",
+              "end": "point-99",
+              "id": "arc-101",
+              "kind": "arc",
+              "start": "point-97"
+            },
+            {
+              "end": "point-102",
+              "id": "line-103",
+              "kind": "line",
+              "start": "point-99"
+            },
+            {
+              "centre": "point-105",
+              "end": "point-104",
+              "id": "arc-106",
+              "kind": "arc",
+              "start": "point-102"
+            },
+            {
+              "end": "point-107",
+              "id": "line-108",
+              "kind": "line",
+              "start": "point-104"
+            },
+            {
+              "centre": "point-110",
+              "end": "point-109",
+              "id": "arc-111",
+              "kind": "arc",
+              "start": "point-107"
+            },
+            {
+              "end": "point-112",
+              "id": "line-113",
+              "kind": "line",
+              "start": "point-109"
+            },
+            {
+              "centre": "point-115",
+              "end": "point-114",
+              "id": "arc-116",
+              "kind": "arc",
+              "start": "point-112"
+            },
+            {
+              "end": "point-117",
+              "id": "line-118",
+              "kind": "line",
+              "start": "point-114"
+            },
+            {
+              "centre": "point-120",
+              "end": "point-119",
+              "id": "arc-121",
+              "kind": "arc",
+              "start": "point-117"
+            },
+            {
+              "end": "point-122",
+              "id": "line-123",
+              "kind": "line",
+              "start": "point-119"
+            },
+            {
+              "centre": "point-125",
+              "end": "point-124",
+              "id": "arc-126",
+              "kind": "arc",
+              "start": "point-122"
+            },
+            {
+              "end": "point-127",
+              "id": "line-128",
+              "kind": "line",
+              "start": "point-124"
+            },
+            {
+              "centre": "point-130",
+              "end": "point-129",
+              "id": "arc-131",
+              "kind": "arc",
+              "start": "point-127"
+            },
+            {
+              "end": "point-132",
+              "id": "line-133",
+              "kind": "line",
+              "start": "point-129"
+            },
+            {
+              "centre": "point-135",
+              "end": "point-134",
+              "id": "arc-136",
+              "kind": "arc",
+              "start": "point-132"
+            },
+            {
+              "end": "point-137",
+              "id": "line-138",
+              "kind": "line",
+              "start": "point-134"
+            },
+            {
+              "centre": "point-140",
+              "end": "point-139",
+              "id": "arc-141",
+              "kind": "arc",
+              "start": "point-137"
+            },
+            {
+              "end": "point-142",
+              "id": "line-143",
+              "kind": "line",
+              "start": "point-139"
+            },
+            {
+              "centre": "point-145",
+              "end": "point-144",
+              "id": "arc-146",
+              "kind": "arc",
+              "start": "point-142"
+            },
+            {
+              "end": "point-147",
+              "id": "line-148",
+              "kind": "line",
+              "start": "point-144"
+            },
+            {
+              "centre": "point-150",
+              "end": "point-149",
+              "id": "arc-151",
+              "kind": "arc",
+              "start": "point-147"
+            },
+            {
+              "end": "point-152",
+              "id": "line-153",
+              "kind": "line",
+              "start": "point-149"
+            },
+            {
+              "centre": "point-155",
+              "end": "point-154",
+              "id": "arc-156",
+              "kind": "arc",
+              "start": "point-152"
+            },
+            {
+              "end": "point-157",
+              "id": "line-158",
+              "kind": "line",
+              "start": "point-154"
+            },
+            {
+              "centre": "point-160",
+              "end": "point-159",
+              "id": "arc-161",
+              "kind": "arc",
+              "start": "point-157"
+            },
+            {
+              "end": "point-162",
+              "id": "line-163",
+              "kind": "line",
+              "start": "point-159"
+            },
+            {
+              "centre": "point-165",
+              "end": "point-164",
+              "id": "arc-166",
+              "kind": "arc",
+              "start": "point-162"
+            },
+            {
+              "end": "point-167",
+              "id": "line-168",
+              "kind": "line",
+              "start": "point-164"
+            },
+            {
+              "centre": "point-170",
+              "end": "point-169",
+              "id": "arc-171",
+              "kind": "arc",
+              "start": "point-167"
+            },
+            {
+              "end": "point-172",
+              "id": "line-173",
+              "kind": "line",
+              "start": "point-169"
+            },
+            {
+              "centre": "point-175",
+              "end": "point-174",
+              "id": "arc-176",
+              "kind": "arc",
+              "start": "point-172"
+            },
+            {
+              "end": "point-177",
+              "id": "line-178",
+              "kind": "line",
+              "start": "point-174"
+            },
+            {
+              "centre": "point-180",
+              "end": "point-179",
+              "id": "arc-181",
+              "kind": "arc",
+              "start": "point-177"
+            },
+            {
+              "end": "point-182",
+              "id": "line-183",
+              "kind": "line",
+              "start": "point-179"
+            },
+            {
+              "centre": "point-185",
+              "end": "point-184",
+              "id": "arc-186",
+              "kind": "arc",
+              "start": "point-182"
+            },
+            {
+              "end": "point-187",
+              "id": "line-188",
+              "kind": "line",
+              "start": "point-184"
+            },
+            {
+              "centre": "point-190",
+              "end": "point-189",
+              "id": "arc-191",
+              "kind": "arc",
+              "start": "point-187"
+            },
+            {
+              "end": "point-192",
+              "id": "line-193",
+              "kind": "line",
+              "start": "point-189"
+            },
+            {
+              "centre": "point-195",
+              "end": "point-194",
+              "id": "arc-196",
+              "kind": "arc",
+              "start": "point-192"
+            },
+            {
+              "end": "point-197",
+              "id": "line-198",
+              "kind": "line",
+              "start": "point-194"
+            },
+            {
+              "centre": "point-200",
+              "end": "point-199",
+              "id": "arc-201",
+              "kind": "arc",
+              "start": "point-197"
+            },
+            {
+              "end": "point-202",
+              "id": "line-203",
+              "kind": "line",
+              "start": "point-199"
+            },
+            {
+              "centre": "point-205",
+              "end": "point-204",
+              "id": "arc-206",
+              "kind": "arc",
+              "start": "point-202"
+            },
+            {
+              "end": "point-207",
+              "id": "line-208",
+              "kind": "line",
+              "start": "point-204"
+            },
+            {
+              "centre": "point-210",
+              "end": "point-209",
+              "id": "arc-211",
+              "kind": "arc",
+              "start": "point-207"
+            },
+            {
+              "end": "point-212",
+              "id": "line-213",
+              "kind": "line",
+              "start": "point-209"
+            },
+            {
+              "centre": "point-215",
+              "end": "point-214",
+              "id": "arc-216",
+              "kind": "arc",
+              "start": "point-212"
+            },
+            {
+              "end": "point-217",
+              "id": "line-218",
+              "kind": "line",
+              "start": "point-214"
+            },
+            {
+              "centre": "point-220",
+              "end": "point-219",
+              "id": "arc-221",
+              "kind": "arc",
+              "start": "point-217"
+            },
+            {
+              "end": "point-222",
+              "id": "line-223",
+              "kind": "line",
+              "start": "point-219"
+            },
+            {
+              "centre": "point-225",
+              "end": "point-224",
+              "id": "arc-226",
+              "kind": "arc",
+              "start": "point-222"
+            },
+            {
+              "end": "point-227",
+              "id": "line-228",
+              "kind": "line",
+              "start": "point-224"
+            },
+            {
+              "centre": "point-230",
+              "end": "point-229",
+              "id": "arc-231",
+              "kind": "arc",
+              "start": "point-227"
+            },
+            {
+              "end": "point-232",
+              "id": "line-233",
+              "kind": "line",
+              "start": "point-229"
+            },
+            {
+              "centre": "point-235",
+              "end": "point-234",
+              "id": "arc-236",
+              "kind": "arc",
+              "start": "point-232"
+            },
+            {
+              "end": "point-237",
+              "id": "line-238",
+              "kind": "line",
+              "start": "point-234"
+            },
+            {
+              "centre": "point-240",
+              "end": "point-239",
+              "id": "arc-241",
+              "kind": "arc",
+              "start": "point-237"
+            },
+            {
+              "end": "point-3",
+              "id": "line-242",
+              "kind": "line",
+              "start": "point-239"
+            }
+          ],
+          "id": "sketch-2",
+          "points": [
+            {
+              "id": "point-3",
+              "x": 50,
+              "y": 0
+            },
+            {
+              "id": "point-4",
+              "x": 49.57224306869052,
+              "y": 6.526309611002579
+            },
+            {
+              "id": "point-5",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-7",
+              "x": 43.62357390044766,
+              "y": 5.743152457682269
+            },
+            {
+              "id": "point-9",
+              "x": 42.500736356719,
+              "y": 11.388037984510913
+            },
+            {
+              "id": "point-10",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-12",
+              "x": 48.29629131445341,
+              "y": 12.940952255126037
+            },
+            {
+              "id": "point-14",
+              "x": 46.19397662556434,
+              "y": 19.134171618254488
+            },
+            {
+              "id": "point-15",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-17",
+              "x": 40.650699430496616,
+              "y": 16.83807102406395
+            },
+            {
+              "id": "point-19",
+              "x": 38.105117766515306,
+              "y": 21.999999999999996
+            },
+            {
+              "id": "point-20",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-22",
+              "x": 43.30127018922194,
+              "y": 24.999999999999996
+            },
+            {
+              "id": "point-24",
+              "x": 39.66766701456176,
+              "y": 30.438071450436034
+            },
+            {
+              "id": "point-25",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-27",
+              "x": 34.907546972814345,
+              "y": 26.78550287638371
+            },
+            {
+              "id": "point-29",
+              "x": 31.112698372208094,
+              "y": 31.112698372208087
+            },
+            {
+              "id": "point-30",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-32",
+              "x": 35.35533905932738,
+              "y": 35.35533905932737
+            },
+            {
+              "id": "point-34",
+              "x": 30.438071450436034,
+              "y": 39.66766701456176
+            },
+            {
+              "id": "point-35",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-37",
+              "x": 26.78550287638371,
+              "y": 34.907546972814345
+            },
+            {
+              "id": "point-39",
+              "x": 22.000000000000004,
+              "y": 38.1051177665153
+            },
+            {
+              "id": "point-40",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-42",
+              "x": 25.000000000000007,
+              "y": 43.30127018922193
+            },
+            {
+              "id": "point-44",
+              "x": 19.13417161825449,
+              "y": 46.19397662556434
+            },
+            {
+              "id": "point-45",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-47",
+              "x": 16.838071024063954,
+              "y": 40.650699430496616
+            },
+            {
+              "id": "point-49",
+              "x": 11.388037984510913,
+              "y": 42.500736356719
+            },
+            {
+              "id": "point-50",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-52",
+              "x": 12.940952255126037,
+              "y": 48.29629131445341
+            },
+            {
+              "id": "point-54",
+              "x": 6.526309611002586,
+              "y": 49.57224306869052
+            },
+            {
+              "id": "point-55",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-57",
+              "x": 5.7431524576822754,
+              "y": 43.62357390044766
+            },
+            {
+              "id": "point-59",
+              "x": 2.6942229581241772e-15,
+              "y": 44
+            },
+            {
+              "id": "point-60",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-62",
+              "x": 3.061616997868383e-15,
+              "y": 50
+            },
+            {
+              "id": "point-64",
+              "x": -6.5263096110025804,
+              "y": 49.57224306869052
+            },
+            {
+              "id": "point-65",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-67",
+              "x": -5.74315245768227,
+              "y": 43.62357390044766
+            },
+            {
+              "id": "point-69",
+              "x": -11.388037984510907,
+              "y": 42.500736356719
+            },
+            {
+              "id": "point-70",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-72",
+              "x": -12.940952255126032,
+              "y": 48.29629131445341
+            },
+            {
+              "id": "point-74",
+              "x": -19.134171618254474,
+              "y": 46.19397662556434
+            },
+            {
+              "id": "point-75",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-77",
+              "x": -16.83807102406394,
+              "y": 40.65069943049662
+            },
+            {
+              "id": "point-79",
+              "x": -21.99999999999999,
+              "y": 38.105117766515306
+            },
+            {
+              "id": "point-80",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-82",
+              "x": -24.99999999999999,
+              "y": 43.30127018922194
+            },
+            {
+              "id": "point-84",
+              "x": -30.438071450436034,
+              "y": 39.66766701456176
+            },
+            {
+              "id": "point-85",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-87",
+              "x": -26.78550287638371,
+              "y": 34.907546972814345
+            },
+            {
+              "id": "point-89",
+              "x": -31.112698372208087,
+              "y": 31.112698372208094
+            },
+            {
+              "id": "point-90",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-92",
+              "x": -35.35533905932737,
+              "y": 35.35533905932738
+            },
+            {
+              "id": "point-94",
+              "x": -39.66766701456175,
+              "y": 30.438071450436045
+            },
+            {
+              "id": "point-95",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-97",
+              "x": -34.907546972814345,
+              "y": 26.785502876383717
+            },
+            {
+              "id": "point-99",
+              "x": -38.105117766515306,
+              "y": 21.999999999999996
+            },
+            {
+              "id": "point-100",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-102",
+              "x": -43.30127018922194,
+              "y": 24.999999999999996
+            },
+            {
+              "id": "point-104",
+              "x": -46.19397662556434,
+              "y": 19.134171618254495
+            },
+            {
+              "id": "point-105",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-107",
+              "x": -40.650699430496616,
+              "y": 16.838071024063954
+            },
+            {
+              "id": "point-109",
+              "x": -42.500736356719,
+              "y": 11.388037984510925
+            },
+            {
+              "id": "point-110",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-112",
+              "x": -48.29629131445341,
+              "y": 12.940952255126051
+            },
+            {
+              "id": "point-114",
+              "x": -49.57224306869052,
+              "y": 6.526309611002599
+            },
+            {
+              "id": "point-115",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-117",
+              "x": -43.62357390044766,
+              "y": 5.743152457682288
+            },
+            {
+              "id": "point-119",
+              "x": -44,
+              "y": 5.3884459162483544e-15
+            },
+            {
+              "id": "point-120",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-122",
+              "x": -50,
+              "y": 6.123233995736766e-15
+            },
+            {
+              "id": "point-124",
+              "x": -49.57224306869052,
+              "y": -6.526309611002588
+            },
+            {
+              "id": "point-125",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-127",
+              "x": -43.62357390044766,
+              "y": -5.743152457682278
+            },
+            {
+              "id": "point-129",
+              "x": -42.500736356719,
+              "y": -11.388037984510914
+            },
+            {
+              "id": "point-130",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-132",
+              "x": -48.29629131445341,
+              "y": -12.94095225512604
+            },
+            {
+              "id": "point-134",
+              "x": -46.19397662556434,
+              "y": -19.134171618254484
+            },
+            {
+              "id": "point-135",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-137",
+              "x": -40.65069943049662,
+              "y": -16.838071024063947
+            },
+            {
+              "id": "point-139",
+              "x": -38.105117766515306,
+              "y": -21.99999999999999
+            },
+            {
+              "id": "point-140",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-142",
+              "x": -43.30127018922194,
+              "y": -24.999999999999986
+            },
+            {
+              "id": "point-144",
+              "x": -39.66766701456176,
+              "y": -30.438071450436034
+            },
+            {
+              "id": "point-145",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-147",
+              "x": -34.907546972814345,
+              "y": -26.78550287638371
+            },
+            {
+              "id": "point-149",
+              "x": -31.112698372208108,
+              "y": -31.112698372208072
+            },
+            {
+              "id": "point-150",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-152",
+              "x": -35.35533905932739,
+              "y": -35.355339059327356
+            },
+            {
+              "id": "point-154",
+              "x": -30.438071450436045,
+              "y": -39.667667014561744
+            },
+            {
+              "id": "point-155",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-157",
+              "x": -26.785502876383717,
+              "y": -34.90754697281434
+            },
+            {
+              "id": "point-159",
+              "x": -22.00000000000002,
+              "y": -38.10511776651529
+            },
+            {
+              "id": "point-160",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-162",
+              "x": -25.00000000000002,
+              "y": -43.301270189221924
+            },
+            {
+              "id": "point-164",
+              "x": -19.134171618254474,
+              "y": -46.19397662556434
+            },
+            {
+              "id": "point-165",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-167",
+              "x": -16.83807102406394,
+              "y": -40.65069943049662
+            },
+            {
+              "id": "point-169",
+              "x": -11.388037984510907,
+              "y": -42.500736356719
+            },
+            {
+              "id": "point-170",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-172",
+              "x": -12.940952255126032,
+              "y": -48.29629131445341
+            },
+            {
+              "id": "point-174",
+              "x": -6.526309611002581,
+              "y": -49.57224306869052
+            },
+            {
+              "id": "point-175",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-177",
+              "x": -5.743152457682272,
+              "y": -43.62357390044766
+            },
+            {
+              "id": "point-179",
+              "x": -8.082668874372531e-15,
+              "y": -44
+            },
+            {
+              "id": "point-180",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-182",
+              "x": -9.184850993605149e-15,
+              "y": -50
+            },
+            {
+              "id": "point-184",
+              "x": 6.526309611002564,
+              "y": -49.572243068690526
+            },
+            {
+              "id": "point-185",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-187",
+              "x": 5.743152457682256,
+              "y": -43.62357390044766
+            },
+            {
+              "id": "point-189",
+              "x": 11.388037984510893,
+              "y": -42.50073635671901
+            },
+            {
+              "id": "point-190",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-192",
+              "x": 12.940952255126014,
+              "y": -48.29629131445342
+            },
+            {
+              "id": "point-194",
+              "x": 19.13417161825446,
+              "y": -46.193976625564346
+            },
+            {
+              "id": "point-195",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-197",
+              "x": 16.83807102406392,
+              "y": -40.65069943049663
+            },
+            {
+              "id": "point-199",
+              "x": 22.000000000000004,
+              "y": -38.1051177665153
+            },
+            {
+              "id": "point-200",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-202",
+              "x": 25.000000000000007,
+              "y": -43.30127018922193
+            },
+            {
+              "id": "point-204",
+              "x": 30.438071450435995,
+              "y": -39.667667014561786
+            },
+            {
+              "id": "point-205",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-207",
+              "x": 26.785502876383674,
+              "y": -34.90754697281437
+            },
+            {
+              "id": "point-209",
+              "x": 31.112698372208083,
+              "y": -31.112698372208097
+            },
+            {
+              "id": "point-210",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-212",
+              "x": 35.35533905932737,
+              "y": -35.355339059327385
+            },
+            {
+              "id": "point-214",
+              "x": 39.667667014561744,
+              "y": -30.438071450436045
+            },
+            {
+              "id": "point-215",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-217",
+              "x": 34.90754697281434,
+              "y": -26.785502876383717
+            },
+            {
+              "id": "point-219",
+              "x": 38.10511776651529,
+              "y": -22.00000000000002
+            },
+            {
+              "id": "point-220",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-222",
+              "x": 43.30127018922192,
+              "y": -25.00000000000002
+            },
+            {
+              "id": "point-224",
+              "x": 46.19397662556434,
+              "y": -19.134171618254477
+            },
+            {
+              "id": "point-225",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-227",
+              "x": 40.65069943049662,
+              "y": -16.83807102406394
+            },
+            {
+              "id": "point-229",
+              "x": 42.500736356718996,
+              "y": -11.38803798451095
+            },
+            {
+              "id": "point-230",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-232",
+              "x": 48.296291314453406,
+              "y": -12.940952255126078
+            },
+            {
+              "id": "point-234",
+              "x": 49.57224306869052,
+              "y": -6.526309611002584
+            },
+            {
+              "id": "point-235",
+              "x": 0,
+              "y": 0
+            },
+            {
+              "id": "point-237",
+              "x": 43.62357390044766,
+              "y": -5.743152457682275
+            },
+            {
+              "id": "point-239",
+              "x": 44,
+              "y": 0
+            },
+            {
+              "id": "point-240",
+              "x": 0,
+              "y": 0
+            }
+          ]
+        }
+      ],
+      "timeline": {
+        "features": [
+          {
+            "dependsOn": [],
+            "id": "sketch-2",
+            "intent": {
+              "parameters": {
+                "plane": "XY"
+              },
+              "summary": "Sketch 1 on the XY plane",
+              "type": "sketch"
+            },
+            "provenance": {
+              "from": [],
+              "self": {
+                "id": "sketch-2",
+                "label": "Sketch 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          },
+          {
+            "dependsOn": [
+              "sketch-2"
+            ],
+            "id": "feature-243",
+            "intent": {
+              "parameters": {
+                "distance": 10,
+                "sketch": "sketch-2"
+              },
+              "summary": "Extrude Sketch 1 by 10 mm",
+              "type": "extrude"
+            },
+            "provenance": {
+              "from": [
+                {
+                  "id": "sketch-2",
+                  "label": "Sketch 1",
+                  "workspace": "design"
+                }
+              ],
+              "self": {
+                "id": "feature-243",
+                "label": "Extrude 1",
+                "workspace": "design"
+              }
+            },
+            "suppressed": false
+          }
+        ]
+      },
+      "version": 3
+    }
+  }
+}

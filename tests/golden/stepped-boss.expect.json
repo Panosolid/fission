@@ -1,0 +1,169 @@
+{
+  "model": "stepped-boss",
+  "what": "A 60 × 40 × 10 plate (the box), a boss r 10 tall 8 sketched on its top round (30, 20), and a step r 5 tall 6 sketched on the boss's top, its centre snapped to the boss's circle's centre. Three bodies: no booleans join them yet.",
+  "bodies": [
+    {
+      "body": "Body 1",
+      "item": "feature-1",
+      "volume": {
+        "is": "60*40*10",
+        "why": "the plate, 60 × 40 × 10 from the origin"
+      },
+      "area": {
+        "is": "2*(60*40 + 60*10 + 40*10)",
+        "why": "two 60 × 40 faces, two 60 × 10, two 40 × 10"
+      },
+      "topology": {
+        "faces": 6,
+        "edges": 12,
+        "vertices": 8,
+        "why": "a box: 6 faces, 12 edges, 8 corners (8 − 12 + 6 = 2)"
+      },
+      "box": {
+        "is": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            60,
+            40,
+            10
+          ]
+        ],
+        "why": "a box sits on the origin, out to its sizes"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 2",
+      "item": "feature-5",
+      "volume": {
+        "is": "pi*10^2*8",
+        "why": "a disc r 10 swept 8"
+      },
+      "area": {
+        "is": "2*pi*10^2 + 2*pi*10*8",
+        "why": "two discs r 10 and a side 2π·10 round, 8 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            20,
+            10,
+            10
+          ],
+          [
+            40,
+            30,
+            18
+          ]
+        ],
+        "why": "round (30, 20) ± 10, from the plate's top z = 10 up 8"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    },
+    {
+      "body": "Body 3",
+      "item": "feature-9",
+      "volume": {
+        "is": "pi*5^2*6",
+        "why": "a disc r 5 swept 6"
+      },
+      "area": {
+        "is": "2*pi*5^2 + 2*pi*5*6",
+        "why": "two discs r 5 and a side 2π·5 round, 6 tall"
+      },
+      "topology": {
+        "faces": 3,
+        "edges": 2,
+        "vertices": 2,
+        "why": "a round extrude: 2 caps and 1 side; each whole circle is one edge with one vertex at its seam, and the side has no seam edge (the kernel's convention, as its cylinder: 2 − 2 + 3 − (4 − 3) = 2, the side having two loops)"
+      },
+      "box": {
+        "is": [
+          [
+            25,
+            15,
+            18
+          ],
+          [
+            35,
+            25,
+            24
+          ]
+        ],
+        "why": "round (30, 20) ± 5, from the boss's top z = 18 up 6"
+      },
+      "tolerance": {
+        "is": "1e-5",
+        "why": "LINEAR (10 nm): a model we make ourselves has no entity looser than the kernel's own tolerance"
+      }
+    }
+  ],
+  "sketches": [
+    {
+      "sketch": "sketch-2",
+      "face": "face:feature-1/top",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          10
+        ],
+        "why": "the box's +Z face is its top (role top), at z = 10, facing up"
+      }
+    },
+    {
+      "sketch": "sketch-6",
+      "face": "face:feature-5/end",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          0,
+          0,
+          18
+        ],
+        "why": "the boss's far cap (role end), 8 above the plate's top: z = 18, facing up"
+      }
+    }
+  ],
+  "pins": [
+    {
+      "sketch": "sketch-6",
+      "point": "point-7",
+      "kind": "centre",
+      "name": "end+side:circle-4",
+      "at": {
+        "is": [
+          30,
+          20,
+          18
+        ],
+        "why": "the step's centre snapped to the centre of the boss's top circle: the edge between the boss's end cap and its side swept from circle-4 (two faces, sorted, joined by +); that circle is round (30, 20) at z = 18"
+      }
+    }
+  ]
+}
