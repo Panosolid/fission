@@ -69,6 +69,8 @@ export class KernelClient implements KernelCalls {
   private worker = new Worker(new URL("./kernel.worker.ts", import.meta.url), { type: "module" });
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  /** Set once the worker is gone (its error event): every call fails with it. */
+  private failed: KernelError | null = null;
 
   constructor() {
     this.worker.onmessage = (event: MessageEvent<KernelResponse>) => {
@@ -79,14 +81,22 @@ export class KernelClient implements KernelCalls {
       if (reply.ok) p.resolve(reply.value);
       else p.reject(new KernelError(reply.error));
     };
+    // The worker answers every call, a failing one too (kernel.worker.ts), so
+    // an error event means its script didn't load or threw while it started:
+    // the worker is gone. Every call waiting and every later one fails with
+    // the same words, never waits for an answer that can't come, and the
+    // event is taken as handled (the app says it, not the browser's console).
     this.worker.onerror = (event) => {
-      const err = new KernelError({ kind: "internal", inputs: [], message: `kernel worker crashed: ${event.message}` });
-      this.pending.forEach((p) => p.reject(err));
+      event.preventDefault();
+      const why = event.message ? `stopped (kernel worker crashed: ${event.message})` : "didn't start (its worker didn't load)";
+      this.failed = new KernelError({ kind: "internal", inputs: [], message: `The geometry kernel ${why}. Reload the page to try again.` });
+      this.pending.forEach((p) => p.reject(this.failed!));
       this.pending.clear();
     };
   }
 
   call<K extends keyof KernelOps>(op: K, ...args: KernelOps[K]["args"]): Promise<KernelOps[K]["result"]> {
+    if (this.failed) return Promise.reject(this.failed);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
