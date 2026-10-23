@@ -255,6 +255,35 @@ mod tests {
     }
 
     #[test]
+    fn a_thin_crescent_far_out_extrudes_by_hand() {
+        // Regression (thin-crescent hunt, 2026-10-23, seeded crescents): two
+        // arcs over one chord, from (−31733.27…, 10⁶ + 0.39…) to
+        // (31734.60…, same y), c = 63467.876341794115, bulging the same way
+        // by bulges −7.16765592653798 and 7.16765589405838: 1.03 µm apart in
+        // the middle, horns meeting at 1.2e-9 rad. It took 52 s (the walls'
+        // triangulation, `a_long_thin_strip_triangulates_as_fast_as_a_round_face`).
+        // Worked apart from this code at 50 digits (prototypes/oracle
+        // exact.py): each arc turns φ = 4·atan(bulge), has radius
+        // r = c / (2|sin(φ/2)|) ≈ 115942.665 and cuts off a segment of
+        // r²(φ − sin φ)/2 from its chord: 42043434377.02725 and
+        // 42043434008.04711 mm², so the crescent is their difference,
+        // 368.98014, and the solid that times d = 2.3108531705336017:
+        // V = 852.6589209150375 mm³. The two segments cancel 8 digits, so
+        // the kernel's volume (from the same two segments) keeps ~8: it is
+        // 2.9e-8 off, inside MASS_PROPS_REL.
+        let p = |x: f64, y: f64| DVec2::new(x, y);
+        let outer = Boundary::Path {
+            corners: vec![p(-31733.274256691682, 1000000.3957638338), p(31734.602085102433, 1000000.3957638338)],
+            bulges: vec![-7.1676559265379804, 7.167655894058381],
+        };
+        let body = extrude(&Profile { outer, holes: vec![] }, 2.3108531705336017).unwrap();
+        let mesh = tessellate(&body, &TessOptions::DISPLAY).unwrap();
+        assert_eq!(mesh.check_closed(), Ok(()));
+        let v = crate::mass::mass_properties(&body).volume;
+        assert!(rel_eq(v, 852.6589209150375, crate::tolerance::MASS_PROPS_REL), "{v}");
+    }
+
+    #[test]
     fn wall_thickness_boundary() {
         // Hole whose left side is k·MIN_FEATURE from the outer's left side:
         // a wall that thin. 1.1× is a legal feature, 0.9× is not.
