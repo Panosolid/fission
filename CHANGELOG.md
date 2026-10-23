@@ -12,6 +12,8 @@ Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `
 
 ## 0.27.8 (2026-10-23)
 
+- Plan (no change to the app): the UI look-and-feel workstream, designed with the owner. The app will resemble Fusion 360's layout while keeping its own icons, names and colours: a slim app bar with one workspace button, a grouped toolbar of flat two-tone shape icons with dropdowns, the properties panel folded away in favour of a floating box for the running tool, light mode and a Settings page (theme, units, mouse controls, grid defaults, AI), one row of icons with bottom sheets on a phone, and a home screen the app opens on, with the last project one click away and projects filterable by workspace. Steps U1 to U8 and their test plans are in the new `docs/progress/ui.md`; the work starts after CAD step 27.
+
 - Fix (found in 27b, #251): on a slow phone, tapping a circle's rim and then Finish Sketch straight away lost the circle. Each tap waits its turn behind the kernel's rounding of the one before; Finish Sketch closed the sketch at once, so when the tap's turn came the sketch was no longer open and the tap was dropped. Finish Sketch now waits for the taps, typed Enters and projections made before it, draws them, then closes the sketch (Escape still drops a waiting tap, since it is a cancel). Checked by a new real-kernel journey (`journeys/finish-wait.journey.ts`) with the kernel held to make it slow: a circle's second tap then Finish keeps the circle (centre and radius worked by hand) as one undo step, and two line taps then Finish keep both lines in order; both failed before the fix. Finish with nothing waiting still closes in the same moment.
 
 ## 0.27.7 (2026-10-23)
