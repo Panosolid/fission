@@ -261,6 +261,12 @@ jobs:
           if [ "$COUNT" = 0 ]; then echo "No mutants in the changed kernel code." | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
           dir="$RUNNER_TEMP/shards"
           expected=$(python3 -c "import json,sys; print(len(json.loads(sys.argv[1])))" "$SHARDS")
+          # download-artifact (v5 on) unpacks a lone matching artifact straight
+          # into path, not into a folder named after it: with one shard, put
+          # its files back into the folder the lines below read.
+          if [ "$expected" = 1 ] && ! ls -d "$dir"/mutants-shard-* >/dev/null 2>&1 && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+            mkdir "$dir/mutants-shard-0" && find "$dir" -maxdepth 1 -type f -exec mv -t "$dir/mutants-shard-0" {} +
+          fi
           got=$(ls -d "$dir"/mutants-shard-* 2>/dev/null | wc -l)
           {
             echo "$COUNT mutants across $expected shards ($got reported)."
