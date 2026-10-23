@@ -16,10 +16,11 @@ const url = "http://localhost:4178/";
 const browser = await launch();
 const errors = [];
 
-async function fresh(width = 1280) {
+async function fresh(width = 1280, plant = null) {
   const context = await browser.newContext({ viewport: { width, height: 800 } });
   const page = await context.newPage();
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
+  if (plant) await page.addInitScript(plant);
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
@@ -59,6 +60,59 @@ const stats = (xs) => {
 };
 const fmt = (ms) => `${ms.toFixed(1)} ms`;
 
+const ORDER = ["image", "render", "slice", "vector", "community", "design"];
+
+/**
+ * Times every switch of ORDER on `page`: the first visits, then five rounds
+ * of returns. A switch at or over the limit is timed once more, the same
+ * kind of switch again, and counts as slow only if it is slow both times
+ * (Ben, 2026-10-23: a one-off runner stall, 106 ms against a 28 ms median,
+ * kept failing the merge queue; the limit itself stays 100 ms). A first
+ * visit is timed again as a first visit, in a fresh page with the same
+ * `plant`; a return, by switching to the workspace before it and back.
+ */
+async function slowSwitches(page, plant = null) {
+  const first = [];
+  for (const id of ORDER) first.push([id, await switchTo(page, id)]);
+  const again = [];
+  for (let round = 0; round < 5; round++) for (const id of ORDER) again.push([id, await switchTo(page, id)]);
+  const firstStats = stats(first.map(([, ms]) => ms));
+  const againStats = stats(again.map(([, ms]) => ms));
+  console.log(`  first visits: median ${fmt(firstStats.median)}, slowest ${fmt(firstStats.max)}; returns (${again.length}): median ${fmt(againStats.median)}, slowest ${fmt(againStats.max)}`);
+  const slow = [];
+  for (const [id, ms] of first.filter(([, ms]) => ms >= LIMIT_MS)) {
+    const other = await fresh(1280, plant);
+    try {
+      for (const before of ORDER.slice(0, ORDER.indexOf(id))) await switchTo(other, before);
+      const retimed = await switchTo(other, id);
+      console.log(`  first visit to ${id} took ${fmt(ms)}; timed again: ${fmt(retimed)}`);
+      if (retimed >= LIMIT_MS) slow.push(`first ${id} ${fmt(ms)}, ${fmt(retimed)}`);
+    } finally {
+      await other.close();
+    }
+  }
+  for (const [id, ms] of again.filter(([, ms]) => ms >= LIMIT_MS)) {
+    await switchTo(page, ORDER.at(ORDER.indexOf(id) - 1));
+    const retimed = await switchTo(page, id);
+    console.log(`  return to ${id} took ${fmt(ms)}; timed again: ${fmt(retimed)}`);
+    if (retimed >= LIMIT_MS) slow.push(`return ${id} ${fmt(ms)}, ${fmt(retimed)}`);
+  }
+  return slow;
+}
+
+/** A planted slowdown for the checks below: a click on `which` workspace's tab holds the page for 150 ms, on the clicks numbered in `on` (1 is the first; null, every click). */
+const slowTab = (which, on) => `(() => {
+  let n = 0;
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest?.('#workspaces [data-workspace="${which}"]')) return;
+    n++;
+    const on = ${JSON.stringify(on)};
+    if (on !== null && !on.includes(n)) return;
+    const end = performance.now() + 150;
+    while (performance.now() < end);
+  }, true);
+})()`;
+
 let failed = false;
 async function check(name, fn) {
   try {
@@ -74,16 +128,29 @@ try {
   await check(`switching workspaces takes under ${LIMIT_MS} ms each time, first visits and returns`, async () => {
     const page = await fresh();
     try {
-      const order = ["image", "render", "slice", "vector", "community", "design"];
-      const first = [];
-      for (const id of order) first.push([id, await switchTo(page, id)]);
-      const again = [];
-      for (let round = 0; round < 5; round++) for (const id of order) again.push([id, await switchTo(page, id)]);
-      const firstStats = stats(first.map(([, ms]) => ms));
-      const againStats = stats(again.map(([, ms]) => ms));
-      console.log(`  first visits: median ${fmt(firstStats.median)}, slowest ${fmt(firstStats.max)}; returns (${again.length}): median ${fmt(againStats.median)}, slowest ${fmt(againStats.max)}`);
-      const slow = [...first, ...again].filter(([, ms]) => ms >= LIMIT_MS).map(([id, ms]) => `${id} ${fmt(ms)}`);
-      assert.deepEqual(slow, [], "switches at or over the limit");
+      assert.deepEqual(await slowSwitches(page), [], "switches at or over the limit, twice");
+    } finally {
+      await page.close();
+    }
+  });
+
+  await check(`the ${LIMIT_MS} ms check fails a switch slowed every time (a 150 ms hold on every click on Image's tab), first visit and returns`, async () => {
+    const plant = slowTab("image", null);
+    const page = await fresh(1280, plant);
+    try {
+      const slow = await slowSwitches(page, plant);
+      // Image is visited first once and returned to five times: all six are slow both times, and nothing else is.
+      assert.equal(slow.length, 6, slow.join("; "));
+      assert.ok(slow.every((s) => / image /.test(s)) && slow[0].startsWith("first image"), slow.join("; "));
+    } finally {
+      await page.close();
+    }
+  });
+
+  await check(`the ${LIMIT_MS} ms check passes a switch slow only once (a 150 ms hold on the second click on Design's tab, its first return)`, async () => {
+    const page = await fresh(1280, slowTab("design", [2]));
+    try {
+      assert.deepEqual(await slowSwitches(page), [], "a one-off stall is timed again and passes");
     } finally {
       await page.close();
     }
