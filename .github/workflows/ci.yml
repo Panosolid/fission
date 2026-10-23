@@ -120,6 +120,11 @@ jobs:
         if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
       - run: python3 -m unittest discover -s prototypes/oracle -p 'test_*.py'
         if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
+      # Step 30a: the exact box model the boolean fuzzing judges by. Its own
+      # tests run in every mode (a few seconds); the OpenCascade cross-check
+      # in it skips where cadquery-ocp isn't installed (quick mode).
+      - run: python3 -m unittest discover -s prototypes/boolean -p 'test_*.py'
+        if: env.CODE == 'true'
       # Step 29b2: the nightly oracle reads every body from its STEP file.
       # One round as the nightly runs it, with every file's first face
       # planted flipped (FISSION_STEP_FAULT): every body must be a finding,
