@@ -99,6 +99,16 @@ async function check(name, fn) {
   }
 }
 
+/**
+ * Waits until the kernel has answered every rebuild asked for, at least one
+ * of them, and a frame has been drawn since: `data-rebuilding` is "false"
+ * only once a rebuild has come back (workspace.ts), so the first build is in.
+ */
+async function rebuilt() {
+  await page.waitForFunction(() => document.querySelector("#viewport")?.dataset.rebuilding === "false");
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+}
+
 try {
   await page.goto(url);
   // The panel appears once the app has looked for a stored project (19c), so wait for it to exist too.
@@ -107,6 +117,9 @@ try {
     const shown = await page.evaluate(() => ({ status: document.querySelector("#status")?.textContent, file: document.querySelector("#file-status")?.textContent, body: document.body.innerText.slice(0, 300) }));
     throw new Error(`${e.message}\n  the page shows ${JSON.stringify(shown)}\n  console errors: ${JSON.stringify(consoleErrors)}`);
   });
+  // And for the box's first build: the panel is drawn at once and filled when the kernel's rebuild lands, later on a
+  // slow runner (E2E_KERNEL_DELAY makes it late here, browser.mjs; e2e-races).
+  await rebuilt();
 
   /**
    * The browser floats over the view's top-left corner (SF3d), where this
@@ -181,6 +194,7 @@ try {
     // of the upright pick below before 17d).
     await page.click("#toolbar [data-shape=cylinder]");
     await page.click("#toolbar [data-shape=box]");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
     await page.waitForTimeout(1000);
     await page.keyboard.press("Escape");
@@ -216,6 +230,7 @@ try {
     // Put the camera back where fit() left it for the checks below.
     await page.click("#toolbar [data-shape=cylinder]");
     await page.click("#toolbar [data-shape=box]");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
   });
 
@@ -317,6 +332,7 @@ try {
     // box's top stays selected, now the cylinder's top (kernel face 1 again),
     // the top front edge goes with a note; the body stays.
     await page.click("#toolbar [data-shape=cylinder]");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
     assert.equal(await selected(), "face:feature-1/top body:feature-1");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.highlight), "body faces 1 edges ");
@@ -328,6 +344,7 @@ try {
     // Back to the 40 mm box, framed afresh by the change of shape, for the hand-worked positions.
     await setSize("width", 40);
     await page.click("#toolbar [data-shape=box]");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
 
@@ -629,6 +646,7 @@ try {
   const near = (a, b, what) => assert.ok(Math.abs(a - b) <= 1e-9 * Math.abs(b), `${what}: shown ${a}, expected ${b}`);
   const pick = async (kind, volumeNot) => {
     await page.click(`#toolbar [data-shape=${kind}]`);
+    await rebuilt();
     await page.waitForFunction(
       ([k, v]) => document.querySelector("#viewport").dataset.shape === k && document.querySelector("#volume")?.textContent !== v,
       [kind, volumeNot],
@@ -759,11 +777,13 @@ try {
     // radius) centred 0.002 from the edge, leaving a 0.0008 mm wall, below
     // the 0.001 mm minimum feature.
     await page.click("#toolbar [data-shape=plate]");
+    await rebuilt();
     for (const id of ["width", "depth"]) await setSize(id, 0.008);
     await page.waitForFunction(() => document.querySelector("#error").textContent.includes("features must be at least"));
     for (const [id, v] of [["width", 40], ["depth", 30]]) await setSize(id, v);
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");
     await page.click("#toolbar [data-shape=box]");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
 
@@ -789,6 +809,7 @@ try {
     await page.fill("#width", "40");
     await page.fill("#depth", "30");
     await page.fill("#height", "20");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     const f = await downloadStl();
     // 12 triangles: 84 + 12 × 50 = 684 bytes. Corners 0/40, 0/30, 0/20 are
@@ -824,6 +845,7 @@ try {
   await check("a cylinder's STL is the prism the viewer shows", async () => {
     await page.click("#toolbar [data-shape=cylinder]");
     await page.fill("#width", "40");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
     const f = await downloadStl();
     // n sides: 2n side triangles + 2 caps of n − 2 = 4n − 4 triangles, so
@@ -842,6 +864,7 @@ try {
     // off, over the 1 µm smallest feature. A cube, so its faces are big
     // enough on screen to see the overlay.
     await page.click("#toolbar [data-shape=box]");
+    await rebuilt();
     for (const id of ["width", "depth", "height"]) await page.fill(`#${id}`, "999999.3");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
     const f = await downloadStl();
@@ -900,6 +923,7 @@ try {
     // Back to a known body, then remember the camera's view of it.
     await page.click("#toolbar [data-shape=box]");
     await page.fill("#width", "40");
+    await rebuilt();
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     await page.waitForTimeout(300); // let orbit damping settle
     const radius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);

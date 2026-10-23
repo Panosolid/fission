@@ -165,7 +165,8 @@ try {
           dt.items.add(new File([text], "plate.fission.json"));
           document.querySelector("#viewport").dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
         }, [plate]);
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent !== "24,000 mm³");
+        // The plate's own volume: not the box's, and not "—", shown while the plate's rebuild is still with the kernel.
+        await page.waitForFunction(() => !["24,000 mm³", "—"].includes(document.querySelector("#volume")?.textContent ?? "—"));
         const plateVolume = await volume(page);
         await page.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
         // A visit that opens it fine: the mark names it while it opens, and is gone a few seconds after.
@@ -199,6 +200,8 @@ try {
           await status(page),
           "The last project didn't finish opening on your last visit, so a new one was started. The old one is still kept in this browser: reload the page now, before changing anything, to try it again.",
         );
+        // The new project's box, once its first build is back from the kernel (the panel shows "—" until then).
+        await page.waitForFunction(() => document.querySelector("#volume")?.textContent !== "—");
         assert.equal(await volume(page), "24,000 mm³");
         assert.equal(await mark(page), null, "the mark is cleared, so the next visit tries again");
         if (shots) await page.screenshot({ path: `${shots}/skipped-${width}.png` });
@@ -217,7 +220,8 @@ try {
       const { context, page } = await freshValved(width);
       try {
         await dropText(page, "plate.fission.json", plate);
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent !== "24,000 mm³");
+        // The plate's own volume: not the box's, and not "—", shown while the plate's rebuild is still with the kernel.
+        await page.waitForFunction(() => !["24,000 mm³", "—"].includes(document.querySelector("#volume")?.textContent ?? "—"));
         const plateVolume = await volume(page);
         await page.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
         const plateId = await page.evaluate(() => document.body.dataset.projectId);
@@ -307,7 +311,8 @@ try {
         // Opened again at full speed: shown, then stored as a new project.
         const boxId = await page.evaluate(() => document.body.dataset.projectId);
         await dropText(page, "plate.fission.json", plate);
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent !== "24,000 mm³");
+        // The plate's own volume: not the box's, and not "—", shown while the plate's rebuild is still with the kernel.
+        await page.waitForFunction(() => !["24,000 mm³", "—"].includes(document.querySelector("#volume")?.textContent ?? "—"));
         await page.waitForFunction((old) => document.body.dataset.projectId !== old, boxId);
         await page.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
         assert.equal((await keptProjects(page)).length, 2);
