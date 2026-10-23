@@ -179,7 +179,7 @@ class Bands(unittest.TestCase):
         self.assertEqual(thin["outcome"], "thin")
         short = [w for w in thin["where"]["thin"] if w[0] == "edge"]
         self.assertEqual(len(short), 4)
-        self.assertTrue(all(w[3] == MIN_FEATURE * Fraction(9, 10) for w in short))
+        self.assertTrue(all(w[3] == (MIN_FEATURE * Fraction(9, 10)) ** 2 for w in short))
         fine = self.step(MIN_FEATURE * Fraction(11, 10))
         self.assertEqual(fine["outcome"], "bodies")
         # The union: 2000 mm^3, and 2 x 600 minus twice the contact

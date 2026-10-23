@@ -423,13 +423,14 @@ class Measured:
         return sorted(out)
 
     def thin(self):
-        """Every place the thin rule refuses: ('edge', from, to, length) for a
-        short edge, ('gap', edge, edge, distance squared) for two edges of one
+        """Every place the thin rule refuses: ('edge', from, to, length
+        squared) for a short edge (squared like the gaps, and like
+        convex_model's, whose edges can have irrational lengths), ('gap', edge, edge, distance squared) for two edges of one
         face that share no vertex and lie closer than MIN_FEATURE."""
         out = []
         for e, (lo, hi, length) in self.edges.items():
             if length < MIN_FEATURE:
-                out.append(("edge", self.point(lo), self.point(hi), length))
+                out.append(("edge", self.point(lo), self.point(hi), length * length))
         # A face's boundary edges: the crease pieces along its squares' sides.
         face_edges = {}
         for sq, f in self.face_of.items():
