@@ -84,6 +84,29 @@ class Main(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("was not measured", printed)
 
+    def test_only_judges_the_metrics_it_names(self):
+        # The nightly golden run measures app.golden* alone: without --only the
+        # kernel's line reads as missing and fails; with it, only the golden
+        # lines are judged, and a golden line that went missing still fails.
+        base = {"margins": MARGINS, "metrics": {"k.op.instructions": 1_000_000, "app.golden_a.instructions": 50_000}}
+        code, printed, _ = self.run_main(base, {"app.golden_a.instructions": 50_000})
+        self.assertEqual(code, 1)
+        code, printed, _ = self.run_main(base, {"app.golden_a.instructions": 50_000, "k.other.instructions": 7}, "--only", "app.golden")
+        self.assertEqual(code, 0, printed)
+        # Neither the baseline's other lines nor other measured ones are in the table.
+        table = printed.split("Measured")[0]
+        self.assertNotIn("k.op.instructions", table)
+        self.assertNotIn("k.other.instructions", table)
+        self.assertIn("| app.golden_a.instructions | 50,000 | 50,000 |", table)
+        code, printed, _ = self.run_main(base, {"app.golden_a.instructions": 60_000}, "--only", "app.golden")
+        self.assertEqual(code, 1)
+        code, printed, _ = self.run_main(base, {}, "--only", "app.golden")
+        self.assertEqual(code, 1)
+        self.assertIn("app.golden_a.instructions is in tests/baseline.json but was not measured", printed)
+        # --update writes the whole baseline, so it refuses to go with --only.
+        code, _, after = self.run_main(base, {"app.golden_a.instructions": 1}, "--only", "app.golden", "--update")
+        self.assertEqual((code, after), (2, base))
+
     def test_update_writes_the_measured_values_and_keeps_the_margins(self):
         base = {"about": "x", "margins": MARGINS, "metrics": {"k.op.instructions": 1}}
         code, _, after = self.run_main(base, {"k.op.instructions": 9_999_999, "k.op.nanos": 5}, "--update")
@@ -146,6 +169,32 @@ class TheRealBaseline(unittest.TestCase):
         self.assertEqual(judged(0), {m: "ok", "app.naming_sessions.references": "info"})
         self.assertEqual(judged(round(1 / 4466 * 100, 4))[m], "fail")
         self.assertEqual(judged(14.8007)[m], "fail")
+
+    def test_the_golden_models_counts_and_success_rate(self):
+        # Step 28b: one rebuild from nothing asks the kernel for each sketch's
+        # outline once, and builds and views each body once (the frees after
+        # are the runner's, not counted), so 2 x bodies + sketches, from each
+        # model's expect.json and project file: bracket-two-holes 1 body (one
+        # extrude of a profile the part holds itself, no sketch): 2; enclosure 5 bodies (the floor is
+        # the starting box), 4 sketches: 14; gear 1 and 1: 3; l-bracket 1 and
+        # 1: 3; stepped-boss 3 and 2: 8; thirty-features 16 and 15: 47.
+        with open(baseline.BASELINE) as f:
+            b = json.load(f)
+        calls = {m[len("app.golden_"):-len(".kernel_calls")]: v for m, v in b["metrics"].items() if m.startswith("app.golden_") and m.endswith(".kernel_calls")}
+        self.assertEqual(calls, {"bracket_two_holes": 2 * 1 + 0, "enclosure": 2 * 5 + 4, "gear": 2 * 1 + 1, "l_bracket": 2 * 1 + 1, "stepped_boss": 2 * 3 + 2, "thirty_features": 2 * 16 + 15})
+        m = "app.golden_models.failed_percent"
+        self.assertEqual(b["metrics"][m], 0)
+        self.assertEqual(b["margins"]["failed_percent"]["fail"], 0)
+
+        def judged(new):
+            return {k: v for k, _, _, _, v in compare({"margins": b["margins"], "metrics": {m: 0}}, {m: new})}[m]
+
+        # One of the six models wrong: 1 / 6 = 16.6667%, fails; none: ok.
+        self.assertEqual(judged(0), "ok")
+        self.assertEqual(judged(round(1 / 6 * 100, 4)), "fail")
+        # One extra kernel call on the smallest model (3 to 4, +33%) fails the 15% margin.
+        op = "app.golden_l_bracket.kernel_calls"
+        self.assertEqual({k: v for k, _, _, _, v in compare({"margins": b["margins"], "metrics": {op: 3}}, {op: 4})}[op], "fail")
 
 
 if __name__ == "__main__":

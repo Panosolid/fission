@@ -10,109 +10,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { projectFromJson, projectToJson, type BodyView, type GeometryReference, type KernelCalls, type StableId } from "@fission/core";
-import { BodyCache, bodyRows, designWorkspace, findInScene, isFaceSketch, joinBodies, rebuildTimeline, shownBodies, type DesignDocument } from "@fission/design";
-import { bodyTolerance, compare, LINEAR, plan, planeGap, readExpect, shellCount, type GoldenExpect, type Measured, type Vec3 } from "../src/golden.ts";
+import { projectFromJson, projectToJson, type BodyView, type KernelCalls } from "@fission/core";
+import { designWorkspace, type DesignDocument } from "@fission/design";
+import { bodyTolerance, compare, LINEAR, plan, type GoldenExpect } from "../src/golden.ts";
+import { goldenDesign as designOf, goldenExpects as expects, goldenFiles as projectFiles, measureGolden, openGolden as open } from "../golden/rebuild.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
 
-const DIR = new URL("../../../tests/golden/", import.meta.url);
 const kernel = nodeKernel();
-
-const expects = (): GoldenExpect[] =>
-  readdirSync(DIR)
-    .filter((f) => f.endsWith(".expect.json"))
-    .sort()
-    .map((f) => readExpect(readFileSync(new URL(f, DIR), "utf8"), f));
-const projectFiles = () =>
-  readdirSync(DIR)
-    .filter((f) => f.endsWith(".panosolid.json"))
-    .map((f) => f.slice(0, -".panosolid.json".length))
-    .sort();
-const open = (model: string) => projectFromJson(readFileSync(new URL(`${model}.panosolid.json`, DIR), "utf8"), [designWorkspace]);
-const designOf = (model: string) => open(model).workspaces.design as DesignDocument;
-
-const cross = (a: readonly number[], b: readonly number[]): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-
-/** A rebuild of `doc` through Design on `calls`, measured as the expectations are written, and how long the rebuild took. */
-async function measure(doc: DesignDocument, calls: KernelCalls = kernel): Promise<{ got: Measured; ms: number }> {
-  const cache = new BodyCache(calls);
-  try {
-    const start = performance.now();
-    const build = await rebuildTimeline(doc, cache, calls);
-    const shown = await shownBodies(doc, build, cache);
-    const ms = performance.now() - start;
-    const scene = joinBodies(shown);
-    const trouble: string[] = [];
-    const failures: Measured["failed"] = [];
-    const failed = new Set<string>();
-    for (const id of build.order) {
-      const r = build.results[id];
-      if (r.status === "failed") {
-        failed.add(id);
-        failures.push({ item: id, message: r.message });
-      } else if (r.status !== "built") trouble.push(`${id} is ${r.status}`);
-      else for (const w of [r.warning, r.plane, r.source, r.points, r.projections]) if (w) trouble.push(`${id} warns: ${w.message}`);
-    }
-    const rows = bodyRows(doc, failed);
-    const bodies = shown.map((s) => {
-      const v = s.view;
-      return {
-        body: rows.find((r) => r.feature.id === s.feature)?.label ?? "no row",
-        item: s.feature,
-        volume: v.volume,
-        area: v.area,
-        faces: v.faces,
-        edges: v.edges,
-        vertices: v.vertices,
-        shells: shellCount(v),
-        box: v.bounds,
-        tolerance: bodyTolerance(v),
-        gap: planeGap(v),
-        errors: v.errors,
-      };
-    });
-    const sketches = doc.timeline.features.filter(isFaceSketch).map((f) => {
-      const face = f.intent.parameters.plane as string;
-      const found = findInScene({ kind: "face", id: face as StableId } as GeometryReference, scene);
-      let normal: Vec3 | null = null;
-      let centroid: Vec3 | null = null;
-      if (found.status === "found") {
-        const b = shown.findIndex((_, i) => found.index >= scene.faceStart[i] && (i + 1 === shown.length || found.index < scene.faceStart[i + 1]));
-        const i = found.index - scene.faceStart[b];
-        normal = shown[b].view.face_normals[i] ?? null;
-        centroid = shown[b].view.face_centroids[i];
-      }
-      const r = build.results[f.id];
-      const p = r?.status === "built" ? r.placement : undefined;
-      return {
-        sketch: f.id,
-        face,
-        found: found.status === "found" ? 1 : found.status === "shared" ? found.count : 0,
-        normal,
-        centroid,
-        placed: p ? { normal: p.plane.normal.map((c) => c * p.side) as Vec3, origin: p.plane.origin } : null,
-      };
-    });
-    const pins = doc.sketches.flatMap((s) =>
-      (s.pins ?? []).map((pin) => {
-        const r = build.results[s.id];
-        const p = r?.status === "built" ? r.placement : undefined;
-        const xy = r?.status === "built" ? r.pinned?.find((q) => q.point === pin.point)?.at : undefined;
-        let at: Vec3 | null = null;
-        if (p && xy) {
-          const { origin, xAxis, normal } = p.plane;
-          const y = cross(normal, xAxis);
-          at = [0, 1, 2].map((k) => origin[k] + xy[0] * xAxis[k] + xy[1] * y[k]) as Vec3;
-        }
-        return { sketch: s.id, point: pin.point, kind: pin.kind, name: pin.name, ...(pin.feature !== undefined ? { feature: pin.feature } : {}), at };
-      }),
-    );
-    return { got: { bodies, sketches, pins, trouble, failed: failures }, ms };
-  } finally {
-    await cache.clear();
-  }
-}
+const measure = (doc: DesignDocument, calls: KernelCalls = kernel) => measureGolden(doc, calls);
 
 test("every golden model has its expectation, and runs unless the step it needs is still to come", () => {
   const runs = plan(expects(), projectFiles());

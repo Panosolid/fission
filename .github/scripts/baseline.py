@@ -20,8 +20,11 @@ part of the metric's name):
 
 `compare` is pure (tested in test_baseline.py); `measure` runs things.
 
-Usage: baseline.py [--update] [--measured FILE] [--save FILE]
+Usage: baseline.py [--update] [--measured FILE] [--only PREFIX] [--save FILE]
   --measured FILE  compare metrics saved earlier instead of measuring
+  --only PREFIX    judge only the metrics whose names start with PREFIX
+                   (the nightly golden run measures only app.golden*, so
+                   the rest would read as missing); not with --update
   --save FILE      also write what was measured to FILE
   --update         write what was measured into tests/baseline.json (only
                    when the owner has confirmed the change is intended)
@@ -42,11 +45,15 @@ def kind_of(metric):
     return metric.rsplit(".", 1)[-1]
 
 
-def compare(baseline, measured):
+def compare(baseline, measured, only=None):
     """Rows (metric, old, new, percent change or None, verdict); verdict is
-    one of ok, fail, flag, better, new, missing, info."""
+    one of ok, fail, flag, better, new, missing, info. With `only`, just the
+    metrics (baseline or measured) whose names start with it."""
     margins = baseline["margins"]
     old_all = baseline["metrics"]
+    if only is not None:
+        old_all = {m: v for m, v in old_all.items() if m.startswith(only)}
+        measured = {m: v for m, v in measured.items() if m.startswith(only)}
     rows = []
     for metric in sorted(set(old_all) | set(measured)):
         old, new = old_all.get(metric), measured.get(metric)
@@ -129,7 +136,11 @@ def main(argv):
     if "--save" in argv:
         with open(argv[argv.index("--save") + 1], "w") as f:
             json.dump(measured, f, indent=2, sort_keys=True)
-    rows = compare(baseline, measured)
+    only = argv[argv.index("--only") + 1] if "--only" in argv else None
+    if only is not None and "--update" in argv:
+        print("--only judges part of the baseline; --update writes all of it, so they don't go together")
+        return 2
+    rows = compare(baseline, measured, only)
     text = table(rows)
     print(text)
     if os.environ.get("GITHUB_STEP_SUMMARY"):

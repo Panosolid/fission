@@ -11,9 +11,12 @@
 # this run (the inputs are all in $IN, so applying twice gives the same result).
 #
 # Environment:
-#   IN              downloaded artifacts: endless-*/ (endless.sh results) and
+#   IN              downloaded artifacts: endless-*/ (endless.sh results),
 #                   mutants-*/ (one cargo mutants shard each: its *.txt lists
-#                   and exit-code.txt)
+#                   and exit-code.txt), golden/ (the golden models' night:
+#                   report.txt, measured.json, baseline.txt and, if a model
+#                   failed, seed-golden-<seed>/golden-report.txt), journeys/
+#                   and ts-mutants-*/
 #   MUTANT_SHARDS   how many mutation shards the run started (0 or unset: none)
 #   RUN_URL, COMMIT, BRANCH   what this run tested, written next to every row
 #   GH_TOKEN        for `gh` (without it no issue is filed; file_issues.py prints
@@ -86,6 +89,23 @@ add_run() {
     echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"$'\n'"no report: the journeys job stopped before the walk" >journeys/latest.txt
   fi
 
+  # The golden models (step 28b): the latest night's lines, every night's
+  # first line in golden/log.txt, and a failing night's folder in failures/
+  # like a failing round's (file_issues.py files its kinds).
+  if [ -f "$IN/golden/report.txt" ]; then
+    mkdir -p golden
+    { echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"; cat "$IN/golden/report.txt"; } >golden/latest.txt
+    echo "$today,$short,$BRANCH,$(head -1 "$IN/golden/report.txt")" >>golden/log.txt
+  elif [ -d golden ]; then
+    echo "tested commit $short on $BRANCH, $today UTC ($RUN_URL)"$'\n'"no report: the golden job stopped before the run" >golden/latest.txt
+  fi
+  for f in "$IN"/golden/seed-*; do
+    [ -d "$f" ] || continue
+    mkdir -p failures && cp -r "$f" failures/
+    echo "tested commit $COMMIT on branch $BRANCH ($RUN_URL)" >"failures/$(basename "$f")/commit.txt"
+    found=$((found + 1))
+  done
+
   # TypeScript mutation testing: the latest run's survivor lines, one target per job.
   mkdir -p ts-mutants
   {
@@ -130,6 +150,9 @@ add_run() {
   fi
   if [ -f journeys/latest.txt ]; then
     { echo ""; echo "Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):"; sed 's/^/  /' journeys/latest.txt; echo "journeys/flags.txt lists every FLAG line so far."; } >>summary.txt
+  fi
+  if [ -f golden/latest.txt ]; then
+    { echo ""; echo "Latest golden models run (tests/golden rebuilt and checked against their hand-worked answers, timed against tests/baseline.json; a failing model files a random-testing issue):"; sed 's/^/  /' golden/latest.txt; echo "golden/log.txt has one line per night."; } >>summary.txt
   fi
   if [ -f ts-mutants/latest.txt ]; then
     { echo ""; echo "Latest TypeScript mutation run (packages/testing/stryker, survivors must be killed or explained):"; sed 's/^/  /' ts-mutants/latest.txt; } >>summary.txt

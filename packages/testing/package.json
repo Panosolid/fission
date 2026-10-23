@@ -11,7 +11,8 @@
     "journeys": "node --experimental-strip-types --no-warnings --test journeys/*.journey.ts",
     "fuzz": "node --experimental-strip-types --no-warnings fuzz/project-loader.ts",
     "sessions": "node --experimental-strip-types --no-warnings fuzz/sketch-extrude.ts",
-    "timeline-fuzz": "node --experimental-strip-types --no-warnings fuzz/timeline.ts"
+    "timeline-fuzz": "node --experimental-strip-types --no-warnings fuzz/timeline.ts",
+    "golden": "node --experimental-strip-types --no-warnings golden/nightly.ts"
   },
   "dependencies": {
     "@fission/ai": "*",
