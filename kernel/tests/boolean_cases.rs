@@ -7,7 +7,7 @@
 #[path = "support/boolean_cases.rs"]
 mod boolean_cases;
 
-use boolean_cases::{lines, matrix, offsets, pairs, Pair, Solid, FAMILIES, KINDS, OPS, PLACES, SAME, SEED};
+use boolean_cases::{accidental, lines, matrix, near_gaps, offsets, pairs, Pair, Solid, Turn, FAMILIES, KINDS, OPS, PLACES, SAME, SEED, TOUCH};
 use fission_kernel::tolerance::{LINEAR, MAX_COORD, MIN_FEATURE};
 use std::collections::BTreeSet;
 
@@ -236,6 +236,55 @@ fn touching_boxes_touch_exactly() {
         };
         for &(i, j) in pairs {
             assert_eq!(b[i].to_bits(), a[j].to_bits(), "{} at {}: {b:?} against {a:?}", p.family, p.place);
+        }
+    }
+}
+
+#[test]
+fn near_places_by_hand() {
+    // A: the square -1..1 in x and y, z 0..1. B: the same square 4 mm along
+    // x, its bottom `gap` above A's top (z = 1). Clear of A, but each of
+    // B's bottom corners is `gap` from A's top plane, which judge.py's snap
+    // counts (as an infinite plane), and each of A's top corners `gap`
+    // below B's bottom plane.
+    let square = vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
+    let a = Solid::Prism { outline: square.clone(), z: [0.0, 1.0], turns: vec![], place: [0.0; 3] };
+    let b = |gap: f64| Solid::Prism { outline: square.clone(), z: [1.0 + gap, 2.0], turns: vec![], place: [4.0, 0.0, 0.0] };
+    let near = |gap: f64| near_gaps(&a, &b(gap)).iter().filter(|g| (g.abs() - gap).abs() < 1e-12).count();
+    // 4 corners of B on A's top, 4 of A under B's bottom.
+    assert_eq!(near(15e-6), 8);
+    // Accidental from TOUCH (1 nm) to 2 x 2·LINEAR (40 nm), boundaries at
+    // 0.9x and 1.1x: touching on purpose below, judged as a gap above.
+    for (gap, want) in [(0.0, false), (0.9 * TOUCH, false), (1.1 * TOUCH, true), (15e-6, true), (0.9 * 2.0 * SAME, true), (1.1 * 2.0 * SAME, false)] {
+        assert_eq!(accidental(&a, &b(gap)), want, "gap {gap}");
+    }
+    // Edges crossing close: A's top edge y = 1, z = 1 along x, and B's side
+    // edge along (0, 3, 4)/5 through (0, 1, 1 + d) (a turn about x with cos
+    // 4/5, sin -3/5 sends z there), ends 0.3 and 0.4 off A's planes. Skew
+    // lines along u = (1, 0, 0) and v = (0, 3, 4)/5 are |(u x v) . w| apart
+    // over |u x v|: u x v = (0, -4, 3)/5, w = (0, 0, d), so 3d/5; d = 25 nm
+    // gives 15 nm.
+    let d = 25e-6;
+    let edge = Solid::Prism {
+        outline: vec![[-0.5, 0.0], [0.0, 0.0], [0.0, 0.5], [-0.5, 0.5]],
+        z: [-0.5, 0.5],
+        turns: vec![Turn { axis: 0, a: 4, b: -3, c: 5 }],
+        place: [0.0, 1.0, 1.0 + d],
+    };
+    assert!(near_gaps(&a, &edge).iter().any(|g| (g.abs() - 15e-6).abs() < 1e-12), "{:?}", near_gaps(&a, &edge));
+    assert!(accidental(&a, &edge));
+}
+
+#[test]
+fn turned_pairs_have_no_accidental_near_places() {
+    // Freely turned pairs are drawn again until the only near places are the
+    // contact asked for: seed 31009 case 160 (corner on corner at 1 um) had
+    // an edge of A ending 15.6 nm off B's face, beyond the judge.
+    for seed in [SEED, 31009] {
+        for p in pairs(seed) {
+            if matches!(p.family, "crossing" | "corner on corner") && p.kind == "prisms" {
+                assert!(!accidental(&p.a, &p.b), "seed {seed}: {} at {}", p.family, p.place);
+            }
         }
     }
 }

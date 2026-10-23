@@ -185,6 +185,74 @@ impl Solid {
     }
 }
 
+/// Closer than this, two places are the same place on purpose (a contact
+/// the generator made, a hair apart from rounding); the judge snaps them.
+pub const TOUCH: f64 = 1e-6;
+
+/// Every near-place gap judge.py's snap looks at, between prisms a and b
+/// as the kernel is given them: each corner's distance (signed) from each
+/// face plane of the other, and the distance between two edges whose
+/// closest points lie inside both. Worked about A's place, so far out the
+/// rounding is that of the shapes, not of their placement.
+pub fn near_gaps(a: &Solid, b: &Solid) -> Vec<f64> {
+    let origin = match a {
+        Solid::Prism { place, .. } | Solid::Boxes { place, .. } => *place,
+    };
+    let corners = |s: &Solid| -> Vec<[f64; 3]> {
+        let Solid::Prism { outline, z, turns, place } = s else { panic!("near_gaps takes prisms") };
+        let m = matrix(turns);
+        let off = [0, 1, 2].map(|r| place[r] - origin[r]);
+        z.iter()
+            .flat_map(|&h| outline.iter().map(move |p| [0, 1, 2].map(|r| m[r][0] * p[0] + m[r][1] * p[1] + m[r][2] * h + off[r])))
+            .collect()
+    };
+    let sub = |p: [f64; 3], q: [f64; 3]| [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+    let dot = |p: [f64; 3], q: [f64; 3]| p[0] * q[0] + p[1] * q[1] + p[2] * q[2];
+    let cross = |p: [f64; 3], q: [f64; 3]| [p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0]];
+    // Bottom ring 0..n, top ring n..2n: each side's plane, the top's, the bottom's.
+    let planes = |c: &[[f64; 3]]| -> Vec<([f64; 3], [f64; 3])> {
+        let n = c.len() / 2;
+        let mut out: Vec<_> = (0..n).map(|i| (c[i], cross(sub(c[(i + 1) % n], c[i]), sub(c[n + i], c[i])))).collect();
+        out.push((c[n], cross(sub(c[n + 1], c[n]), sub(c[n + 2], c[n]))));
+        out.push((c[0], cross(sub(c[1], c[0]), sub(c[2], c[0]))));
+        out.into_iter().map(|(p, v)| (p, v.map(|x| x / dot(v, v).sqrt()))).collect()
+    };
+    let edges = |c: &[[f64; 3]]| -> Vec<([f64; 3], [f64; 3])> {
+        let n = c.len() / 2;
+        (0..n).flat_map(|i| [(c[i], c[(i + 1) % n]), (c[n + i], c[n + (i + 1) % n]), (c[i], c[n + i])]).collect()
+    };
+    let (ca, cb) = (corners(a), corners(b));
+    let mut out = vec![];
+    for (s, o) in [(&cb, &ca), (&ca, &cb)] {
+        for (p, n) in planes(o) {
+            out.extend(s.iter().map(|&v| dot(n, sub(v, p))));
+        }
+    }
+    for (p0, p1) in edges(&cb) {
+        for (q0, q1) in edges(&ca) {
+            let (u, v, w) = (sub(p1, p0), sub(q1, q0), sub(p0, q0));
+            let m = cross(u, v);
+            let den = dot(u, u) * dot(v, v) - dot(u, v) * dot(u, v);
+            if dot(m, m) == 0.0 || den == 0.0 {
+                continue; // parallel: near only where a corner is, counted above
+            }
+            let s_ = (dot(u, v) * dot(v, w) - dot(v, v) * dot(u, w)) / den;
+            let t_ = (dot(u, u) * dot(v, w) - dot(u, v) * dot(u, w)) / den;
+            if 0.0 < s_ && s_ < 1.0 && 0.0 < t_ && t_ < 1.0 {
+                out.push(dot(m, w) / dot(m, m).sqrt());
+            }
+        }
+    }
+    out
+}
+
+/// Whether prisms a and b have a near place nobody asked for: a gap above
+/// TOUCH and within 2·LINEAR, or a little past it (twice that), so none
+/// sits on the band's edge either.
+pub fn accidental(a: &Solid, b: &Solid) -> bool {
+    near_gaps(a, b).iter().any(|g| g.abs() > TOUCH && g.abs() <= 2.0 * SAME)
+}
+
 /// The shortest decimal that reads back as `x` exactly.
 pub fn num(x: f64) -> String {
     format!("{x:?}")
@@ -638,19 +706,19 @@ fn prisms(rng: &mut Rng, family: &'static str, delta: Option<f64>, unit: f64, at
             b_outline = shift(&para, scale2(v2, 2.0));
             bz = [z0f, z1f];
         }
-        "crossing" | "corner on corner" => {
-            a_outline = any_outline(rng);
-            b_outline = any_outline(rng);
+        "crossing" | "corner on corner" => loop {
+            let a_drawn = any_outline(rng);
+            let b_outline = any_outline(rng);
             let lo = rng.int(-8, 0);
-            bz = [lo as f64, (lo + rng.int(6, 14)) as f64];
-            b_turns = turns(rng);
+            let bz = [lo as f64, (lo + rng.int(6, 14)) as f64];
+            let b_turns = turns(rng);
             // A third of crossings are an axis-aligned box against a turned prism.
-            let a_turns = if family == "crossing" && rng.int(0, 2) == 0 { vec![] } else { tu };
+            let a_turns = if family == "crossing" && rng.int(0, 2) == 0 { vec![] } else { tu.clone() };
             let a_outline = if a_turns.is_empty() {
                 let (x, y) = (rng.int(4, 12) as f64, rng.int(4, 12) as f64);
                 vec![[-x, -y], [x, -y], [x, y], [-x, y]]
             } else {
-                a_outline
+                a_drawn
             };
             let a = Solid::Prism { outline: scale_outline(&a_outline, unit), z: [z0f * unit, z1f * unit], turns: a_turns, place: at };
             let b_place = if family == "crossing" {
@@ -668,8 +736,17 @@ fn prisms(rng: &mut Rng, family: &'static str, delta: Option<f64>, unit: f64, at
                 [0, 1, 2].map(|r| ca[i][r] - (0..3).map(|n| m[r][n] * q[n]).sum::<f64>())
             };
             let b = Solid::Prism { outline: scale_outline(&b_outline, unit), z: [bz[0] * unit, bz[1] * unit], turns: b_turns, place: b_place };
-            return (a, b, intent);
-        }
+            // Turned freely, a corner can land by chance within 2·LINEAR of
+            // a plane of the other solid without touching it (seed 31009
+            // case 160, at micrometre size: an edge of A leaving the shared
+            // corner and ending 15.6 nm off B's face). That near place and
+            // the one asked for are two that no single move of B brings
+            // together, beyond the judge; such a near miss is a family of
+            // its own (near-tangent, 37a). Draw again.
+            if !accidental(&a, &b) {
+                return (a, b, intent);
+            }
+        },
         _ => unreachable!("no prism family {family}"),
     }
     b_turns = tu.clone();
