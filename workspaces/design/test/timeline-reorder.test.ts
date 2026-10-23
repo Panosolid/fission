@@ -489,7 +489,7 @@ const PLANTS: { name: string; file: "timeline-reorder.ts" | "timeline-bar.ts"; f
   // Every press a drag: a click's small slip moves the item.
   { name: "every-press-a-drag", file: "timeline-reorder.ts", find: "if (!isDrag(e.clientX - down.clientX, e.clientY - down.clientY)) return;", replace: "", caught: "the bar sent" },
   // A cancelled drag dropped anyway.
-  { name: "cancel-drops", file: "timeline-reorder.ts", find: 'if (e.type === "pointerup") o.act({ kind: "item", id: o.id, place });', replace: 'if (e.type !== "") o.act({ kind: "item", id: o.id, place });', caught: "the bar sent" },
+  { name: "cancel-drops", file: "timeline-reorder.ts", find: 'if (e.type === "pointerup" && !awayFromBar(e.clientY, r.top, r.bottom)) o.act({ kind: "item", id: o.id, place: place! });', replace: 'if (e.type !== "") o.act({ kind: "item", id: o.id, place: place! });', caught: "the bar sent" },
   // A finger drags any item, so the row can't be scrolled with a finger on an item.
   { name: "touch-drags-unpicked", file: "timeline-reorder.ts", find: 'if (down.pointerType === "touch" && !o.picked) return;', replace: "", caught: "a line shows, but this is no drag" },
   // The right button drags too.
@@ -499,7 +499,7 @@ const PLANTS: { name: string; file: "timeline-reorder.ts" | "timeline-bar.ts"; f
   // The line drawn at the gap after the place.
   { name: "line-off-by-one", file: "timeline-reorder.ts", find: "const x = listLeft + gapX(barEdges(list), p) - list.scrollLeft;", replace: "const x = listLeft + gapX(barEdges(list), Math.min(p + 1, barEdges(list).length)) - list.scrollLeft;", caught: "the line is drawn at" },
   // The drop sent one place on.
-  { name: "drop-off-by-one", file: "timeline-reorder.ts", find: 'o.act({ kind: "item", id: o.id, place });', replace: 'o.act({ kind: "item", id: o.id, place: place + 1 });', caught: "the bar sent" },
+  { name: "drop-off-by-one", file: "timeline-reorder.ts", find: ') o.act({ kind: "item", id: o.id, place: place! });', replace: ') o.act({ kind: "item", id: o.id, place: place! + 1 });', caught: "the bar sent" },
   // The click after a drag not dropped: the item is picked as well.
   { name: "click-after-drag", file: "timeline-reorder.ts", find: "      swallowClick(list);\n", replace: "", caught: "picked" },
   // The bar's items not wired to be dragged at all.

@@ -473,7 +473,7 @@ const WIRING_PLANTS: { name: string; find: string; replace: string; caught: stri
   // Every press on the marker a drag: a small slip moves it.
   { name: "every-press-a-drag", find: "if (place === null && !isDrag(e.clientX - down.clientX, e.clientY - down.clientY)) return;", replace: "", caught: "the bar sent" },
   // A cancelled drag dropped anyway.
-  { name: "cancel-drops", find: 'if (e.type === "pointerup") act({ kind: "marker", place });', replace: 'if (e.type !== "") act({ kind: "marker", place });', caught: "the bar sent" },
+  { name: "cancel-drops", find: 'if (e.type === "pointerup" && !awayFromBar(e.clientY, r.top, r.bottom)) act({ kind: "marker", place });', replace: 'if (e.type !== "") act({ kind: "marker", place });', caught: "the bar sent" },
   // A mouse click between items moving the marker, as a tap does.
   { name: "mouse-taps", find: 'if (press.type !== "touch" || (e.target as Element).closest', replace: 'if ((e.target as Element).closest', caught: "the bar sent" },
   // Taps whose target is an item ignored (the bug the browser check found): a tap the phone moved onto an item picks it.
