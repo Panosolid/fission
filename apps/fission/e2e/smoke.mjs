@@ -2,9 +2,12 @@
 // what is on screen. Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { launch } from "./browser.mjs";
+import { launch, browserName } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
+
+// TEMPORARY (hunt 3e probe, removed before the PR is ready).
+if (browserName !== "chromium") await import("./engine-probe.mjs");
 
 const server = await preview({ preview: { port: 4174, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4174/";
