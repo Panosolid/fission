@@ -1,7 +1,7 @@
 /* The timeline's item menu (timeline-menu.ts, step 24f3): a failed item's
    row in the browser's Timeline group red, as its item on the bar is. The
    menu itself is delete-ask.css's row menu. */
-.timeline-menu.timeline-menu-failed { color: #ff6b6b; }
+.timeline-menu.timeline-menu-failed:not(#none) { color: #ff6b6b; }
 /* Step 24f5: a row after the rollback marker greyed, as its item on the bar is. */
 .timeline-menu.timeline-menu-rolled-back { opacity: 0.45; }
 /* Step 26e: a row greyed by a suppressed item it is built on, as its item

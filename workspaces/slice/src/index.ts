@@ -2,7 +2,7 @@
 //
 // A 3D printing slicer for any printer, fed directly by the design.
 // It will refer to Design's geometry by stable IDs and never copy it, so a
-// design change flows straight through. Work starts after CAD step 73 (STL and 3MF export).
+// design change flows straight through. Work starts after CAD step 33 (it slices a mesh of each body).
 
 import type { BodyReference, WorkspacePlugin } from "@fission/core";
 import { showPlaceholder } from "@fission/ui";
@@ -31,7 +31,7 @@ export const sliceWorkspace: WorkspacePlugin = {
       title: "Slice",
       summary: "A 3D printing slicer for any printer, fed directly by the design.",
       plans: ["Printer profiles for any printer, not tied to one brand", "Supports, infill and walls", "Several plates per project; a plate updates when the design changes", "Layer preview and G-code export"],
-      startsAfter: "after CAD step 73 (STL and 3MF export)",
+      startsAfter: "after CAD step 33",
     });
     return { unmount: () => ctx.properties.replaceChildren() };
   },
