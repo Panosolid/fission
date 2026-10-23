@@ -77,10 +77,10 @@ test("projections: each refusal names the sketch and the projection; a feature o
   refused(list([{ ...one, made: 4 }]), `Design sketch ${id}'s projection ${projection} made nothing`);
 });
 
-test("a sketch listed twice is checked by its first entry, so a broken second one is refused for its repeated ids, not its pins (catches `!sketchIds.has(s.id)` made always true: the last entry checked)", () => {
+test("a sketch listed twice is refused as that, whichever entry is broken (#262; catches the `sketchIds.has(s.id)` check made always false: a second entry looked past)", () => {
   const made = addSketch(partDocument("box", 40, 30, 20));
   const doc = drawCircle(made.doc, made.id, [1, 1], 1).doc;
   const s = doc.sketches[0];
-  const centrePoint = (s.curves[0] as { centre: string }).centre;
-  refused({ ...doc, sketches: [s, { ...s, pins: [] }] }, `Design id ${centrePoint} is used twice`);
+  refused({ ...doc, sketches: [s, { ...s, pins: [] }] }, `Design sketch ${s.id} is listed twice in the sketches list`);
+  refused({ ...doc, sketches: [{ ...s, pins: [] }, s] }, `Design sketch ${s.id} is listed twice in the sketches list`);
 });

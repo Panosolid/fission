@@ -629,7 +629,11 @@ export function readDesignDocument(data: unknown): DesignDocument {
   }
   // Each sketch has exactly one timeline item, on a plane this Panosolid knows, and each sketch item its sketch.
   const sketchIds = new Map<string, Sketch>();
-  for (const s of d.sketches) if (!sketchIds.has(s.id)) sketchIds.set(s.id, s);
+  for (const s of d.sketches) {
+    // A second copy would be looked past here, unchecked, yet read further on (#262).
+    if (sketchIds.has(s.id)) throw new Error(`Design sketch ${s.id} is listed twice in the sketches list`);
+    sketchIds.set(s.id, s);
+  }
   const items = d.timeline.features.filter(isSketchItem);
   for (const f of items) {
     const content = sketchIds.get(f.id);
