@@ -10,9 +10,13 @@ How the numbers work, big.step.bugfix:
 
 Versions 0.0.0 to 0.14.2 come from the first chat's own commits, which reached `main` in four big early pull requests (#1, #2, #7, #8). From 0.15.0 on, numbers like #154 are the pull requests.
 
-## 0.27.7 (2026-10-23)
+## 0.27.8 (2026-10-23)
 
 - Fix (found in 27b, #251): on a slow phone, tapping a circle's rim and then Finish Sketch straight away lost the circle. Each tap waits its turn behind the kernel's rounding of the one before; Finish Sketch closed the sketch at once, so when the tap's turn came the sketch was no longer open and the tap was dropped. Finish Sketch now waits for the taps, typed Enters and projections made before it, draws them, then closes the sketch (Escape still drops a waiting tap, since it is a cancel). Checked by a new real-kernel journey (`journeys/finish-wait.journey.ts`) with the kernel held to make it slow: a circle's second tap then Finish keeps the circle (centre and radius worked by hand) as one undo step, and two line taps then Finish keep both lines in order; both failed before the fix. Finish with nothing waiting still closes in the same moment.
+
+## 0.27.7 (2026-10-23)
+
+- Fix (found by a seeded thin-crescent hunt, part of the known-bugs sweep): a crescent 63 m long and 1 µm wide at its middle, its two horns meeting almost tangent, took 52 s to extrude, though the answer was right. Each arc needs about 124,000 chords there to keep clear of the other, so each wall is a very long, very thin strip of points, and the triangulation library's fast loader goes quadratic on strips like that (and on points round a circle about their centre): 21 s per wall. Faces with more than 2048 points are now triangulated by adding the points one at a time in a fixed shuffled order with a search hierarchy, which stays fast for any shape; smaller faces are meshed exactly as before, so every baseline mesh, allocation count and memory peak is unchanged. The crescent now extrudes in 2.3 s. Checked by a timing test that failed before the fix (60,000 points on a 1000 × 0.01 strip took 2.6 s against 61 ms for the same count round a circle; now within 2 times), hand-worked tests (a strip's N − 2 triangles and area 10; the crescent's volume worked to 50 digits from its two arcs' segments; the shuffle's order worked by hand; the switch at 2048 and 2049 points), and 3,990 seeded crescents and off-centre rings up to 90 km out with no panic, no wrong refusal and every mesh closed.
 
 ## 0.27.6 (2026-10-23)
 
