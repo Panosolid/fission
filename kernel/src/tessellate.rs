@@ -27,7 +27,7 @@ use crate::topology::{Body, FaceId};
 use glam::{DVec2, DVec3};
 use std::f64::consts::{PI, TAU};
 use spade::handles::FixedVertexHandle;
-use spade::{ConstrainedDelaunayTriangulation, Point2, Triangulation};
+use spade::{ConstrainedDelaunayTriangulation, HierarchyHintGenerator, HintGenerator, Point2, Triangulation};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TessOptions {
@@ -638,42 +638,78 @@ fn bulk_loaded(uv: &[Vec<DVec2>]) -> Option<Cdt> {
     Cdt::bulk_load_cdt(points, vec![]).ok().filter(|cdt| cdt.num_vertices() == n)
 }
 
+/// Most points `triangulate_uv` bulk loads. Spade's bulk loader sweeps a
+/// circle out from the points' centre, which is quick for most faces but
+/// goes quadratic on points along a long thin strip (an arc's wall split
+/// finely: 21 s for 124,000 points on a 660 m × 2.3 mm strip) or round a
+/// circle about their centre (14 s for two concentric arcs of 62,000
+/// points). Up to 2048 points that worst case is a few milliseconds; above
+/// it the points are inserted in a shuffled order through spade's search
+/// hierarchy, O(n log n) expected whatever their shape (0.3 s and 0.5 s for
+/// those two), and within a few times the bulk loader's speed where it is
+/// quick (3.1 s against 2.7 s for a cap face with 2,000 round holes,
+/// 506,000 points).
+const BULK_LOAD_MAX: usize = 2048;
+
+/// Whether `triangulate_uv` bulk loads `n` points.
+fn bulk_loads(n: usize) -> bool {
+    n <= BULK_LOAD_MAX
+}
+
+type Inserted = ConstrainedDelaunayTriangulation<Point2<f64>, (), (), (), HierarchyHintGenerator<f64>>;
+
 /// The triangulation of `triangulate_uv`'s points inserted one at a time,
-/// with the mesh vertex of each handle and each loop's handles. This path
-/// accepts a repeated point only if it is the same mesh vertex, and reports
-/// anything else (`bulk_loaded` can't tell which point was kept).
+/// with the mesh vertex of each handle and each loop's handles. The order
+/// is shuffled with a fixed seed, so a face always gets the same triangles
+/// (random order is what makes incremental insertion O(n log n) expected
+/// for any points; in loop order a strip's first side, all on one line,
+/// went in as one long line, quadratic). This path accepts a repeated
+/// point only if it is the same mesh vertex, and reports anything else
+/// (`bulk_loaded` can't tell which point was kept).
 #[allow(clippy::type_complexity)]
-fn insert_one_at_a_time(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<((Cdt, Vec<u32>), Vec<Vec<FixedVertexHandle>>), String> {
-    let mut cdt = Cdt::new();
+fn insert_one_at_a_time(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<((Inserted, Vec<u32>), Vec<Vec<FixedVertexHandle>>), String> {
+    let mut order: Vec<(usize, usize)> = loops.iter().enumerate().flat_map(|(l, ids)| (0..ids.len()).map(move |k| (l, k))).collect();
+    shuffle(&mut order);
+    let mut cdt = Inserted::new();
     let mut handle_to_mesh: Vec<u32> = Vec::new();
-    let mut handles = Vec::new();
-    for (l, pts) in loops.iter().zip(uv) {
-        let mut hs = Vec::new();
-        for (&id, &p) in l.iter().zip(pts) {
-            let h = cdt.insert(snap_uv(p)).map_err(|e| format!("{e:?}"))?;
-            if h.index() == handle_to_mesh.len() {
-                handle_to_mesh.push(id);
-            } else if handle_to_mesh[h.index()] != id {
-                return Err("two boundary points have the same uv position".into());
-            }
-            hs.push(h);
+    let mut handles: Vec<Vec<FixedVertexHandle>> = loops.iter().map(|l| vec![FixedVertexHandle::from_index(0); l.len()]).collect();
+    for (l, k) in order {
+        let id = loops[l][k];
+        let h = cdt.insert(snap_uv(uv[l][k])).map_err(|e| format!("{e:?}"))?;
+        if h.index() == handle_to_mesh.len() {
+            handle_to_mesh.push(id);
+        } else if handle_to_mesh[h.index()] != id {
+            return Err("two boundary points have the same uv position".into());
         }
-        handles.push(hs);
+        handles[l][k] = h;
     }
     Ok(((cdt, handle_to_mesh), handles))
+}
+
+/// Shuffles `xs` the same way every time: Fisher–Yates, drawing from
+/// xorshift64 (Marsaglia's shifts 13, 7, 17) seeded with 2⁶⁴/φ.
+fn shuffle<T>(xs: &mut [T]) {
+    let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+    for i in (1..xs.len()).rev() {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        xs.swap(i, (seed % (i as u64 + 1)) as usize);
+    }
 }
 
 /// Constrained Delaunay triangulation of the region bounded by `loops`
 /// (mesh vertex ids with matching uv points). Returns counter-clockwise
 /// triangles inside the region (even-odd rule).
 pub(crate) fn triangulate_uv(loops: &[Vec<u32>], uv: &[Vec<DVec2>]) -> Result<Vec<[u32; 3]>, String> {
-    triangulate_loaded(loops, uv, bulk_loaded(uv))
+    let n = uv.iter().map(Vec::len).sum();
+    triangulate_loaded(loops, uv, if bulk_loads(n) { bulk_loaded(uv) } else { None })
 }
 
 /// `triangulate_uv` from the bulk loaded points, or (None) from inserting
 /// them one at a time.
 fn triangulate_loaded(loops: &[Vec<u32>], uv: &[Vec<DVec2>], loaded: Option<Cdt>) -> Result<Vec<[u32; 3]>, String> {
-    let ((mut cdt, handle_to_mesh), handles) = match loaded {
+    match loaded {
         Some(cdt) => {
             let mut next = 0;
             let handles = loops
@@ -683,10 +719,22 @@ fn triangulate_loaded(loops: &[Vec<u32>], uv: &[Vec<DVec2>], loaded: Option<Cdt>
                     (next - l.len()..next).map(FixedVertexHandle::from_index).collect()
                 })
                 .collect();
-            ((cdt, loops.iter().flatten().copied().collect()), handles)
+            constrained(cdt, loops.iter().flatten().copied().collect(), handles)
         }
-        None => insert_one_at_a_time(loops, uv)?,
-    };
+        None => {
+            let ((cdt, handle_to_mesh), handles) = insert_one_at_a_time(loops, uv)?;
+            constrained(cdt, handle_to_mesh, handles)
+        }
+    }
+}
+
+/// The triangles inside the loops of `handles` (each loop's points'
+/// handles in `cdt`, whose handle i is mesh vertex `handle_to_mesh[i]`).
+fn constrained<L: HintGenerator<f64>>(
+    mut cdt: ConstrainedDelaunayTriangulation<Point2<f64>, (), (), (), L>,
+    handle_to_mesh: Vec<u32>,
+    handles: Vec<Vec<FixedVertexHandle>>,
+) -> Result<Vec<[u32; 3]>, String> {
     for hs in &handles {
         for i in 0..hs.len() {
             let (a, b) = (hs[i], hs[(i + 1) % hs.len()]);
@@ -1293,6 +1341,86 @@ mod tests {
             }
             assert!(rel_eq(area(&bulk, &uv), area(&slow, &uv), FP_REL), "case {case}");
         }
+    }
+
+    /// `k` points along each long side of a `len` × `h` rectangle, counter-
+    /// clockwise from (0, 0): the uv region of an extruded arc's wall.
+    fn strip(k: usize, len: f64, h: f64) -> Vec<(f64, f64)> {
+        let u = |i: usize| i as f64 * len / (k - 1) as f64;
+        (0..k).map(|i| (u(i), 0.0)).chain((0..k).rev().map(|i| (u(i), h))).collect()
+    }
+
+    #[test]
+    fn shuffle_by_hand() {
+        // Worked apart from this code (Python, 64-bit wrapping): from seed
+        // 0x9e3779b97f4a7c15 the xorshift draws are 0xdc1b77ae0bf34dad,
+        // 0x64f0eeb9026e6076, 0x7b07ce91e5906136, 0x305f050c368dcc74,
+        // 0x2ceb16e0a1c54aec, 0x97101dce4e7bfb79, 0x9ad2e144d6e8f2cf; each
+        // mod i + 1 for i = 7 down to 1 picks 5, 4, 0, 0, 0, 0, 1 to swap
+        // with i, which takes 0..8 to [2, 1, 3, 6, 7, 0, 4, 5].
+        let mut xs: Vec<usize> = (0..8).collect();
+        shuffle(&mut xs);
+        assert_eq!(xs, [2, 1, 3, 6, 7, 0, 4, 5]);
+        let mut one = [9];
+        shuffle(&mut one);
+        assert_eq!(one, [9]);
+    }
+
+    #[test]
+    fn faces_up_to_bulk_load_max_points_are_bulk_loaded() {
+        assert!(bulk_loads(BULK_LOAD_MAX));
+        assert!(!bulk_loads(BULK_LOAD_MAX + 1));
+        // Both paths mesh a face of either size: a strip of 1024 points a
+        // side (2048, bulk loaded) and of 1025 (2050, inserted), N − 2
+        // triangles each.
+        for k in [1024, 1025] {
+            let (ids, uv) = region(&[strip(k, 1000.0, 0.01)]);
+            assert_eq!(triangulate_uv(&ids, &uv).unwrap().len(), 2 * k - 2);
+        }
+    }
+
+    #[test]
+    fn a_long_thin_strip_triangulates_by_hand() {
+        // A rectangle 1000 × 0.01 with k points on each long side is a
+        // simple polygon of N = 2k corners and no holes, so it has N − 2
+        // triangles (their angles add up to the polygon's, π(N − 2)) of
+        // total area 1000 × 0.01 = 10. k = 3000: N = 6000, above
+        // BULK_LOAD_MAX, so this is the shuffled insertion's answer.
+        let (ids, uv) = region(&[strip(3000, 1000.0, 0.01)]);
+        let tris = triangulate_uv(&ids, &uv).unwrap();
+        assert_eq!(tris.len(), 5998);
+        assert!(rel_eq(area(&tris, &uv), 10.0, FP_REL), "{}", area(&tris, &uv));
+    }
+
+    #[test]
+    fn a_long_thin_strip_triangulates_as_fast_as_a_round_face() {
+        // Regression (thin-crescent hunt, 2026-10-23): a crescent 63 m long
+        // and 1 µm wide (two arcs of radius 116 m, 1000 km out) took 52 s
+        // to extrude. Its horns meet at 1.2e-9 rad, so its arcs needed
+        // 124,000 chords each to keep clear of one another, and each arc's
+        // wall is then a strip 660 m long and 2.3 mm high in uv with 124,000
+        // points on each long side. Spade's bulk loader sweeps a circle out
+        // from the points' centre, which on a strip that thin went
+        // quadratic: 21 s per wall. Timed against the same number of points
+        // round a circle, in the same build (a speed test never trusts the
+        // wall clock alone): 60,000 points on a 1000 × 0.01 strip took
+        // ~80 times as long; inserted in a shuffled order through spade's
+        // search hierarchy, about as long.
+        let k = 30_000;
+        let round: Vec<(f64, f64)> = (0..2 * k).map(|i| {
+            let t = TAU * i as f64 / (2 * k) as f64;
+            (500.0 * fmath::cos(t), 500.0 * fmath::sin(t))
+        }).collect();
+        let timed = |l: Vec<(f64, f64)>| {
+            let (ids, uv) = region(&[l]);
+            let t = std::time::Instant::now();
+            let tris = triangulate_uv(&ids, &uv).unwrap();
+            (t.elapsed(), tris.len())
+        };
+        let (thin, n) = timed(strip(k, 1000.0, 0.01));
+        assert_eq!(n, 2 * k - 2);
+        let (reference, _) = timed(round);
+        assert!(thin < reference * 10, "strip {thin:?}, round face {reference:?}");
     }
 
     #[test]
