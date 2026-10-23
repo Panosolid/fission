@@ -887,5 +887,12 @@
     "original": "typeof pin.point !== \"string\"",
     "replacement": "false",
     "why": "A pin's point that is not a string is never one of the sketch's point ids (all strings, checked before the pins), so `!points.has(pin.point)` on the same line refuses it with the same words; a pin that is not a record (null) is caught by `!isRecord(pin)` before `pin.point` is read."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "ConditionalExpression",
+    "original": "journal",
+    "replacement": "true",
+    "why": "finish() with no journal: journal.setItem then throws a TypeError inside the try, whose catch leaves journalVersion as it was, exactly as skipping the block does."
   }
 ]
