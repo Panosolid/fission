@@ -10,6 +10,9 @@
 .timeline-reorder .timeline-reorder-line { position: absolute; top: 3px; bottom: 3px; width: 2px; border-radius: 1px; background: #4aa8ff; pointer-events: none; z-index: 2; }
 .timeline-reorder .timeline-reorder-line[data-state="refused"] { background: #ff6b6b; }
 .timeline-reorder .timeline-reorder-line[data-state="refused"]::before { content: "×"; position: absolute; top: -9px; left: -4px; color: #ff6b6b; font: 700 11px/1 system-ui, sans-serif; }
+/* Far from the bar (timeline hunt, finding 7): letting go calls the drag off; the line greyed, its words plain. */
+.timeline-reorder .timeline-reorder-line[data-state="away"] { background: #6f7680; }
 .timeline-reorder .timeline-reorder-note { position: absolute; bottom: calc(100% + 4px); max-width: min(360px, calc(100vw - 16px)); padding: 4px 8px; border: 1px solid #e0656d; border-radius: 4px; background: #3a2226; color: #ffd7d9; font: 12px/1.35 system-ui, sans-serif; pointer-events: none; z-index: 5; box-sizing: border-box; }
 .timeline-reorder .timeline-reorder-note[hidden] { display: none; }
+.timeline-reorder .timeline-reorder-note[data-state="away"] { border-color: #353a43; background: #262a31; color: #c9d1d9; }
 .timeline-reorder .timeline-bar-item { user-select: none; -webkit-user-select: none; }
