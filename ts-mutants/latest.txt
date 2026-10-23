@@ -1,0 +1,18 @@
+tested commit 1dd0b47 on claude/project-thread-rxh19p, 2026-10-23 01:48 UTC (https://github.com/Panosolid/fission/actions/runs/39877064235)
+core: 8 survivors, all explained: true
+design: 11 survivors, all explained: true
+UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight && storedVersion === version => true
+UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | LogicalOperator | timer === null && !inFlight && storedVersion === version => timer === null && !inFlight || storedVersion === version
+UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight => true
+UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | LogicalOperator | timer === null && !inFlight => timer === null || !inFlight
+UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | timer === null => true
+UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | storedVersion === version => true
+storage: 28 survivors, all explained: false
+6 problem(s): kill each survivor with a test, or explain in explained.json why no caller can tell
+model: 37 survivors, all explained: true
+svg: 4 survivors, all explained: true
+UNEXPLAINED survivor at packages/viewport/src/framing.ts:96: packages/viewport/src/framing.ts | EqualityOperator | lo[0] <= hi[0] => lo[0] < hi[0]
+UNEXPLAINED survivor at packages/viewport/src/framing.ts:98: packages/viewport/src/framing.ts | ArithmeticOperator | h - lo[k] => h + lo[k]
+viewport: 35 survivors, all explained: false
+2 problem(s): kill each survivor with a test, or explain in explained.json why no caller can tell
+ai: 12 survivors, all explained: true

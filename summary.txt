@@ -1,10 +1,10 @@
-Panosolid random testing, all runs so far (updated 2026-10-22 22:37 UTC)
+Panosolid random testing, all runs so far (updated 2026-10-23 01:48 UTC)
 
-hours of testing:                 926.6
-rounds:                           16165
-random operation chains:          32330000
+hours of testing:                 929.3
+rounds:                           16223
+random operation chains:          32446000
 rounds where the harness failed:  583
-bodies compared with OpenCascade: 65987692
+bodies compared with OpenCascade: 66245140
 OpenCascade disagreements:        346
 last problem found:               2026-10-22 05:31:27 (seed 151249361384487, commit 1c26768 on claude/project-thread-uzoch4)
 
@@ -22,15 +22,35 @@ Latest mutation run (whole kernel, lib tests), 2026-10-22 22:37 UTC, commit 0f57
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 0f57150 on main, 2026-10-22 22:37 UTC (https://github.com/Panosolid/fission/actions/runs/39805293815)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.25 s (baseline 1.23 s)
-  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 3.27 s (baseline 9.70 s)
+  tested commit 1dd0b47 on claude/project-thread-rxh19p, 2026-10-23 01:48 UTC (https://github.com/Panosolid/fission/actions/runs/39877064235)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.85 s (baseline 1.23 s)
+  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 4.37 s (baseline 9.70 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
   PENDING Photo to lithophane: waits for Image (G2), Slice (P2)
   PENDING Part to simulation and back: waits for Simulate (S3), parameters (34, I18)
 journeys/flags.txt lists every FLAG line so far.
+
+Latest TypeScript mutation run (packages/testing/stryker, survivors must be killed or explained):
+  tested commit 1dd0b47 on claude/project-thread-rxh19p, 2026-10-23 01:48 UTC (https://github.com/Panosolid/fission/actions/runs/39877064235)
+  core: 8 survivors, all explained: true
+  design: 11 survivors, all explained: true
+  UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight && storedVersion === version => true
+  UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | LogicalOperator | timer === null && !inFlight && storedVersion === version => timer === null && !inFlight || storedVersion === version
+  UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight => true
+  UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | LogicalOperator | timer === null && !inFlight => timer === null || !inFlight
+  UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | timer === null => true
+  UNEXPLAINED survivor at packages/storage/src/autosave.ts:180: packages/storage/src/autosave.ts | ConditionalExpression | storedVersion === version => true
+  storage: 28 survivors, all explained: false
+  6 problem(s): kill each survivor with a test, or explain in explained.json why no caller can tell
+  model: 37 survivors, all explained: true
+  svg: 4 survivors, all explained: true
+  UNEXPLAINED survivor at packages/viewport/src/framing.ts:96: packages/viewport/src/framing.ts | EqualityOperator | lo[0] <= hi[0] => lo[0] < hi[0]
+  UNEXPLAINED survivor at packages/viewport/src/framing.ts:98: packages/viewport/src/framing.ts | ArithmeticOperator | h - lo[k] => h + lo[k]
+  viewport: 35 survivors, all explained: false
+  2 problem(s): kill each survivor with a test, or explain in explained.json why no caller can tell
+  ai: 12 survivors, all explained: true
 
 Fuzzing (the STL reader, the project loader, the sketch-extrude and timeline sessions and the kernel fuzz targets), all runs so far (updated 2026-10-23 00:30 UTC)
   hours of fuzzing: 39.6
