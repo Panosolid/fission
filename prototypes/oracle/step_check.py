@@ -29,9 +29,10 @@ A body passes when:
   faces, so this holds the body to the kernel's own rule (every vertex on
   its edges and every edge on its faces within LINEAR).
 
-For bodies OpenCascade misreads though they are good (far out, or with
-radii of a few µm), `home` and `scaled` give exact copies of the same body
-that it reads better; compare.py's `step_issues` judges with them.
+For a good body far out, which OpenCascade misreads (it loses digits
+there), `home` gives an exact copy of the same body moved home;
+compare.py's `step_issues` judges with it. `RADIUS` finds the radii, for
+compare.py's small-feature limit.
 
 Usage: python step_check.py body.step [more.step ...] (exit status 1 if
 any fails). Needs: pip install cadquery-ocp
@@ -139,11 +140,7 @@ def _largest_tolerance(shape, kind, cast):
     return max((BRep_Tool.Tolerance_s(cast(s)) for s in _shapes(shape, kind)), default=0.0)
 
 
-def check(path, scale=1.0):
-    """The checks above on the body in the file at `path`. `scale` says the
-    file is a body blown up by that factor (`scaled`): the tolerance limit
-    is LINEAR times it, and the report's numbers are given back in the
-    body's own units."""
+def check(path):
     report = Report()
     raw, why = _translate(path)
     if raw is None:
@@ -161,27 +158,24 @@ def check(path, scale=1.0):
         report.problems.append("BRepCheck: invalid" + (f" (faces {bad}, counted in file order)" if bad else ""))
     # 1 + 1e-9: the tolerance OpenCascade sets is the file's LINEAR read back
     # from decimal, which may land an ulp or so either side.
-    # A power of two scales exactly, so dividing back is exact too.
-    report.vertex_tolerance /= scale
-    report.edge_tolerance /= scale
     for name, value in (("vertex", report.vertex_tolerance), ("edge", report.edge_tolerance)):
         if value > LINEAR * (1 + 1e-9):
             report.problems.append(f"{'an' if name == 'edge' else 'a'} {name} needed tolerance {value:.3g} mm, above LINEAR ({LINEAR})")
     volume, area = GProp_GProps(), GProp_GProps()
     BRepGProp.VolumeProperties_s(shape, volume)
     BRepGProp.SurfaceProperties_s(shape, area)
-    report.volume, report.area = volume.Mass() / scale ** 3, area.Mass() / scale ** 2
+    report.volume, report.area = volume.Mass(), area.Mass()
     report.faces = len(list(_shapes(shape, TopAbs_FACE)))
     return report
 
 
-def check_text(text, scale=1.0):
+def check_text(text):
     """`check` of a file's text (OpenCascade reads only from a path)."""
     fd, path = tempfile.mkstemp(suffix=".step")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(text)
-        return check(path, scale)
+        return check(path)
     finally:
         os.unlink(path)
 
@@ -229,38 +223,9 @@ def home(text):
 
 
 
+# A circle's or round surface's radius (group 2).
 RADIUS = re.compile(r"^(#\d+ = (?:CIRCLE|CYLINDRICAL_SURFACE|SPHERICAL_SURFACE)\('',#\d+,)([^,()]+)\);$", re.M)
-UNCERTAINTY = re.compile(r"LENGTH_MEASURE\(([^()]+)\)")
-SMALLEST = 1.0  # mm: the smallest radius `scaled` blows a body up to
 
-
-def scaled(text):
-    """The same body blown up by a power of two, 2^k with the smallest k >= 0
-    that makes its smallest radius at least SMALLEST (1 mm), and the factor
-    (1.0, and the text unchanged, when it has no radius below that). Every
-    length in the file is multiplied: the points, the circles' and
-    surfaces' radii and the uncertainty; directions and the topology stay.
-    Multiplying by a power of two is exact, so this is the same body at
-    another size, every distance and gap in it scaled alike.
-
-    Why (found by 29b2's first runs): OpenCascade lost the side of a
-    cylinder of radius 1 µm whose top circle's centre sat 3e-9 mm off the
-    axis (rounding, 3,000 times inside LINEAR) and read it as a valid solid
-    of a third of its volume; its normal reader with every repair did the
-    same. Its working precisions are absolute (1e-7 mm), made for parts of
-    millimetres and more, and the kernel's smallest features are 1 µm
-    (MIN_FEATURE). The same cylinder blown up 1024 times reads valid, with
-    its exact volume."""
-    radii = [float(m.group(2)) for m in RADIUS.finditer(text)]
-    factor = 1.0
-    while radii and min(radii) * factor < SMALLEST:
-        factor *= 2.0
-    if factor == 1.0:
-        return text, factor
-    t = POINT.sub(lambda m: f"#{m.group(1)} = CARTESIAN_POINT('',(" + ",".join(
-        _part21(float(m.group(k)) * factor) for k in (2, 3, 4)) + "));", text)
-    t = RADIUS.sub(lambda m: f"{m.group(1)}{_part21(float(m.group(2)) * factor)});", t)
-    return UNCERTAINTY.sub(lambda m: f"LENGTH_MEASURE({_part21(float(m.group(1)) * factor)})", t), factor
 
 def main():
     failed = 0

@@ -184,20 +184,24 @@ def step_issues(case, rebuilt, ref, slack):
     referee's within the harness's slacks. A body the harness held valid
     that the writer refused is a finding too.
 
-    The file is judged as written and, when that fails, as two exact copies
-    of the same body: moved home (`step_check.home`, for a part far out,
-    where OpenCascade loses digits) and then blown up by a power of two
-    (`step_check.scaled`, for features under 1 mm, below the sizes
-    OpenCascade's absolute precisions are made for). A real fault (a face
-    turned, a loop walked backwards, a gap over LINEAR) is in every copy
-    alike, so the body passes when one copy passes every check; a copy
-    before it that failed is listed with OpenCascade's rounding, not
-    counted. When none passes, the last copy's problems are the finding.
+    The file is judged as written and, when that fails and the part is far
+    out, as an exact copy of the same body moved home (`step_check.home`):
+    OpenCascade loses digits far out, and a real fault (a face turned, a
+    loop walked backwards, a gap over LINEAR) is in both alike, so the body
+    passes when either passes every check; a miss as written is then listed
+    with OpenCascade's rounding, not counted. When neither passes, the
+    home copy's problems are the finding, except in a body with a radius
+    under SMALL_FEATURE (below).
+
+    No copy is blown up to rescue a small feature: a 1 µm cylinder blown
+    up 1024 times reads valid with its exact volume, but so did one with a
+    cap planted flipped (29b2's planted-fault run in CI), so a pass there
+    proves nothing.
 
     `rebuilt` is OpenCascade's own rebuild's (volume, area), the reference
-    without mpmath; with it, a miss where the rebuild missed the exact
-    value as well is OpenCascade's rounding, listed but not counted, like
-    compare's own."""
+    without mpmath; with it, a miss no bigger than the rebuild's own miss of
+    the exact value (plus the slack) is OpenCascade's rounding, listed but
+    not counted, like compare's own."""
     issues, occ_only = [], []
     if case.get("step_refused") is not None:
         issues.append(f"step write refused: {case['step_refused']}")
@@ -208,12 +212,9 @@ def step_issues(case, rebuilt, ref, slack):
     moved, shift = step_check.home(text)
     if any(shift):
         copies.append((f"moved home by {shift}", moved, 1.0))
-    big, factor = step_check.scaled(moved)
-    if factor != 1.0:
-        copies.append((("moved home and " if any(shift) else "") + f"blown up {factor:g} times", big, factor))
     tried = []
     for label, t, f in copies:
-        found, rounding = one_step_copy(case, step_check.check_text(t, f), rebuilt, ref, slack)
+        found, rounding = one_step_copy(case, step_check.check_text(t), rebuilt, ref, slack)
         if not found:
             occ_only += [f"{note} (as written; passes {label})" for _, notes in tried for note in notes if "validity" in note]
             return issues, occ_only + rounding
@@ -221,11 +222,13 @@ def step_issues(case, rebuilt, ref, slack):
     label, found = tried[-1]
     radii = [float(m.group(2)) for m in step_check.RADIUS.finditer(text)]
     if radii and min(radii) < SMALL_FEATURE:
-        # OpenCascade's own limit, seen in every copy (29b2's first runs:
-        # 11 of 5,231 bodies, every one with a radius of 1-5 µm, none with
-        # one over 5 µm): listed under its own heading, not counted, so it
-        # can't hide a fault in a body of ordinary size. Kept in view in
-        # docs/progress/booleans.md until something else checks such files.
+        # OpenCascade's own limit (29b2's first runs: it lost the side of a
+        # 1 µm cylinder whose top circle's centre sat 3e-9 mm off the axis,
+        # 3,000 times inside LINEAR, and called it valid; every body it
+        # couldn't read had a radius of 1-5 µm): listed under its own
+        # heading, not counted, so it can't hide a fault in a body of
+        # ordinary size. Kept in view in docs/progress/booleans.md until
+        # something else checks such files.
         return issues, occ_only + [f"{SMALL_LIMIT}: {note} ({label})" for note in found]
     return issues + [f"{note} ({label})" for note in found], occ_only
 
@@ -241,7 +244,11 @@ def one_step_copy(case, r, rebuilt, ref, slack):
         if abs(got - reference) <= allowed:
             continue
         note = f"{name}: OpenCascade read {got!r} from the file, {'exact' if exact_value is not None else 'its rebuild'} {reference!r}, allowed {allowed:.3g}"
-        if exact_value is not None and abs(theirs - reference) > allowed:
+        # OpenCascade's rounding only when reading the file came out no
+        # worse than its own rebuild of the shape (29b2's planted-fault run:
+        # a rebuild a hair over the slack had excused a file that lost both
+        # caps of a 1 µm cylinder, 1,300 times the slack).
+        if exact_value is not None and abs(got - reference) <= abs(theirs - reference) + allowed:
             rounding.append(note + f" (its rebuild {theirs!r} is off too)")
         else:
             found.append(note)

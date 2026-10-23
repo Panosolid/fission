@@ -253,51 +253,55 @@ def flipped_side(t):
 @unittest.skipUnless(importlib.util.find_spec("OCP") is not None and importlib.util.find_spec("mpmath") is not None,
                      "needs cadquery-ocp and mpmath")
 class SmallFeatures(unittest.TestCase):
-    """Bodies with radii of a few µm, which OpenCascade misreads unless blown
-    up (`step_check.scaled`), and its limit beyond that."""
+    """Bodies with radii of a few µm, which OpenCascade misreads: its
+    small-feature limit."""
 
-    def test_blown_up_by_hand(self):
-        # Radius 0.001: 0.001 x 512 = 0.512 is under 1 mm, 0.001 x 1024 =
-        # 1.024 isn't, so the factor is 1024. The vertex (0.001, 0, 0) becomes
-        # (1.024, 0, 0), the height 3 becomes 3072, the uncertainty 1e-5
-        # becomes 0.01024. Volume pi r^2 h = 3e-6 pi and area
-        # 2 pi r (r + h) = 2 pi 0.001 x 3.001 = 0.006002 pi, given back in
-        # the body's own units.
-        import math
-        import compare
-        import step_check
-        t, f = step_check.scaled(cylinder_text(0.001, 3.0))
-        self.assertEqual(f, 1024.0)
-        self.assertIn("#14 = CARTESIAN_POINT('',(1.024,0.0,0.0));", t)
-        self.assertIn("#16 = CARTESIAN_POINT('',(1.024,0.0,3072.0));", t)
-        self.assertIn("#52 = CYLINDRICAL_SURFACE('',#51,1.024);", t)
-        self.assertIn("LENGTH_MEASURE(0.01024)", t)
-        r = step_check.check_text(t, f)
-        self.assertTrue(r.ok, r.problems)
-        self.assertLessEqual(abs(r.volume - 3e-6 * math.pi), compare.REL * 3e-6 * math.pi)
-        self.assertLessEqual(abs(r.area - 0.006002 * math.pi), compare.REL * 0.006002 * math.pi)
-
-    def test_nothing_to_blow_up(self):
-        # Smallest radius 2 mm (and a box has none): the file as it is.
-        import step_check
-        t = cylinder_text(2.0, 3.0)
-        self.assertEqual(step_check.scaled(t), (t, 1.0))
-        self.assertEqual(step_check.scaled(cube_text()), (cube_text(), 1.0))
-
-    def test_a_1_um_cylinder_off_axis_by_rounding_is_read_blown_up(self):
+    def test_a_1_um_cylinder_off_axis_by_rounding_is_opencascades_limit(self):
         # Found by 29b2's first run (seed 12345): a cylinder of radius 1 µm
         # whose top circle's centre sits 3e-9 mm off the axis, 3,000 times
-        # inside LINEAR. As written OpenCascade calls it invalid (if this
-        # assertion starts failing, OpenCascade got better at it); blown up
-        # 1024 times it is valid with the exact volume, so compare passes
-        # it and lists the as-written miss with OpenCascade's rounding.
+        # inside LINEAR. OpenCascade calls it invalid (if this assertion
+        # starts failing, OpenCascade got better at it), so compare lists it
+        # under the small-feature limit rather than counting it.
         import compare
         import step_check
         t = cylinder_text(0.001, 35.5, 3e-9)
         self.assertFalse(step_check.check_text(t).ok)
         issues, occ = compare.compare(cylinder_case(0.001, 35.5, t))[1:]
         self.assertEqual(issues, [])
-        self.assertTrue(any("passes blown up 1024 times" in o for o in occ), occ)
+        self.assertTrue(occ and all(compare.SMALL_LIMIT in o for o in occ), occ)
+
+    def test_a_blown_up_copy_would_have_passed_a_planted_fault(self):
+        # Why no copy is blown up. 29b2's planted-fault run in CI (seed
+        # 60150794052458, 40 cases, FISSION_STEP_FAULT): a 1 µm cylinder
+        # 761.89 mm long, turned and placed 50 km out, its bottom cap planted
+        # flipped; the oracle's line is kept in regressions/. Moved home and
+        # blown up 1024 times (every length and the uncertainty; exact),
+        # OpenCascade called it valid, losing both caps, whose area
+        # (2 pi r^2 = 6.3e-6 mm^2) hides in the slack of a body that far out
+        # (0.069 mm^2). Neither as written nor moved home does it pass, and
+        # compare lists it under the small-feature limit.
+        import json
+        import compare
+        import step_check
+        here = os.path.join(os.path.dirname(__file__), "regressions", "flipped-cap-1um-cylinder")
+        with open(here + ".step") as f:
+            bad = f.read()
+        with open(here + ".json") as f:
+            case = {**json.load(f), "step": bad}
+        P, k = step_check._part21, 1024.0
+        moved, _ = step_check.home(bad)
+        big = step_check.POINT.sub(lambda m: f"#{m.group(1)} = CARTESIAN_POINT('',(" + ",".join(
+            P(float(m.group(j)) * k) for j in (2, 3, 4)) + "));", moved)
+        big = step_check.RADIUS.sub(lambda m: f"{m.group(1)}{P(float(m.group(2)) * k)});", big)
+        big = big.replace("LENGTH_MEASURE(1.E-5)", f"LENGTH_MEASURE({P(1e-5 * k)})")
+        r = step_check.check_text(big)
+        self.assertTrue(r.ok, r.problems)  # the false pass, kept in view
+        self.assertFalse(step_check.check_text(bad).ok)
+        self.assertFalse(step_check.check_text(moved).ok)
+        issues, occ = compare.compare(case)[1:]
+        self.assertEqual(issues, [])
+        self.assertFalse(any("passes" in o for o in occ), occ)
+        self.assertTrue(occ and all(compare.SMALL_LIMIT in o for o in occ), occ)
 
     def test_a_fault_under_the_small_feature_limit_is_listed_not_counted(self):
         # Radius 0.9 x SMALL_FEATURE (0.009 mm) with its side flipped: every
