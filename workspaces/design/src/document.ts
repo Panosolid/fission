@@ -608,9 +608,16 @@ export function readDesignDocument(data: unknown): DesignDocument {
       throw new Error(`Design feature ${i + 1} has no id or intent`);
     if (typeof f.suppressed !== "boolean") throw new Error(`Design feature ${f.id}: suppressed must be true or false, not ${shown(f.suppressed)}`);
   }
-  // Each id's first item, so every lookup below is one step (a search in a loop took minutes on a big file, audit S2).
+  // Two items with one id are said as that first (timeline hunt, finding 12: a sketch item's id given to another item
+  // was refused as "a sketch with no content", sending the reader to the wrong place); every id is checked below.
+  const itemIds = new Set<string>();
+  for (const f of d.timeline.features) {
+    if (itemIds.has(f.id)) throw new Error(`Design id ${shown(f.id)} is used twice`);
+    itemIds.add(f.id);
+  }
+  // Each id's item (one each, checked above), so every lookup below is one step (a search in a loop took minutes on a big file, audit S2).
   const byId = new Map<string, { item: Feature; at: number }>();
-  for (const [at, item] of d.timeline.features.entries()) if (!byId.has(item.id)) byId.set(item.id, { item, at });
+  for (const [at, item] of d.timeline.features.entries()) byId.set(item.id, { item, at });
   const marker = d.timeline.marker;
   if (Object.hasOwn(d.timeline, "marker") && marker !== "start" && !byId.has(marker as string))
     throw new Error(`Design timeline marker ${shown(marker)} is not "start" or the id of an item in the timeline`);
@@ -635,8 +642,8 @@ export function readDesignDocument(data: unknown): DesignDocument {
     // And its projections (27d).
     if (Object.hasOwn(content, "projected")) checkProjections(f, content, byId);
   }
-  const itemIds = new Set(items.map((f) => f.id));
-  for (const s of d.sketches) if (!itemIds.has(s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
+  const sketchItemIds = new Set(items.map((f) => f.id));
+  for (const s of d.sketches) if (!sketchItemIds.has(s.id)) throw new Error(`Design sketch ${s.id} has no place in the timeline`);
   // An extrude of a sketch comes after its sketch and depends on it, so a rebuild in order always has the outline.
   for (const [i, f] of d.timeline.features.entries()) {
     if (!isSketchExtrude(f)) continue;

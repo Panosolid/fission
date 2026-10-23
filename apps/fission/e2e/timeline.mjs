@@ -593,6 +593,23 @@ try {
       await page.waitForTimeout(150);
       assert.deepEqual(await bar(page), all.bar);
       assert.equal(await undoTitle(page), before);
+      // Called off (timeline hunt, finding 7): Escape mid-drag, then let go on the gap; and let go 200 px above the
+      // bar (past DROP_REACH, 72 px). Neither moves the marker or records a step.
+      const gap = await gapX("feature-1", "sketch-2");
+      await drag(gap, {
+        hold: async () => {
+          assert.deepEqual(await bar(page), atBox.bar, "dragged to the gap first");
+          await page.keyboard.press("Escape");
+          assert.deepEqual(await bar(page), all.bar, "Escape puts the marker back at once");
+        },
+      });
+      await page.waitForTimeout(150);
+      assert.deepEqual(await bar(page), all.bar);
+      assert.equal(await undoTitle(page), before, "Escape mid-drag records nothing");
+      await drag(gap, { hold: async () => page.mouse.move(gap, (await markerBox()).y - 200, { steps: 4 }) });
+      await page.waitForTimeout(150);
+      assert.deepEqual(await bar(page), all.bar);
+      assert.equal(await undoTitle(page), before, "let go far above the bar records nothing");
       // Four Undos go back through the three drags and Go to the end, so the press added no step.
       for (const want of [atStart, atBox, all, atBox]) {
         await undo();
