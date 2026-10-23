@@ -38,6 +38,7 @@ Several threads run at once, one per workstream. So they never edit the same lin
 - `ai.md`: the AI assistant (AI1…, and the A items in `docs/roadmap.md`).
 - `video.md`: the Video workspace (F0–F14: design decisions and every substep's test plan).
 - `slice.md`: the Slice workspace, 3D printing (P0–P14: design decisions and every substep's test plan).
+- `ui.md`: the UI look and feel (U1–U8: top bar icons, light mode, settings, panels, phone, home screen).
 - A new workstream (Render, Vector, Layout…) gets a new file here the day it starts, added to this list in its own small PR.
 
 Rules:
