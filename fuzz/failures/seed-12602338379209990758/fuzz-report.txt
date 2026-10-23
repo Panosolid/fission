@@ -1,0 +1,2 @@
+Project loader fuzzing, seed 12602338379209990758, 2000 inputs: 1 kind(s) of failure
+failure: refused with an engine message: (s.projected ?? []).map is not a function or its return value is not iterable | case 588 | shrunk input: input-588.json (3112 characters)
