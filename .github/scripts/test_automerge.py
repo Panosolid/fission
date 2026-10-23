@@ -25,6 +25,18 @@ def check(name, status="completed", conclusion="success", app="github-actions"):
 
 
 class CiState(unittest.TestCase):
+    def test_docs_only_head(self):
+        # ci.yml's docs-only run (ci_mode.py, docs): kernel and e2e and
+        # mutants-in-diff pass, app and baseline and every share report
+        # skipped. That head may merge, with the queue or without.
+        docs = [check("kernel"), check("e2e"), check("mutants-in-diff"), check("app", conclusion="skipped"),
+                check("baseline", conclusion="skipped"), check("e2e (quick)", conclusion="skipped"),
+                check("e2e (${{ matrix.shard }}/3)", conclusion="skipped"), check("coverage", conclusion="skipped")]
+        self.assertEqual(ci_state(docs), "success")
+        self.assertEqual(ci_state(docs, quick_ok=True), "success")
+        # The kernel job's script tests failing (VERSION against CHANGELOG.md) still blocks it.
+        self.assertEqual(ci_state([check("kernel", conclusion="failure")] + docs[1:]), "failure")
+
     def test_cases(self):
         both = [check("kernel"), check("app"), check("e2e"), check("mutants-in-diff"), check("baseline")]
         self.assertEqual(ci_state(both), "success")
