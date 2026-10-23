@@ -1614,7 +1614,8 @@ fn side_of(p: &Piece) -> (f64, DVec2) {
 /// The unplaced body's faces against `face_model`: one role each, none
 /// twice, exactly the model's roles, each face's area and centroid the
 /// model's to 1e-6 of the part's size (the timeline harness's MATCH_REL,
-/// which is MASS_PROPS_REL), and the faces' areas adding up to the body's.
+/// which is MASS_PROPS_REL), and the faces' areas adding up to the body's
+/// (`body`'s own area, not `m`'s, which is of the body re-centred).
 fn check_face_model(shape: &Shape, body: &Body, m: &Measure) -> Result<(), String> {
     let model = face_model(shape)?;
     let got = face_masses(body);
@@ -1642,9 +1643,16 @@ fn check_face_model(shape: &Shape, body: &Body, m: &Measure) -> Result<(), Strin
             return Err(format!("{role:?}: centroid {} but the model says {centroid} ({off:e} off)", got[f].centroid));
         }
     }
+    // Both from `body` itself. `m` measured it re-centred (`Placed::new`):
+    // other corners (a coordinate near 0 rounds at the part's own scale)
+    // and other roundings in each cap's cross products, which cancel from
+    // ~2.7e10 mm² to 701 mm² on a long thin frame, so the two bodies' areas
+    // differ by more than the sums' agreement promises (issue #241, see
+    // `a_thin_frame_far_out_adds_up_on_its_own_body`).
     let total: f64 = got.iter().map(|g| g.area).sum();
-    if !tolerance::measure_eq(total, m.exact.area, 1e-9 * m.exact.area) {
-        return Err(format!("faces' areas add up to {total}, the body's is {}", m.exact.area));
+    let whole = fission_kernel::mass::mass_properties(body).area;
+    if !tolerance::measure_eq(total, whole, 1e-9 * whole) {
+        return Err(format!("faces' areas add up to {total}, the body's is {whole}"));
     }
     Ok(())
 }
@@ -2424,7 +2432,11 @@ fn apply_op(slots: &mut Vec<Slot>, op: &Op, step: usize, checks: bool) -> Result
                 return Err(fail(format!("move by {to} well inside model space was refused"), vec![("primitive".into(), base)]));
             }
             if let Some(p) = &placed {
-                let m1 = measure(p, 0.0).map_err(|m| fail(m, vec![("placed".into(), p.baked())]))?;
+                // Its numbers went through where it was built and through
+                // the move, as for Move below (issue #240: a disc built at
+                // y = 964 m and moved back to y = 5 mm keeps the rounding
+                // of 964 m in its mesh).
+                let m1 = measure(p, reach(&m0).max(to.abs().max_element())).map_err(|m| fail(m, vec![("placed".into(), p.baked())]))?;
                 check_rigid(&m0, &m1, "placing").map_err(|m| fail(m, vec![("primitive".into(), base.clone()), ("placed".into(), p.baked())]))?;
             }
             record(op, placed.is_some());
@@ -2924,6 +2936,29 @@ fn bounds_round_at_the_size_they_were_built_at() {
     assert!(e.contains("miss mesh points"), "{e}");
 }
 
+/// Issue #240 (seed4e0a16a70d0e): a disc of radius ~1 mm, drawn as one
+/// bulge arc (bulge −3636.36…, chord 0.0011 mm) at y = 964 472.99 mm and
+/// moved by y = −964 467.99 mm. Exactly, with fractions, the chord lands at
+/// y = 4.999989000032656 and the arc's top is the chord plus its sagitta
+/// |bulge|·chord/2 = 1.9999998487499886: 6.999988848782644, the box's top
+/// to 1.3e-16. The top mesh point is 2.65e-11 higher: it was made at
+/// y ≈ 964 475, where one unit in the last place is 2⁻³³ ≈ 1.16e-10, so it
+/// is a quarter of a unit off, rounding, not a wrong box.
+#[test]
+fn a_moved_body_rounds_at_the_size_it_was_built_at() {
+    let lo = DVec3::new(0.0005500000000144833, 4.999989000032656, 0.0);
+    let hi = DVec3::new(2.0005500000000143, 6.999988848782644, 0.001);
+    let mlo = DVec3::new(0.0005500378125036232, 4.999989000032656, 0.0);
+    let mhi = DVec3::new(2.0005499621874963, 6.999988848809153, 0.001);
+    let sag = 0.02; // 2·max(DISPLAY_CHORD = 0.01, 1·(1 − cos(π/256)) ≈ 7.5e-5)
+    // Built at 964 475: slack 964475 · 64 · 2⁻⁵² · 4 ≈ 5.48e-8 ≫ 2.65e-11.
+    assert_eq!(check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, 964474.99486), Ok(()));
+    // At the moved body's own size, 7 · 64 · 2⁻⁵² · 4 ≈ 3.98e-13 ≪ 2.65e-11:
+    // the old reading (scale 0, so the box's own 7), which flagged it.
+    let e = check_bounds_hold_mesh((lo, hi), (mlo, mhi), sag, 7.0).unwrap_err();
+    assert!(e.contains("miss mesh points"), "{e}");
+}
+
 /// The bounds check's slack at scale 1000 is 1000 · 64 · 2⁻⁵² · 4 =
 /// 256000 · 2⁻⁵² ≈ 5.684e-11; a 10 mm cube's box missing a mesh point, or
 /// reaching past the mesh beyond the sag, by 0.9× that passes and by 1.1×
@@ -3332,6 +3367,34 @@ fn edge_pairs_by_hand_and_broken() {
     let outer = Boundary::Path { corners: vec![DVec2::new(0.0, 0.0), DVec2::new(0.0011, 0.0)], bulges: vec![-1168734181.6392605, 0.0] };
     let body = extrude::extrude(&Profile { outer, holes: vec![] }, 0.5).unwrap();
     edge_pairs_off(&body, &fission_kernel::edge_faces(&body), &mid(&body)).unwrap();
+}
+
+/// Issue #241 (seed29088d9f24f1): a 233.68 m × 116.84 m frame at
+/// x = −100 km with walls 1 µm wide, extruded 1 µm. Exactly, with
+/// fractions from the corners' doubles, each cap is outer − hole =
+/// 701.0407900259959 mm² and the sides are both perimeters × 0.001 =
+/// 1402.0806311239971 mm², 2804.162211175989 mm² in all. Re-centred, the
+/// hole's two corners at y = 0.001 land 3.4e-12 off (y − 58420.03 rounds
+/// at 58 m's scale), which takes 8.0e-7 off each cap: 2804.162209570956.
+/// Each body's faces add up to its own area, both areas are their exact
+/// values to MASS_PROPS_REL, but the faces of one against the area of the
+/// other (the old reading) are 1.5e-9 apart, past the sums' 1e-9.
+#[test]
+fn a_thin_frame_far_out_adds_up_on_its_own_body() {
+    let path = |pts: [(f64, f64); 4]| Boundary::Path { corners: pts.iter().map(|&(x, y)| DVec2::new(x, y)).collect(), bulges: vec![] };
+    let outer = path([(-99999999.0, 0.0), (-99766318.89347933, 0.0), (-99766318.89347933, 116840.05326033363), (-99999999.0, 116840.05326033363)]);
+    let hole = path([(-99999998.999, 0.001), (-99999998.999, 116840.05226033363), (-99766318.89447933, 116840.05226033363), (-99766318.89447933, 0.001)]);
+    let raw = extrude::extrude(&Profile { outer, holes: vec![hole] }, 0.001).unwrap();
+    let centred = Placed::new(raw.clone());
+    assert!(!centred.placement.is_identity(), "far out, so re-centred");
+    let sum = |b: &Body| face_masses(b).iter().map(|g| g.area).sum::<f64>();
+    let area = |b: &Body| fission_kernel::mass::mass_properties(b).area;
+    for (b, exact) in [(&raw, 2804.162211175989), (&centred.body, 2804.1622095709563)] {
+        assert!(tolerance::measure_eq(sum(b), area(b), 1e-9 * area(b)), "{} vs {}", sum(b), area(b));
+        assert!(tolerance::rel_eq(area(b), exact, tolerance::MASS_PROPS_REL), "{} vs {exact}", area(b));
+    }
+    let (faces, whole) = (sum(&raw), area(&centred.body));
+    assert!(!tolerance::measure_eq(faces, whole, 1e-9 * whole), "{faces} vs {whole}");
 }
 
 fn mid(b: &Body) -> Vec<DVec3> {
