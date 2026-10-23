@@ -115,6 +115,9 @@ jobs:
       - run: python3 prototypes/vectors.py
         if: env.CODE == 'true'
       - run: python3 -m unittest discover -s .github/scripts
+      - name: Install OpenCascade, so the oracle's own tests run rather than skip (test_step_check.py, step 29)
+        run: pip install cadquery-ocp
+        if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
       - run: python3 -m unittest discover -s prototypes/oracle -p 'test_*.py'
         if: env.CODE == 'true' && needs.mode.outputs.full != 'false'
 

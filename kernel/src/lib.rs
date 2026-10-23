@@ -58,6 +58,7 @@ pub mod ops;
 pub mod placed;
 pub mod self_intersect;
 pub mod sketch;
+pub mod step_write;
 pub mod stl;
 pub mod store;
 pub mod tessellate;

@@ -1,0 +1,234 @@
+ISO-10303-21;
+/* A 1 x 1 x 1 cube from (0,0,0) to (1,1,1), as make_box(1, 1, 1) builds it,
+   written by step_write::write and checked line by line by hand
+   (kernel/src/step_write.rs, unit_cube_file_is_the_hand_checked_one, strips
+   these comments and needs the rest to match the writer's output exactly;
+   prototypes/oracle/test_step_check.py reads this file with OpenCascade:
+   valid, volume 1, area 6, six faces). Vertex k is (bit 0, bit 1, bit 2 of
+   k): v0 (0,0,0), v1 (1,0,0), v2 (0,1,0), v3 (1,1,0), v4 (0,0,1),
+   v5 (1,0,1), v6 (0,1,1), v7 (1,1,1). */
+/* No date or author, so the same body always gives the same file. The
+   schema is AP214's (AUTOMOTIVE_DESIGN), which every STEP reader knows. */
+HEADER;
+FILE_DESCRIPTION(('Panosolid body'),'2;1');
+FILE_NAME('body.step','',(''),(''),'Panosolid','Panosolid','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
+ENDSEC;
+DATA;
+/* #1-#8: the product a reader looks for, and its shape (#8), which #169
+   ties to the solid's representation. */
+#1 = APPLICATION_CONTEXT('automotive design');
+#2 = APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#1);
+#3 = PRODUCT_CONTEXT('',#1,'mechanical');
+#4 = PRODUCT('body','body','',(#3));
+#5 = PRODUCT_DEFINITION_CONTEXT('part definition',#1,'design');
+#6 = PRODUCT_DEFINITION_FORMATION('','',#4);
+#7 = PRODUCT_DEFINITION('design','',#6,#5);
+#8 = PRODUCT_DEFINITION_SHAPE('','',#7);
+/* #9-#13: lengths in millimetres (the kernel's unit), angles in radians,
+   and the uncertainty 1.E-5 mm = tolerance::LINEAR (10 nm), all in the
+   context #13 the representation #168 uses. */
+#9 = (LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#10 = (NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));
+#11 = (NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT());
+#12 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-5),#9,'distance_accuracy_value','Panosolid LINEAR');
+#13 = (GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#12)) GLOBAL_UNIT_ASSIGNED_CONTEXT((#9,#10,#11)) REPRESENTATION_CONTEXT('',''));
+/* #14-#29: the eight vertices v0..v7 in order, a point and a vertex
+   each: #15 v0, #17 v1, #19 v2, #21 v3, #23 v4, #25 v5, #27 v6, #29 v7. */
+#14 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#15 = VERTEX_POINT('',#14);
+#16 = CARTESIAN_POINT('',(1.0,0.0,0.0));
+#17 = VERTEX_POINT('',#16);
+#18 = CARTESIAN_POINT('',(0.0,1.0,0.0));
+#19 = VERTEX_POINT('',#18);
+#20 = CARTESIAN_POINT('',(1.0,1.0,0.0));
+#21 = VERTEX_POINT('',#20);
+#22 = CARTESIAN_POINT('',(0.0,0.0,1.0));
+#23 = VERTEX_POINT('',#22);
+#24 = CARTESIAN_POINT('',(1.0,0.0,1.0));
+#25 = VERTEX_POINT('',#24);
+#26 = CARTESIAN_POINT('',(0.0,1.0,1.0));
+#27 = VERTEX_POINT('',#26);
+#28 = CARTESIAN_POINT('',(1.0,1.0,1.0));
+#29 = VERTEX_POINT('',#28);
+/* #30-#89: the twelve edges, five lines each: the start point (always
+   the start vertex), the unit direction, a vector of length 1 along it,
+   the line, and the edge from the lower-numbered vertex to the higher.
+   The two ends differ in one coordinate, the higher vertex having the 1,
+   so each direction is +X, +Y or +Z:
+   #34 v0-v2 +Y, #39 v2-v3 +X, #44 v1-v3 +Y, #49 v0-v1 +X,
+   #54 v4-v5 +X, #59 v5-v7 +Y, #64 v6-v7 +X, #69 v4-v6 +Y,
+   #74 v1-v5 +Z, #79 v0-v4 +Z, #84 v2-v6 +Z, #89 v3-v7 +Z. */
+#30 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#31 = DIRECTION('',(0.0,1.0,0.0));
+#32 = VECTOR('',#31,1.0);
+#33 = LINE('',#30,#32);
+#34 = EDGE_CURVE('',#15,#19,#33,.T.);
+#35 = CARTESIAN_POINT('',(0.0,1.0,0.0));
+#36 = DIRECTION('',(1.0,0.0,0.0));
+#37 = VECTOR('',#36,1.0);
+#38 = LINE('',#35,#37);
+#39 = EDGE_CURVE('',#19,#21,#38,.T.);
+#40 = CARTESIAN_POINT('',(1.0,0.0,0.0));
+#41 = DIRECTION('',(0.0,1.0,0.0));
+#42 = VECTOR('',#41,1.0);
+#43 = LINE('',#40,#42);
+#44 = EDGE_CURVE('',#17,#21,#43,.T.);
+#45 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#46 = DIRECTION('',(1.0,0.0,0.0));
+#47 = VECTOR('',#46,1.0);
+#48 = LINE('',#45,#47);
+#49 = EDGE_CURVE('',#15,#17,#48,.T.);
+#50 = CARTESIAN_POINT('',(0.0,0.0,1.0));
+#51 = DIRECTION('',(1.0,0.0,0.0));
+#52 = VECTOR('',#51,1.0);
+#53 = LINE('',#50,#52);
+#54 = EDGE_CURVE('',#23,#25,#53,.T.);
+#55 = CARTESIAN_POINT('',(1.0,0.0,1.0));
+#56 = DIRECTION('',(0.0,1.0,0.0));
+#57 = VECTOR('',#56,1.0);
+#58 = LINE('',#55,#57);
+#59 = EDGE_CURVE('',#25,#29,#58,.T.);
+#60 = CARTESIAN_POINT('',(0.0,1.0,1.0));
+#61 = DIRECTION('',(1.0,0.0,0.0));
+#62 = VECTOR('',#61,1.0);
+#63 = LINE('',#60,#62);
+#64 = EDGE_CURVE('',#27,#29,#63,.T.);
+#65 = CARTESIAN_POINT('',(0.0,0.0,1.0));
+#66 = DIRECTION('',(0.0,1.0,0.0));
+#67 = VECTOR('',#66,1.0);
+#68 = LINE('',#65,#67);
+#69 = EDGE_CURVE('',#23,#27,#68,.T.);
+#70 = CARTESIAN_POINT('',(1.0,0.0,0.0));
+#71 = DIRECTION('',(0.0,0.0,1.0));
+#72 = VECTOR('',#71,1.0);
+#73 = LINE('',#70,#72);
+#74 = EDGE_CURVE('',#17,#25,#73,.T.);
+#75 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#76 = DIRECTION('',(0.0,0.0,1.0));
+#77 = VECTOR('',#76,1.0);
+#78 = LINE('',#75,#77);
+#79 = EDGE_CURVE('',#15,#23,#78,.T.);
+#80 = CARTESIAN_POINT('',(0.0,1.0,0.0));
+#81 = DIRECTION('',(0.0,0.0,1.0));
+#82 = VECTOR('',#81,1.0);
+#83 = LINE('',#80,#82);
+#84 = EDGE_CURVE('',#19,#27,#83,.T.);
+#85 = CARTESIAN_POINT('',(1.0,1.0,0.0));
+#86 = DIRECTION('',(0.0,0.0,1.0));
+#87 = VECTOR('',#86,1.0);
+#88 = LINE('',#85,#87);
+#89 = EDGE_CURVE('',#21,#29,#88,.T.);
+/* #90-#161: the six faces, eleven lines each: the plane (origin = the
+   face's first corner, axis = outward normal, ref = any_perpendicular of
+   the normal: n x X, or n x Y when |n.x| >= 0.9), four oriented edges
+   (.F. = walked from its higher vertex to its lower), the loop, its bound
+   and the face (.T.: outward normal = the plane's axis).
+   Bottom, normal -Z, ref -Z x X = (0,-1,0): v0 v2 v3 v1 = #34 +, #39 +,
+   #44 - (v3 to v1), #49 - (v1 to v0). Seen from below, where x runs
+   right to left, that is counter-clockwise. */
+#90 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#91 = DIRECTION('',(0.0,0.0,-1.0));
+#92 = DIRECTION('',(0.0,-1.0,0.0));
+#93 = AXIS2_PLACEMENT_3D('',#90,#91,#92);
+#94 = PLANE('',#93);
+#95 = ORIENTED_EDGE('',*,*,#34,.T.);
+#96 = ORIENTED_EDGE('',*,*,#39,.T.);
+#97 = ORIENTED_EDGE('',*,*,#44,.F.);
+#98 = ORIENTED_EDGE('',*,*,#49,.F.);
+#99 = EDGE_LOOP('',(#95,#96,#97,#98));
+#100 = FACE_BOUND('',#99,.T.);
+#101 = ADVANCED_FACE('',(#100),#94,.T.);
+/* Top, normal +Z, ref Z x X = +Y, origin v4: v4 v5 v7 v6 = #54 +, #59 +,
+   #64 - (v7 to v6), #69 - (v6 to v4): counter-clockwise from above. */
+#102 = CARTESIAN_POINT('',(0.0,0.0,1.0));
+#103 = DIRECTION('',(0.0,0.0,1.0));
+#104 = DIRECTION('',(0.0,1.0,0.0));
+#105 = AXIS2_PLACEMENT_3D('',#102,#103,#104);
+#106 = PLANE('',#105);
+#107 = ORIENTED_EDGE('',*,*,#54,.T.);
+#108 = ORIENTED_EDGE('',*,*,#59,.T.);
+#109 = ORIENTED_EDGE('',*,*,#64,.F.);
+#110 = ORIENTED_EDGE('',*,*,#69,.F.);
+#111 = EDGE_LOOP('',(#107,#108,#109,#110));
+#112 = FACE_BOUND('',#111,.T.);
+#113 = ADVANCED_FACE('',(#112),#106,.T.);
+/* Front, normal -Y, ref -Y x X = +Z (written -0.0,0.0,1.0: the cross
+   product's x is -0 exactly), origin v0: v0 v1 v5 v4 = #49 +, #74 +,
+   #54 - (v5 to v4), #79 - (v4 to v0). Seen from -Y, x is right and z up:
+   (0,0) (1,0) (1,1) (0,1), counter-clockwise. */
+#114 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#115 = DIRECTION('',(0.0,-1.0,0.0));
+#116 = DIRECTION('',(-0.0,0.0,1.0));
+#117 = AXIS2_PLACEMENT_3D('',#114,#115,#116);
+#118 = PLANE('',#117);
+#119 = ORIENTED_EDGE('',*,*,#49,.T.);
+#120 = ORIENTED_EDGE('',*,*,#74,.T.);
+#121 = ORIENTED_EDGE('',*,*,#54,.F.);
+#122 = ORIENTED_EDGE('',*,*,#79,.F.);
+#123 = EDGE_LOOP('',(#119,#120,#121,#122));
+#124 = FACE_BOUND('',#123,.T.);
+#125 = ADVANCED_FACE('',(#124),#118,.T.);
+/* Back, normal +Y, ref Y x X = -Z, origin v2: v2 v6 v7 v3 = #84 +, #64 +,
+   #89 - (v7 to v3), #39 - (v3 to v2). Seen from +Y, right is -x and up
+   is z: (0,0) (0,1) (-1,1) (-1,0), shoelace area +1, counter-clockwise. */
+#126 = CARTESIAN_POINT('',(0.0,1.0,0.0));
+#127 = DIRECTION('',(0.0,1.0,0.0));
+#128 = DIRECTION('',(0.0,0.0,-1.0));
+#129 = AXIS2_PLACEMENT_3D('',#126,#127,#128);
+#130 = PLANE('',#129);
+#131 = ORIENTED_EDGE('',*,*,#84,.T.);
+#132 = ORIENTED_EDGE('',*,*,#64,.T.);
+#133 = ORIENTED_EDGE('',*,*,#89,.F.);
+#134 = ORIENTED_EDGE('',*,*,#39,.F.);
+#135 = EDGE_LOOP('',(#131,#132,#133,#134));
+#136 = FACE_BOUND('',#135,.T.);
+#137 = ADVANCED_FACE('',(#136),#130,.T.);
+/* Left, normal -X, ref -X x Y = -Z, origin v0: v0 v4 v6 v2 = #79 +, #69 +,
+   #84 - (v6 to v2), #34 - (v2 to v0). Seen from -X, right is -y and up
+   is z: (0,0) (0,1) (-1,1) (-1,0), counter-clockwise. */
+#138 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#139 = DIRECTION('',(-1.0,0.0,0.0));
+#140 = DIRECTION('',(0.0,0.0,-1.0));
+#141 = AXIS2_PLACEMENT_3D('',#138,#139,#140);
+#142 = PLANE('',#141);
+#143 = ORIENTED_EDGE('',*,*,#79,.T.);
+#144 = ORIENTED_EDGE('',*,*,#69,.T.);
+#145 = ORIENTED_EDGE('',*,*,#84,.F.);
+#146 = ORIENTED_EDGE('',*,*,#34,.F.);
+#147 = EDGE_LOOP('',(#143,#144,#145,#146));
+#148 = FACE_BOUND('',#147,.T.);
+#149 = ADVANCED_FACE('',(#148),#142,.T.);
+/* Right, normal +X, ref X x Y = +Z, origin v1: v1 v3 v7 v5 = #44 +, #89 +,
+   #59 - (v7 to v5), #74 - (v5 to v1). Seen from +X, right is y and up
+   is z: (0,0) (1,0) (1,1) (0,1), counter-clockwise.
+   Each of the twelve edges is now walked once each way: #34 bottom + left
+   -, #39 bottom + back -, #44 right + bottom -, #49 front + bottom -,
+   #54 top + front -, #59 top + right -, #64 back + top -, #69 left + top -,
+   #74 front + right -, #79 left + front -, #84 back + left -,
+   #89 right + back -. */
+#150 = CARTESIAN_POINT('',(1.0,0.0,0.0));
+#151 = DIRECTION('',(1.0,0.0,0.0));
+#152 = DIRECTION('',(0.0,0.0,1.0));
+#153 = AXIS2_PLACEMENT_3D('',#150,#151,#152);
+#154 = PLANE('',#153);
+#155 = ORIENTED_EDGE('',*,*,#44,.T.);
+#156 = ORIENTED_EDGE('',*,*,#89,.T.);
+#157 = ORIENTED_EDGE('',*,*,#59,.F.);
+#158 = ORIENTED_EDGE('',*,*,#74,.F.);
+#159 = EDGE_LOOP('',(#155,#156,#157,#158));
+#160 = FACE_BOUND('',#159,.T.);
+#161 = ADVANCED_FACE('',(#160),#154,.T.);
+/* The shell of the six faces, the solid, and its representation in the
+   context #13 with the world placement #167 (origin, Z up, X along); #169
+   gives the product's shape #8 this representation. */
+#162 = CLOSED_SHELL('',(#101,#113,#125,#137,#149,#161));
+#163 = MANIFOLD_SOLID_BREP('body',#162);
+#164 = CARTESIAN_POINT('',(0.0,0.0,0.0));
+#165 = DIRECTION('',(0.0,0.0,1.0));
+#166 = DIRECTION('',(1.0,0.0,0.0));
+#167 = AXIS2_PLACEMENT_3D('',#164,#165,#166);
+#168 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#167,#163),#13);
+#169 = SHAPE_DEFINITION_REPRESENTATION(#8,#168);
+ENDSEC;
+END-ISO-10303-21;
