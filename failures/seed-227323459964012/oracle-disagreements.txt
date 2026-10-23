@@ -1,0 +1,30 @@
+line 844: {"Extrude": {"dist": "49.5", "expect": true, "holes": [{"Path": {"bulges": [], "pts": [["206.0932611422215", "6.5"], ["206.09436114222152", "6.5"], ["206.09436114222152", "6.5011"], ["206.0932611422215", "6.5011"]]}}], "outer": {"Path": {"bulges": ["0.43382342911385896", "0.43382342911385896"], "pts": [["206.06104029561592", "6.5"], ["206.1254819888271", "6.5"]]}}}}
+  step validity: BRepCheck: invalid (faces [3], counted in file order) (moved home and blown up 32 times)
+  step volume: OpenCascade read -0.14027946733862096 from the file, exact 0.06157242583654156, allowed 3.15e-06 (moved home and blown up 32 times)
+  step area: OpenCascade read -6.351104342118677 from the file, exact 7.3725438180674345, allowed 0.00186 (moved home and blown up 32 times)
+occ-rounding, line 194: {"Sphere": {"r": "0.0038946835526663735"}}
+  step validity: BRepCheck: invalid (faces [0, 1], counted in file order) (as written; passes moved home by (98999999.00011556, 125433.87306879349, 49.50015648857821))
+occ-rounding, line 949: {"Extrude": {"dist": "84.5", "expect": null, "holes": [], "outer": {"Circle": {"c": ["99999999.0", "13.0"], "r": "0.001"}}, "sketch": 6130761055007463230}}
+  step validity: BRepCheck: invalid (faces [1, 2], counted in file order) (as written; passes moved home by (-33333352.11734639, 24401201.04431632, 91068353.2246362))
+occ-rounding, line 1009: {"Sphere": {"r": "0.005360777693989362"}}
+  step validity: BRepCheck: invalid (faces [0, 1], counted in file order) (as written; passes moved home by (-12.5, -290.9696973623596, -50000000.00321647))
+occ-rounding, line 1102: {"Extrude": {"dist": "68.0", "expect": true, "holes": [], "outer": {"Circle": {"c": ["515.7920490539643", "-690.5069615586644"], "r": "0.0011"}}}}
+  OpenCascade's small-feature limit: step validity: BRepCheck: invalid (faces [0, 2], counted in file order) (moved home and blown up 1024 times)
+occ-rounding, line 1105: {"Extrude": {"dist": "27.000011", "expect": null, "holes": [], "outer": {"Path": {"bulges": ["0.0", "-1.0", "0.0", "-1.0"], "pts": [["12.0", "-13.498"], ["14304.901372358892", "-13.498"], ["14304.901372358892", "-13.5"], ["12.0", "-13.5"]]}}, "sketch": 12305413307011025908}}
+  OpenCascade's small-feature limit: step validity: BRepCheck: invalid (faces [4], counted in file order) (blown up 1024 times)
+  OpenCascade's small-feature limit: step area: OpenCascade read 771874.1601629811 from the file, exact 771874.3298090554, allowed 0.000914 (blown up 1024 times)
+occ-rounding, line 1264: {"Extrude": {"dist": "1131.1725059722344", "expect": true, "holes": [{"Circle": {"c": ["-395.49378898972964", "338.6970757202094"], "r": "0.0011"}}, {"Circle": {"c": ["-330.7304198977987", "338.6970757202094"], "r": "0.0011"}}], "outer": {"Path": {"bulges": [], "pts": [["-460.2560580816605", "403.4593448121403"], ["-265.9681508058678", "403.4593448121403"], ["-265.9681508058678", "273.93480662827847"], ["-460.2560580816605", "273.93480662827847"]]}}}}
+  step validity: BRepCheck: invalid (faces [0, 1, 6, 7], counted in file order) (as written; passes moved home by (-62448243.842029944, 0.0, 0.0))
+occ-rounding, line 2294: {"Cylinder": {"h": "8.0", "r": "0.0010000000000012221"}}
+  step validity: BRepCheck: invalid (faces [0, 2], counted in file order) (as written; passes moved home and blown up 1024 times)
+  step validity: BRepCheck: invalid (as written; passes moved home and blown up 1024 times)
+occ-rounding, line 2813: {"Extrude": {"dist": "71.0", "expect": null, "holes": [], "outer": {"Path": {"bulges": ["-1.0", "-0.0", "-1.0", "-0.0"], "pts": [["42.5", "42.5"], ["42.5", "42.502"], ["119.0", "42.502"], ["119.0", "42.5"]]}}}}
+  step validity: BRepCheck: invalid (faces [5], counted in file order) (as written; passes moved home and blown up 1024 times)
+  step validity: BRepCheck: invalid (faces [5], counted in file order) (as written; passes moved home and blown up 1024 times)
+occ-rounding, line 3029: {"Sphere": {"r": "0.0011528051213997507"}}
+  step validity: BRepCheck: invalid (faces [0, 1], counted in file order) (as written; passes moved home by (-12067745.566718359, -37688777.924565814, 14357282.074248664))
+occ-rounding, line 3614: {"Extrude": {"dist": "94.0", "expect": true, "holes": [{"Circle": {"c": ["49.0011", "-258.8023998593905"], "r": "0.0011"}}, {"Circle": {"c": ["78.5033", "-258.8023998593905"], "r": "0.0011"}}, {"Circle": {"c": ["108.0055", "-258.8023998593905"], "r": "0.0011"}}], "outer": {"Path": {"bulges": [], "pts": [["19.5", "-229.3012998593905"], ["137.5066", "-229.3012998593905"], ["137.5066", "-288.3034998593905"], ["19.5", "-288.3034998593905"]]}}}}
+  step validity: BRepCheck: invalid (faces [6, 7, 8], counted in file order) (as written; passes moved home and blown up 1024 times)
+  step validity: BRepCheck: invalid (faces [6, 7, 8], counted in file order) (as written; passes moved home and blown up 1024 times)
+occ-rounding, line 4066: {"Extrude": {"dist": "8751.414503561144", "expect": true, "holes": [], "outer": {"Circle": {"c": ["5.5", "618.5660209870582"], "r": "0.0011"}}}}
+  OpenCascade's small-feature limit: step validity: BRepCheck: invalid (faces [1, 2], counted in file order) (moved home and blown up 1024 times)

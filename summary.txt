@@ -1,12 +1,12 @@
-Panosolid random testing, all runs so far (updated 2026-10-23 15:44 UTC)
+Panosolid random testing, all runs so far (updated 2026-10-23 16:59 UTC)
 
-hours of testing:                 943.6
-rounds:                           16521
-random operation chains:          33042000
+hours of testing:                 946.4
+rounds:                           16566
+random operation chains:          33132000
 rounds where the harness failed:  583
-bodies compared with OpenCascade: 67567673
-OpenCascade disagreements:        346
-last problem found:               2026-10-22 05:31:27 (seed 151249361384487, commit 1c26768 on claude/project-thread-uzoch4)
+bodies compared with OpenCascade: 67767349
+OpenCascade disagreements:        444
+last problem found:               2026-10-23 16:58:58 (seed 279407479666350, commit 6dd9a6b on claude/project-thread-tgetbe)
 
 Every round is a line in log.csv. Each round that found a problem has a
 folder in failures/ named after its seed: report.txt says what went wrong,
@@ -22,9 +22,9 @@ Latest mutation run (whole kernel, lib tests), 2026-10-22 22:37 UTC, commit 0f57
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 9295960 on claude/project-thread-mojaro, 2026-10-23 15:44 UTC (https://github.com/Panosolid/fission/actions/runs/39970939404)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 0.91 s (baseline 1.23 s)
-  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 4.67 s (baseline 9.70 s)
+  tested commit 6dd9a6b on claude/project-thread-tgetbe, 2026-10-23 16:59 UTC (https://github.com/Panosolid/fission/actions/runs/39982143782)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.11 s (baseline 1.23 s)
+  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 5.64 s (baseline 9.70 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
@@ -33,35 +33,35 @@ Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, 
 journeys/flags.txt lists every FLAG line so far.
 
 Latest golden models run (tests/golden rebuilt and checked against their hand-worked answers, timed against tests/baseline.json; a failing model files a random-testing issue):
-  tested commit 9295960 on claude/project-thread-mojaro, 2026-10-23 15:44 UTC (https://github.com/Panosolid/fission/actions/runs/39970939404)
-  seed 1792766181, 50 rounds of 6 models; every answer right and the same every round; replay: FISSION_SEED=1792766181 FISSION_GOLDEN_ROUNDS=50 npm run golden -w @fission/testing (after npm run kernel -w @fission/app)
-  bracket-two-holes: 50 rebuilds, fastest 2.2 ms, slowest 3.4 ms, OK
-  enclosure: 50 rebuilds, fastest 1.3 ms, slowest 4.2 ms, OK
-  gear: 50 rebuilds, fastest 12.7 ms, slowest 20.7 ms, OK
+  tested commit 6dd9a6b on claude/project-thread-tgetbe, 2026-10-23 16:59 UTC (https://github.com/Panosolid/fission/actions/runs/39982143782)
+  seed 1792771288, 50 rounds of 6 models; every answer right and the same every round; replay: FISSION_SEED=1792771288 FISSION_GOLDEN_ROUNDS=50 npm run golden -w @fission/testing (after npm run kernel -w @fission/app)
+  bracket-two-holes: 50 rebuilds, fastest 2.4 ms, slowest 20.2 ms, OK
+  enclosure: 50 rebuilds, fastest 1.6 ms, slowest 9.2 ms, OK
+  gear: 50 rebuilds, fastest 14.7 ms, slowest 26.4 ms, OK
   l-bracket: 50 rebuilds, fastest 0.4 ms, slowest 1.0 ms, OK
-  stepped-boss: 50 rebuilds, fastest 2.1 ms, slowest 5.4 ms, OK
-  thirty-features: 50 rebuilds, fastest 8.5 ms, slowest 38.2 ms, OK
+  stepped-boss: 50 rebuilds, fastest 2.5 ms, slowest 4.5 ms, OK
+  thirty-features: 50 rebuilds, fastest 9.9 ms, slowest 26.9 ms, OK
   | metric | baseline | now | change | |
   | app.golden_bracket_two_holes.kernel_calls | 2 | 2 | +0.0% |  |
-  | app.golden_bracket_two_holes.relative_time | 0.0409 | 0.0406 | -0.7% |  |
+  | app.golden_bracket_two_holes.relative_time | 0.0409 | 0.0355 | -13.2% |  |
   | app.golden_enclosure.kernel_calls | 14 | 14 | +0.0% |  |
-  | app.golden_enclosure.relative_time | 0.0284 | 0.0237 | -16.5% | better: lower the baseline? |
+  | app.golden_enclosure.relative_time | 0.0284 | 0.0224 | -21.1% | better: lower the baseline? |
   | app.golden_gear.kernel_calls | 3 | 3 | +0.0% |  |
-  | app.golden_gear.relative_time | 0.2412 | 0.2404 | -0.3% |  |
+  | app.golden_gear.relative_time | 0.2412 | 0.2198 | -8.9% |  |
   | app.golden_l_bracket.kernel_calls | 3 | 3 | +0.0% |  |
-  | app.golden_l_bracket.relative_time | 0.0065 | 0.0055 | -15.4% | better: lower the baseline? |
+  | app.golden_l_bracket.relative_time | 0.0065 | 0.005 | -23.1% | better: lower the baseline? |
   | app.golden_models.failed_percent | 0 | 0 | - |  |
   | app.golden_stepped_boss.kernel_calls | 8 | 8 | +0.0% |  |
-  | app.golden_stepped_boss.relative_time | 0.039 | 0.0387 | -0.8% |  |
+  | app.golden_stepped_boss.relative_time | 0.039 | 0.0357 | -8.5% |  |
   | app.golden_thirty_features.kernel_calls | 47 | 47 | +0.0% |  |
-  | app.golden_thirty_features.relative_time | 0.1632 | 0.1614 | -1.1% |  |
+  | app.golden_thirty_features.relative_time | 0.1632 | 0.1434 | -12.1% |  |
   0 metric(s) failed, 0 flagged, 2 better.
 golden/log.txt has one line per night.
 
 Latest TypeScript mutation run (packages/testing/stryker, survivors must be killed or explained):
-  tested commit 9295960 on claude/project-thread-mojaro, 2026-10-23 15:44 UTC (https://github.com/Panosolid/fission/actions/runs/39970939404)
+  tested commit 6dd9a6b on claude/project-thread-tgetbe, 2026-10-23 16:59 UTC (https://github.com/Panosolid/fission/actions/runs/39982143782)
   core: 8 survivors, all explained: true
-  design: 11 survivors, all explained: true
+  design: no report (the job stopped before the check)
   UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight && storedVersion === version => true
   UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | LogicalOperator | timer === null && !inFlight && storedVersion === version => timer === null && !inFlight || storedVersion === version
   UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight => true
