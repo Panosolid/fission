@@ -28,7 +28,7 @@
 // `FAULTS` are planted bugs (a Design bug or a kernel bug, simulated in
 // the driver) that the journey shows each check catching.
 
-import { emptyProject, projectFromJson, projectToJson, type BodyView, type KernelCalls, type Outline } from "@fission/core";
+import { emptyProject, projectFromJson, projectToJson, type BodyHandle, type BodySpec, type BodyView, type KernelCalls, type Outline } from "@fission/core";
 import {
   addSketch,
   buildSpec,
@@ -409,6 +409,9 @@ export interface OracleLine {
   model_volume: number;
   model_area: number;
   context: string;
+  /** The built body's STEP file (step 29b3, `body_step`), or why the kernel wouldn't write it. */
+  step: string | null;
+  step_refused: string | null;
 }
 
 /** The kernel's outline in the oracle's terms: a path of corners and bulges, or a circle. */
@@ -564,6 +567,7 @@ async function check(
   if (s.shape.kind === "circle" || s.shape.sagitta.some((x) => x !== 0)) result.curved++;
   if (oracle && "extrude" in spec.ok) {
     const { profile, distance } = spec.ok.extrude;
+    const { step, step_refused } = await stepFile(kernel, spec.ok);
     oracle({
       shape: { Extrude: { outer: oracleRing(profile.outer), holes: profile.holes.map(oracleRing), dist: distance } },
       fission_volume: body.volume,
@@ -572,9 +576,24 @@ async function check(
       model_volume: volume,
       model_area: area,
       context,
+      step,
+      step_refused,
     });
   }
   return null;
+}
+
+/** The body `spec` builds as a STEP file, from a body kept just for it (and freed), or why the kernel refused. */
+async function stepFile(kernel: KernelCalls, spec: BodySpec): Promise<{ step: string | null; step_refused: string | null }> {
+  let handle: BodyHandle | undefined;
+  try {
+    handle = await kernel.call("body_build", spec);
+    return { step: await kernel.call("body_step", handle), step_refused: null };
+  } catch (e) {
+    return { step: null, step_refused: e instanceof Error ? e.message : String(e) };
+  } finally {
+    if (handle !== undefined) await kernel.call("body_free", handle);
+  }
 }
 
 /** The seed of session i of a run started from `seed` (each session replays on its own from its seed). */

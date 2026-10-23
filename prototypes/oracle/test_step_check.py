@@ -161,6 +161,31 @@ class StepCheck(unittest.TestCase):
         self.assertFails(edit(text("sphere_r2.step"), "#36 = ORIENTED_EDGE('',*,*,#21,.F.);",
                               "#36 = ORIENTED_EDGE('',*,*,#21,.T.);"), "BRepCheck")
 
+    def test_a_pcurve_fitted_a_turn_away_is_moved_back(self):
+        # Found by 29b3's rerun of the stateful harness (seed 12345, 2,000
+        # cases, line 3913), kept moved home in regressions/: a part 28
+        # long whose outline is two arcs of radius 0.164 bulging 0.588
+        # with a 1.1 µm square hole. The kernel's exact volume is
+        # 0.9630141254075874 (exact.py agrees); without FixShifted
+        # OpenCascade fits one arc's pcurve a turn away and reads the file
+        # invalid with 2.54. FixShifted only moves a pcurve by the period.
+        import step_check
+        path = os.path.join(os.path.dirname(__file__), "regressions", "shifted-pcurve-arc.step")
+        with open(path) as f:
+            t = f.read()
+        r = self.check(t)
+        self.assertEqual(r.problems, [])
+        # OpenCascade measures it 2.1e-9 off; the harness allowed this body
+        # 1.71e-6, for its rounding where it was placed (6 km out).
+        self.assertLess(abs(r.volume - 0.9630141254075874), 1e-8)
+        try:
+            step_check.WIRE_ON = step_check.WIRE_ON - {"FixShiftedMode"}
+            off = self.check(t)
+        finally:
+            step_check.WIRE_ON = step_check.WIRE_ON | {"FixShiftedMode"}
+        self.assertTrue(any("BRepCheck" in p for p in off.problems), off.problems)
+        self.assertGreater(off.volume, 2.0)
+
     def test_the_normal_reader_would_have_hidden_the_flipped_normal(self):
         # Why step_check translates without OpenCascade's repairs: read
         # through its normal STEP reader, the face with its normal flipped

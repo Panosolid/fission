@@ -77,6 +77,7 @@ test("the report file_issues.py reads: a first line naming the night, then one l
     models: 2,
     lines: [],
     orders: [["gear", "l-bracket"], ["l-bracket", "gear"]],
+    steps: [],
     failures: [
       { model: "l-bracket", round: 1, problems: ["Body 1 (feature-15): volume 2, not 1 (1)", "a save and reopen changed it"] },
       { model: "gear", round: 2, problems: ["rebuilt differently in round 2 than in round 1: bodies[0].volume:\n  1 then 2"] },

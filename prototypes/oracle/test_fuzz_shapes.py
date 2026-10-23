@@ -130,5 +130,80 @@ class WithOpenCascade(unittest.TestCase):
         self.assertIn("validity: occ calls it invalid, but no two pieces meet at 50 digits", occ_only)
 
 
+HERE = os.path.dirname(__file__)
+
+
+def read(*parts):
+    with open(os.path.join(HERE, *parts)) as f:
+        return f.read()
+
+
+def flip_first_face(text):
+    """The planted fault FISSION_STEP_FAULT makes (kernel/tests/support/step_file.rs):
+    the first ADVANCED_FACE's same_sense swapped."""
+    lines = text.split("\n")
+    k = next(i for i, l in enumerate(lines) if "= ADVANCED_FACE(" in l)
+    head, sense = lines[k][:-len(".T.);")], lines[k][-len(".T.);"):]
+    lines[k] = head + (".F.);" if sense == ".T.);" else ".T.);")
+    return "\n".join(lines)
+
+
+def regression(name):
+    import json
+    return {**json.loads(read("regressions", name + ".json")), "step": read("regressions", name + ".step")}
+
+
+@unittest.skipUnless(HAVE_OCC, "needs cadquery-ocp")
+class StepFiles(unittest.TestCase):
+    """Step 29b3: each fuzz body's STEP file, judged as compare.py judges
+    the stateful harness's (`step_issues`)."""
+
+    def setUp(self):
+        import compare
+        self.occ = compare
+        # A unit square extruded 1 is the unit cube: V = 1, S = 6, six
+        # faces, and its file the hand-checked kernel/tests/step/unit_cube.step.
+        square = {"Extrude": {"outer": path([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]), "holes": [], "dist": "1.0"}}
+        self.cube = {**case(square, 1.0, 6.0, 6, [0.0] * 3, [1.0] * 3), "step": read("..", "..", "kernel", "tests", "step", "unit_cube.step"),
+                     "step_refused": None}
+
+    def test_the_unit_cubes_file_agrees(self):
+        self.assertEqual(fuzz_shapes.check(self.cube, self.occ), ([], []))
+
+    def test_a_flipped_face_or_a_refusal_is_a_finding(self):
+        issues = fuzz_shapes.check({**self.cube, "step": flip_first_face(self.cube["step"])}, self.occ)[0]
+        self.assertTrue(issues and all(i.startswith("step ") and i.endswith("(extrude: by hand)") for i in issues), issues)
+        self.assertTrue(any(i.startswith("step validity: BRepCheck") for i in issues), issues)
+        issues = fuzz_shapes.check({**self.cube, "step": None, "step_refused": "a body of 2 shells"}, self.occ)[0]
+        self.assertEqual(issues, ["step write refused: a body of 2 shells (extrude: by hand)"])
+
+    def test_a_planted_fault_in_an_ordinary_part_with_a_tiny_hole_is_found(self):
+        # Extrude seed 74: a 441 mm part, 3.125 thick, with a 7 µm hole.
+        # Its file reads valid; with its first cap planted flipped,
+        # OpenCascade's area is 6,095 for the exact 580,809, which a hole of
+        # radius 0.007 could account for at most 3 x (2 pi 0.007 L + 2 pi
+        # 0.007^2), about 63 mm^2 with L the 445 mm diagonal: a finding,
+        # where a radius under SMALL_FEATURE once excused anything.
+        good = regression("small-hole-441mm-part")
+        self.assertEqual(fuzz_shapes.check(good, self.occ)[0], [])
+        issues, occ_only = fuzz_shapes.check({**good, "step": flip_first_face(good["step"])}, self.occ)
+        self.assertTrue(any(i.startswith("step area:") for i in issues), issues)
+        self.assertFalse(any(self.occ.SMALL_LIMIT in o for o in occ_only), occ_only)
+
+    def test_opencascades_own_invalid_rebuild_excuses_its_verdict_on_the_file_only(self):
+        # Sketch seed 720: a near-full arc of radius 110 m beside two half
+        # circles, nearly tangent. OpenCascade calls its own rebuild invalid
+        # though no two pieces meet at 50 digits, and calls the file's cap
+        # invalid too: its tolerance, listed. Planted flipped, the file's
+        # area is still wrong (692,548 for 7.6e10), so the fault is found.
+        good = regression("near-tangent-110m-arc")
+        issues, occ_only = fuzz_shapes.check(good, self.occ)
+        self.assertEqual(issues, [])
+        self.assertTrue(any(o.startswith(self.occ.OCC_TOLERANCE + ": step validity") for o in occ_only), occ_only)
+        issues = fuzz_shapes.check({**good, "step": flip_first_face(good["step"])}, self.occ)[0]
+        self.assertTrue(any(i.startswith("step area:") for i in issues), issues)
+        self.assertFalse(any(i.startswith("step validity") for i in issues), issues)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,12 @@
 // every-PR journey, one rebuild per model in file order, can't see. Last,
 // the kernel's body store must be empty, so no rebuild leaked a body.
 //
+// With `steps`, each shown body's STEP file is read from the kernel too
+// (step 29b3, `body_step`), the same text every round, and round 1's go
+// out as `GoldenNight.steps`, one line each with the model's hand-worked
+// volume, area and faces, for prototypes/oracle/golden_step.py to have
+// OpenCascade judge.
+//
 // A failure is written as a report that .github/scripts/file_issues.py
 // reads like a fuzzer's: a first line naming the run, then one
 // "failure: <model>: <first problem> | <the rest, the round, how to
@@ -15,8 +21,8 @@
 // `random-testing` issue.
 
 import type { BodyView, KernelCalls } from "@fission/core";
-import type { GoldenExpect, Measured } from "../src/golden.ts";
-import { checkGolden, firstDifference } from "./rebuild.ts";
+import { evaluate, type GoldenExpect, type Measured } from "../src/golden.ts";
+import { checkGolden, firstDifference, type GoldenStep } from "./rebuild.ts";
 import { seeded } from "../src/index.ts";
 
 export interface GoldenFailure {
@@ -36,6 +42,17 @@ export interface GoldenNight {
   lines: string[];
   /** Each round's order, for the report. */
   orders: string[][];
+  /** With `steps`: round 1's STEP file of every shown body, a line each for golden_step.py. */
+  steps: GoldenStepLine[];
+}
+
+/** One body's STEP file and its model's hand-worked answers for it (prototypes/oracle/golden_step.py reads these). */
+export interface GoldenStepLine extends GoldenStep {
+  model: string;
+  /** The hand-worked volume, area and face count (`BodyExpect`), evaluated; null for a body the model doesn't expect (its own failure already). */
+  volume: number | null;
+  area: number | null;
+  faces: number | null;
 }
 
 /**
@@ -76,12 +93,13 @@ export function shuffled<T>(items: readonly T[], next: () => number): T[] {
   return out;
 }
 
-export async function goldenNight(kernel: KernelCalls, models: readonly GoldenExpect[], seed: bigint, rounds: number): Promise<GoldenNight> {
+export async function goldenNight(kernel: KernelCalls, models: readonly GoldenExpect[], seed: bigint, rounds: number, options: { steps?: boolean } = {}): Promise<GoldenNight> {
   const random = seeded(seed);
   const first = new Map<string, Measured | null>();
   const failed = new Map<string, GoldenFailure>();
   const times = new Map<string, number[]>();
   const orders: string[][] = [];
+  const firstSteps = new Map<string, GoldenStep[]>();
   const fail = (model: string, round: number, problems: string[]) => {
     const f = failed.get(model);
     if (!f) failed.set(model, { model, round, problems: [...problems] });
@@ -91,13 +109,20 @@ export async function goldenNight(kernel: KernelCalls, models: readonly GoldenEx
     const order = shuffled(models, random.next);
     orders.push(order.map((m) => m.model));
     for (const want of order) {
-      const { problems, got, ms } = await checkGolden(want, kernel);
+      const { problems, got, ms, steps } = await checkGolden(want, kernel, options);
       (times.get(want.model) ?? times.set(want.model, []).get(want.model)!).push(ms);
       if (problems.length > 0) fail(want.model, round, problems);
       if (!first.has(want.model)) first.set(want.model, got);
       else {
         const d = firstDifference(first.get(want.model), got);
         if (d !== null) fail(want.model, round, [`rebuilt differently in round ${round} than in round 1: ${d}`]);
+      }
+      if (steps === undefined) continue;
+      const earlier = firstSteps.get(want.model);
+      if (!earlier) firstSteps.set(want.model, steps);
+      else {
+        const d = firstDifference(earlier, steps);
+        if (d !== null) fail(want.model, round, [`its STEP files were written differently in round ${round} than in round 1: ${d.slice(0, 300)}`]);
       }
     }
   }
@@ -108,7 +133,13 @@ export async function goldenNight(kernel: KernelCalls, models: readonly GoldenEx
     const ok = !failed.has(m.model);
     return `${m.model}: ${ms.length} rebuilds, fastest ${Math.min(...ms).toFixed(1)} ms, slowest ${Math.max(...ms).toFixed(1)} ms, ${ok ? "OK" : "FAILED"}`;
   });
-  return { seed, rounds, models: models.length, failures: [...failed.values()], lines, orders };
+  const stepLines = models.flatMap((m) =>
+    (firstSteps.get(m.model) ?? []).map((s) => {
+      const want = m.bodies.find((b) => b.item === s.item);
+      return { model: m.model, ...s, volume: want ? evaluate(want.volume.is) : null, area: want ? evaluate(want.area.is) : null, faces: want ? want.topology.faces : null };
+    }),
+  );
+  return { seed, rounds, models: models.length, failures: [...failed.values()], lines, orders, steps: stepLines };
 }
 
 /** The command that runs this night again. */

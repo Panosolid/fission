@@ -22,10 +22,11 @@
 //! `.cargo/mutants.toml`. The real WebAssembly build covers them, through
 //! the kernel bridge (`packages/testing/src/node-kernel.ts`, and the app's
 //! worker in the browser):
-//! - `body_build`, `body_view`, `body_stl`, `body_free`, `body_count`,
+//! - `body_build`, `body_view`, `body_stl`, `body_step`, `body_free`, `body_count`,
 //!   `js_error` and `from_js`: `packages/testing/journeys/body-store.journey.ts`
 //!   (a stored 40 × 30 × 20 box's volume is 24000 and its view and STL are
-//!   `make_box`'s and `export_stl`'s; the count goes up by one and back;
+//!   `make_box`'s and `export_stl`'s, and its STEP file has the box's
+//!   eight hand-worked corners; the count goes up by one and back;
 //!   each refusal's `kind` and `inputs`; seeded sessions against a model).
 //! - `make_box`, `make_cylinder`, `make_sphere`, `make_extrude` and
 //!   `to_js`: `packages/testing/journeys/command-fuzz.journey.ts` (3000
@@ -653,6 +654,14 @@ pub fn body_view(body: f64) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn body_stl(body: f64, name: &str) -> Result<JsValue, JsValue> {
     to_js(store::handle_from_js(body).and_then(|h| STORE.with_borrow(|s| s.stl(h, name))))
+}
+
+/// A kept body as a STEP AP214 file (`store::BodyStore::step`), placed
+/// where the app shows it: the oracle's way to read the app's bodies with
+/// OpenCascade (step 29b3).
+#[wasm_bindgen]
+pub fn body_step(body: f64) -> Result<JsValue, JsValue> {
+    to_js(store::handle_from_js(body).and_then(|h| STORE.with_borrow(|s| s.step(h))))
 }
 
 /// Lets a kept body go; its handle is refused from then on.

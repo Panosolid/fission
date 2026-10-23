@@ -23,8 +23,22 @@ Each body is checked three ways:
   corners, huge nearly-half circles), listed but not counted.
 OpenCascade's own volume and area are compared with the exact values too;
 where only it is off, that is its rounding: counted, not a finding.
+- the body itself, as the kernel holds it (step 29b3): its STEP file
+  ("step", or "step_refused" with the writer's words) read by OpenCascade
+  and judged as compare.py's `step_issues` judges the stateful harness's
+  bodies: valid with every tolerance within LINEAR, the kernel's faces,
+  and the exact volume and area to the same allowance; a refusal is a
+  finding; a body with a radius under compare.SMALL_FEATURE that
+  OpenCascade can't read in any copy, missed by no more than its small
+  features could hold, is listed under its small-feature limit, and where
+  OpenCascade's own rebuild is invalid too (above), its checker's verdict
+  on the file is listed under its tolerance; neither is counted. A line
+  without "step" (from before 29b3) skips it.
 
-Usage: python fuzz_shapes.py cases.jsonl [disagreements.txt]
+Usage: python fuzz_shapes.py cases.jsonl [disagreements.txt] [--planted]
+  --planted: the files were written with FISSION_STEP_FAULT (a face
+  flipped in every one): passes only when every body is a disagreement or
+  under compare.py's small-feature limit, and at least one is one.
 Needs: pip install cadquery-ocp mpmath
 """
 
@@ -142,7 +156,8 @@ def check(case, occ=None):
     met = crossings.crossings(shape) if kind == "Extrude" else []
     for k, i, kk, j, x in met[:3]:
         issues.append(f"validity: loop {k} piece {i} meets loop {kk} piece {j} at {x} {where}")
-    if not met and not analyzer_valid(solid):
+    occ_invalid = not met and not analyzer_valid(solid)
+    if occ_invalid:
         occ_only.append("validity: occ calls it invalid, but no two pieces meet at 50 digits")
     if kind == "Extrude":
         _, placed, _ = occ.build(shape)
@@ -156,7 +171,8 @@ def check(case, occ=None):
     for name, theirs, ref, slack in (("volume", vol, ev, vslack), ("area", area, ea, aslack)):
         if not abs(exact.mpf(theirs) - ref) <= slack:
             occ_only.append(f"{name}: occ {theirs!r}, exact {float(ref)!r}")
-    return issues, occ_only
+    more, more_occ = occ.step_issues({**case, "faces": case["fission_faces"]}, (vol, area), (ev, ea), (vslack, aslack), occ_invalid)
+    return issues + [f"{m} {where}" for m in more], occ_only + more_occ
 
 
 def analyzer_valid(solid):
@@ -166,12 +182,14 @@ def analyzer_valid(solid):
 
 def main():
     import compare
-    path = sys.argv[1]
-    out = sys.argv[2] if len(sys.argv) > 2 else None
-    total, bad, per, lines, occ_lines = 0, 0, Counter(), [], []
+    args = [a for a in sys.argv[1:] if a != "--planted"]
+    path = args[0]
+    out = args[1] if len(args) > 1 else None
+    total, bad, steps, per, lines, occ_lines = 0, 0, 0, Counter(), [], []
     with open(path) as f:
         for n, line in enumerate(f, 1):
             case = json.loads(line)
+            steps += case.get("step") is not None
             try:
                 issues, occ_only = check(case, compare)
             except Exception as e:  # an oracle crash is itself worth a look
@@ -185,14 +203,20 @@ def main():
             elif occ_only:
                 occ_lines.append(f"occ-rounding, line {n}: {json.dumps(case['shape'])}\n  " + "\n  ".join(occ_only))
     print(f"Fuzz oracle: {total} fuzz bodies compared with the exact values and OpenCascade, {bad} disagreement(s)")
-    print(f"  {len(occ_lines)} more where only OpenCascade disagreed with the exact values (its own rounding or tolerance, not counted)")
+    print(f"  {steps} of them also read from their STEP files and checked (step 29b3)")
+    small = sum(1 for l in occ_lines if compare.SMALL_LIMIT in l)
+    print(f"  {len(occ_lines) - small} more where only OpenCascade disagreed with the exact values (its own rounding or tolerance, not counted)")
+    print(f"  {small} more with a radius under {compare.SMALL_FEATURE} mm that OpenCascade couldn't read from the STEP file "
+          f"in any copy (its small-feature limit, not counted)")
     for k, v in sorted(per.items()):
         print(f"  {k:<8} {v}")
-    for l in lines[:20]:
-        print(l)
     if out:
         with open(out, "w") as f:
             f.write("\n".join(lines + occ_lines) + "\n")
+    for l in lines[:20]:
+        print(l)
+    if "--planted" in sys.argv[1:]:
+        sys.exit(0 if compare.planted_caught(total, bad, small) else 1)
     sys.exit(1 if bad else 0)
 
 

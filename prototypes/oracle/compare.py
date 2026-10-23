@@ -65,6 +65,12 @@ REL = 1e-9  # OpenCascade's exact mass properties vs exact-in-theory values
 # the largest radius seen failing (5 µm).
 SMALL_FEATURE = 0.01
 SMALL_LIMIT = "OpenCascade's small-feature limit"
+# A STEP body OpenCascade's own rebuild of the same shape calls invalid
+# too, though no two of its pieces meet (fuzz_shapes.py: its 1e-7 mm
+# tubes round each edge, near a sharp corner or a nearly tangent piece):
+# its checker's verdict on the file is its tolerance, not a finding
+# (`step_issues`); the file's faces, volume and area still count.
+OCC_TOLERANCE = "OpenCascade's tolerance (its own rebuild is invalid too)"
 
 
 def wire(ps, ccw):
@@ -175,7 +181,7 @@ def measure(shape):
     return vp.Mass(), sp.Mass(), lo_hi[:3], lo_hi[3:], faces
 
 
-def step_issues(case, rebuilt, ref, slack):
+def step_issues(case, rebuilt, ref, slack, occ_invalid=False):
     """The body as the kernel holds it, read from its STEP file (step 29b,
     kernel/src/step_write.rs, step_check.py): OpenCascade's checker must
     call it valid with every tolerance within LINEAR, it must have the
@@ -191,7 +197,8 @@ def step_issues(case, rebuilt, ref, slack):
     passes when either passes every check; a miss as written is then listed
     with OpenCascade's rounding, not counted. When neither passes, the
     home copy's problems are the finding, except in a body with a radius
-    under SMALL_FEATURE (below).
+    under SMALL_FEATURE whose misses its small features can explain
+    (`small_reach`, below).
 
     No copy is blown up to rescue a small feature: a 1 µm cylinder blown
     up 1024 times reads valid with its exact volume, but so did one with a
@@ -201,36 +208,83 @@ def step_issues(case, rebuilt, ref, slack):
     `rebuilt` is OpenCascade's own rebuild's (volume, area), the reference
     without mpmath; with it, a miss no bigger than the rebuild's own miss of
     the exact value (plus the slack) is OpenCascade's rounding, listed but
-    not counted, like compare's own."""
+    not counted, like compare's own. `occ_invalid`: that rebuild is invalid
+    too with no real crossing (OCC_TOLERANCE), so the checker's verdict on
+    the file is listed, not counted, and the rest still is."""
     issues, occ_only = [], []
     if case.get("step_refused") is not None:
         issues.append(f"step write refused: {case['step_refused']}")
     text = case.get("step")
     if text is None:
         return issues, occ_only  # refused, or a line from before step 29b
-    copies = [("as written", text, 1.0)]
+    copies = [("as written", text)]
     moved, shift = step_check.home(text)
     if any(shift):
-        copies.append((f"moved home by {shift}", moved, 1.0))
+        copies.append((f"moved home by {shift}", moved))
     tried = []
-    for label, t, f in copies:
-        found, rounding = one_step_copy(case, step_check.check_text(t), rebuilt, ref, slack)
+    for label, t in copies:
+        r = step_check.check_text(t)
+        found, rounding = one_step_copy(case, r, rebuilt, ref, slack)
+        excused = []
+        if occ_invalid:
+            excused = [f"{OCC_TOLERANCE}: {note} ({label})" for note in found if note.startswith("step validity")]
+            found = [note for note in found if not note.startswith("step validity")]
         if not found:
-            occ_only += [f"{note} (as written; passes {label})" for _, notes in tried for note in notes if "validity" in note]
-            return issues, occ_only + rounding
-        tried.append((label, found))
-    label, found = tried[-1]
-    radii = [float(m.group(2)) for m in step_check.RADIUS.finditer(text)]
-    if radii and min(radii) < SMALL_FEATURE:
+            occ_only += [f"{note} (as written; passes {label})" for _, notes, _ in tried for note in notes if "validity" in note]
+            return issues, occ_only + rounding + excused
+        tried.append((label, found, r))
+    label, found, r = tried[-1]
+    occ_only += excused  # the last copy's, beside what is counted or limited
+    reach = small_reach(text)
+    if reach is not None:
         # OpenCascade's own limit (29b2's first runs: it lost the side of a
         # 1 µm cylinder whose top circle's centre sat 3e-9 mm off the axis,
         # 3,000 times inside LINEAR, and called it valid; every body it
         # couldn't read had a radius of 1-5 µm): listed under its own
-        # heading, not counted, so it can't hide a fault in a body of
-        # ordinary size. Kept in view in docs/progress/booleans.md until
-        # something else checks such files.
-        return issues, occ_only + [f"{SMALL_LIMIT}: {note} ({label})" for note in found]
+        # heading, not counted, but only while its volume and area are
+        # missed by no more than the small features could account for. A
+        # radius alone once excused anything (29b3: a planted flipped cap
+        # on a 441 mm part with a 7 µm hole, its area 6,095 read for
+        # 580,809), so a fault in a part of ordinary size is still found
+        # however small one of its features is. Kept in view in
+        # docs/progress/booleans.md until something else checks such files.
+        volume_bound, area_bound = reach
+        for got, want, theirs, allowed, bound in ((r.volume, ref[0], rebuilt[0], slack[0], volume_bound),
+                                                  (r.area, ref[1], rebuilt[1], slack[1], area_bound)):
+            if not abs(got - float(want if want is not None else theirs)) <= allowed + bound:
+                break
+        else:
+            return issues, occ_only + [f"{SMALL_LIMIT}: {note} ({label})" for note in found]
     return issues + [f"{note} ({label})" for note in found], occ_only
+
+
+def planted_caught(total, found, small):
+    """For a run whose every STEP file was written with a face planted
+    flipped (FISSION_STEP_FAULT): whether the oracle caught it in every
+    body, each a finding or under the small-feature limit, and in at least
+    one (so a run that checked nothing can't pass). Prints the verdict."""
+    caught = found > 0 and found + small == total
+    print("the planted fault was caught in every body" if caught else
+          f"the planted fault was NOT caught in every body: {total} bodies, {found} findings, {small} under the small-feature limit")
+    return caught
+
+
+def small_reach(text):
+    """How much of a body's volume and area its small features (each circle,
+    cylinder and sphere in the file with a radius under SMALL_FEATURE) could
+    hold, or None when it has none: each counted as a cylinder of its radius
+    r reaching right across the body (the diagonal L of its points' box),
+    π r² L of volume and 2π r L + 2π r² of area, the most OpenCascade
+    could lose or invent by misreading it (it lost a 1 µm cylinder's whole
+    side, 29b2). A circle is counted for each cap edge and its side, so
+    generously, but always in proportion to the small features alone."""
+    small = [r for r in (float(m.group(2)) for m in step_check.RADIUS.finditer(text)) if r < SMALL_FEATURE]
+    if not small:
+        return None
+    points = [[float(m.group(k)) for k in (2, 3, 4)] for m in step_check.POINT.finditer(text)]
+    diagonal = math.dist([min(p[k] for p in points) for k in range(3)], [max(p[k] for p in points) for k in range(3)])
+    return (sum(math.pi * r * r * diagonal for r in small),
+            sum(2.0 * math.pi * r * diagonal + 2.0 * math.pi * r * r for r in small))
 
 
 def one_step_copy(case, r, rebuilt, ref, slack):

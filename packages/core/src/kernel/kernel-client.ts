@@ -17,6 +17,8 @@ export interface KernelOps {
   body_build: { args: [spec: BodySpec]; result: BodyHandle };
   body_view: { args: [body: BodyHandle]; result: BodyView };
   body_stl: { args: [body: BodyHandle, name: string]; result: StlFile };
+  /** The body as a STEP AP214 file, placed where it is shown (step 29b3: the oracle reads the app's bodies with OpenCascade). */
+  body_step: { args: [body: BodyHandle]; result: string };
   body_free: { args: [body: BodyHandle]; result: void };
   /** How many bodies the kernel keeps: tests check what they build they free. */
   body_count: { args: []; result: number };

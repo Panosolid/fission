@@ -21,6 +21,7 @@ const ops = {
   body_build: (spec: BodySpec) => kernel.body_build(spec),
   body_view: (body: BodyHandle) => kernel.body_view(body),
   body_stl: (body: BodyHandle, name: string) => kernel.body_stl(body, name),
+  body_step: (body: BodyHandle) => kernel.body_step(body),
   body_free: (body: BodyHandle) => kernel.body_free(body),
   body_count: () => kernel.body_count(),
 } satisfies Record<KernelRequest["op"], (...args: never[]) => unknown>;

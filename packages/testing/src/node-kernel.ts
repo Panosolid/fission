@@ -28,6 +28,7 @@ export function nodeKernel(): KernelCalls {
     body_build: (spec) => wasm.body_build(spec),
     body_view: (body) => wasm.body_view(body),
     body_stl: (body, name) => wasm.body_stl(body, name),
+    body_step: (body) => wasm.body_step(body),
     body_free: (body) => wasm.body_free(body),
     body_count: () => wasm.body_count(),
   };

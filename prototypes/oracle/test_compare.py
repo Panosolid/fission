@@ -323,5 +323,88 @@ class SmallFeatures(unittest.TestCase):
         self.assertFalse(any(compare.SMALL_LIMIT in o for o in occ), occ)
 
 
+@unittest.skipUnless(importlib.util.find_spec("OCP") is not None and importlib.util.find_spec("mpmath") is not None,
+                     "needs cadquery-ocp and mpmath")
+class SmallReach(unittest.TestCase):
+    """How much a body's small features could hold (`small_reach`), which
+    bounds what the small-feature limit may excuse (step 29b3)."""
+
+    def test_a_1_um_cylinders_reach_by_hand(self):
+        # Radius r = 0.001, height h = 35.5: the file has two CIRCLEs and a
+        # CYLINDRICAL_SURFACE of radius r (three small features), and its
+        # points span x 0..r, y 0, z 0..h, a diagonal L = sqrt(r^2 + h^2).
+        # Each holds pi r^2 L of volume and 2 pi r L + 2 pi r^2 of area.
+        import math
+        import compare
+        r, h = 0.001, 35.5
+        L = math.sqrt(r * r + h * h)
+        v, a = compare.small_reach(cylinder_text(r, h))
+        self.assertAlmostEqual(v, 3 * math.pi * r * r * L, delta=1e-15)
+        self.assertAlmostEqual(a, 3 * (2 * math.pi * r * L + 2 * math.pi * r * r), delta=1e-12)
+
+    def test_no_small_feature_no_reach(self):
+        import compare
+        self.assertIsNone(compare.small_reach(cube_text()))  # no radius at all
+        self.assertIsNone(compare.small_reach(cylinder_text(1.1 * compare.SMALL_FEATURE, 3.0)))
+        self.assertIsNotNone(compare.small_reach(cylinder_text(0.9 * compare.SMALL_FEATURE, 3.0)))
+
+    def judge(self, which, k):
+        """A 9 µm cylinder 3 long, its side flipped (every copy fails), with
+        the referee's `which` (0 volume, 1 area) set k times its small
+        reach away from what OpenCascade reads, the other exactly what it
+        reads, no slack, and the rebuild agreeing with the referee (no
+        rounding excuse)."""
+        import compare
+        import step_check
+        r = 0.9 * compare.SMALL_FEATURE
+        t = flipped_side(cylinder_text(r, 3.0))
+        got = step_check.check_text(t)
+        self.assertFalse(got.ok)
+        ref = [got.volume, got.area]
+        ref[which] -= k * compare.small_reach(t)[which]
+        return compare.step_issues(cylinder_case(r, 3.0, t), tuple(ref), tuple(ref), (0.0, 0.0))
+
+    def test_a_miss_of_09_of_the_reach_is_the_limit(self):
+        import compare
+        for which in (0, 1):
+            issues, occ = self.judge(which, 0.9)
+            self.assertEqual(issues, [])
+            self.assertTrue(occ and all(compare.SMALL_LIMIT in o for o in occ), occ)
+
+    def test_a_miss_of_11_of_the_reach_is_a_finding(self):
+        import compare
+        for which, name in ((0, "step volume"), (1, "step area")):
+            issues, occ = self.judge(which, 1.1)
+            self.assertIn(name, kinds(issues), issues)
+            self.assertFalse(any(compare.SMALL_LIMIT in o for o in occ), occ)
+
+    def test_occ_invalid_excuses_the_checkers_verdict_and_nothing_else(self):
+        # The unit cube with a face flipped: OpenCascade's checker calls it
+        # invalid, and reads its area as 4 (the flipped face's 1 counted
+        # against the other five, 5 - 1), not 6. Told OpenCascade's own
+        # rebuild is invalid too, the verdict is listed under its
+        # tolerance, but the area is still counted. Only against a referee
+        # that agrees with what it read does nothing count.
+        import compare
+        import step_check
+        bad = flip_cube_face(cube_text())
+        read = step_check.check_text(bad)
+        self.assertEqual(read.area, 4.0)
+        issues, occ = compare.step_issues(cube_case(bad), (1.0, 6.0), (1.0, 6.0), (1e-12, 0.0), occ_invalid=True)
+        self.assertEqual(kinds(issues), ["step area"], issues)
+        self.assertTrue(any(o.startswith(compare.OCC_TOLERANCE + ": step validity") for o in occ), occ)
+        issues, occ = compare.step_issues(cube_case(bad), (read.volume, 4.0), (read.volume, 4.0), (0.0, 0.0), occ_invalid=True)
+        self.assertEqual(issues, [])
+        self.assertTrue(occ and all(o.startswith(compare.OCC_TOLERANCE + ": step validity") for o in occ), occ)
+        issues = compare.step_issues(cube_case(bad), (read.volume, 4.0), (read.volume, 4.0), (0.0, 0.0))[0]
+        self.assertEqual(kinds(issues), ["step validity"], issues)
+
+
+def flip_cube_face(t):
+    old = "#101 = ADVANCED_FACE('',(#100),#94,.T.);"
+    assert t.count(old) == 1
+    return t.replace(old, "#101 = ADVANCED_FACE('',(#100),#94,.F.);")
+
+
 if __name__ == "__main__":
     unittest.main()

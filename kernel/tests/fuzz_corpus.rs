@@ -101,9 +101,18 @@ fn the_reference_area_is_right_by_hand() {
 // FISSION_SEED (decimal; the same seed gives the same inputs), and
 // FISSION_ORACLE_BREAK=1 plants a bug: every volume written is 1e-6 too big,
 // which the comparison must report for every body (its self-test).
+//
+// Each line also carries the body's STEP file (step 29b3, "step", or
+// "step_refused" with the writer's words), which fuzz_shapes.py has
+// OpenCascade read and judge (compare.py's step_issues); with
+// FISSION_STEP_FAULT set every file has its first face flipped, which it
+// must catch in every body (CI's kernel job checks).
 
 use fission_kernel::ops::extrude::{self as extruding, Boundary, Profile};
 use serde_json::{json, Value};
+
+#[path = "support/step_file.rs"]
+mod step_file;
 
 /// A number as compare.py's shapes write it: Rust's shortest round-trip
 /// form, so Python reads back the very double the kernel was given.
@@ -140,10 +149,12 @@ fn case(target: &str, input: &str, shape: Value, body: &fission_kernel::topology
     let m = fission_kernel::mass::mass_properties(body);
     let (lo, hi) = body.bounds();
     let volume = if std::env::var_os("FISSION_ORACLE_BREAK").is_some() { m.volume * (1.0 + 1e-6) } else { m.volume };
+    let (step, step_refused) = step_file::step_file(body);
     json!({
         "target": target, "input": input, "shape": shape,
         "fission_volume": volume, "fission_area": m.area, "fission_faces": body.faces.len(),
         "lo": lo.to_array(), "hi": hi.to_array(),
+        "step": step, "step_refused": step_refused,
     })
 }
 
@@ -212,6 +223,21 @@ fn oracle_shapes_by_hand() {
     // Shortest round trip, never rounded: 0.1 + 0.2 keeps its last digit.
     assert_eq!(num(0.1 + 0.2), json!("0.30000000000000004"));
     assert_eq!(primitive_shape(checks::Primitive::Cylinder(2.5, 1e-5)).to_string(), r#"{"Cylinder":{"h":"1e-5","r":"2.5"}}"#);
+}
+
+#[test]
+fn oracle_lines_carry_the_bodys_step_file() {
+    // A 2 × 3 rectangle extruded 1: its line's "step" is the writer's file
+    // of the very body measured (six faces, eight corners), no refusal.
+    use glam::DVec2;
+    let profile = Profile { outer: Boundary::Path { corners: vec![DVec2::new(0.0, 0.0), DVec2::new(2.0, 0.0), DVec2::new(2.0, 3.0), DVec2::new(0.0, 3.0)], bulges: vec![0.0; 4] }, holes: vec![] };
+    let body = extruding::extrude(&profile, 1.0).unwrap();
+    let line = case("extrude", "by hand", extrude_shape(&profile, 1.0), &body);
+    let step = line["step"].as_str().unwrap();
+    assert_eq!(step, fission_kernel::step_write::write(&body).unwrap());
+    assert_eq!((step.matches("= ADVANCED_FACE(").count(), step.matches("= VERTEX_POINT(").count()), (6, 8));
+    assert!(line["step_refused"].is_null());
+    assert_eq!(line["fission_faces"], 6);
 }
 
 #[test]

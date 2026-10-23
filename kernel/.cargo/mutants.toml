@@ -18,7 +18,7 @@ exclude_re = [
   # return Result<JsValue, JsValue> (and body_build an f64 handle, body_free
   # (), body_count a number): replacing any of them, or the
   # conversions to_js, from_js and js_error, by a default is excluded by name.
-  '^src/lib\.rs:\d+:\d+: replace (make_box|make_sphere|make_cylinder|make_extrude|snap_to_grid|place_freely|sketch_outline|export_stl|body_build|body_view|body_stl|body_free|body_count|to_js|from_js|js_error) -> ',
+  '^src/lib\.rs:\d+:\d+: replace (make_box|make_sphere|make_cylinder|make_extrude|snap_to_grid|place_freely|sketch_outline|export_stl|body_build|body_view|body_stl|body_step|body_free|body_count|to_js|from_js|js_error) -> ',
 
   # Equivalent: an o·o product of 0 with the other negative means the touching end is the crossing point, so the collinear clause already returns true (exact predicates).
   '^src/tolerance\.rs:\d+:\d+: replace < with <= in segments_touch$',

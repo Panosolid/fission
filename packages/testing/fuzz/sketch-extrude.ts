@@ -6,7 +6,9 @@
 // each round is a line of <dir>/log.csv, a failing session writes
 // <dir>/seed-<seed>/fuzz-report.txt (what failed, every step, and how to
 // replay it), and up to 20,000 built extrudes go to <dir>/oracle.jsonl for
-// prototypes/oracle/sketch_extrude.py. Exits 1 if anything failed.
+// prototypes/oracle/sketch_extrude.py, each with its body's STEP file (step
+// 29b3), which FISSION_STEP_FAULT=1 writes with its first face flipped
+// (src/step-fault.ts) for the oracle to catch. Exits 1 if anything failed.
 // Replay a session: FISSION_SEED=<session seed> FISSION_SESSIONS=1
 // FISSION_SESSION_STEPS=40 npm run journeys (the sketch-extrude-sessions
 // journey).
@@ -15,7 +17,8 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { splitmix64 } from "../src/index.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
-import { runSession, sessionSeed } from "../src/sketch-extrude-session.ts";
+import { runSession, sessionSeed, type OracleLine } from "../src/sketch-extrude-session.ts";
+import { flipFirstFace } from "../src/step-fault.ts";
 
 const SESSIONS = 50;
 const STEPS = 40;
@@ -28,11 +31,13 @@ let seed = first !== undefined ? BigInt(first.trim()) : randomBytes(8).readBigUI
 
 const kernel = nodeKernel();
 let oracleLines = 0;
+const stepFault = process.env.FISSION_STEP_FAULT !== undefined;
 const oracle = out
-  ? (line: object) => {
+  ? (line: OracleLine) => {
       if (oracleLines >= ORACLE_LINES) return;
       oracleLines++;
-      appendFileSync(join(out, "oracle.jsonl"), JSON.stringify(line) + "\n");
+      const written = stepFault && line.step !== null ? { ...line, step: flipFirstFace(line.step) } : line;
+      appendFileSync(join(out, "oracle.jsonl"), JSON.stringify(written) + "\n");
     }
   : undefined;
 if (out) mkdirSync(out, { recursive: true });
