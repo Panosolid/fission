@@ -1,14 +1,7 @@
-tested commit bc29a66 on claude/project-thread-m584cs, 2026-10-24 03:25 UTC (https://github.com/Panosolid/fission/actions/runs/40051951575)
+tested commit bbfa69f on claude/project-thread-4lcc0b, 2026-10-24 05:45 UTC (https://github.com/Panosolid/fission/actions/runs/40061378507)
 core: 8 survivors, all explained: true
 design: 11 survivors, all explained: true
-UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight && storedVersion === version => true
-UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | LogicalOperator | timer === null && !inFlight && storedVersion === version => timer === null && !inFlight || storedVersion === version
-UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight => true
-UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | LogicalOperator | timer === null && !inFlight => timer === null || !inFlight
-UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | ConditionalExpression | timer === null => true
-UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | ConditionalExpression | storedVersion === version => true
-storage: 29 survivors, all explained: false
-6 problem(s): kill each survivor with a test, or explain in explained.json why no caller can tell
+storage: 26 survivors, all explained: true
 model: 37 survivors, all explained: true
 svg: 4 survivors, all explained: true
 UNEXPLAINED survivor at packages/viewport/src/framing.ts:96: packages/viewport/src/framing.ts | EqualityOperator | lo[0] <= hi[0] => lo[0] < hi[0]
