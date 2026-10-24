@@ -1,12 +1,12 @@
-SpindleLabs random testing, all runs so far (updated 2026-10-24 10:18 UTC)
+SpindleLabs random testing, all runs so far (updated 2026-10-24 12:31 UTC)
 
-hours of testing:                 1018.4
-rounds:                           18025
-random operation chains:          36050000
+hours of testing:                 1022.4
+rounds:                           18096
+random operation chains:          36192000
 rounds where the harness failed:  583
-bodies compared with OpenCascade: 74237971
-OpenCascade disagreements:        460
-last problem found:               2026-10-24 10:03:26 (seed 47125886350939, commit 32c3474 on claude/project-thread-llkq26)
+bodies compared with OpenCascade: 74553152
+OpenCascade disagreements:        461
+last problem found:               2026-10-24 11:54:46 (seed 29992734133294, commit acf549a on claude/project-thread-fqowdf)
 
 Every round is a line in log.csv. Each round that found a problem has a
 folder in failures/ named after its seed: report.txt says what went wrong,
@@ -22,9 +22,9 @@ Latest mutation run (whole kernel, lib tests), 2026-10-23 22:38 UTC, commit 4c16
 mutants/missed.txt lists every survivor; mutants/log.csv has one line per night.
 
 Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, or the slowest walk more than 15% over):
-  tested commit 32c3474 on claude/project-thread-llkq26, 2026-10-24 10:18 UTC (https://github.com/Panosolid/fission/actions/runs/40080441668)
-  OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.24 s (baseline 1.23 s)
-  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 4.82 s (baseline 9.70 s)
+  tested commit acf549a on claude/project-thread-fqowdf, 2026-10-24 12:31 UTC (https://github.com/Panosolid/SpindleLabs/actions/runs/40089212845)
+  OK Design: shape to STL: 3 clicks (baseline 3), slowest 1.09 s (baseline 1.23 s)
+  OK Design: sketch to STL: 8 clicks (baseline 8), slowest 5.65 s (baseline 9.70 s)
   PENDING Box to laser panels: waits for Laser (L1–L3), X13
   PENDING Logo to everything: waits for Vector (V3), Laser (L1), Render (R1)
   PENDING Enclosure and board: waits for Circuit (E3), Slice (P1)
@@ -33,34 +33,34 @@ Latest magic-moment journeys against tests/baseline.json (FLAG: an extra click, 
 journeys/flags.txt lists every FLAG line so far.
 
 Latest golden models run (tests/golden rebuilt and checked against their hand-worked answers, timed against tests/baseline.json; a failing model files a random-testing issue):
-  tested commit 32c3474 on claude/project-thread-llkq26, 2026-10-24 10:18 UTC (https://github.com/Panosolid/fission/actions/runs/40080441668)
-  seed 1792832654, 50 rounds of 6 models; every answer right and the same every round; replay: FISSION_SEED=1792832654 FISSION_GOLDEN_ROUNDS=50 npm run golden -w @fission/testing (after npm run kernel -w @fission/app)
-  bracket-two-holes: 50 rebuilds, fastest 2.6 ms, slowest 6.1 ms, OK
-  enclosure: 50 rebuilds, fastest 1.7 ms, slowest 3.5 ms, OK
-  gear: 50 rebuilds, fastest 15.5 ms, slowest 54.1 ms, OK
-  l-bracket: 50 rebuilds, fastest 0.4 ms, slowest 1.7 ms, OK
-  stepped-boss: 50 rebuilds, fastest 2.5 ms, slowest 4.0 ms, OK
-  thirty-features: 50 rebuilds, fastest 10.4 ms, slowest 23.1 ms, OK
+  tested commit acf549a on claude/project-thread-fqowdf, 2026-10-24 12:31 UTC (https://github.com/Panosolid/SpindleLabs/actions/runs/40089212845)
+  seed 1792840624, 50 rounds of 6 models; every answer right and the same every round; replay: FISSION_SEED=1792840624 FISSION_GOLDEN_ROUNDS=50 npm run golden -w @fission/testing (after npm run kernel -w @fission/app)
+  bracket-two-holes: 50 rebuilds, fastest 2.4 ms, slowest 4.5 ms, OK
+  enclosure: 50 rebuilds, fastest 1.6 ms, slowest 21.6 ms, OK
+  gear: 50 rebuilds, fastest 14.1 ms, slowest 39.6 ms, OK
+  l-bracket: 50 rebuilds, fastest 0.5 ms, slowest 1.1 ms, OK
+  stepped-boss: 50 rebuilds, fastest 2.3 ms, slowest 4.8 ms, OK
+  thirty-features: 50 rebuilds, fastest 9.4 ms, slowest 18.0 ms, OK
   | metric | baseline | now | change | |
   | app.golden_bracket_two_holes.kernel_calls | 2 | 2 | +0.0% |  |
-  | app.golden_bracket_two_holes.relative_time | 0.0409 | 0.038 | -7.1% |  |
+  | app.golden_bracket_two_holes.relative_time | 0.0409 | 0.0393 | -3.9% |  |
   | app.golden_enclosure.kernel_calls | 14 | 14 | +0.0% |  |
-  | app.golden_enclosure.relative_time | 0.0284 | 0.0256 | -9.9% |  |
+  | app.golden_enclosure.relative_time | 0.0284 | 0.0251 | -11.6% |  |
   | app.golden_gear.kernel_calls | 3 | 3 | +0.0% |  |
-  | app.golden_gear.relative_time | 0.2412 | 0.231 | -4.2% |  |
+  | app.golden_gear.relative_time | 0.2412 | 0.2309 | -4.3% |  |
   | app.golden_l_bracket.kernel_calls | 3 | 3 | +0.0% |  |
-  | app.golden_l_bracket.relative_time | 0.0065 | 0.0057 | -12.3% |  |
+  | app.golden_l_bracket.relative_time | 0.0065 | 0.005 | -23.1% | better: lower the baseline? |
   | app.golden_models.failed_percent | 0 | 0 | - |  |
   | app.golden_stepped_boss.kernel_calls | 8 | 8 | +0.0% |  |
-  | app.golden_stepped_boss.relative_time | 0.039 | 0.0366 | -6.2% |  |
+  | app.golden_stepped_boss.relative_time | 0.039 | 0.0378 | -3.1% |  |
   | app.golden_thirty_features.kernel_calls | 47 | 47 | +0.0% |  |
-  | app.golden_thirty_features.relative_time | 0.1632 | 0.1555 | -4.7% |  |
-  0 metric(s) failed, 0 flagged, 0 better.
+  | app.golden_thirty_features.relative_time | 0.1632 | 0.1532 | -6.1% |  |
+  0 metric(s) failed, 0 flagged, 1 better.
   Golden STEP files: 27 bodies read by OpenCascade, 0 disagreement(s)
 golden/log.txt has one line per night.
 
 Latest TypeScript mutation run (packages/testing/stryker, survivors must be killed or explained):
-  tested commit 32c3474 on claude/project-thread-llkq26, 2026-10-24 10:18 UTC (https://github.com/Panosolid/fission/actions/runs/40080441668)
+  tested commit acf549a on claude/project-thread-fqowdf, 2026-10-24 12:31 UTC (https://github.com/Panosolid/SpindleLabs/actions/runs/40089212845)
   core: 8 survivors, all explained: true
   design: 11 survivors, all explained: true
   storage: 26 survivors, all explained: true
