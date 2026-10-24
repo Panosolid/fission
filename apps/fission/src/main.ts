@@ -218,8 +218,18 @@ function placeSlots(pane: PaneId, slots: Slots) {
     if (now !== slots[key]) now.replaceWith(slots[key]);
   }
 }
-/** Four empty slots shaped like `pane`'s (an element's attributes, no children). */
-const emptySlots = (pane: PaneId): Slots => Object.fromEntries(SLOT_KEYS.map((key) => [key, $(SLOT_IDS[pane][key]).cloneNode(false) as HTMLElement])) as Slots;
+/**
+ * Each pane's slots as the page first had them (an element's attributes, no
+ * children). New slots copy these, never the slots on screen: a mark a
+ * workspace put on its own slot (Design's folded properties, U0b) must not
+ * reach the next one's (found by image.mjs: Image's panel opened folded).
+ */
+const PRISTINE: Record<PaneId, Slots> = {
+  main: Object.fromEntries(SLOT_KEYS.map((key) => [key, $(SLOT_IDS.main[key]).cloneNode(false)])) as Slots,
+  split: Object.fromEntries(SLOT_KEYS.map((key) => [key, $(SLOT_IDS.split[key]).cloneNode(false)])) as Slots,
+};
+/** Four empty slots shaped like `pane`'s as the page first had them. */
+const emptySlots = (pane: PaneId): Slots => Object.fromEntries(SLOT_KEYS.map((key) => [key, PRISTINE[pane][key].cloneNode(false) as HTMLElement])) as Slots;
 const pool = new WarmPool<WorkspaceId, PaneId, { slots: Slots; view: MountedWorkspace }>({
   mount(pane, id) {
     const slots = emptySlots(pane);

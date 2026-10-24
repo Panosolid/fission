@@ -17,6 +17,7 @@ import { mkdirSync } from "node:fs";
 import { launch } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4233, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4233/?test-hooks";
@@ -35,6 +36,7 @@ async function fresh(width = 1280, touch = false) {
   });
   await page.goto(url + "#design");
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 

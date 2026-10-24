@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { BodyView, Feature } from "@fission/core";
-import { parameterRows, propertiesPanel } from "../src/properties.ts";
+import { parameterRows, propertiesPanel, WORDS_EVENT } from "../src/properties.ts";
 
 /** Each row as "label" when shown, null when hidden, in width/depth/height order. */
 const rows = (shape: Parameters<typeof parameterRows>[0]) => parameterRows(shape).map((r) => (r.shown ? r.label : null));
@@ -26,8 +26,30 @@ function panel() {
   doc.body.append(slot);
   const p = propertiesPanel(slot);
   const $ = (id: string) => slot.querySelector<HTMLElement>(`#${id}`)!;
-  return { p, $ };
+  return { p, $, slot };
 }
+
+test("U0b: new words the user must see tell the slot (so a folded panel opens); a problem is marked on the slot", () => {
+  const { p, slot } = panel();
+  let told = 0;
+  slot.addEventListener(WORDS_EVENT, () => told++);
+  p.showActionNote("", false);
+  assert.equal(told, 0, "clearing the note says nothing");
+  p.showActionNote("Too big for an accurate STL", true);
+  assert.equal(told, 1, "an action's note");
+  p.showError("Extrude 1 can't be built");
+  assert.equal(told, 2, "a new error");
+  p.showError("Extrude 1 can't be built");
+  assert.equal(told, 2, "the same error shown again by the next rebuild is not new");
+  assert.equal(slot.hasAttribute("data-problem"), true, "an error is a problem");
+  p.showError("");
+  assert.equal(slot.hasAttribute("data-problem"), false, "built again: no problem");
+  p.showWarning("Extrude 1 is built from its kept shape");
+  assert.equal(slot.hasAttribute("data-problem"), true, "a kept shape's warning is one too");
+  assert.equal(told, 2, "a warning stays in the folded panel, marked on its button, without opening it");
+  p.showWarning("");
+  assert.equal(slot.hasAttribute("data-problem"), false);
+});
 
 const view = (errors: string[] = []): BodyView => ({
   mesh: { positions: [], normals: [], indices: [], triangle_faces: [], edge_lines: [], edge_line_edges: [] },

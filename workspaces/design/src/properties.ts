@@ -73,6 +73,9 @@ const HTML = `
     <div id="downstream-chips" role="group" aria-label="What other workspaces make from this design"></div>
   </section>`;
 
+/** The event the properties slot gets when new words the user must see are put in it (properties-fold.ts opens a folded panel for it). */
+export const WORDS_EVENT = "properties-words";
+
 /** A verb as a button shows it: the action's id, label and one-line title. */
 export interface Verb {
   id: string;
@@ -113,6 +116,17 @@ export interface PropertiesPanel {
 export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
   slot.innerHTML = HTML;
   const $ = <T extends HTMLElement>(id: string) => slot.querySelector<T>(`#${id}`)!;
+  /** New words the user must see (an action's note, a rebuild's error): a folded panel opens for them (U0b, `WORDS_EVENT`). */
+  const said = () => {
+    // The slot's own page's Event (a test's DOM has its own).
+    const PageEvent = slot.ownerDocument.defaultView?.Event ?? Event;
+    slot.dispatchEvent(new PageEvent(WORDS_EVENT));
+  };
+  /** The slot says when it holds a failed rebuild's words or a warning, so its folded button can show it (U0b, properties-fold.css). */
+  const markProblem = () => {
+    if ($("error").textContent !== "" || !$("kept-warning").hidden) slot.dataset.problem = "";
+    else delete slot.dataset.problem;
+  };
   return {
     inputs: SIZE_KEYS.map((k) => $<HTMLInputElement>(k)),
     setShape(shape) {
@@ -165,11 +179,15 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
       $("body-problems").hidden = true;
     },
     showError(message) {
+      const was = $("error").textContent;
       $("error").textContent = message;
+      markProblem();
+      if (message !== "" && message !== was) said();
     },
     showWarning(message) {
       $("kept-warning").textContent = message;
       $("kept-warning").hidden = message === "";
+      markProblem();
     },
     markStale(stale, failed) {
       $("stats").classList.toggle("stale", stale);
@@ -195,6 +213,7 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
       const note = $("action-note");
       note.textContent = text;
       note.className = bad ? "bad" : "";
+      if (text !== "") said();
     },
     showDownstream(chips, onOpen) {
       $("downstream").hidden = chips.length === 0;

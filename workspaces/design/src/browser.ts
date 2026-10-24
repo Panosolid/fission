@@ -14,6 +14,8 @@ export interface BrowserNode {
   label: string;
   /** Groups have children (possibly none); leaves are rows a click highlights. */
   children?: BrowserNode[];
+  /** A group shown folded until the user opens it (U0a, like Fusion's browser). */
+  startsFolded?: boolean;
 }
 
 /** The origin every part is built on; the same for every document. */
@@ -52,7 +54,9 @@ export function bodyRows(document: DesignDocument, failed: ReadonlySet<string> =
 
 /**
  * The browser's tree for a document. Each feature is a row numbered in
- * build order with its intent summary; a suppressed one says so. Each
+ * build order with its intent summary; a suppressed one says so. The
+ * Timeline and the Origin start folded (U0a): the bar along the bottom
+ * shows the timeline, and the origin's planes are seldom needed. Each
  * body the last rebuild built is a row (`bodyRows`; `failed` the ids it failed). Each profile
  * is a row by its own id ("profile-1"), selectable as an outline. Each
  * sketch is a timeline row by its id and a row in Sketches by
@@ -68,13 +72,29 @@ export function browserTree(document: DesignDocument, failed: ReadonlySet<string
     {
       id: "timeline",
       label: "Timeline",
+      // The bar along the bottom shows every item already, with the same menu and double-click.
+      startsFolded: true,
       children: features.map((f, i) => ({ id: f.id, label: `${i + 1}. ${f.intent.summary}${f.suppressed ? " (suppressed)" : ""}` })),
     },
     { id: "sketches", label: "Sketches", children: document.sketches.map((s) => ({ id: `sketches/${s.id}`, label: sketchItemOf(s.id).provenance.self.label })) },
     { id: "profiles", label: "Profiles", children: document.profiles.map((p) => ({ id: p.id, label: profileLabel(p) })) },
     { id: "bodies", label: "Bodies", children: bodyRows(document, failed).map(({ id, label }) => ({ id, label })) },
-    { id: "origin", label: "Origin", children: ORIGIN },
+    { id: "origin", label: "Origin", children: ORIGIN, startsFolded: true },
   ];
+}
+
+/**
+ * The timeline item a browser row stands for, whose menu (Delete, Suppress,
+ * Edit…) and double-click it takes: a Timeline row's own item, a sketch's
+ * row in Sketches its sketch item, and (the owner's ask, 2026-10-24) a
+ * Body row the feature that makes the body, since every body is made by
+ * one feature; deleting it asks first when anything is built from it, as
+ * the timeline's rules say. Other rows (profiles, the origin) have none.
+ */
+export function rowItem(node: string, doc: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): string | null {
+  if (node.startsWith("sketches/")) return node.slice("sketches/".length);
+  if (node.startsWith("body-")) return bodyRows(doc, failed).find((r) => r.id === node)?.feature.id ?? null;
+  return doc.timeline.features.some((f) => f.id === node) ? node : null;
 }
 
 /**

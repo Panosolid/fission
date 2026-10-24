@@ -11,6 +11,7 @@
 // `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
+import { withPropertiesFolded } from "./properties.mjs";
 import { clickPlane, screenPoint, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 
@@ -99,7 +100,10 @@ async function addSquare(page, { square, distance, volume }, tap) {
   await page.check("#sketch-grid-snap");
   await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0));
   await press(page, "#sketch-tool-rectangle", tap);
-  for (const p of [square[0], square[2]]) await clickPlane(page, p, TOP, tap);
+  // The sketch's panel floats over the square's corners on a wide screen (U0b).
+  await withPropertiesFolded(page, async () => {
+    for (const p of [square[0], square[2]]) await clickPlane(page, p, TOP, tap);
+  });
   await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "the square closed");
   await press(page, "#sketch-extrude", tap);
   await page.fill("#extrude-distance", String(distance));

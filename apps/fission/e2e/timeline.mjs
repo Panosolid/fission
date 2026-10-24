@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
+import { withPropertiesFolded, pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4211, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4211/?test-hooks";
@@ -60,6 +61,7 @@ async function fresh(width, touch) {
   });
   await page.goto(url + "#design");
   await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "the box");
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 
@@ -185,7 +187,10 @@ async function addSquare(page, tap, layout, live = false) {
   await page.check("#sketch-grid-snap");
   await page.evaluate(() => (document.getElementById("workspace").scrollTop = 0));
   await press(page, "#sketch-tool-rectangle", tap);
-  for (const p of layout.corners) await (live ? clickModel(page, p, tap) : clickPlane(page, p, TOP, tap));
+  // The sketch's panel floats over the square's corners on a wide screen (U0b).
+  await withPropertiesFolded(page, async () => {
+    for (const p of layout.corners) await (live ? clickModel(page, p, tap) : clickPlane(page, p, TOP, tap));
+  });
   await until(page, (w) => document.querySelector("#viewport").dataset.sketchPoints?.startsWith(w), layout.corners[0].join(","), "the square's first corner where it was clicked");
   await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "the square closed");
   await press(page, "#sketch-extrude", tap);
