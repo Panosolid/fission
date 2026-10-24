@@ -224,9 +224,6 @@ fn edges_meet(body: &Body, i: EdgeId, j: EdgeId) -> Option<DVec3> {
     let mut shared: Vec<VertexId> = [a.start, a.end].into_iter().filter(|v| *v == b.start || *v == b.end).collect();
     shared.dedup();
     let known: Vec<DVec3> = shared.iter().map(|&v| body.vertices[v].point).collect();
-    // Each shared vertex with its own tolerance: a meeting within it is the
-    // vertex itself.
-    let known_tol: Vec<f64> = shared.iter().map(|&v| body.vertices[v].tol).collect();
     let candidates: Vec<DVec3> = if along_each_other(a, b) {
         // On one line or circle: they overlap if an end or a sample of one
         // lies inside the other (an overlap's ends are ends of one of them).
@@ -238,7 +235,8 @@ fn edges_meet(body: &Body, i: EdgeId, j: EdgeId) -> Option<DVec3> {
         c
     };
     candidates.into_iter().find(|&p| {
-        a.distance(p) <= a.tol && b.distance(p) <= b.tol && known.iter().zip(&known_tol).all(|(k, &tol)| k.distance(p) > tol)
+        // A meeting within a shared vertex's own tolerance is that vertex.
+        a.distance(p) <= a.tol && b.distance(p) <= b.tol && shared.iter().all(|&v| body.vertices[v].point.distance(p) > body.vertices[v].tol)
     })
 }
 
