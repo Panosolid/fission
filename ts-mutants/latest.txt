@@ -1,11 +1,8 @@
-tested commit 8c39037 on claude/project-thread-ywh86d, 2026-10-24 06:21 UTC (https://github.com/Panosolid/fission/actions/runs/40065436579)
+tested commit 32c3474 on claude/project-thread-llkq26, 2026-10-24 10:18 UTC (https://github.com/Panosolid/fission/actions/runs/40080441668)
 core: 8 survivors, all explained: true
 design: 11 survivors, all explained: true
 storage: 26 survivors, all explained: true
 model: 37 survivors, all explained: true
 svg: 4 survivors, all explained: true
-UNEXPLAINED survivor at packages/viewport/src/framing.ts:96: packages/viewport/src/framing.ts | EqualityOperator | lo[0] <= hi[0] => lo[0] < hi[0]
-UNEXPLAINED survivor at packages/viewport/src/framing.ts:98: packages/viewport/src/framing.ts | ArithmeticOperator | h - lo[k] => h + lo[k]
-viewport: 35 survivors, all explained: false
-2 problem(s): kill each survivor with a test, or explain in explained.json why no caller can tell
+viewport: 33 survivors, all explained: true
 ai: 12 survivors, all explained: true
