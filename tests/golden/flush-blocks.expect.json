@@ -1,7 +1,7 @@
 {
   "model": "flush-blocks",
-  "what": "Stacked blocks joined flush: the ready-made box 40 × 30 × 10 and a 40 × 12 × 10 block sketched on its top and standing flush with its front, left and right, joined into one L-shaped body. The second block's start cap lies on the first's top (faces on each other, 35a), and three of its sides lie on the first's, which merge (35c).",
-  "from": "35",
+  "what": "Stacked blocks joined flush: the ready-made box 40 × 30 × 10 and a 40 × 12 × 10 block sketched on its top and standing flush with its front, left and right, joined into one L-shaped body. The second block's start cap lies on the first's top (faces on each other, 36a), and three of its sides lie on the first's, which merge (36c).",
+  "from": "36",
   "recipe": [
     {
       "do": "Start a new part with its ready-made box 40 × 30 × 10 from the origin: Body 1.",
@@ -39,7 +39,7 @@
         "faces": 8,
         "edges": 18,
         "vertices": 12,
-        "why": "an L-shaped prism along X, its profile (y, z) (0, 0), (30, 0), (30, 10), (12, 10), (12, 20), (0, 20): 2 ends and 6 sides, 6 + 6 + 6 edges, 12 corners (12 − 18 + 8 = 2). The blocks' fronts (y = 0), lefts (x = 0) and rights (x = 40) each merge into one face (35c), the edges along where they met go, the uprights at the front corners join into one each, and the first block's top keeps only its back strip, y 12..30"
+        "why": "an L-shaped prism along X, its profile (y, z) (0, 0), (30, 0), (30, 10), (12, 10), (12, 20), (0, 20): 2 ends and 6 sides, 6 + 6 + 6 edges, 12 corners (12 − 18 + 8 = 2). The blocks' fronts (y = 0), lefts (x = 0) and rights (x = 40) each merge into one face (36c), the edges along where they met go, the uprights at the front corners join into one each, and the first block's top keeps only its back strip, y 12..30"
       },
       "box": {
         "is": [
@@ -77,7 +77,7 @@
           0,
           10
         ],
-        "why": "the box's +Z face, its top at z = 10; after the join only its strip y 12..30 is left, one face, which keeps the name (40a rule 2: a face keeps its name when only its outline changes)"
+        "why": "the box's +Z face, its top at z = 10; after the join only its strip y 12..30 is left, one face, which keeps the name (34a rule 2: a face keeps its name when only its outline changes)"
       }
     }
   ],

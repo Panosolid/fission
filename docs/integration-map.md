@@ -16,19 +16,19 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
-| 1 | Design → Slice | bodies on a print plate; hole intent (so holes print round) | Solid, re-tessellated by Slice at the printer's resolution (Mesh only when the source is a mesh) | printability overlay (overhangs, thin walls), print time and weight as Data | plate update cheap, slicing expensive | P1 (after 48) |
-| 2 | Design → Laser | planar faces, sketches, sheet-metal flat patterns | Outline (exact lines, arcs, later splines) | none; kerf and sheet thickness are Design parameters (row 30) | cheap | L1 (after 48); flat patterns after 83 |
+| 1 | Design → Slice | bodies on a print plate; hole intent (so holes print round) | Solid, re-tessellated by Slice at the printer's resolution (Mesh only when the source is a mesh) | printability overlay (overhangs, thin walls), print time and weight as Data | plate update cheap, slicing expensive | P1 (after 52) |
+| 2 | Design → Laser | planar faces, sketches, sheet-metal flat patterns | Outline (exact lines, arcs, later splines) | none; kerf and sheet thickness are Design parameters (row 30) | cheap | L1 (after 52); flat patterns after 87 |
 | 3 | Design → Manufacture | bodies as parts in a setup; faces and edges picked for strategies; feature intent (a hole feature becomes a drilling cycle) | Solid, faces and edges by stable id | machinability overlay (internal corners sharper than the smallest tool) | toolpaths expensive | M1–M2 (after 40) |
 | 4 | Design → Simulate | bodies; loads and fixtures on faces by stable id; materials | Solid, meshed by S2 | stress, displacement and safety-factor overlays; results as Data | expensive | S1–S3 (after 40) |
-| 5 | Simulate → Design | a parameter sweep ("thinnest wall with safety factor ≥ 2") | Data (parameter values) | the chosen value is offered as a previewed parameter edit | expensive | S3 + step 50 |
-| 6 | Design → Render | bodies, appearances, saved camera views | Solid, tessellated at render quality | none | preview cheap, final render expensive | R1–R3 (after 48) |
-| 7 | Design ↔ Circuit | board outline from a face or sketch; mounting holes linked both ways with screw posts; the board and its components as bodies inside the enclosure | Outline (outline); Solid (board and parts, back into Design as a linked component) | collision warnings as overlays on both sides | interference check cheap | E3 (after 75; collisions use 76) |
+| 5 | Simulate → Design | a parameter sweep ("thinnest wall with safety factor ≥ 2") | Data (parameter values) | the chosen value is offered as a previewed parameter edit | expensive | S3 + step 55 |
+| 6 | Design → Render | bodies, appearances, saved camera views | Solid, tessellated at render quality | none | preview cheap, final render expensive | R1–R3 (after 52) |
+| 7 | Design ↔ Circuit | board outline from a face or sketch; mounting holes linked both ways with screw posts; the board and its components as bodies inside the enclosure | Outline (outline); Solid (board and parts, back into Design as a linked component) | collision warnings as overlays on both sides | interference check cheap | E3 (after 79; collisions use 80) |
 
 ## The 2D workspaces
 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
-| 8 | Vector → Design | a logo or shape to sketch on, emboss or deboss | Outline (biarc-fitted until 65, decision 2) | none | cheap | V3 |
+| 8 | Vector → Design | a logo or shape to sketch on, emboss or deboss | Outline (biarc-fitted until 69, decision 2) | none | cheap | V3 |
 | 9 | Design → Vector | a face outline or sketch as editable paths (to draw artwork that fits a part) | Outline | none | cheap | V1 + 21 |
 | 10 | Vector → Laser | paths to cut, engrave or score; layers map to operations | Outline | none | cheap | V1 + L1 |
 | 11 | Vector → Render | a decal on a face | Outline, rasterised by a converter at render resolution | none | cheap | V1 + R1 |
@@ -40,7 +40,7 @@ When a workspace becomes real, its rows here become its integration tests (a jou
 | 17 | Image → Design | a lithophane or relief from brightness | Image in, a Design feature builds a mesh body (decisions 3 and 4) | none | cheap | G2 + 24 |
 | 18 | Image → Layout | photos on a page | Image | none | cheap | G1 + Y1 |
 | 19 | Render → Layout and Image | a rendered picture | Image (marked out of date when the scene changes) | none | expensive | R2 + Y2 / G1 |
-| 20 | Design → Layout | a design view or a drawing view; parameters as text fields | Outline for drawings (77–79), Image for shaded views, Data for parameters | none | cheap | Y2 + 77 for drawings |
+| 20 | Design → Layout | a design view or a drawing view; parameters as text fields | Outline for drawings (81–83), Image for shaded views, Data for parameters | none | cheap | Y2 + 77 for drawings |
 | 21 | Layout → Laser | a page as an engraving or cut (signs, labels) | Outline and Image | none | cheap | Y4 + L1 |
 | 22 | Layout → Vector | a page's artwork back to editable paths | Outline | none | cheap | Y4 |
 
@@ -61,7 +61,7 @@ Document, Sheet and Slides are planned workspaces (roadmap W, T and U), late in 
 
 | # | From → to | What flows | As | Back | Cost | Ready at |
 |---|---|---|---|---|---|---|
-| 39 | Design → Document | design views, drawing views, parameters as text, one view per timeline step for build instructions | Image or Outline for views, Data for parameters | none | cheap | W2–W3 + 77 for drawings |
+| 39 | Design → Document | design views, drawing views, parameters as text, one view per timeline step for build instructions | Image or Outline for views, Data for parameters | none | cheap | W2–W3 + 81 for drawings |
 | 40 | Design ↔ Sheet | parameters and measured values (volume, mass, size) into cells; a cell that owns a parameter drives the design | Data | edits to Design parameters are previewed commands | cheap | T2 + 50 |
 | 41 | Sheet → Document and Slides | tables and charts | Data (tables), Image (charts) | none | cheap | T3 + W2 / U2 |
 | 42 | Design → Slides | a live 3D part on a slide, and views | Solid (tessellated for the slide), Image for views | none | cheap | U2 |
@@ -82,7 +82,7 @@ Document, Sheet and Slides are planned workspaces (roadmap W, T and U), late in 
 | 26 | One selection (stable ids) | all | done (17) |
 | 27 | One undo history; an edit in one workspace undoes from any | all | 20, timeline edits at 24 |
 | 28 | Units | all | done |
-| 29 | One materials library: appearance (Render), mechanical (Simulate), print settings (Slice), power and speed (Laser), stock and feeds (Manufacture) | all making workspaces | I3 with 62 |
+| 29 | One materials library: appearance (Render), mechanical (Simulate), print settings (Slice), power and speed (Laser), stock and feeds (Manufacture) | all making workspaces | I3 with 66 |
 | 30 | Parameters: Design parameters used anywhere (kerf, thickness, board size, wall thickness in a sweep) | all | 50 + I18 |
 | 31 | One bill of materials from Design components and Circuit parts, placeable in Layout as a table | Design, Circuit, Layout | 74 + E1 |
 | 32 | Project-wide search ("M3" finds every M3 hole, screw and pad) over feature intent | all | I14, once two workspaces are real |
@@ -121,7 +121,7 @@ The registry already turns Solid into Mesh (tessellation). The rows above also n
 All five are approved, with additions; the full text and reasons are in [integration.md](integration.md), "The owner's five decisions".
 
 1. One owner per value; edits from the other side are previewed commands for the owner; "Owned by …" shown; ownership transferable per value.
-2. Vector curves fitted with biarcs (tangent-continuous) until NURBS at step 65, with a note; the faces from one curve are one logical face for naming.
+2. Vector curves fitted with biarcs (tangent-continuous) until NURBS at step 69, with a note; the faces from one curve are one logical face for naming.
 3. Lithophanes are a Design feature, "relief from image", whose output is a mesh body until exact surfaces exist.
 4. Mesh bodies are a marked, separate kind of body with a fixed list of operations (mesh booleans with exact solids allowed, giving a marked mesh); never turned exact automatically; a later user-started "fit exact surfaces" feature.
 5. One 2D curve library, in the Rust kernel with its tolerances, in the stateful harness.

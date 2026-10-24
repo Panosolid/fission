@@ -6,8 +6,8 @@
 // from a Design face or sketch, components sit in 3D inside the enclosure
 // with live collision checks, and mounting holes are linked both ways (move
 // one on the board and the screw post in the case moves, and the other way
-// round). Work starts after CAD step 75 (full topological naming at 50,
-// assemblies and joints at 74–75).
+// round). Work starts after CAD step 79 (full topological naming at 40,
+// assemblies and joints at 78–79).
 
 import type { FaceReference, WorkspacePlugin } from "@fission/core";
 import { showPlaceholder } from "@fission/ui";
@@ -53,7 +53,7 @@ export const circuitWorkspace: WorkspacePlugin = {
         "Mounting holes linked both ways to screw posts in the enclosure",
         "Gerber and drill export",
       ],
-      startsAfter: "after CAD step 75 (full topological naming, then assemblies and joints)",
+      startsAfter: "after CAD step 79 (full topological naming, then assemblies and joints)",
     });
     return { unmount: () => ctx.properties.replaceChildren() };
   },

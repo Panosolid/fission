@@ -1,7 +1,7 @@
 {
   "model": "far-wall-outside",
   "what": "A 40 × 30 × 20 block (x 0..40, y 10..40) cut by a box running through it along Y and ending 0.5 µm past its back face, at y = 40.0005: a slot open at the top, x 10..30, from z = 5 up. The far wall lies between the tolerance and MIN_FEATURE outside the body; the middle band is judged on the result (booleans.md rule 1), where nothing is thin, so it builds.",
-  "from": "34",
+  "from": "35",
   "recipe": [
     {
       "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."

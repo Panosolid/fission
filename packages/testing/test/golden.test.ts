@@ -222,14 +222,14 @@ test("the reader refuses an expectation missing a field, its working or a readab
   assert.throws(() => readExpect(text((e) => (((e.pins as Record<string, unknown>[])[0].name = ""))), "f"), /pins\[0\]\.name must be a name/);
   // A model waiting for a later step may have no bodies yet, and must say how a user makes it.
   const recipe = [{ do: "Start from the ready-made box", makes: "feature-1" }, { do: "Create Sketch on its top", makes: "sketch-2" }];
-  assert.equal(readExpect(text((e) => ((e.bodies = []), (e.from = "34"), (e.recipe = recipe))), "f").from, "34");
-  assert.throws(() => readExpect(text((e) => (e.from = "34")), "f"), /recipe must say how a user makes the model, which waits for step 34/);
+  assert.equal(readExpect(text((e) => ((e.bodies = []), (e.from = "35"), (e.recipe = recipe))), "f").from, "35");
+  assert.throws(() => readExpect(text((e) => (e.from = "35")), "f"), /recipe must say how a user makes the model, which waits for step 35/);
 });
 
 test("the reader, from 28a2: recipes name every item the expectation does, once; shells and refusals are readable", () => {
   const text = (change: (e: Record<string, unknown>) => void) => {
     const e = structuredClone(expectation()) as unknown as Record<string, unknown>;
-    e.from = "34";
+    e.from = "35";
     e.recipe = [{ do: "Start from the ready-made box", makes: "feature-1" }, { do: "Create Sketch on its top", makes: "sketch-2" }, { do: "Click (40, 30) on the corner" }];
     change(e);
     return JSON.stringify(e);
@@ -256,10 +256,10 @@ test("the reader, from 28a2: recipes name every item the expectation does, once;
 
 test("which models run: one waiting for a step that hasn't landed has no file; once it lands it needs one; every file has an expectation", () => {
   const e = (model: string, from?: string): GoldenExpect => ({ ...expectation(), model, ...(from ? { from } : {}) });
-  assert.deepEqual(plan([e("box"), e("cut", "34")], ["box"], new Set()), [{ model: "box", run: "build" }, { model: "cut", run: "waits", from: "34" }]);
-  assert.deepEqual(plan([e("box"), e("cut", "34")], ["box", "cut"], new Set(["34"])), [{ model: "box", run: "build" }, { model: "cut", run: "build" }]);
-  assert.throws(() => plan([e("box"), e("cut", "34")], ["box"], new Set(["34"])), /step 34 has landed: make cut\.panosolid\.json with it/);
-  assert.throws(() => plan([e("cut", "34")], ["cut"], new Set()), /cut waits for step 34, which hasn't landed, yet has a project file/);
+  assert.deepEqual(plan([e("box"), e("cut", "35")], ["box"], new Set()), [{ model: "box", run: "build" }, { model: "cut", run: "waits", from: "35" }]);
+  assert.deepEqual(plan([e("box"), e("cut", "35")], ["box", "cut"], new Set(["35"])), [{ model: "box", run: "build" }, { model: "cut", run: "build" }]);
+  assert.throws(() => plan([e("box"), e("cut", "35")], ["box"], new Set(["35"])), /step 35 has landed: make cut\.panosolid\.json with it/);
+  assert.throws(() => plan([e("cut", "35")], ["cut"], new Set()), /cut waits for step 35, which hasn't landed, yet has a project file/);
   assert.throws(() => plan([e("box")], []), /box has no project file/);
   assert.throws(() => plan([e("box")], ["box", "stray"]), /stray\.panosolid\.json has no stray\.expect\.json/);
   assert.throws(() => plan([e("box"), e("box")], ["box"]), /two expectations name the same model/);

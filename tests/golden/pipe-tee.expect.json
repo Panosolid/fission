@@ -1,7 +1,7 @@
 {
   "model": "pipe-tee",
-  "what": "A pipe tee: a main pipe along X, outside r 10 and bore r 8, 60 long, and a branch up Z from its middle, outside r 6 and bore r 4, to z = 25; the outsides joined, then both bores cut. Each crossing is a smaller cylinder through a bigger one at right angles, in general position (38c).",
-  "from": "38c",
+  "what": "A pipe tee: a main pipe along X, outside r 10 and bore r 8, 60 long, and a branch up Z from its middle, outside r 6 and bore r 4, to z = 25; the outsides joined, then both bores cut. Each crossing is a smaller cylinder through a bigger one at right angles, in general position (41b).",
+  "from": "41b",
   "recipe": [
     {
       "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."

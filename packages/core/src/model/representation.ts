@@ -37,7 +37,7 @@ export interface SolidRep {
   spec: BodySpec;
 }
 
-/** 2D paths with exact curves (lines and arcs today; Béziers/NURBS at step 65), on a plane. */
+/** 2D paths with exact curves (lines and arcs today; Béziers/NURBS at step 69), on a plane. */
 export interface OutlineRep {
   kind: "outline";
   plane: Plane;

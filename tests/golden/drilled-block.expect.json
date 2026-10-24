@@ -1,6 +1,6 @@
 {
   "model": "drilled-block",
-  "what": "A 40 × 30 × 20 block (the ready-made box) drilled through by a hole r 5 round (20, 15): a circle sketched on its top, extruded down through it as a new body, and cut away. The hole's ends lie on the top and bottom (faces on each other, 35a), its wall is a plane–cylinder crossing (37).",
+  "what": "A 40 × 30 × 20 block (the ready-made box) drilled through by a hole r 5 round (20, 15): a circle sketched on its top, extruded down through it as a new body, and cut away. The hole's ends lie on the top and bottom (faces on each other, 36a), its wall is a plane–cylinder crossing (37).",
   "from": "37",
   "recipe": [
     {
@@ -77,7 +77,7 @@
           0,
           20
         ],
-        "why": "the box's top at z = 20, still one face with the hole in it, keeping its name (40a rule 2)"
+        "why": "the box's top at z = 20, still one face with the hole in it, keeping its name (34a rule 2)"
       }
     }
   ],

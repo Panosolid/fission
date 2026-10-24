@@ -1,7 +1,7 @@
 //! A minimal STEP writer (step 29b): one body as an AP214 manifold solid,
 //! so OpenCascade can read the kernel's actual bodies, check them with its
 //! own validity checker and measure them (`prototypes/oracle/step_check.py`),
-//! instead of only rebuilding each shape itself. Also step 70's first piece.
+//! instead of only rebuilding each shape itself. Also step 74's first piece.
 //!
 //! The file (ISO 10303-21, "Part 21") is a header and a list of numbered
 //! entities, each one line, written children first so no line refers
@@ -44,7 +44,7 @@
 //!
 //! Only valid bodies are written (`validate`): an invalid one is refused
 //! with `InvalidInput`, so the oracle never reports a fault the kernel
-//! already knew about. A body of more than one shell (a void, from step 34)
+//! already knew about. A body of more than one shell (a void, from step 35)
 //! is refused too, with words, until booleans need `BREP_WITH_VOIDS`.
 //! Ellipses join at step 37b.
 

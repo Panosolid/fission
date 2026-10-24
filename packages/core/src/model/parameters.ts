@@ -29,7 +29,7 @@ export interface ProjectParameters {
   value(name: string): number;
 }
 
-/** The project's parameters. Not implemented yet (step 50). */
+/** The project's parameters. Not implemented yet (step 55). */
 export function projectParameters(): ProjectParameters {
   throw new Error("not implemented");
 }

@@ -1,7 +1,7 @@
 {
   "model": "micron-cube-halved",
   "what": "A 1 µm cube, the smallest legal feature (MIN_FEATURE), with half of it cut away: the half left would be 0.5 µm thick, narrower than MIN_FEATURE, so the cut is refused with words and both bodies are kept as they were (booleans.md rule 1 and decision 6; Fusion check F3: a refused Combine keeps its bodies). Its pair, small-cube-halved, is left 1.1 µm thick and builds.",
-  "from": "34",
+  "from": "35",
   "recipe": [
     {
       "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."

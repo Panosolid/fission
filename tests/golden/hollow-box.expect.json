@@ -1,7 +1,7 @@
 {
   "model": "hollow-box",
   "what": "The same 40 × 30 × 20 block with a 20 × 5 × 10 box wholly inside it cut away, at least 5 mm clear of every face: one body with a void (B0 decision 3: shells[0] the outside, a further shell facing in). The table has no facts at all here, so the classification is by the seeded ray.",
-  "from": "34",
+  "from": "35",
   "recipe": [
     {
       "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
