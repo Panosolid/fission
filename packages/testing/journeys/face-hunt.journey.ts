@@ -19,7 +19,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyProject, projectFromJson, projectToJson, type DisplayMesh } from "@fission/core";
 import { addSketch, designWorkspace, drawRectangle, extrudeSketch, partDocument, type DesignDocument } from "@fission/design";
-import { app } from "./design-app.ts";
+import { app, chooseShape } from "./design-app.ts";
 
 type App = Awaited<ReturnType<typeof app>>;
 
@@ -54,9 +54,7 @@ const drawn = (a: App) => a.drawings().filter((d) => !d.editing).map((d) => ({ o
 
 /** Clicks the toolbar's shape button `label`. */
 async function shape(a: App, label: string) {
-  const b = [...a.window.document.querySelectorAll("button")].find((x) => x.textContent === label) as unknown as HTMLButtonElement;
-  assert.ok(b, `a ${label} button`);
-  b.click();
+  chooseShape(a, label);
   await a.settle();
 }
 

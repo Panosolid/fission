@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { partDocument } from "@fission/design";
 import { ActionRegistry, ChangeNotes, DependencyGraph, DownstreamRegistry, emptyProject, FILE_FORMATS, createHistory, RepresentationRegistry, createSelection, NO_HIGHLIGHT, SHELL_SHORTCUTS, ShortcutTable, type BodyView, type GeometryReference, type KernelCalls, type SharedViewport, type StableId, type ViewportHighlight, type WorkspaceContext, type WorkspacePlugin } from "@fission/core";
 
 const root = join(import.meta.dirname, "../../..");
@@ -127,7 +128,8 @@ const opened = new WeakMap<WorkspaceContext, string[]>();
 /** How many times each test context was told the project changed. */
 const changes = new WeakMap<WorkspaceContext, number>();
 
-function testContext(): WorkspaceContext {
+/** `empty`: a project as the app starts one, with no workspace data at all. */
+function testContext({ empty = false } = {}): WorkspaceContext {
   const doc = new Window().document as unknown as Document;
   const el = () => doc.createElement("div") as unknown as HTMLElement;
   const viewport: SharedViewport = {
@@ -150,8 +152,11 @@ function testContext(): WorkspaceContext {
     showSketches() {},
     showPlanes() {},
   };
+  // A new project's design starts empty (U0c); these tests work on a part, the 40 × 30 × 20 box (feature-1).
+  const project = emptyProject();
+  if (!empty) project.workspaces.design = partDocument("box", 40, 30, 20);
   return {
-    project: emptyProject(),
+    project,
     projectChanged() {
       changes.set(this, (changes.get(this) ?? 0) + 1);
     },
@@ -493,12 +498,13 @@ test("Design shows a kernel failure in its panel rather than throwing", async ()
   const view = plugins.find((p) => p.id === "design")!.mount(ctx);
   await settle();
   assert.match(ctx.properties.querySelector("#error")!.textContent!, /no kernel in this test/);
-  // Its toolbar (16b): the sketch tool (21c), then the command groups, with the part's shape pressed, then Start fresh's Design group.
-  const groups = [...ctx.toolbar.querySelectorAll<HTMLElement>("[role=group]")];
-  assert.deepEqual(groups.filter((g) => !g.hidden).map((g) => g.getAttribute("aria-label")), ["Sketch", "Create", "Export", "Design"]);
+  // Its toolbar (16b): the sketch tool (21c), Insert ▾ (U0d), the command groups, then Start fresh's Design group.
+  const groups = [...ctx.toolbar.querySelectorAll<HTMLElement>(":scope > [role=group], :scope > * > [role=group]")].filter((g) => g.closest(".menu-button-menu") === null);
+  assert.deepEqual(groups.filter((g) => !g.hidden).map((g) => g.getAttribute("aria-label")), ["Sketch", "Insert", "Export", "Design"]);
   // The sketch's own toolbar (SF3b) is there too, hidden until a sketch is edited: its Create menu and tools first, Finish Sketch last.
-  assert.deepEqual(groups.map((g) => [g.getAttribute("aria-label"), g.hidden]), [["Create", true], ["Sketch", false], ["Create", false], ["Export", false], ["Design", false], ["Finish", true]]);
-  assert.deepEqual([...ctx.toolbar.querySelectorAll("[aria-pressed=true]")].map((b) => b.textContent), ["Box"]);
+  assert.deepEqual(groups.map((g) => [g.getAttribute("aria-label"), g.hidden]), [["Create", true], ["Sketch", false], ["Insert", false], ["Export", false], ["Design", false], ["Finish", true]]);
+  // The part's shape is the panel's Shape choice now: the box.
+  assert.equal(ctx.properties.querySelector<HTMLSelectElement>("#shape")!.value, "box");
   view.unmount();
 });
 
@@ -591,20 +597,23 @@ test("a body the kernel failed is not shown: it offers no verb, and the STL butt
 // must not (a placeholder that did would mark the project changed for nothing).
 test("Design says the project changed when it writes the part; placeholders never do", async () => {
   for (const p of plugins) {
-    const ctx = testContext();
+    const ctx = testContext({ empty: true });
     const view = p.mount(ctx);
     await settle();
     if (p.id !== "design") {
       assert.equal(changes.get(ctx) ?? 0, 0, `${p.id} changed nothing`);
       assert.deepEqual(Object.keys(ctx.project.workspaces), [], `${p.id} wrote nothing`);
     } else {
-      // Mounting on an empty project writes the default part: one change.
+      // Mounting on an empty project writes the empty design a new project starts with (U0c): one change, no body.
       assert.equal(changes.get(ctx), 1);
+      assert.deepEqual(ctx.project.workspaces.design, { version: 3, nextId: 1, profiles: [], sketches: [], timeline: { features: [] } });
       const before = ctx.project.workspaces.design;
       const width = ctx.properties.querySelector("input") as HTMLInputElement;
       width.value = "50";
       width.dispatchEvent(new (ctx.properties.ownerDocument.defaultView as unknown as typeof globalThis).Event("input"));
       assert.notEqual(ctx.project.workspaces.design, before, "the edit wrote a new document");
+      // A size typed with no body adds one (24f4): a 50 × 30 × 20 box, feature-1.
+      assert.deepEqual((ctx.project.workspaces.design as { timeline: { features: { id: string; intent: { summary: string } }[] } }).timeline.features.map((f) => [f.id, f.intent.summary]), [["feature-1", "Box: 50 × 30 × 20 mm"]]);
       assert.equal(changes.get(ctx), 2, "and said so once");
     }
     view.unmount();

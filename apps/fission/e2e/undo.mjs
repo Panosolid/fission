@@ -13,13 +13,14 @@ import assert from "node:assert/strict";
 import { browserName, launch } from "./browser.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { chooseShape, startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4180, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4180/";
 const browser = await launch();
 const errors = [];
 
-async function fresh(hash = "#design") {
+async function fresh(hash = "#design", { box = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
@@ -28,7 +29,7 @@ async function fresh(hash = "#design") {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + hash);
-  if (hash === "#design") await volume(page, "24,000 mm³"); // 40 · 30 · 20
+  if (hash === "#design" && box) await startWithBox(page); // a new project starts empty (U0c): the 40 · 30 · 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
@@ -73,17 +74,20 @@ async function check(name, fn) {
 
 try {
   await check("buttons: off at the start, then Undo Change width puts back the old volume and size box, Redo brings it again", async () => {
-    const page = await fresh();
+    const page = await fresh("#design", { box: false });
     try {
-      // Design filled in its default box while it was first shown: not a step.
+      // Design filled in its empty design while it was first shown: not a step.
+      await page.waitForSelector("#start-hint", { state: "visible" });
       assert.deepEqual(await buttons(page), [[true, "Nothing to undo"], [true, "Nothing to redo"]]);
+      await startWithBox(page);
+      assert.deepEqual(await buttons(page), [[false, "Undo Insert Box (Ctrl+Z)"], [true, "Nothing to redo"]]);
       await page.fill("#width", "50");
       await volume(page, "30,000 mm³"); // 50 · 30 · 20
       assert.deepEqual(await buttons(page), [[false, "Undo Change width (Ctrl+Z)"], [true, "Nothing to redo"]]);
       await page.click("#undo");
       await volume(page, "24,000 mm³");
       assert.equal(await width(page), "40");
-      assert.deepEqual(await buttons(page), [[true, "Nothing to undo"], [false, "Redo Change width (Ctrl+Shift+Z)"]]);
+      assert.deepEqual(await buttons(page), [[false, "Undo Insert Box (Ctrl+Z)"], [false, "Redo Change width (Ctrl+Shift+Z)"]]);
       await page.screenshot({ path: "e2e/undo.png", clip: { x: 0, y: 0, width: 1280, height: 120 } });
       await page.click("#redo");
       await volume(page, "30,000 mm³");
@@ -102,14 +106,18 @@ try {
     try {
       await typeWidth(page, "60"); // the box shows 6, then 60: two input events, well under a second apart
       await volume(page, "36,000 mm³"); // 60 · 30 · 20
-      await page.click('[data-shape="cylinder"]');
+      await chooseShape(page, "cylinder");
       assert.deepEqual((await buttons(page))[0], [false, "Undo Change shape to Cylinder (Ctrl+Z)"]);
       await page.click("#undo"); // back to the box, 60 wide
       await volume(page, "36,000 mm³");
       await page.click("#undo"); // the whole typed 60 at once, back to 40
       await volume(page, "24,000 mm³");
       assert.equal(await width(page), "40");
-      assert.deepEqual(await buttons(page), [[true, "Nothing to undo"], [false, "Redo Change width (Ctrl+Shift+Z)"]]);
+      assert.deepEqual(await buttons(page), [[false, "Undo Insert Box (Ctrl+Z)"], [false, "Redo Change width (Ctrl+Shift+Z)"]]);
+      await page.click("#undo"); // the insert: empty again, as the project started
+      await page.waitForSelector("#start-hint", { state: "visible" });
+      assert.equal(await page.textContent("#volume"), "—");
+      assert.deepEqual(await buttons(page), [[true, "Nothing to undo"], [false, "Redo Insert Box (Ctrl+Shift+Z)"]]);
     } finally {
       await page.close();
     }
@@ -186,12 +194,13 @@ try {
     }
   });
 
-  await check("starting in another workspace: Design's default box, filled in when it is first shown, is no step", async () => {
+  await check("starting in another workspace: Design's empty design, filled in when it is first shown, is no step", async () => {
     const page = await fresh("#laser");
     try {
       assert.deepEqual(await buttons(page), [[true, "Nothing to undo"], [true, "Nothing to redo"]]);
       await page.click("[data-workspace=design]");
-      await volume(page, "24,000 mm³");
+      await page.waitForSelector("#start-hint", { state: "visible" });
+      await volume(page, "—");
       assert.deepEqual(await buttons(page), [[true, "Nothing to undo"], [true, "Nothing to redo"]]);
     } finally {
       await page.close();
@@ -225,7 +234,7 @@ try {
   await check("undo to a different shape keeps a face of the same name and drops one that is gone, with the note", async () => {
     const page = await fresh();
     try {
-      await page.click('[data-shape="cylinder"]');
+      await chooseShape(page, "cylinder");
       await shape(page, "cylinder");
       await clickCentre(page);
       // The centre of the view is on the cylinder's top.
@@ -235,7 +244,7 @@ try {
       await volume(page, "24,000 mm³");
       assert.equal(await selection(page), "face:feature-1/top", "the top is the box's top now");
       assert.equal(await page.isVisible("#selection-note"), false);
-      await page.click('[data-shape="sphere"]');
+      await chooseShape(page, "sphere");
       await shape(page, "sphere");
       // A sphere has no top: dropped by the change of shape, with the note.
       assert.equal(await selection(page), "");
@@ -278,7 +287,7 @@ try {
       // Another shape, undone: the user's shape change is framed (a new part), its undo is not, as long as
       // the box still fits the framing (box and L-bracket sit in the same place; box ↔ cylinder re-frames
       // because the cylinder sits elsewhere, the needsRefit rule edits use).
-      await page.click('[data-shape="l-bracket"]');
+      await chooseShape(page, "l-bracket");
       await shape(page, "l-bracket");
       const framed = await fits();
       assert.equal(framed, before + 1, "a new shape by the user is framed");

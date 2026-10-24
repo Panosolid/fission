@@ -21,6 +21,7 @@ import { mkdirSync } from "node:fs";
 import { launch, browserName } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
+import { chooseShape, startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4195, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4195/?test-hooks";
@@ -38,7 +39,7 @@ async function fresh(width = 1280, touch = false) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   return page;
 }
 
@@ -293,7 +294,7 @@ try {
 
   await check("1280 px: a cylinder's round side does not light and is refused in words, nothing recorded; its flat top is offered", async () => {
     const page = await fresh();
-    await page.click("#toolbar [data-shape=cylinder]");
+    await chooseShape(page, "cylinder");
     await until(page, () => document.querySelector("#viewport").dataset.shape === "cylinder", null, "a cylinder");
     await settle(page);
     const undoBefore = await page.evaluate(() => document.getElementById("undo").title);

@@ -24,6 +24,7 @@ import { launch } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { chooseShape, startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4197, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4197/?test-hooks";
@@ -47,7 +48,7 @@ async function fresh(width = 1280, touch = false) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
@@ -114,8 +115,6 @@ async function settle(page) {
   }
   throw new Error("the camera never settled");
 }
-/** The toolbar's shape button `label`. */
-const shapeButton = (page, label, tap) => (tap ? page.getByRole("button", { name: label, exact: true }).tap() : page.getByRole("button", { name: label, exact: true }).click());
 /** A playback button on the timeline bar. */
 const playback = (page, b, tap) => press(page, `#timeline [data-button="${b}"]`, tap);
 
@@ -161,7 +160,7 @@ try {
       await until(page, () => document.querySelector("#volume")?.textContent === "48,000 mm³", null, "40 × 30 × 40 = 48,000 mm³");
       // ---- Sphere: no flat face, the circle's plane lost: drawn red, at z = 40 (where it last was), not z = 20 (where it was drawn).
       await top(page);
-      await shapeButton(page, "Sphere", tap);
+      await chooseShape(page, "sphere"); // the properties' Shape choice (U0d)
       await until(page, () => Number(document.querySelector("#viewport").dataset.sketchLost) > 0, null, "the circle drawn lost");
       // A new part is framed with the lost circle in (hunt 26h; before, the body alone, and at 375 px the circle sat under the view
       // cube): the box round the sphere (−20..20 each way) and the circle (5 round c at z = 40) is, for c = (20, 15), 45 × 40 × 60,

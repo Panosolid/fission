@@ -20,6 +20,7 @@ import { launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4181, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4181/";
@@ -106,7 +107,7 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
     return route.fulfill({ headers: cors, body: JSON.stringify({ choices: [{ message: { content: answers.shift() ?? "{}" } }] }) });
   });
   await page.goto(url + "#design");
-  await volume(page, "24,000 mm³"); // the default box: 40 · 30 · 20
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   if (open) await page.click("#assistant-toggle");
   return { page, asked, listed, builtInAsked, builtInCreated, ollamaHits, remoteHits };
@@ -194,7 +195,7 @@ try {
       assert.equal(await page.textContent("#ai-preview .ai-label"), "AI: box 50 × 30 × 20 mm");
       assert.deepEqual(await page.$$eval("#ai-preview tr", (rows) => rows.map((r) => r.textContent)), ["width40→50"]);
       await volume(page, "24,000 mm³");
-      assert.equal(await undoTitle(page), "Nothing to undo");
+      assert.equal(await undoTitle(page), "Undo Insert Box (Ctrl+Z)"); // the box's insert (U0c) is the only step
       await page.screenshot({ path: "e2e/assistant-preview.png" });
       await page.click("#ai-accept");
       await volume(page, "30,000 mm³"); // 50 · 30 · 20
@@ -202,7 +203,7 @@ try {
       assert.equal(await undoTitle(page), "Undo AI: box 50 × 30 × 20 mm (Ctrl+Z)");
       await page.click("#undo");
       await volume(page, "24,000 mm³");
-      assert.equal(await undoTitle(page), "Nothing to undo", "one step, taken back whole");
+      assert.equal(await undoTitle(page), "Undo Insert Box (Ctrl+Z)", "one step, taken back whole");
       await page.click("#redo");
       await volume(page, "30,000 mm³");
     } finally {
@@ -222,7 +223,7 @@ try {
       await page.click("#ai-reject");
       assert.match(await page.textContent("#ai-result"), /Rejected: nothing was changed/);
       await volume(page, "24,000 mm³");
-      assert.equal(await undoTitle(page), "Nothing to undo");
+      assert.equal(await undoTitle(page), "Undo Insert Box (Ctrl+Z)"); // the box's insert (U0c) is the only step
     } finally {
       await page.close();
     }
@@ -349,7 +350,7 @@ try {
       assert.match(await page.textContent("#ai-result"), /even after one retry.*Nothing was changed/s);
       assert.equal(asked.length, 2);
       await volume(page, "24,000 mm³");
-      assert.equal(await undoTitle(page), "Nothing to undo");
+      assert.equal(await undoTitle(page), "Undo Insert Box (Ctrl+Z)"); // the box's insert (U0c) is the only step
     } finally {
       await page.close();
     }
@@ -458,7 +459,7 @@ try {
     try {
       await useOllama(page);
       await page.reload();
-      await volume(page, "24,000 mm³");
+      await page.waitForSelector("#start-hint", { state: "visible" }); // each load is a new, empty project here (U0c)
       assert.equal(await page.textContent("#assistant-toggle"), "AI Ollama");
       await page.click("#assistant-toggle");
       await page.waitForFunction(() => document.querySelector("#ai-model-pick").value === "qwen2.5:1.5b");
@@ -553,7 +554,7 @@ try {
       await page.selectOption("#ai-provider", "");
       assert.equal(await page.textContent("#assistant-toggle"), "AI off");
       await page.reload();
-      await volume(page, "24,000 mm³");
+      await page.waitForSelector("#start-hint", { state: "visible" }); // each load is a new, empty project here (U0c)
       await page.click("#assistant-toggle");
       await looked(page);
       await page.click("#ai-detect");
@@ -583,7 +584,7 @@ try {
       await page.fill("#ai-model", "my-tuned-model");
       await page.dispatchEvent("#ai-model", "change");
       await page.reload();
-      await volume(page, "24,000 mm³");
+      await page.waitForSelector("#start-hint", { state: "visible" }); // each load is a new, empty project here (U0c)
       await page.click("#assistant-toggle");
       await page.waitForFunction(() => document.querySelector("#ai-model").value === "my-tuned-model");
       assert.equal(await page.isVisible("#ai-model"), true, "a name not in the list stays a typed name");

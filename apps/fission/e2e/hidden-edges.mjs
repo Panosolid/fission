@@ -132,7 +132,7 @@ async function fresh(width, touch) {
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³", null, { timeout: 15000 });
+  await page.waitForSelector("#start-hint", { state: "visible", timeout: 15000 }); // the empty new project (U0c), ready for the file
   await page.setInputFiles("#open-file", { name: "Hidden.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(project)) });
   await page.waitForFunction(() => document.querySelectorAll('#browser [data-node="timeline"] .tree-row').length === 3 && document.querySelector("#viewport")?.dataset.sketchLines === "5", null, { timeout: 15000 });
   // 40 · 30 · 20 = 24,000 mm³ again, the same as the box the page opened with, so wait for the timeline instead.

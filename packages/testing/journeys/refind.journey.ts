@@ -311,10 +311,11 @@ async function refindSession(seed: number, steps: number, plugin = designWorkspa
           reach("edit-sketch");
         }
       } else if (roll < 0.7) {
-        // The part's shape from the toolbar (the last preset): a box made a cylinder or a sphere takes faces off it.
-        const button = a.$(`[data-shape="${pickOf(["box", "cylinder", "sphere"])}"]`);
-        if (button && !(button as HTMLButtonElement).disabled) {
-          button.click();
+        // The part's shape from the panel's Shape choice (the last preset; the toolbar's buttons until U0d): a box made a cylinder or a sphere takes faces off it.
+        const choice = a.$("#shape") as HTMLSelectElement | null;
+        if (choice && !choice.disabled) {
+          choice.value = pickOf(["box", "cylinder", "sphere"]);
+          choice.dispatchEvent(new a.window.Event("change", { bubbles: true }) as unknown as Event);
           await a.settle();
           reach("shape");
         }

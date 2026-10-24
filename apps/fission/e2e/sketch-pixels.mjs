@@ -25,6 +25,7 @@ import { preview } from "vite";
 import { browserName, launch } from "./browser.mjs";
 import { compareImages, decodePng, encodePng } from "./png.mjs";
 import { clickPlane, screenPoint, TOP } from "./sketch-screen.mjs";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4193, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4193/";
@@ -143,7 +144,7 @@ try {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   // The canvas's size comes from the bars above it, whose height follows the fonts installed (CI's are
   // a pixel shorter): pin them, so the canvas is 1280 × 678 everywhere (980 × 678 before U0b floated the properties, 760 × 710 before SF3d) and the golden images line up.
   await page.addStyleTag({ content: "#topbar, #toolbar { height: 45px !important; min-height: 0 !important; overflow: hidden; }" });

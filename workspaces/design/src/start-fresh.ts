@@ -1,39 +1,29 @@
-// Start fresh: the design cleared back to the one a new project opens with,
-// as one undo step, after asking. Every sketch, feature, profile and kept
-// shape goes; what is left is the starting box (the panel's default sizes),
-// the design a new project opens with (a design with no body opens too
-// from 24f4, but a fresh start gives the same start as a new project).
-// The workspace runs it from the toolbar's Start fresh button (workspace.ts);
-// the dialog asks first, says what goes, and that Undo brings it back.
-// Styles: src/styles/start-fresh.css.
+// Start fresh: the design cleared back to the empty one a new project
+// opens with (U0c), as one undo step, after asking. Every sketch, feature,
+// profile and kept shape goes. The workspace runs it from the toolbar's
+// Start fresh button (workspace.ts); the dialog asks first, says what goes,
+// and that Undo brings it back. Styles: src/styles/start-fresh.css.
 
-import { isSketchItem, partDocument, type DesignDocument } from "./document.ts";
-import { DEFAULT_SIZES } from "./properties.ts";
+import { isSketchItem, type DesignDocument } from "./document.ts";
 
 /** The undo step Start fresh is recorded as. */
 export const START_FRESH_STEP = "Start fresh";
 
-/** The design a new project opens with: the box at the panel's default sizes (40 × 30 × 20 mm). */
+/** The design a new project opens with (U0c, the owner's ask): nothing in it, the id counter at 1. */
 export function freshDesign(): DesignDocument {
-  return partDocument("box", Number(DEFAULT_SIZES.width), Number(DEFAULT_SIZES.depth), Number(DEFAULT_SIZES.height));
+  return { version: 3, nextId: 1, profiles: [], sketches: [], timeline: { features: [] } };
 }
 
-/** The same plain data, key order aside (a document read from a file can list its keys in another order). */
-function same(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && same((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
-}
-
-/** Whether the design is already the fresh one, so Start fresh would change nothing (and records no step). */
+/**
+ * Whether the design has nothing in it, so Start fresh would clear nothing
+ * (and records no step): no timeline item, sketch, ready-made profile or
+ * kept shape. The id counter and the marker don't count: a design whose
+ * last body was deleted is as empty as a fresh one, and clearing it would
+ * change nothing anyone can see.
+ */
 export function isFresh(doc: DesignDocument): boolean {
-  return same(doc, freshDesign());
+  return doc.timeline.features.length === 0 && doc.sketches.length === 0 && doc.profiles.length === 0 && Object.keys(doc.kept ?? {}).length === 0;
 }
-
-/** The fresh box's sizes as the dialog says them: "40 × 30 × 20". */
-export const FRESH_SIZES = `${DEFAULT_SIZES.width} × ${DEFAULT_SIZES.depth} × ${DEFAULT_SIZES.height}`;
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -41,7 +31,7 @@ const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : 
 export function clearedWords(doc: DesignDocument): string {
   const sketches = doc.timeline.features.filter(isSketchItem).length;
   const features = doc.timeline.features.length - sketches;
-  const parts = [...(sketches > 0 ? [count(sketches, "sketch", "sketches")] : []), count(features, "feature", "features")];
+  const parts = [...(sketches > 0 ? [count(sketches, "sketch", "sketches")] : []), ...(features > 0 || sketches === 0 ? [count(features, "feature", "features")] : [])];
   return parts.join(" and ");
 }
 
@@ -57,7 +47,7 @@ export interface StartFresh {
 }
 
 export const START_FRESH_TITLE = "Clear the whole design and start again from a new one. It asks first, and Undo brings it back.";
-export const ALREADY_FRESH_TITLE = "Nothing to clear: this is the design a new project starts with.";
+export const ALREADY_FRESH_TITLE = "Nothing to clear: the design is already empty.";
 
 /**
  * The Start fresh button and its dialog, in the toolbar slot's page. The
@@ -132,7 +122,7 @@ export function startFresh(slot: HTMLElement, events: { current(): DesignDocumen
   });
 
   const ask = (doc: DesignDocument) => {
-    words.textContent = `This clears everything in the design (${clearedWords(doc)}) and starts again from the ${FRESH_SIZES} mm box a new design opens with. Undo brings it all back.`;
+    words.textContent = `This clears everything in the design (${clearedWords(doc)}) and starts again from an empty design, as a new project opens. Undo brings it all back.`;
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
     cancel.focus();

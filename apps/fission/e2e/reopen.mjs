@@ -16,6 +16,7 @@ import { resolve } from "node:path";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4219, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4219/";
@@ -46,7 +47,7 @@ async function fresh(width) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return { context, page };
 }
@@ -86,7 +87,7 @@ async function freshValved(width) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "?test-hooks#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page);
   return { context, page };
 }
@@ -203,9 +204,9 @@ try {
           await status(page),
           "The last project didn't finish opening on your last visit, so a new one was started. The old one is still kept in this browser: reload the page now, before changing anything, to try it again.",
         );
-        // The new project's box, once its first build is back from the kernel (the panel shows "—" until then).
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent !== "—");
-        assert.equal(await volume(page), "24,000 mm³");
+        // The new project: empty, as every new project starts (U0c), its hint showing.
+        await page.waitForSelector("#start-hint", { state: "visible" });
+        assert.equal(await volume(page), "—");
         assert.equal(await mark(page), null, "the mark is cleared, so the next visit tries again");
         if (shots) await page.screenshot({ path: `${shots}/skipped-${width}.png` });
         // The visit after opens it again.
@@ -248,15 +249,16 @@ try {
         if (shots) await page.screenshot({ path: `${shots}/opening-${width}.png` });
         await page.click("#opening-fresh");
         await page.evaluate(() => window.releaseKernel());
-        // The new project, built once the plate's held answers are through; the plate's late bodies are freed.
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+        // The new project, empty (U0c); the plate's late bodies are freed once its held answers are through.
+        await page.waitForSelector("#start-hint", { state: "visible" });
         assert.equal(await status(page), "Started a new project instead. The last one is still kept in this browser: reload the page, before changing anything, to try it again.");
         assert.equal(await page.isVisible("#opening-fresh"), false);
         assert.equal(await mark(page), null, "the plate didn't freeze the tab: the next visit opens it");
-        await page.waitForFunction(async () => (await window.fissionTest.bodyCount()) === 1, null, { timeout: 10_000 });
+        await page.waitForFunction(async () => (await window.fissionTest.bodyCount()) === 0, null, { timeout: 10_000 });
         await page.waitForTimeout(1000);
-        assert.equal(await volume(page), "24,000 mm³", "the plate never replaced it");
-        assert.equal(await page.evaluate(() => window.fissionTest.bodyCount()), 1, "only the new box: none of the plate's bodies left in the kernel");
+        assert.equal(await volume(page), "—", "the plate never replaced it");
+        assert.equal(await page.isVisible("#start-hint"), true, "still the empty new project");
+        assert.equal(await page.evaluate(() => window.fissionTest.bodyCount()), 0, "none of the plate's bodies left in the kernel");
         assert.deepEqual(await keptProjects(page), kept, "nothing stored until the new project changes");
         if (shots) await page.screenshot({ path: `${shots}/started-instead-${width}.png` });
         // The next visit opens the plate, as the message says, even after a pause.
@@ -269,7 +271,8 @@ try {
         await page.waitForSelector("#opening-fresh", { state: "visible", timeout: 10_000 });
         await page.click("#opening-fresh");
         await page.evaluate(() => window.releaseKernel());
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+        await startWithBox(page);
+        await pinProperties(page);
         await page.fill("#width", "50");
         // V = 50·30·20 = 30000.
         await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
@@ -284,9 +287,9 @@ try {
         await page.waitForSelector("#opening-fresh", { state: "visible", timeout: 10_000 });
         await page.click("#opening-fresh");
         await page.evaluate(() => window.releaseKernel());
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+        await page.waitForSelector("#start-hint", { state: "visible" });
         await page.waitForTimeout(1000);
-        assert.equal(await page.evaluate(() => window.fissionTest.bodyCount()), 1, "the 50 mm box built late was freed, not left in the kernel");
+        assert.equal(await page.evaluate(() => window.fissionTest.bodyCount()), 0, "the 50 mm box built late was freed, not left in the kernel");
       } finally {
         await context.close();
       }
@@ -307,16 +310,18 @@ try {
         assert.deepEqual(await keptProjects(page), first, "not stored before it has shown");
         await page.click("#opening-fresh");
         await page.evaluate(() => window.releaseKernel());
-        await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+        // A new, empty project (U0c): the file never shown.
+        await page.waitForSelector("#start-hint", { state: "visible" });
+        assert.equal(await volume(page), "—");
         assert.equal(await status(page), "Started a new project instead. The file was not opened: open it again to try again.");
         await page.waitForTimeout(1500);
         assert.deepEqual(await keptProjects(page), first, "the file was never stored");
         // Opened again at full speed: shown, then stored as a new project.
-        const boxId = await page.evaluate(() => document.body.dataset.projectId);
+        const newId = await page.evaluate(() => document.body.dataset.projectId);
         await dropText(page, "plate.fission.json", plate);
         // The plate's own volume: not the box's, and not "—", shown while the plate's rebuild is still with the kernel.
         await page.waitForFunction(() => !["24,000 mm³", "—"].includes(document.querySelector("#volume")?.textContent ?? "—"));
-        await page.waitForFunction((old) => document.body.dataset.projectId !== old, boxId);
+        await page.waitForFunction((old) => document.body.dataset.projectId !== old, newId);
         await page.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
         assert.equal((await keptProjects(page)).length, 2);
         assert.equal(await status(page), "");

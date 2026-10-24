@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
 import { TOP, clickPlane } from "./sketch-screen.mjs";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4193, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4193/?test-hooks";
@@ -31,7 +32,7 @@ async function fresh(width = 1280, touch = false) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await settle(page);
   return page;
 }
@@ -92,14 +93,14 @@ await check("picking a plane swaps the modelling buttons for the sketch's toolba
   try {
     assert.equal(await visible(page, "#finish-sketch"), false, "no Finish Sketch while modelling");
     assert.equal(await visible(page, "#sketch-create"), false);
-    assert.equal(await visible(page, "[data-shape=box]"), true);
+    assert.equal(await visible(page, "#insert"), true);
     await page.click("#create-sketch");
     // While picking a plane the toolbar is still the modelling one.
     assert.equal(await visible(page, "#create-sketch"), true);
     assert.equal(await visible(page, "#finish-sketch"), false);
     await page.click("#sketch-plane-XY");
     await sketching(page, true);
-    for (const sel of ["#create-sketch", "[data-shape=box]", "[data-shape=star]", "[data-op=export_stl]"]) assert.equal(await visible(page, sel), false, `${sel} hidden while sketching`);
+    for (const sel of ["#create-sketch", "#insert", "[data-op=export_stl]"]) assert.equal(await visible(page, sel), false, `${sel} hidden while sketching`);
     for (const sel of ["#sketch-create", "#extrude", "#finish-sketch", ...TOOLS.map((t) => `#sketch-tool-${t}`)]) assert.equal(await visible(page, sel), true, `${sel} shown while sketching`);
     // Order along the bar: Create, then the tools, Extrude, Finish Sketch last and flush right.
     const xs = [];
@@ -215,7 +216,7 @@ await check("Finish Sketch on the toolbar: back to modelling at the home view, n
     assert.equal(await visible(page, "#finish-sketch"), false);
     assert.equal(await visible(page, "#sketch-create"), false);
     assert.equal(await visible(page, "#create-sketch"), true, "the modelling buttons are back");
-    assert.equal(await visible(page, "[data-shape=box]"), true);
+    assert.equal(await visible(page, "#insert"), true);
     assert.equal(await page.evaluate(() => document.querySelector("#viewport").dataset.sketchLines), "3", "the sketch stays drawn");
     if (shots) await page.screenshot({ path: `${shots}/sketch-toolbar-finished-1280.png` });
   } finally {

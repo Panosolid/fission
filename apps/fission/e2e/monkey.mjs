@@ -86,7 +86,8 @@ async function open(browser) {
   page.on("console", (m) => m.type() === "error" && errors.push(`console error: ${m.text()}`));
   page.on("dialog", (d) => d.dismiss().catch(() => {}));
   await page.goto(url);
-  await page.waitForSelector('#timeline li[data-item]', { timeout: 20000 });
+  // A new project starts empty (U0c): ready once the kernel has said its version and the start hint shows.
+  await page.waitForFunction(() => /kernel v/.test(document.getElementById("version")?.textContent ?? "") && document.querySelector("#start-hint")?.hidden === false, null, { timeout: 20000 });
   return { context, page, errors, saved: null, savedName: "Untitled.spindlelabs.json", known: new Set(), design: null, seen: new Set() };
 }
 

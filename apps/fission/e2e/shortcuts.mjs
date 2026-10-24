@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4179, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4179/";
@@ -22,7 +23,7 @@ async function fresh(width = 1280) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }

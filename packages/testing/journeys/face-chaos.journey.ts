@@ -28,7 +28,7 @@ import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { emptyProject, projectFromJson, projectToJson, type DisplayMesh, type Plane, type SketchDrawing } from "@fission/core";
 import { addSketch, designWorkspace, drawLine, drawRectangle, extrudeSketch, partDocument, settleKept, type DesignDocument } from "@fission/design";
-import { app, close, kernel } from "./design-app.ts";
+import { app, chooseShape, close, kernel } from "./design-app.ts";
 
 const SEEDS = Number(process.env.FISSION_SESSIONS ?? 6);
 const STEPS = Number(process.env.FISSION_SESSION_STEPS ?? 40);
@@ -185,8 +185,7 @@ export async function faceSession(seed: number, steps: number, plugin = designWo
         // The part is a preset with a sketch on it: another shape, which loses some or all of its faces (Edit feature never does).
         const now = sketchedPart(before)!;
         const shape = pick(["Box", "Cylinder", "Sphere"].filter((x) => x.toLowerCase() !== now));
-        const button = [...a.window.document.querySelectorAll("button")].find((b) => b.textContent === shape) as unknown as HTMLButtonElement;
-        button.click();
+        chooseShape(a, shape);
         await a.settle();
         done.push(`shape ${shape} (the part, a ${now}, has a sketch on it)`);
         reach("shape-lose");
@@ -276,11 +275,10 @@ export async function faceSession(seed: number, steps: number, plugin = designWo
           reach("edit-feature");
         }
       } else if (roll < 0.54) {
-        // The panel: a shape button (it changes the part when that is a box, cylinder or sphere, losing faces), or a size typed (one box).
+        // The panel: the Shape choice (it changes the part when that is a box, cylinder or sphere, losing faces; on an extruded sketch it adds a box, cylinder or sphere), or a size typed (one box).
         if (r() < 0.6) {
           const shape = pick(["Box", "Cylinder", "Sphere"]);
-          const button = [...a.window.document.querySelectorAll("button")].find((b) => b.textContent === shape) as unknown as HTMLButtonElement | undefined;
-          button?.click();
+          chooseShape(a, shape);
           await a.settle();
           done.push(`shape ${shape}`);
           reach("shape");

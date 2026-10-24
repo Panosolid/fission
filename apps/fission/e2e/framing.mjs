@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4230, strictPort: true }, logLevel: "error" });
 const app = "http://localhost:4230/";
@@ -219,8 +220,8 @@ try {
     const violations = [];
     page.on("console", (m) => /Content Security Policy/i.test(m.text()) && violations.push(m.text()));
     await page.goto(app);
-    // 40 × 30 × 20 = 24,000, the default box, worked out by hand; the kernel computes it in its worker.
-    await waitUntil(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    // 40 × 30 × 20 = 24,000, the box inserted into the empty new project (U0c), worked out by hand; the kernel computes it in its worker.
+    await startWithBox(page);
     if (shots) await page.screenshot({ path: `${shots}/unframed-1280.png` });
     // The kernel's worker has a policy of its own (a worker from this site's URL doesn't take the page's meta
     // policy), so the page compiles a module itself: the 8-byte header of an empty one ("\0asm", version 1).

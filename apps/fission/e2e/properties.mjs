@@ -5,11 +5,21 @@
 // kept in the browser's storage, so it holds through reloads in that context.
 // At phone width (and in split view) there is no button and nothing folds.
 
-/** Pins the panel open when it is folded; a no-op where it does not fold. */
+/** The pin as the panel keeps it in the browser's storage (properties-fold.ts PIN_KEY). */
+const pinnedNow = (page) => page.evaluate(() => localStorage.getItem("fission.properties-pinned") === "true");
+
+/**
+ * Pins the panel open; a no-op where it does not fold. A panel shown only
+ * for a while (a body just inserted shows its sizes, U0d) is not pinned: its
+ * button folds it first, and the second press pins it.
+ */
 export async function pinProperties(page) {
   const handle = page.locator("#properties-handle");
   if (!(await handle.isVisible())) return;
-  if ((await handle.getAttribute("aria-expanded")) === "false") await handle.click();
+  if (!(await pinnedNow(page))) {
+    if ((await handle.getAttribute("aria-expanded")) === "true") await handle.click();
+    await handle.click();
+  }
   await page.waitForFunction(() => !document.querySelector("#properties")?.hasAttribute("data-folded"));
 }
 

@@ -17,6 +17,7 @@
 import assert from "node:assert/strict";
 import { browserName, launch } from "./browser.mjs";
 import { preview } from "vite";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4183, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4183/";
@@ -48,9 +49,10 @@ async function fresh(width = 1280, touch = false) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³").catch(async (e) => {
+  // A new project starts empty (U0c): the 40 × 30 × 20 box, inserted.
+  await startWithBox(page).catch(async (e) => {
     const volume = await page.evaluate(() => document.querySelector("#volume")?.textContent ?? "(none)").catch(() => "(unreadable)");
-    throw new Error(`the page never showed the default box's 24,000 mm³ (volume "${volume}"): ${e.message}`);
+    throw new Error(`the page never showed the inserted box's 24,000 mm³ (volume "${volume}"): ${e.message}`);
   });
   await foldBrowser(page);
   return page;
@@ -181,7 +183,7 @@ try {
     await page.keyboard.press("Escape");
     assert.equal(await page.isVisible("#sketch-panel"), false, "Escape leaves the prompt");
     assert.equal(await data(page, "planes"), "", "the planes go");
-    assert.equal(await undoTitle(page), "Nothing to undo", "cancelling made no sketch");
+    assert.equal(await undoTitle(page), "Undo Insert Box (Ctrl+Z)", "cancelling made no sketch: the box's insert is still the last step");
     await page.context().close();
   });
 
@@ -232,7 +234,7 @@ try {
     await page.keyboard.press("Control+z"); // the sketch itself
     await until(page, () => document.querySelector("#sketch-panel")?.hidden === true, null, "the sketch is gone, so is the tool");
     assert.equal(await page.$('[data-node="sketches/sketch-2"]'), null);
-    assert.equal(await undoTitle(page), "Nothing to undo");
+    assert.equal(await undoTitle(page), "Undo Insert Box (Ctrl+Z)", "back to the inserted box (U0c)");
     await page.context().close();
   });
 

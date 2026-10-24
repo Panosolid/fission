@@ -22,6 +22,7 @@ import { preview } from "vite";
 import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { isClosed, modelOutline, openWords, shoelace } from "../../../packages/testing/src/outline-model.ts";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4196, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4196/";
@@ -249,7 +250,7 @@ async function session(seed) {
     const page = await context.newPage();
     watch(page);
     await page.goto(url + "#design");
-    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
     await foldBrowser(page);
 
     // Sketch 1: about SHAPES shapes, messily.
@@ -305,7 +306,7 @@ async function session(seed) {
     const tab = await other.newPage();
     watch(tab);
     await tab.goto(url + "#design");
-    await tab.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    await startWithBox(tab); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
     await tab.setInputFiles("#open-file", { name: "Session.fission.json", mimeType: "application/json", buffer: readFileSync(await download.path()) });
     await tab.waitForFunction((n) => document.querySelector("#viewport")?.dataset.sketchLines === String(n), finished, { timeout: 10000 });
     await other.close();

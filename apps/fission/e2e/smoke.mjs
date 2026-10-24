@@ -6,6 +6,7 @@ import { launch, browserName } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { chooseShape, insertPreset, startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4174, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4174/";
@@ -105,6 +106,20 @@ async function check(name, fn) {
  * of them, and a frame has been drawn since: `data-rebuilding` is "false"
  * only once a rebuild has come back (workspace.ts), so the first build is in.
  */
+/**
+ * After a goto to the address the page already has: Chromium keeps the page
+ * and its part, WebKit loads it afresh, and a fresh app is empty (U0c), so
+ * then the 40 × 30 × 20 box is inserted again. Either way a built part is
+ * on screen after this, its panel pinned.
+ */
+async function partShown(p) {
+  await p.waitForFunction(() => document.querySelector("#status")?.textContent === "valid" || document.querySelector("#start-hint")?.hidden === false);
+  if (await p.isVisible("#start-hint")) {
+    await startWithBox(p);
+    await pinProperties(p);
+  }
+}
+
 async function rebuilt() {
   await page.waitForFunction(() => document.querySelector("#viewport")?.dataset.rebuilding === "false");
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
@@ -118,7 +133,9 @@ try {
     const shown = await page.evaluate(() => ({ status: document.querySelector("#status")?.textContent, file: document.querySelector("#file-status")?.textContent, body: document.body.innerText.slice(0, 300) }));
     throw new Error(`${e.message}\n  the page shows ${JSON.stringify(shown)}\n  console errors: ${JSON.stringify(consoleErrors)}`);
   });
-  // And for the box's first build: the panel is drawn at once and filled when the kernel's rebuild lands, later on a
+  // A new project starts empty (U0c): the checks below work on the 40 × 30 × 20 box, inserted by Insert ▾ (U0d).
+  await startWithBox(page);
+  // And for the box's build to be drawn: the panel is filled when the kernel's rebuild lands, later on a
   // slow runner (E2E_KERNEL_DELAY makes it late here, browser.mjs; e2e-races).
   await rebuilt();
   await pinProperties(page); // the checks below type sizes into the panel, folded at the start on a wide screen (U0b)
@@ -194,8 +211,8 @@ try {
     // out over many frames (damping): a second's wait checks fit() stopped it
     // rather than letting the camera drift off the framing (a flaky failure
     // of the upright pick below before 17d).
-    await page.click("#toolbar [data-shape=cylinder]");
-    await page.click("#toolbar [data-shape=box]");
+    await chooseShape(page, "cylinder");
+    await chooseShape(page, "box");
     await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
     await page.waitForTimeout(1000);
@@ -230,8 +247,8 @@ try {
     assert.equal(await selection(), "face:feature-1/front", "a hidden edge is not picked; the face in front is");
     await page.keyboard.press("Escape");
     // Put the camera back where fit() left it for the checks below.
-    await page.click("#toolbar [data-shape=cylinder]");
-    await page.click("#toolbar [data-shape=box]");
+    await chooseShape(page, "cylinder");
+    await chooseShape(page, "box");
     await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
   });
@@ -333,7 +350,7 @@ try {
     // A cylinder (the same feature, changed) has a top but no front: the
     // box's top stays selected, now the cylinder's top (kernel face 1 again),
     // the top front edge goes with a note; the body stays.
-    await page.click("#toolbar [data-shape=cylinder]");
+    await chooseShape(page, "cylinder");
     await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
     assert.equal(await selected(), "face:feature-1/top body:feature-1");
@@ -345,7 +362,7 @@ try {
     assert.equal(await page.isVisible("#selection-note"), false, "the next change of selection retires the note");
     // Back to the 40 mm box, framed afresh by the change of shape, for the hand-worked positions.
     await setSize("width", 40);
-    await page.click("#toolbar [data-shape=box]");
+    await chooseShape(page, "box");
     await rebuilt();
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
@@ -647,14 +664,14 @@ try {
   const shown = async (id) => Number((await text(id)).split(" ")[0].replaceAll(",", ""));
   const near = (a, b, what) => assert.ok(Math.abs(a - b) <= 1e-9 * Math.abs(b), `${what}: shown ${a}, expected ${b}`);
   const pick = async (kind, volumeNot) => {
-    await page.click(`#toolbar [data-shape=${kind}]`);
+    await chooseShape(page, kind);
     await rebuilt();
     await page.waitForFunction(
       ([k, v]) => document.querySelector("#viewport").dataset.shape === k && document.querySelector("#volume")?.textContent !== v,
       [kind, volumeNot],
     );
-    // The toolbar shows the shape on screen pressed, and only that one.
-    assert.deepEqual(await page.$$eval("#toolbar [aria-pressed=true]", (els) => els.map((e) => e.dataset.shape)), [kind]);
+    // The properties' Shape choice shows the shape on screen (U0d: the toolbar's shape buttons moved there).
+    assert.equal(await page.inputValue("#shape"), kind);
   };
 
   await check("L-bracket extrusion shows hand-worked numbers", async () => {
@@ -780,13 +797,13 @@ try {
     // Plate 0.008 × 0.008: holes of radius 0.15·0.008 = 0.0012 (a legal
     // radius) centred 0.002 from the edge, leaving a 0.0008 mm wall, below
     // the 0.001 mm minimum feature.
-    await page.click("#toolbar [data-shape=plate]");
+    await chooseShape(page, "plate");
     await rebuilt();
     for (const id of ["width", "depth"]) await setSize(id, 0.008);
     await page.waitForFunction(() => document.querySelector("#error").textContent.includes("features must be at least"));
     for (const [id, v] of [["width", 40], ["depth", 30]]) await setSize(id, v);
     await page.waitForFunction(() => document.querySelector("#error").textContent === "");
-    await page.click("#toolbar [data-shape=box]");
+    await chooseShape(page, "box");
     await rebuilt();
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
   });
@@ -809,7 +826,7 @@ try {
     tris.reduce((v, [a, b, c]) => v + (a[0] * (b[1] * c[2] - b[2] * c[1]) + a[1] * (b[2] * c[0] - b[0] * c[2]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6, 0);
 
   await check("the STL button saves the box as a binary STL with hand-worked contents", async () => {
-    await page.click("#toolbar [data-shape=box]");
+    await chooseShape(page, "box");
     await page.fill("#width", "40");
     await page.fill("#depth", "30");
     await page.fill("#height", "20");
@@ -847,7 +864,7 @@ try {
   });
 
   await check("a cylinder's STL is the prism the viewer shows", async () => {
-    await page.click("#toolbar [data-shape=cylinder]");
+    await chooseShape(page, "cylinder");
     await page.fill("#width", "40");
     await rebuilt();
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
@@ -867,7 +884,7 @@ try {
     // to 999,999.3125 in single precision (spacing 1/16 there), 0.0125 mm
     // off, over the 1 µm smallest feature. A cube, so its faces are big
     // enough on screen to see the overlay.
-    await page.click("#toolbar [data-shape=box]");
+    await chooseShape(page, "box");
     await rebuilt();
     for (const id of ["width", "depth", "height"]) await page.fill(`#${id}`, "999999.3");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box" && document.querySelector("#status").textContent === "valid");
@@ -925,7 +942,7 @@ try {
 
   await check("each placeholder workspace says what it will do and 'Coming soon', and keeps the viewport", async () => {
     // Back to a known body, then remember the camera's view of it.
-    await page.click("#toolbar [data-shape=box]");
+    await chooseShape(page, "box");
     await page.fill("#width", "40");
     await rebuilt();
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
@@ -959,7 +976,7 @@ try {
     await page.click("[data-workspace=design]");
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     assert.equal(await page.inputValue("#width"), "40");
-    assert.equal(await page.getAttribute("#toolbar [data-shape=box]", "aria-pressed"), "true");
+    assert.equal(await page.inputValue("#shape"), "box");
     assert.equal(await page.$eval("#viewport", (el) => el.dataset.framedRadius), radius);
     assert.equal(await page.textContent("#browser [data-node=feature-1]"), "1. Box: 40 × 30 × 20 mm");
     await page.screenshot({ path: "e2e/workspace-design.png" });
@@ -973,7 +990,7 @@ try {
 
   await check("the assistant is optional, off, and follows the active workspace", async () => {
     await page.goto(url + "#design");
-    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    await partShown(page);
     // Off by default: nothing is sent anywhere.
     assert.equal(await page.textContent("#assistant-toggle"), "AI off");
     assert.equal(await page.isVisible("#assistant"), false);
@@ -998,7 +1015,7 @@ try {
   await check("desktop: focus moves top bar, toolbar, browser, View buttons, Split, properties; panel toggles hidden", async () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(url + "#design");
-    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    await partShown(page);
     assert.equal(await page.isVisible("#panel-toggles"), false);
     assert.equal(await page.isVisible("#browser"), true);
     assert.equal(await page.isVisible("#properties"), true);
@@ -1018,7 +1035,7 @@ try {
   await check("phone width: no sideways scroll, browser and properties fold behind toggles", async () => {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto(url + "#design");
-    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    await partShown(page);
     // The canvas keeps the size it was drawn at until the viewer's resize
     // observer runs (a frame after layout), so measure only once it has
     // followed the viewport to phone width; before that it can stick out.
@@ -1073,7 +1090,7 @@ try {
     phone.on("pageerror", (e) => noteError(e.message));
     try {
       await phone.goto(url + "#design");
-      await phone.waitForFunction(() => document.querySelector("#viewport")?.dataset.shape === "box");
+      await startWithBox(phone, true); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       const box = await phone.locator("#viewport canvas").boundingBox();
       const top = screenPoint(box, [20, 15, 20]); // face 1 (framed to the narrower, horizontal fov)
       await phone.touchscreen.tap(top.x, top.y);
@@ -1092,7 +1109,7 @@ try {
     phone.on("pageerror", (e) => noteError(e.message));
     try {
       await phone.goto(url + "#design");
-      await phone.waitForFunction(() => document.querySelector("#viewport")?.dataset.shape === "box");
+      await startWithBox(phone, true); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       const rect = (sel) => phone.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
       const [viewport, cube, buttons, toggles] = await Promise.all(["#viewport", "#viewport .view-cube", "#view-controls", "#panel-toggles"].map(rect));
       const inside = (a, b) => a.left >= b.left && a.right <= b.right && a.top >= b.top && a.bottom <= b.bottom;
@@ -1130,7 +1147,7 @@ try {
   await check("phone width: focus moves top bar, toolbar, panel toggles, Undo and Redo, View buttons, properties", async () => {
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto(url + "#design");
-    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    await partShown(page);
     // Undo and Redo are tab stops only while there is a step to undo. A goto
     // to the address the page already has keeps the page, and the steps the
     // checks above made, in Chromium; in WebKit on CI both buttons were
@@ -1194,9 +1211,9 @@ try {
     // In WebKit the goto loads the page afresh; reloading before it has started
     // leaves it mid-start, and WebKit logs the kernel's cancelled loads as
     // console errors (hunt 3e). So wait for the part, as a person would see it.
-    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    await partShown(page);
     await page.reload(); // the same URL keeps the page in Chromium, so start from a fresh app
-    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    await startWithBox(page);
     await setSize("width", 50);
     // V = 50·30·20 = 30000.
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
@@ -1207,9 +1224,9 @@ try {
     const file = JSON.parse(readFileSync(saved, "utf8"));
     assert.equal(file.formatVersion, 2);
     assert.deepEqual(file.workspaces.design.timeline.features[0].intent.parameters, { width: 50, depth: 30, height: 20 });
-    // A fresh app shows the default 40 × 30 × 20 box again.
+    // A fresh app is empty again (U0c).
     await page.reload();
-    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    await page.waitForSelector("#start-hint", { state: "visible" });
     await page.setInputFiles("#open-file", saved);
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
     assert.equal(await page.inputValue("#width"), "50");
@@ -1240,7 +1257,7 @@ try {
     kept.on("pageerror", (e) => noteError(e.message));
     try {
       await kept.goto(url + "#design");
-      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await startWithBox(kept); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       await pinProperties(kept);
       // A new browser: the default part is stored as a new project.
       await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
@@ -1283,7 +1300,7 @@ try {
     kept.on("pageerror", (e) => noteError(e.message));
     try {
       await kept.goto(url + "#design");
-      await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await startWithBox(kept); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       await pinProperties(kept);
       await kept.fill("#width", "50");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³"); // 50·30·20
@@ -1342,7 +1359,7 @@ try {
     try {
       await phone.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await phone.goto(url + "#design");
-      await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await startWithBox(phone); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       const rect = (sel) => phone.$eval(sel, (el) => el.getBoundingClientRect().toJSON());
       const visible = (sel) => phone.$eval(sel, (el) => el.getBoundingClientRect().width > 0);
       // 19a left Save/Open squeezing the tabs to 6 px; now at least three whole tabs show.
@@ -1395,7 +1412,7 @@ try {
     try {
       await phone.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await phone.goto(url + "#design");
-      await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await startWithBox(phone); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       await phone.fill("#width", "50");
       await phone.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
       const m = await phone.evaluate(() => {
@@ -1472,8 +1489,8 @@ try {
         db.close();
       }, id);
       await phone.reload();
-      // Not a blank app: the default part, and the message in full.
-      await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      // A new project, empty as every new one starts (U0c), and the message in full.
+      await phone.waitForSelector("#start-hint", { state: "visible" });
       const message = await phone.textContent("#file-status");
       assert.match(message, new RegExp(`^Couldn't open the last project \\(can't open the stored project "${id}": not a SpindleLabs project: the file is not valid JSON.*\\), so a new one was started\\. The old one is still kept in this browser\\.$`));
       const notice = await phone.$eval("#file-notice", (el) => ({ ...el.getBoundingClientRect().toJSON(), cut: el.scrollWidth > el.clientWidth }));
@@ -1537,7 +1554,7 @@ try {
     try {
       await bare.addInitScript(() => delete window.indexedDB);
       await bare.goto(url + "#design");
-      await bare.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await startWithBox(bare); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       assert.equal(await bare.evaluate(() => typeof indexedDB), "undefined", "the test really took storage away");
       await pinProperties(bare); // a fresh browser starts with the panel folded (U0b)
       assert.match(await bare.textContent("#file-status"), /^Projects can't be kept in this browser \(IndexedDB is not available\)\. Use Save to keep your work as a file\.$/);
@@ -1561,7 +1578,7 @@ try {
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await wide.goto(url + "?test-hooks#design");
-      await wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+      await startWithBox(wide); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       const canvasOf = (sel) => `${sel} > canvas`;
       const image = (sel) => wide.evaluate((s) => document.querySelector(s).toDataURL(), canvasOf(sel));
       const pixelAt = (sel, x, y) =>
@@ -1723,7 +1740,7 @@ try {
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await wide.goto(url + "?test-hooks#design");
-      await wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+      await startWithBox(wide); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       const titles = Object.fromEntries(await wide.$$eval("[data-workspace]", (tabs) => tabs.map((t) => [t.dataset.workspace, t.textContent.trim()])));
       const placeholders = ["render", "simulate", "manufacture", "laser", "slice", "circuit", "vector", "layout"];
 
@@ -1829,7 +1846,8 @@ try {
       };
       await wide.click("[data-workspace=design]");
       await wide.waitForFunction(() => document.body.dataset.split === "image");
-      const wrap = await wide.addStyleTag({ content: ".split-view #toolbar, .split-view #split-toolbar, .split-view .tool-group { flex-wrap: wrap !important; }" });
+      // Each group on a row of its own: Design's toolbar is short since its shape buttons went into Insert ▾ (U0d), so wrapping alone no longer breaks it.
+      const wrap = await wide.addStyleTag({ content: ".split-view #toolbar, .split-view #split-toolbar, .split-view .tool-group { flex-wrap: wrap !important; } .split-view .tool-group { flex-basis: 100% !important; }" });
       await fails("toolbars wrapping into rows", async () => checkRow(await measure(), "wrapped"));
       await wrap.evaluate((t) => t.remove());
       const floating = await wide.addStyleTag({ content: "#split-bar { position: absolute !important; left: 8px; top: 8px; } #split-toolbar { grid-column: 3 / 5 !important; }" });
@@ -1872,7 +1890,7 @@ try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await wide.goto(url + "?test-hooks#design");
       const valid = () => wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
-      await valid();
+      await startWithBox(wide); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       const notesIn = (pane) => wide.$$eval(`${pane} .notes-strip .change-note`, (els) => els.map((e) => e.querySelector(".note-text").textContent));
       await pinProperties(wide);
       // Today nothing outside Design reads the design, so an edit makes no note.
@@ -1937,7 +1955,7 @@ try {
     try {
       await wide.addInitScript(() => indexedDB.deleteDatabase("fission"));
       await wide.goto(url + "?test-hooks#design");
-      await wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+      await startWithBox(wide); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       const notesIn = (pane) => wide.$$eval(`${pane} .notes-strip .change-note`, (els) => els.map((e) => e.querySelector(".note-text").textContent));
       // Slice's print plate stands in reading the box (feature-1); Slice beside Design shows its notes.
       await wide.evaluate(() => window.fissionTest.graph.set({ id: "e2e.plate", label: "Print plate", workspace: "slice", cost: "expensive" }, ["feature-1"]));
@@ -1975,6 +1993,9 @@ try {
     try {
       await bare.route(/kernel\.worker[^/]*\.js$/, (r) => r.abort());
       await bare.goto(url);
+      // A new project is empty (U0c) and asks the kernel nothing, so a box is inserted for it to build.
+      await bare.waitForSelector("#start-hint", { state: "visible" });
+      await insertPreset(bare, "box");
       const words = "The geometry kernel didn't start (its worker didn't load). Reload the page to try again.";
       await bare.waitForFunction((w) => document.querySelector("#error")?.textContent === w, words);
       // The box's build was answered (with the failure), so nothing is still rebuilding.

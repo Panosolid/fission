@@ -18,6 +18,7 @@ import { launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 import { withPropertiesFolded, pinProperties } from "./properties.mjs";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4232, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4232/";
@@ -42,7 +43,7 @@ const status = (page) => page.$eval("#save-status", (s) => s.dataset.state);
 const journal = (page) => page.evaluate((prefix) => Object.keys(localStorage).filter((k) => k.startsWith(prefix)), UNSAVED_PREFIX);
 const volume = (page, want) => until(page, (w) => document.querySelector("#volume")?.textContent === w, want, `the volume ${want}`);
 
-/** A context of its own (its own IndexedDB and localStorage, kept across reloads), the app open on the stored box. */
+/** A context of its own (its own IndexedDB and localStorage, kept across reloads), the app open on the box, inserted and stored. */
 async function fresh(width, { touch = false, init } = {}) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   if (init) await context.addInitScript(init);
@@ -52,14 +53,16 @@ async function fresh(width, { touch = false, init } = {}) {
   return { context, page };
 }
 
-async function open(context, want = "24,000 mm³") {
+/** A new page in `context`: on a new browser (no `want`) the box is inserted into the empty new project (U0c); else the stored project showing `want`. */
+async function open(context, want) {
   const page = await context.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await volume(page, want);
+  if (want === undefined) await startWithBox(page);
+  else await volume(page, want);
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }

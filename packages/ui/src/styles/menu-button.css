@@ -1,0 +1,19 @@
+/* A button that drops down a menu (menu-button.ts, U0d): the button in the
+   toolbar's or top bar's own look with a ▾, the menu a floating list under
+   it with a small heading over each section and the key at each item's
+   right, the same look as the sketch toolbar's Create ▾. ":not(#none)"
+   lifts a rule over the base layout's "#workspace button" and "#topbar
+   button" while every selector still starts with .menu-button. */
+.menu-button { display: inline-flex; }
+.menu-button > .menu-button-toggle[aria-expanded="true"]:not(#none) { background: #23384f; border-color: #4aa8ff; color: #e6e9ee; }
+.menu-button > .menu-button-menu { position: fixed; z-index: 30; display: flex; flex-direction: column; min-width: 200px; max-width: calc(100vw - 8px); max-height: calc(100vh - 8px); overflow-y: auto; padding: 4px; background: #1c1f24; color: #e6e9ee; border: 1px solid #353a43; border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); font-size: 14px; }
+.menu-button > .menu-button-menu[hidden] { display: none; }
+.menu-button .menu-button-section + .menu-button-section { margin-top: 4px; padding-top: 4px; border-top: 1px solid #2a2e35; }
+.menu-button .menu-button-heading { padding: 4px 10px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #8a919c; }
+.menu-button .menu-button-item:not(#none) { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 16px; padding: 6px 10px; background: none; border: 1px solid transparent; border-radius: 4px; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.menu-button .menu-button-item:not(#none):hover, .menu-button .menu-button-item:not(#none):focus-visible { background: #2e333b; outline: none; border-color: #353a43; }
+.menu-button .menu-button-item[aria-disabled="true"]:not(#none) { color: #8a919c; cursor: default; background: none; }
+.menu-button .menu-button-key { font-family: ui-monospace, monospace; font-size: 12px; color: #8a919c; }
+@media (max-width: 640px) {
+  .menu-button .menu-button-item:not(#none) { min-height: 44px; }
+}

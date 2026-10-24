@@ -90,6 +90,8 @@ export interface PropertiesFold {
   readonly state: FoldState;
   /** The selection or the tool changed. */
   update(next: Partial<Pick<FoldReasons, "selected" | "tool">>): void;
+  /** Opens a folded panel until the user moves on (`revealed`): a body just inserted shows its sizes (U0d). */
+  reveal(): void;
   /** Stops watching the tool boxes and takes the fold off the slot (its class, its folded and ⚠ marks, the button). */
   close(): void;
 }
@@ -142,6 +144,7 @@ export function propertiesFold(slot: HTMLElement, toolBoxes: readonly HTMLElemen
       return state;
     },
     update: (next) => set(withReasons(state, next)),
+    reveal: onWords,
     // The slot is shared with the next workspace (Image shows its page in it): leave it as it was found.
     close: () => {
       watch.disconnect();
