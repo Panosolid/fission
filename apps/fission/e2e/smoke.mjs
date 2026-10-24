@@ -1383,6 +1383,40 @@ try {
     }
   });
 
+  await check("phone width: the save mark sits at the name's corner, clear of its letters and the tabs", async () => {
+    const phone = await browser.newPage({ viewport: { width: 375, height: 740 } });
+    phone.on("pageerror", (e) => noteError(e.message));
+    try {
+      await phone.addInitScript(() => indexedDB.deleteDatabase("fission"));
+      await phone.goto(url + "#design");
+      await phone.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await phone.fill("#width", "50");
+      await phone.waitForFunction(() => document.querySelector("#save-status")?.dataset.state === "saved");
+      const m = await phone.evaluate(() => {
+        const h1 = document.querySelector("#topbar h1");
+        const after = getComputedStyle(h1, "::after");
+        // The mark's own width: the same glyph in the same font, measured.
+        const probe = Object.assign(document.createElement("span"), { textContent: "✓" });
+        probe.style.cssText = `font: ${after.font}; position: absolute; visibility: hidden`;
+        document.body.append(probe);
+        const w = probe.getBoundingClientRect().width;
+        probe.remove();
+        return { content: after.content, right: -parseFloat(after.right), margin: parseFloat(getComputedStyle(h1).marginRight), w, name: h1.getBoundingClientRect().toJSON(), tabs: document.querySelector("#workspaces").getBoundingClientRect().toJSON(), words: getComputedStyle(document.querySelector("#save-status")).fontSize };
+      });
+      assert.equal(m.content, '"✓"', "the mark is drawn by the name");
+      assert.equal(m.words, "0px", "the status words take no room");
+      // Anchored `right` px past the name's right edge: its left, name.right + right - w,
+      // is clear of the last letter when w <= right; its right edge, name.right + right,
+      // is short of the tabs, which start name.right + margin + the top bar's 8 px gap.
+      assert.ok(m.w <= m.right + 0.5, `mark ${m.w} px wide, ${m.right} px past the name`);
+      assert.ok(m.name.right + m.right <= m.tabs.left + 0.5, `mark ends ${m.name.right + m.right}, tabs start ${m.tabs.left}`);
+      assert.equal(m.tabs.left - m.name.right, m.margin + 8, "the gap is the margin plus the top bar's 8 px");
+      await phone.screenshot({ path: "e2e/design-375-save-mark.png", clip: { x: 0, y: 0, width: 375, height: 44 } });
+    } finally {
+      await phone.close();
+    }
+  });
+
   await check("wide screen: every tab, Save, Open, AI and Community in one row, no Menu", async () => {
     const wide = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     wide.on("pageerror", (e) => noteError(e.message));

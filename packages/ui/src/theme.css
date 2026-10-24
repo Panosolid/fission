@@ -167,22 +167,16 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
      the right; Escape, a choice or a tap elsewhere closes it. */
   #menu-toggle { display: block; }
   #workspaces [role="tab"] { padding-left: 4px; padding-right: 4px; }
-  /* The tab row's width is rarely a whole pixel but its scroll offset is, so
-     scrolled to the end the last tab could stay up to a pixel cut off; 1 px
-     of end padding lets it show whole. */
-  #workspaces { padding-right: 1px; }
   #topbar { position: relative; }
   #topbar-actions { display: none; position: absolute; top: 44px; right: 0; z-index: 20; min-width: 180px; flex-direction: column; background: #1c1f24; border: 1px solid #2a2e35; border-top: none; }
   #topbar[data-menu="open"] #topbar-actions { display: flex; }
   #topbar #topbar-actions button { text-align: left; padding: 12px 16px; border-bottom: none; border-left: 2px solid transparent; }
   #topbar #topbar-actions button[aria-pressed="true"] { border-left-color: #4aa8ff; }
-  /* The save status as one small mark beside the name, taking no room from
-     the tabs (the words stay for screen readers and the tooltip); a failed
-     save shows its words in full on a row of its own. */
-  #save-status:not([data-state="error"]) { position: absolute; left: 62px; top: 8px; font-size: 0; }
-  #save-status:not([data-state="error"])::before { font-size: 11px; }
-  #save-status[data-state="saved"]::before { content: "✓"; }
-  #save-status[data-state="saving"]::before { content: "…"; }
+  /* The save status takes no room from the tabs: its words stay for screen
+     readers and the tooltip, and the name shows it as one small mark
+     (styles/save-mark.css); a failed save shows its words in full on a row
+     of its own. */
+  #save-status:not([data-state="error"]) { position: absolute; font-size: 0; }
 }
 [hidden] { display: none !important; }
 #assistant { width: 320px; padding: 16px; background: #1c1f24; border-left: 1px solid #2a2e35; overflow-y: auto; }
