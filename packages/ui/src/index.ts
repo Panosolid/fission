@@ -8,3 +8,4 @@ export { workspaceSwitcher, type SwitcherEntry } from "./switcher.ts";
 export { SPLIT_MIN_WIDTH_PX, defaultSplit, splitChoices, type SplitEntry } from "./split.ts";
 export { WarmPool, type WarmHooks } from "./warm.ts";
 export { shortcutList, type ShortcutGroup } from "./shortcut-list.ts";
+export { menuButton, menuPlace, MENU_GAP, type MenuButton, type MenuItem, type MenuSection } from "./menu-button.ts";

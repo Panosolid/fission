@@ -96,6 +96,8 @@ export interface WorkspaceContext {
   openWorkspace(id: WorkspaceId): void;
   /** A workspace's title as the user sees it ("Slice"). */
   workspaceTitle(id: WorkspaceId): string;
+  /** Asks the user for a file to open, as the top bar's Open does (Design's empty-design hint, U0c). Left out where the app can't. */
+  openFile?(): void;
 }
 
 /**

@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { crc32, deflateSync } from "node:zlib";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
+import { startWithBox } from "./start.mjs";
 
 /** A PNG: 8-bit RGBA, `pixel(x, y)` gives [r, g, b, a]; `ppm` pixels per metre in a pHYs chunk (none if null). */
 function makePng(width, height, pixel, ppm) {
@@ -147,7 +148,7 @@ const settle = () => page.waitForTimeout(400); // orbit damping eases out
 
 try {
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await settle();
   const designCentre = await pixel(0.5, 0.5);
   const designRadius = await page.$eval("#viewport", (el) => el.dataset.framedRadius);
@@ -489,7 +490,7 @@ try {
     p.on("pageerror", (e) => errors.push(e.message));
     try {
       await p.goto(url + "#design");
-      await p.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await startWithBox(p); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
       await p.waitForTimeout(400);
       const at = (sel, fx, fy) =>
         p.evaluate(

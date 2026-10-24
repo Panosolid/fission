@@ -14,6 +14,7 @@ import { launch } from "./browser.mjs";
 import { withPropertiesFolded } from "./properties.mjs";
 import { clickPlane, screenPoint, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4205, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4205/";
@@ -23,7 +24,7 @@ const shots = process.env.E2E_SHOTS;
 
 const until = (page, fn, arg, what) => page.waitForFunction(fn, arg, { timeout: 5000 }).catch(async () => assert.fail(`${what}: timed out`));
 
-async function fresh(width, touch) {
+async function fresh(width, touch, { box = true } = {}) {
   const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: touch });
   const page = await context.newPage();
   await page.addInitScript(() => indexedDB.deleteDatabase("fission"));
@@ -32,7 +33,8 @@ async function fresh(width, touch) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "the box");
+  if (box) await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
+  else await page.waitForSelector("#start-hint", { state: "visible" });
   return page;
 }
 
@@ -218,7 +220,7 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
   });
 
   await check(`Start fresh clears both bodies and the sketch after asking, as one undo step (${width} px${tap ? ", taps" : ""})`, async () => {
-    const page = await fresh(width, tap);
+    const page = await fresh(width, tap, { box: false });
     const state = () =>
       page.evaluate(() => ({
         volume: document.querySelector("#volume")?.textContent,
@@ -228,10 +230,11 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
         open: document.getElementById("start-fresh-dialog").open,
         undo: document.getElementById("undo").title,
       }));
-    const ALREADY = "Nothing to clear: this is the design a new project starts with.";
+    const ALREADY = "Nothing to clear: the design is already empty.";
     const ON = "Clear the whole design and start again from a new one. It asks first, and Undo brings it back.";
-    // A new design is already fresh: the button is off and says why.
+    // A new design is already empty (U0c): the button is off and says why.
     assert.deepEqual((await state()).button, [true, ALREADY]);
+    await startWithBox(page, tap);
     await addSquare(page, { square, distance, volume }, tap);
     assert.deepEqual(await bodyRows(page), ["body-1 Body 1", "body-2 Body 2"]);
     const before = await state();
@@ -247,7 +250,7 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
     await ask();
     assert.equal(
       await page.textContent("#start-fresh-words"),
-      "This clears everything in the design (1 sketch and 2 features) and starts again from the 40 × 30 × 20 mm box a new design opens with. Undo brings it all back.",
+      "This clears everything in the design (1 sketch and 2 features) and starts again from an empty design, as a new project opens. Undo brings it all back.",
     );
     assert.equal(await page.evaluate(() => document.activeElement?.id), "start-fresh-cancel", "Cancel has the focus");
     const box = await page.locator("#start-fresh-dialog").boundingBox();
@@ -263,20 +266,15 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
     assert.deepEqual(await state(), before);
     assert.deepEqual(await bodyRows(page), ["body-1 Body 1", "body-2 Body 2"]);
 
-    // Confirmed: the fresh box alone, 40 · 30 · 20 = 24,000 mm³, one body, no sketch, one timeline item; the button off again.
+    // Confirmed: an empty design, as a new project opens (U0c): no body, no sketch, no timeline item, the hint back; the button off again.
     await ask();
     await press(page, "#start-fresh-confirm", tap);
-    await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "the fresh box");
+    await until(page, () => document.getElementById("start-hint")?.hidden === false, null, "the empty design's hint");
     const after = await state();
-    assert.deepEqual(after, { volume: "24,000 mm³", sketches: 0, timeline: 1, button: [true, ALREADY], open: false, undo: "Undo Start fresh (Ctrl+Z)" });
-    assert.deepEqual(await bodyRows(page), ["body-1 Body 1"]);
-    // Framed on the box alone: [0, 40] × [0, 30] × [0, 20], radius √(40² + 30² + 20²)/2 = √2900/2.
-    await until(page, (r) => Math.abs(Number(document.querySelector("#viewport").dataset.framedRadius) - r) < 1e-6, Math.sqrt(2900) / 2, "framed on the box");
-    // Body 2 is gone from the screen: where its top was is the background (sampled 60 mm under the floor's middle).
-    await page.evaluate(() => (window.scrollTo(0, 0), (document.getElementById("workspace").scrollTop = 0)));
-    const view = { toward: [0.6, -0.8, 0.55], up: [0, 0, 1], centre: [20, 15, 10], radius: Math.sqrt(2900) / 2 };
-    const empty = await colourAt(page, [20, 15, -60], view);
-    assert.ok(differs(await colourAt(page, [20, 15, 20], view), empty), "the box is drawn");
+    assert.deepEqual(after, { volume: "—", sketches: 0, timeline: 0, button: [true, ALREADY], open: false, undo: "Undo Start fresh (Ctrl+Z)" });
+    assert.deepEqual(await bodyRows(page), []);
+    // Nothing drawn: the view shows no part.
+    await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "no part drawn");
     if (shots) await page.screenshot({ path: `${shots}/start-fresh-${width}-after.png` });
 
     // One undo step: a single Undo brings both bodies and the sketch back; Redo clears them again.
@@ -285,8 +283,8 @@ for (const { width, tap, square, distance, volume, centre, radius: want, top2 } 
     assert.deepEqual({ ...(await state()), undo: "" }, { ...before, undo: "" });
     assert.deepEqual(await bodyRows(page), ["body-1 Body 1", "body-2 Body 2"]);
     await press(page, "#redo", tap);
-    await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "redone");
-    assert.deepEqual(await bodyRows(page), ["body-1 Body 1"]);
+    await until(page, () => document.getElementById("start-hint")?.hidden === false, null, "redone");
+    assert.deepEqual(await bodyRows(page), []);
     if (width === 375) assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 375), "no sideways scrolling");
     await page.context().close();
   });

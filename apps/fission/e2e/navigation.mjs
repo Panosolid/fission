@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4191, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4191/?test-hooks";
@@ -27,7 +28,7 @@ async function fresh(width = 1280, touch = false) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await settle(page);
   return page;
 }

@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
 import { compareImages, decodePng } from "./png.mjs";
 import { preview } from "vite";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4183, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4183/";
@@ -82,7 +83,9 @@ async function fresh({ width = 1280, height = 800, touch = false, reducedMotion 
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + query);
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  // A new project starts empty (U0c): the 40 × 30 × 20 box, inserted; with ?guide the guide is over the app, so the design stays empty.
+  if (query.includes("guide")) await page.waitForFunction(() => document.querySelector("#start-hint") !== null);
+  else await startWithBox(page);
   return page;
 }
 

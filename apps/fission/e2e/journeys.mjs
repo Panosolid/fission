@@ -14,10 +14,11 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { launch } from "./browser.mjs";
-import { clickPlane, TOP } from "./sketch-screen.mjs";
+import { clickPlane, EMPTY_TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 import { MAGIC_JOURNEYS, baselineLine, compareToBaseline, judge, parseBaselines, reportLine } from "../../../packages/testing/src/magic.ts";
 import { pinProperties } from "./properties.mjs";
+import { startWithBox } from "./start.mjs";
 
 /** Walks per journey; the slowest one is judged, so a limit holds every time. */
 const WALKS = 5;
@@ -29,7 +30,8 @@ const url = "http://localhost:4180/";
 const browser = await launch();
 const errors = [];
 
-async function fresh() {
+/** A page on a new project; `box`: with the 40 × 30 × 20 box inserted (a new project starts empty, U0c). */
+async function fresh({ box = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true });
   const page = await context.newPage();
   await page.addInitScript(() => {
@@ -45,7 +47,11 @@ async function fresh() {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  if (!box) {
+    await page.waitForSelector("#start-hint", { state: "visible" });
+    return page;
+  }
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
@@ -66,22 +72,27 @@ function stlVolume(bytes) {
 }
 
 /**
- * "Design: shape to STL", from a cylinder on screen: click Box, click the
- * width and type 50, click STL. Returns the clicks counted on the page, the
- * milliseconds from the first click to the file, and the file.
- * `extraClick` adds a needless click (the deliberate break).
+ * "Design: shape to STL", from an empty design (a new project, U0c): open
+ * Insert ▾ and click Box, click the width and type 50, click STL. Returns
+ * the clicks counted on the page, the milliseconds from the first click to
+ * the file, and the file. `extraClick` adds a needless click (the
+ * deliberate break). Set-up, not counted: Start fresh (asked and
+ * confirmed) empties the design again for the next walk.
  */
 async function designShapeToStl(page, { extraClick = false } = {}) {
-  // Set-up, not part of the journey: a cylinder on screen, counter at zero.
-  await page.click("#toolbar [data-shape=cylinder]");
-  await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "cylinder");
+  if (await page.isEnabled("#start-fresh")) {
+    await page.click("#start-fresh");
+    await page.click("#start-fresh-confirm");
+  }
+  await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "none" && document.querySelector("#start-fresh").disabled);
   await page.evaluate(() => (window.journeyClicks = 0));
 
   const t0 = performance.now();
-  await page.click("#toolbar [data-shape=box]"); // pick a shape
+  await page.click("#insert"); // add a preset
+  await page.click("#insert-box");
   await page.waitForFunction(() => document.querySelector("#viewport").dataset.shape === "box");
-  if (extraClick) await page.click("#toolbar [data-shape=box]");
-  await page.click("#width"); // change a size
+  if (extraClick) await page.click("#width");
+  await page.click("#width"); // change a size (the panel shows the inserted box's sizes)
   await page.keyboard.press("ControlOrMeta+A");
   await page.keyboard.type("50");
   await volume(page, "30,000 mm³"); // 50 × 30 × 20
@@ -92,16 +103,16 @@ async function designShapeToStl(page, { extraClick = false } = {}) {
 }
 
 /**
- * "Design: sketch to STL" (step 25c4), from the default box: Create Sketch,
- * the ground plane, the rectangle tool, its corners (0, 0) and (40, 30),
- * Extrude, OK at its 10 mm, and STL, which saves every body shown: the box
- * and the extrude. Set-up, not counted: a fresh page (the one passed in is
+ * "Design: sketch to STL" (step 25c4), from an empty design (a new project,
+ * U0c): Create Sketch, the ground plane, the rectangle tool, its corners
+ * (0, 0) and (40, 30), Extrude, OK at its 10 mm, and STL, which saves the
+ * extrude, the one body. Set-up, not counted: a fresh page (the one passed in is
  * left alone), and Snap to grid ticked in a sketch that Undo then takes
  * back, so the corners are exact.
  */
 async function designSketchToStl() {
   // Set-up: a page of its own, as a reload would bring back the autosaved design.
-  const page = await fresh();
+  const page = await fresh({ box: false });
   try {
     // Snap to grid lives in the sketch panel and lasts for the page: tick it in a sketch, then Undo that sketch.
     await page.click("#create-sketch");
@@ -116,7 +127,7 @@ async function designSketchToStl() {
     await page.click("#sketch-plane-XY");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true");
     await page.click("#sketch-tool-rectangle"); // draw a rectangle
-    for (const corner of [[0, 0], [40, 30]]) await clickPlane(page, corner, TOP);
+    for (const corner of [[0, 0], [40, 30]]) await clickPlane(page, corner, EMPTY_TOP); // the design is empty, so the sketch is framed round the origin
     await page.waitForFunction(() => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.");
     await page.click("#sketch-extrude"); // extrude it
     await page.waitForFunction(() => document.querySelector("#extrude-status")?.textContent.startsWith("Sketch 1 makes a closed outline."));
@@ -136,13 +147,13 @@ const WALKERS = { "Design: shape to STL": designShapeToStl, "Design: sketch to S
 /**
  * The file each journey makes, worked by hand; every corner is a whole
  * number of mm, exact in single precision. A 50 × 30 × 20 box is 12
- * triangles, 84 + 50 · 12 = 684 bytes, 30,000 mm³. The box and the
- * extruded 40 × 30 rectangle are 12 + 12 triangles, 84 + 50 · 24 = 1284
- * bytes, 24,000 + 12,000 = 36,000 mm³ (overlapping volumes add).
+ * triangles, 84 + 50 · 12 = 684 bytes, 30,000 mm³. The extruded 40 × 30
+ * rectangle, alone in a new project's empty design (U0c), is 12 triangles
+ * too, 684 bytes, 40 · 30 · 10 = 12,000 mm³.
  */
 const FILES = {
   "Design: shape to STL": { name: "fission-box.stl", length: 684, volume: 30000 },
-  "Design: sketch to STL": { name: "fission-2-bodies.stl", length: 1284, volume: 36000 },
+  "Design: sketch to STL": { name: "fission-extrude.stl", length: 684, volume: 12000 },
 };
 
 let failed = false;
@@ -167,7 +178,7 @@ try {
     await check(`journey "${journey.name}" within ${journey.clickLimit} clicks and ${journey.secondsLimit} s, ${WALKS} walks`, async () => {
       const walk = WALKERS[journey.name];
       assert.ok(walk, `no walker for ready journey "${journey.name}"`);
-      const page = await fresh();
+      const page = await fresh({ box: false });
       try {
         const runs = [];
         for (let i = 0; i < WALKS; i++) {
@@ -192,14 +203,14 @@ try {
     });
   }
 
-  await check("the counter counts every click and only clicks a person makes: Design's walks are exactly 3 and 8", async () => {
-    const page = await fresh();
+  await check("the counter counts every click and only clicks a person makes: Design's walks are exactly 4 and 8", async () => {
+    const page = await fresh({ box: false });
     try {
-      // Box, the width field, STL: 3 clicks worked out from the steps. The app's
+      // Insert ▾, Box, the width field, STL: 4 clicks worked out from the steps. The app's
       // own anchor click for the download is untrusted and adds nothing.
-      assert.equal((await designShapeToStl(page)).clicks, 3);
-      await page.evaluate(() => document.querySelector("#toolbar [data-shape=cylinder]").click()); // a script's click
-      assert.equal(await clicks(page), 3);
+      assert.equal((await designShapeToStl(page)).clicks, 4);
+      await page.evaluate(() => document.querySelector("#insert").click()); // a script's click
+      assert.equal(await clicks(page), 4);
       // The sketch's walk: Create Sketch, the plane, the rectangle tool, two corners, Extrude, OK, STL: 8.
       assert.equal((await designSketchToStl()).clicks, 8);
     } finally {
@@ -209,14 +220,14 @@ try {
 
   await check("deliberate breaks fail: one needless click, or a time limit too tight", async () => {
     const journey = MAGIC_JOURNEYS.find((j) => j.name === "Design: shape to STL");
-    const page = await fresh();
+    const page = await fresh({ box: false });
     try {
       const run = await designShapeToStl(page, { extraClick: true });
-      assert.equal(run.clicks, 4);
+      assert.equal(run.clicks, 5);
       assert.deepEqual(judge(journey, run).kind, "fail");
-      assert.match(reportLine(journey, judge(journey, run)), /^FAIL .*4 clicks, limit 3/);
+      assert.match(reportLine(journey, judge(journey, run)), /^FAIL .*5 clicks, limit 4/);
       const tight = { ...journey, secondsLimit: run.ms / 1000 / 1.1 }; // the walk takes 1.1× the limit
-      assert.equal(judge(tight, { clicks: 3, ms: run.ms }).kind, "fail");
+      assert.equal(judge(tight, { clicks: 4, ms: run.ms }).kind, "fail");
     } finally {
       await page.close();
     }
@@ -225,16 +236,16 @@ try {
   await check("deliberate breaks are flagged against the baseline: one extra click, a slowest walk 16.5% over", async () => {
     const journey = MAGIC_JOURNEYS.find((j) => j.name === "Design: shape to STL");
     const base = baselines.get(journey.name);
-    const page = await fresh();
+    const page = await fresh({ box: false });
     try {
       const run = await designShapeToStl(page, { extraClick: true });
       const extra = compareToBaseline(journey, { clicks: run.clicks, slowestMs: run.ms }, { ...base, slowestMs: run.ms });
       assert.equal(extra.kind, "flag");
       assert.deepEqual(extra.flags.map((f) => f.kind), ["clicks"]);
       // A real walk against baselines that put it at 0.9× and 1.1× of the 15% margin.
-      const walked = { clicks: 3, slowestMs: run.ms };
-      assert.equal(compareToBaseline(journey, walked, { clicks: 3, slowestMs: run.ms / 1.135 }).kind, "ok");
-      const slow = compareToBaseline(journey, walked, { clicks: 3, slowestMs: run.ms / 1.165 });
+      const walked = { clicks: 4, slowestMs: run.ms };
+      assert.equal(compareToBaseline(journey, walked, { clicks: 4, slowestMs: run.ms / 1.135 }).kind, "ok");
+      const slow = compareToBaseline(journey, walked, { clicks: 4, slowestMs: run.ms / 1.165 });
       assert.deepEqual(slow.kind === "flag" && slow.flags.map((f) => f.kind), ["time"]);
     } finally {
       await page.close();

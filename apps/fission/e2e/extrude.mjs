@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { chooseShape, startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4184, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4184/";
@@ -39,7 +40,7 @@ async function fresh(width = 1280, touch = false) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
@@ -191,7 +192,7 @@ try {
     // A preset after it is a new feature after it (24d1: nothing is replaced), keeping the sizes in the boxes
     // (the height box held the distance): a 40 × 30 × 10 box, the same 12,000 mm³ but a box, shown as the part
     // until every body is drawn (24d3). Undo takes it out again.
-    await page.click('[data-op="set_part"][data-shape="box"]');
+    await chooseShape(page, "box"); // the Shape choice says "Extruded sketch"; a box is a new body after it
     await until(page, () => document.querySelector("#intent")?.textContent === "Box: 40 × 30 × 10 mm", null, "the box");
     assert.equal(await undoTitle(page), "Undo Change shape to Box (Ctrl+Z)");
     assert.deepEqual(await timelineRows(page), ["1. Box: 40 × 30 × 20 mm", "2. Sketch 1 on the XY plane", "3. Extrude Sketch 1 by 10 mm", "4. Box: 40 × 30 × 10 mm"]);

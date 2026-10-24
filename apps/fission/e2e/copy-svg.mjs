@@ -12,6 +12,7 @@ import { launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 import { pinProperties } from "./properties.mjs";
+import { chooseShape, startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4177, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4177/";
@@ -27,7 +28,7 @@ async function fresh(width = 1000) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url);
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
@@ -69,7 +70,7 @@ try {
   await check("a selected profile offers Copy as SVG, which puts its SVG on the clipboard in mm", async () => {
     const page = await fresh();
     try {
-      await page.click("#toolbar [data-shape=l-bracket]");
+      await chooseShape(page, "l-bracket");
       await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "12,240 mm³");
       // The new project's box is feature-1 (counter 2); the profile a preset now needs takes the counter's 2 (24d1).
       const row = "#browser [data-node=profile-2]";
@@ -109,7 +110,7 @@ try {
   await check("Ctrl+C copies the selected profile; in a text field it copies the text", async () => {
     const page = await fresh();
     try {
-      await page.click("#toolbar [data-shape=slot]");
+      await chooseShape(page, "slot");
       await page.click("#browser [data-node=profile-2]");
       await clearClipboard(page);
       await page.keyboard.press("Control+c");
@@ -140,10 +141,10 @@ try {
   await check("a change to a box takes the profile out of the selection, with a note", async () => {
     const page = await fresh();
     try {
-      await page.click("#toolbar [data-shape=star]");
+      await chooseShape(page, "star");
       await page.click("#browser [data-node=profile-2]");
       assert.deepEqual(await page.$$eval("#selection-actions button", (bs) => bs.map((b) => b.textContent)), ["Copy as SVG"]);
-      await page.click("#toolbar [data-shape=box]");
+      await chooseShape(page, "box");
       await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       await page.waitForFunction(() => document.querySelector("#selection-note")?.textContent !== "");
       assert.equal(await page.textContent("#selection-note"), "Taken out of the selection: the profile. The part has no profile now.");

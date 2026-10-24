@@ -36,6 +36,20 @@ export const close = (got: number, want: number) => Math.abs(got - want) <= 1e-6
 /** The app last made, put away before the next is made: a test that failed part way leaves it mounted, and Design keeps the open sketch in its module. */
 let previous: { close(): Promise<boolean> } | null = null;
 
+/**
+ * Changes the part's shape as a person does: the properties' Shape choice
+ * (U0d; the toolbar's Box, Cylinder… buttons until then), named by its
+ * words ("Box", "L-bracket"). Throws when there is no such choice.
+ */
+export function chooseShape(a: { window: { document: unknown; Event: unknown } }, label: string): void {
+  const doc = a.window.document as Document;
+  const choice = doc.querySelector<HTMLSelectElement>("#shape");
+  const option = choice && [...choice.options].find((o) => o.textContent === label && !o.disabled);
+  if (!choice || !option) throw new Error(`no ${label} in the Shape choice`);
+  choice.value = option.value;
+  choice.dispatchEvent(new (a.window.Event as typeof Event)("change", { bubbles: true }));
+}
+
 export async function app(start: DesignDocument, plugin: WorkspacePlugin = designWorkspace) {
   await previous?.close();
   const window = new Window({ width: 1280, height: 800 });

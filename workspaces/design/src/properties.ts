@@ -5,7 +5,9 @@
 
 import { describeProvenance, type BodyView, type Feature } from "@fission/core";
 import { downstreamChip, formatQuantity as fmt, type ChipInfo } from "@fission/ui";
+import { SHAPES } from "./commands.ts";
 import type { PartKind } from "./document.ts";
+import { SHAPE_LABELS } from "./toolbar.ts";
 import { NAME_NOTE } from "./references.ts";
 import type { SelectionRow } from "./selection.ts";
 
@@ -40,6 +42,9 @@ export const DEFAULT_SIZES: Record<SizeKey, string> = { width: "40", depth: "30"
 /** The panel's words for a design with no body (24f4). */
 export const NO_BODY_FEATURE = "No body: nothing in the timeline builds";
 export const NO_PART = "No body to change: choosing a shape or typing a size adds a new body at the marker.";
+/** The Shape choice's words for a part that is no preset (U0d: the toolbar's shape buttons moved here; Insert ▾ adds a new body). */
+export const EXTRUDED_SKETCH = "Extruded sketch";
+export const SHAPE_TITLE = "The part's shape: choosing another changes the part in place when it is a preset, else adds a new body at the marker. Insert ▾ adds a new body.";
 const NONE = "—";
 
 const HTML = `
@@ -51,6 +56,7 @@ const HTML = `
   <p id="action-note"></p>
   <h2>Parameters</h2>
   <p id="no-part" hidden>${NO_PART}</p>
+  <label id="shape-row" title="${SHAPE_TITLE}">Shape <select id="shape"><option value="" disabled hidden>—</option><option value="sketch-extrude" disabled hidden>${EXTRUDED_SKETCH}</option>${SHAPES.map((k) => `<option value="${k}">${SHAPE_LABELS[k]}</option>`).join("")}</select></label>
   ${SIZE_KEYS.map((k) => `<label id="${k}-row"><span id="${k}-label"></span> <input id="${k}" type="number" value="${DEFAULT_SIZES[k]}" step="any" /> mm</label>`).join("\n  ")}
   <h2>Feature</h2>
   <dl id="feature-info">
@@ -86,8 +92,10 @@ export interface Verb {
 export interface PropertiesPanel {
   /** The size inputs, in SIZE_KEYS order. */
   inputs: HTMLInputElement[];
-  /** Labels and shows the size inputs for this shape. */
-  setShape(shape: PartKind): void;
+  /** The Shape choice (U0d), standing for the part's shape as the toolbar's shape buttons did. */
+  shapeChoice: HTMLSelectElement;
+  /** Labels and shows the size inputs for this shape; the Shape choice shows the part's shape (`pressed`), or "—" for a design with no body. */
+  setShape(shape: PartKind, pressed: PartKind | null): void;
   /** The part's feature, or null for a design with no body (24f4). */
   showFeature(feature: Feature | null): void;
   /** What is selected: one row per item, or the empty note. */
@@ -129,7 +137,12 @@ export function propertiesPanel(slot: HTMLElement): PropertiesPanel {
   };
   return {
     inputs: SIZE_KEYS.map((k) => $<HTMLInputElement>(k)),
-    setShape(shape) {
+    shapeChoice: $<HTMLSelectElement>("shape"),
+    setShape(shape, pressed) {
+      const choice = $<HTMLSelectElement>("shape");
+      choice.value = pressed ?? "";
+      // The two words that are no choice show only while they are the part's.
+      for (const o of choice.options) if (o.disabled) o.hidden = o.value !== choice.value;
       for (const row of parameterRows(shape)) {
         $(`${row.key}-label`).textContent = row.label;
         $(`${row.key}-row`).hidden = !row.shown;

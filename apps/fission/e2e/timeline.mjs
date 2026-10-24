@@ -24,6 +24,7 @@ import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 import { withPropertiesFolded, pinProperties } from "./properties.mjs";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4211, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4211/?test-hooks";
@@ -60,7 +61,7 @@ async function fresh(width, touch) {
     if (m.type() === "error") errors.push(m.text());
   });
   await page.goto(url + "#design");
-  await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "the box");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
@@ -357,11 +358,11 @@ try {
       await until(page, () => document.querySelector("#viewport").dataset.shape === "none", null, "nothing on screen");
       const noBody = { bar: ["feature-1 suppressed", "sketch-2", "feature-11 suppressed", "|"], drawn: { box: false, square: false }, volume: "—", red: [] };
       assert.deepEqual(await state(), noBody);
-      // The panel says there is no body, how to add one, and shows no error; no shape is pressed.
+      // The panel says there is no body, how to add one, and shows no error; no shape is chosen.
       assert.equal(await page.textContent("#intent"), "No body: nothing in the timeline builds");
       assert.equal(await page.isVisible("#no-part"), true);
       assert.equal(await page.textContent("#error"), "");
-      assert.deepEqual(await page.$$eval('#toolbar [data-op="set_part"][aria-pressed="true"]', (bs) => bs.length), 0);
+      assert.equal(await page.inputValue("#shape"), "", "the Shape choice says —");
       if (shots) await page.screenshot({ path: `${shots}/no-body-${width}.png` });
       // The toolbar's STL has nothing to save, and says why.
       if (await page.isVisible('#toolbar [data-op="export_stl"]')) {

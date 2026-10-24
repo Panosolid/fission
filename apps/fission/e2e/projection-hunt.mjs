@@ -15,6 +15,7 @@ import { mkdirSync } from "node:fs";
 import { launch } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
+import { startWithBox } from "./start.mjs";
 
 const server = await preview({ preview: { port: 4234, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4234/?test-hooks";
@@ -36,7 +37,7 @@ async function fresh(width = 1280, touch = false) {
   // A new context is a store of its own, empty, kept across a reload. No clearing and reloading here: WebKit
   // reports the kernel's fetch a reload cuts off as a page error ("Load failed").
   await page.goto(url + "#design");
-  await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await startWithBox(page); // a new project starts empty (U0c): the 40 × 30 × 20 box, inserted
   await until(page, () => document.querySelector("#save-status").dataset.state === "saved", null, "the box stored");
   return page;
 }

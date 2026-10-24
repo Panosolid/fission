@@ -8,6 +8,12 @@
 export const HOME = { toward: [0.6, -0.8, 0.55], up: [0, 0, 1], centre: [20, 15, 10], radius: Math.sqrt(2900) / 2 };
 /** Straight down, as a sketch on the ground plane is looked at. */
 export const TOP = { ...HOME, toward: [0, 0, 1], up: [0, 1, 0] };
+/**
+ * Straight down on a sketch started in an empty design (U0c): nothing to
+ * frame, so Look At frames 50 mm round the plane's origin
+ * (packages/viewport framing.ts LOOK_AT_EMPTY_RADIUS).
+ */
+export const EMPTY_TOP = { toward: [0, 0, 1], up: [0, 1, 0], centre: [0, 0, 0], radius: 50 };
 
 /** Where a model point is on screen, for a canvas at `box` and a view framing the box. */
 export function screenPoint(box, [px, py, pz], view) {

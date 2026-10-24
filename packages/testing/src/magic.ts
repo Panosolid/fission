@@ -30,14 +30,14 @@ export type JourneyVerdict =
 export const MAGIC_JOURNEYS: MagicJourney[] = [
   {
     name: "Design: shape to STL",
-    steps: ["pick a shape", "change a size", "Download STL"],
-    // One click per step: the shape's button, the size field, the STL button.
-    clickLimit: 3,
+    steps: ["insert a shape", "change a size", "Download STL"],
+    // From an empty design (a new project, U0c): Insert ▾ and its Box (U0d: the presets live in a menu), the size field, the STL button.
+    clickLimit: 4,
     secondsLimit: 5,
     status: "ready",
   },
   {
-    // Step 25c4: a part from a sketch, on the timeline the default box starts.
+    // Step 25c4: a part from a sketch, from an empty design (a new project, U0c).
     name: "Design: sketch to STL",
     steps: ["start a sketch on the ground", "draw a rectangle", "extrude it", "Download STL"],
     // Create Sketch and the plane, the rectangle tool and its two corners, Extrude and OK, the STL button.

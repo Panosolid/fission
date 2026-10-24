@@ -84,6 +84,7 @@ const ctx: WorkspaceContext = {
   changeNotes: new ChangeNotes(),
   openWorkspace: (id) => openFrom("main", id),
   workspaceTitle,
+  openFile: () => $("open-file").click(),
 };
 
 // The one undo history (step 20): whole-project snapshots, put back the way
@@ -335,6 +336,7 @@ function paneCtx(pane: PaneId, slots: Slots): WorkspaceContext {
     downstream: ctx.downstream,
     openWorkspace: (id) => openFrom(pane, id),
     workspaceTitle,
+    openFile: ctx.openFile,
   };
 }
 /**
