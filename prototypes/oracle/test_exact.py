@@ -84,10 +84,10 @@ class Judge(unittest.TestCase):
         self.assertEqual(judge(1 + 0.9e-6, 1.0, e, a), "agree")
         self.assertEqual(judge(1 + 1.1e-6, 1.0, e, a), "fission")
         self.assertEqual(judge(1 - 1.1e-6, 1.0, e, a), "fission")
-        # Panosolid right, OpenCascade 1.1x out: OpenCascade's rounding.
+        # SpindleLabs right, OpenCascade 1.1x out: OpenCascade's rounding.
         self.assertEqual(judge(1.0, 1 + 1.1e-6, e, a), "occ")
         self.assertEqual(judge(1.0, 1 + 0.9e-6, e, a), "agree")
-        # Both off: Panosolid's finding, whatever OpenCascade says.
+        # Both off: SpindleLabs's finding, whatever OpenCascade says.
         self.assertEqual(judge(1 + 2e-6, 1 + 2e-6, e, a), "fission")
 
     def test_without_an_exact_value_opencascade_is_the_reference(self):

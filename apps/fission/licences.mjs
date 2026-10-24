@@ -40,7 +40,7 @@ export const ALLOWED_EXCEPTIONS = ["LLVM-exception"];
  * run while building or testing and never ship a byte. MPL-2.0 is a
  * file-level copyleft: changes to the tool's own files must be shared, but
  * what the tool builds is untouched, so it leaves every licence choice for
- * Panosolid open (audit L4). Nothing under these may be bundled: the shipped
+ * SpindleLabs open (audit L4). Nothing under these may be bundled: the shipped
  * walks (`npmShipped`, `cratesShipped`), the notices and the build plugin
  * take ALLOWED alone. First use: lightningcss, Vite 8's CSS tool.
  */
@@ -300,7 +300,7 @@ export function noticeTexts(pkg) {
  * The notices file: every shipped package with the licence it ships under
  * and that licence's text, each distinct text printed once.
  */
-export function noticesFile({ npm, crates, embedded = EMBEDDED, app = "Panosolid" }) {
+export function noticesFile({ npm, crates, embedded = EMBEDDED, app = "SpindleLabs" }) {
   const printed = new Map();
   const out = [
     `Third-party licences for ${app}`,

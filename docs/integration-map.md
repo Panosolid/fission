@@ -1,6 +1,6 @@
 # The integration map
 
-Every link between Panosolid's ten workspaces, planned up front so nobody has to guess when a workspace is built. [integration.md](integration.md) says *how* links work (representations, live links, provenance, the dependency graph). This page says *which* links exist, what flows along each one, and when each can be built.
+Every link between SpindleLabs's ten workspaces, planned up front so nobody has to guess when a workspace is built. [integration.md](integration.md) says *how* links work (representations, live links, provenance, the dependency graph). This page says *which* links exist, what flows along each one, and when each can be built.
 
 When a workspace becomes real, its rows here become its integration tests (a journey or round trip in `packages/testing/src/journeys.ts`). A link not on this page is not built until it is added here first.
 

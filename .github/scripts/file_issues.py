@@ -89,7 +89,7 @@ def oracle_kinds(disagreements):
             first = line
         elif not line.startswith(" "):
             # "occ-rounding, line N": only OpenCascade was off the exact
-            # value, which is not a Panosolid problem.
+            # value, which is not a SpindleLabs problem.
             shape = None
             if line.startswith("oracle crashed"):
                 kinds.append(("OpenCascade oracle crashed", line))
@@ -274,7 +274,7 @@ def texts(action, kind, hits, run_url, commit, branch):
             "`FISSION_SEED=<seed> FISSION_STATEFUL_CASES=2000 cargo test --release --test stateful "
             "stateful_random_chains -- --nocapture` in kernel/.\n\n"
             "Close this issue as completed once it is fixed (with a regression test), or as not planned "
-            "if it is not a Panosolid bug (say why in a comment): a kind closed as fixed that comes back on "
+            "if it is not a SpindleLabs bug (say why in a comment): a kind closed as fixed that comes back on "
             "main reopens it; one closed as not planned is not reported again."
         )
         return f"Random testing: {kind}"[:250], body

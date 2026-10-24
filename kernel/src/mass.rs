@@ -266,7 +266,7 @@ pub(crate) mod tests {
     #[test]
     fn a_thin_slot_far_out_keeps_its_volume() {
         // Regression (OpenCascade oracle, seed 33200934698058; OpenCascade
-        // agreed with a 50-digit calculation, Panosolid was 1.1e-6 high): a
+        // agreed with a 50-digit calculation, SpindleLabs was 1.1e-6 high): a
         // slot 364.5 mm long with half-round ends, drawn at y = 5e7, so its
         // width is w = (5e7 + 0.0022) − 5e7 as doubles = 0.00219999998808
         // (exact by Sterbenz), extruded 96. V = (364.5·w + π(w/2)²)·96: a

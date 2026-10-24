@@ -38,10 +38,10 @@ export function checkMmPerPixel(mmPerPixel: number, width: number, height: numbe
     throw new ImageError("invalid-size", `A pixel's size must be a positive number of mm, not ${mmPerPixel}.`);
   }
   if (mmPerPixel < MIN_MM_PER_PIXEL) {
-    throw new ImageError("invalid-size", `${mmPerPixel} mm per pixel is smaller than the smallest size Panosolid models (${MIN_MM_PER_PIXEL} mm, 10 nm).`);
+    throw new ImageError("invalid-size", `${mmPerPixel} mm per pixel is smaller than the smallest size SpindleLabs models (${MIN_MM_PER_PIXEL} mm, 10 nm).`);
   }
   const side = Math.max(width, height) * mmPerPixel;
   if (side > MAX_SIZE_MM) {
-    throw new ImageError("invalid-size", `At ${mmPerPixel} mm per pixel the image would be ${side} mm across, larger than the largest size Panosolid models (${MAX_SIZE_MM} mm, 1 km).`);
+    throw new ImageError("invalid-size", `At ${mmPerPixel} mm per pixel the image would be ${side} mm across, larger than the largest size SpindleLabs models (${MAX_SIZE_MM} mm, 1 km).`);
   }
 }

@@ -1,4 +1,4 @@
-// Makes the golden models that today's Panosolid can build (step 28a),
+// Makes the golden models that today's SpindleLabs can build (step 28a),
 // each through the Design app itself on the real WASM kernel (the app
 // journeys' design-app.ts: Design mounted in happy-dom, picks and clicks
 // handed to it as the viewport would), or for the gear, whose 96 sides

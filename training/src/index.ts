@@ -1,4 +1,4 @@
-// Training data for Panosolid's own model (docs/ai.md, "Panosolid's own
+// Training data for SpindleLabs's own model (docs/ai.md, "SpindleLabs's own
 // model"; roadmap A11). Kept in its own folder, ready to move to a
 // repository of its own: nothing in the app imports it.
 

@@ -1,6 +1,6 @@
 # Training data
 
-Contents of `training/`: the training data generator for Panosolid's own model (docs/ai.md, "Panosolid's own model"; roadmap A11, progress in docs/progress/ai.md). Nothing in the app imports it; it is kept apart so it can move to a repository of its own. Keep this list current when you add or change a file here.
+Contents of `training/`: the training data generator for SpindleLabs's own model (docs/ai.md, "SpindleLabs's own model"; roadmap A11, progress in docs/progress/ai.md). Nothing in the app imports it; it is kept apart so it can move to a repository of its own. Keep this list current when you add or change a file here.
 
 - `src/recipe.ts`: the parts: a `CommandRule` per command (how it is built on the kernel, the reason when it is refused) and `Recipe`s (how people ask for it), making `Draft`s.
 - `src/lengths.ts`: lengths as written ("4 cm", "1.5 inches", a bare number is mm) and the millimetres they mean, in one rounding.
