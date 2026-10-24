@@ -71,6 +71,13 @@ SMALL_LIMIT = "OpenCascade's small-feature limit"
 # its checker's verdict on the file is its tolerance, not a finding
 # (`step_issues`); the file's faces, volume and area still count.
 OCC_TOLERANCE = "OpenCascade's tolerance (its own rebuild is invalid too)"
+# A STEP volume OpenCascade misses on a body whose flat faces have holes
+# nearly as big as their outlines, by no more than the loop area that
+# cancels there times the harness's rounding per corner (`one_step_copy`;
+# #282, owner's decision 2026-10-24, on condition that it stays in view):
+# listed under this heading, never dropped, so the nightly results show
+# every miss it excuses.
+CANCELLED_LOOPS = "OpenCascade's cancelling loops"
 
 
 def wire(ps, ccw):
@@ -287,6 +294,21 @@ def small_reach(text):
             sum(2.0 * math.pi * r * diagonal + 2.0 * math.pi * r * r for r in small))
 
 
+def cancelled_room(case, r):
+    """The extra room a STEP volume gets for loops that cancel on its flat
+    faces (`step_check.cancelled_area`, #282): that area times the
+    harness's rounding allowance per corner, delta. The harness's volume
+    slack is the body's area times delta (kernel/tests/stateful.rs,
+    "volume_slack"), which counts each face once; OpenCascade integrates a
+    face with holes loop by loop, so each loop's area is moved by rounding
+    of up to delta at its corners. A face with one loop adds nothing, and a
+    hole walked the wrong way adds to the face's area instead of cancelling,
+    so it gets nothing either."""
+    if not case.get("area") or not r.cancelled:
+        return 0.0
+    return r.cancelled * case["volume_slack"] / case["area"]
+
+
 def one_step_copy(case, r, rebuilt, ref, slack):
     """One copy's findings and OpenCascade-only misses (`step_issues`)."""
     found, rounding = [f"step validity: {p}" for p in r.problems], []
@@ -302,8 +324,11 @@ def one_step_copy(case, r, rebuilt, ref, slack):
         # worse than its own rebuild of the shape (29b2's planted-fault run:
         # a rebuild a hair over the slack had excused a file that lost both
         # caps of a 1 µm cylinder, 1,300 times the slack).
+        room = cancelled_room(case, r) if name == "step volume" else 0.0
         if exact_value is not None and abs(got - reference) <= abs(theirs - reference) + allowed:
             rounding.append(note + f" (its rebuild {theirs!r} is off too)")
+        elif abs(got - reference) <= allowed + room:
+            rounding.append(f"{CANCELLED_LOOPS}: {note}, with {room:.3g} for {r.cancelled:.6g} mm2 of loops cancelling")
         else:
             found.append(note)
     return found, rounding
@@ -408,7 +433,10 @@ def main():
     if exact is None:
         print("  (mpmath not installed: no exact referee, OpenCascade is the reference)")
     small = sum(1 for l in occ_lines if SMALL_LIMIT in l)
+    cancelling = sum(1 for l in occ_lines if CANCELLED_LOOPS in l)
     print(f"  {len(occ_lines) - small} more where only OpenCascade was off the exact value (its own rounding, not counted)")
+    print(f"  {cancelling} of them a STEP volume missed on flat faces whose holes nearly fill them "
+          f"(its cancelling loops, #282; listed, not counted)")
     print(f"  {small} more with a radius under {SMALL_FEATURE} mm that OpenCascade couldn't read from the STEP file "
           f"in any copy (its small-feature limit, not counted)")
     for k, v in sorted(per_kind.items()):
