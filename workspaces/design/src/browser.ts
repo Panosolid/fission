@@ -84,6 +84,20 @@ export function browserTree(document: DesignDocument, failed: ReadonlySet<string
 }
 
 /**
+ * The timeline item a browser row stands for, whose menu (Delete, Suppress,
+ * Edit…) and double-click it takes: a Timeline row's own item, a sketch's
+ * row in Sketches its sketch item, and (the owner's ask, 2026-10-24) a
+ * Body row the feature that makes the body, since every body is made by
+ * one feature; deleting it asks first when anything is built from it, as
+ * the timeline's rules say. Other rows (profiles, the origin) have none.
+ */
+export function rowItem(node: string, doc: DesignDocument, failed: ReadonlySet<string> = NONE_FAILED): string | null {
+  if (node.startsWith("sketches/")) return node.slice("sketches/".length);
+  if (node.startsWith("body-")) return bodyRows(doc, failed).find((r) => r.id === node)?.feature.id ?? null;
+  return doc.timeline.features.some((f) => f.id === node) ? node : null;
+}
+
+/**
  * The browser rows that stand for selectable geometry, and the reference
  * each selects: "body-n" its body, a profile's row its outline, and (step
  * 24f6) a Timeline row of a solid feature that builds the body it makes,

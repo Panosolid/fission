@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { XY_PLANE, type Feature } from "@fission/core";
-import { browserTree, type BrowserNode } from "../src/browser.ts";
+import { browserTree, rowItem, type BrowserNode } from "../src/browser.ts";
 import { partDocument, type DesignDocument } from "../src/document.ts";
 import { addSketch, drawLine } from "../src/sketch.ts";
 
@@ -98,4 +98,27 @@ test("U0a: the Timeline and the Origin start folded, every other group open, lik
   );
   const leaves = tree.flatMap((n) => n.children ?? []);
   assert.ok(leaves.length > 0 && leaves.every((n) => n.startsFolded === undefined), "no row is a folding group");
+});
+
+test("hand-worked: the item each row's menu and double-click act on; a Body row's is the feature that makes it", () => {
+  // The hand-built document of the first test, with a third feature: feature-1 (an extrude) builds Body 1,
+  // feature-2 is suppressed so builds none, feature-3 (a box) builds Body 2.
+  const doc: DesignDocument = {
+    version: 2,
+    nextId: 4,
+    sketches: [],
+    profiles: [{ id: "profile-1", kind: "slot", width: 40, depth: 10, plane: XY_PLANE }],
+    timeline: { features: [feature("feature-1", "Extrude: slot by 5 mm"), feature("feature-2", "Box: 1 × 2 × 3 mm", true), feature("feature-3", "Box: 4 × 5 × 6 mm")] },
+  };
+  assert.equal(rowItem("body-1", doc), "feature-1");
+  assert.equal(rowItem("body-2", doc), "feature-3", "Body 2 skips the suppressed feature-2");
+  assert.equal(rowItem("body-3", doc), null, "no third body");
+  assert.equal(rowItem("feature-2", doc), "feature-2", "a Timeline row is its own item");
+  assert.equal(rowItem("sketches/sketch-9", doc), "sketch-9", "a Sketches row is its sketch");
+  assert.equal(rowItem("profile-1", doc), null, "a profile row has no item");
+  assert.equal(rowItem("origin-xy", doc), null, "nor an origin row");
+  // With feature-1 failed in the last rebuild, Body 1 is feature-3's (bodyRows numbers by place among the builders,
+  // so feature-3 keeps "body-2" and there is no body-1 row).
+  assert.equal(rowItem("body-2", doc, new Set(["feature-1"])), "feature-3");
+  assert.equal(rowItem("body-1", doc, new Set(["feature-1"])), null);
 });

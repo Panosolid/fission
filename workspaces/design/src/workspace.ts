@@ -15,7 +15,7 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { browserTree, rowReferences, type BrowserNode } from "./browser.ts";
+import { browserTree, rowItem, rowReferences, type BrowserNode } from "./browser.ts";
 import { callOffDrag, showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey } from "./properties.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
@@ -183,7 +183,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
         row.dataset.label = n.label;
         row.dataset.node = n.id;
         if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
-        if (items.has(n.id) || n.id.startsWith("sketches/")) {
+        if (items.has(n.id) || n.id.startsWith("sketches/") || n.id.startsWith("body-")) {
           row.addEventListener("dblclick", () => onOpen(n.id));
           // The row's menu: a right-click at the pointer, or the ⋯ button under itself.
           row.addEventListener("contextmenu", (e) => {
@@ -281,7 +281,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Draws the browser for `doc` with the last rebuild's failed items (no Body row for them). */
   function drawBrowser(doc: DesignDocument) {
     rowsFailed = failedNow;
-    browser(ctx.browser, doc, failedNow, selectRow, openRowMenu, (node) => openItem(rowItem(node)));
+    browser(ctx.browser, doc, failedNow, selectRow, openRowMenu, (node) => openItem(itemOfRow(node)));
   }
 
   /** The browser's Body 1 row: a click selects the body, Shift adds or takes it out. */
@@ -606,10 +606,11 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   }
 
   /** The timeline item of a browser row with a menu: "sketches/<id>" or an item's id. */
-  const rowItem = (node: string) => (node.startsWith("sketches/") ? node.slice("sketches/".length) : node);
-  /** A row's menu (24e4 for sketches, 24f3 for every timeline item). */
+  /** The item a row stands for (browser.ts rowItem), or "" for none. */
+  const itemOfRow = (node: string) => rowItem(node, designDoc(), failedNow) ?? "";
+  /** A row's menu (24e4 for sketches, 24f3 for every timeline item, U0a for bodies: their feature's). */
   function openRowMenu(node: string, at: { x: number; y: number }) {
-    openMenu(rowItem(node), at);
+    openMenu(itemOfRow(node), at);
   }
 
   /** A double-click on item `id` (25a3): its menu's Edit Sketch or Edit feature, refused with the menu's words when that is off. */
