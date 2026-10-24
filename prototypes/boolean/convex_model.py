@@ -54,7 +54,7 @@ can happen.
   (AssertionError otherwise), so the two halves keep each other honest.
 
 Tolerance, as box_model: a corner of one prism within 2 x LINEAR of a face
-plane of the other, or an edge of one passing within 2 x LINEAR of an edge
+of the other (of its plane, near the face; 30c), or an edge of one passing within 2 x LINEAR of an edge
 of the other, without touching it exactly, is the same place to the kernel
 (rule 1), which this model cannot see, so it refuses them (`ModelError`;
 30c snaps first). For axis-aligned boxes this is box_model's refusal of
@@ -740,11 +740,16 @@ def on_segment(p, a, b):
 
 def refuse_close(a, b):
     """Rule 1's refusal: a corner of one prism within 2 x LINEAR of a face
-    plane of the other, or edges passing within 2 x LINEAR, without touching."""
+    of the other, or edges passing within 2 x LINEAR, without touching. A
+    corner further than that outside any plane of the other is further from
+    all its faces, so a face's plane counts only near the solid."""
     for s, t in ((a, b), (b, a)):
         for v in s.vertices:
-            for n, d in t.halfspaces:
-                gap = abs(dot(n, v) - d)
+            gaps = [dot(n, v) - d for n, d in t.halfspaces]
+            if max(gaps) > SAME:
+                continue
+            for (n, d), g in zip(t.halfspaces, gaps):
+                gap = abs(g)
                 if 0 < gap <= SAME:
                     raise ModelError(f"corner {v} is within tolerance of the plane {n} . x = {d}")
     for p0, p1 in a.segments():

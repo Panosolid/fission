@@ -283,6 +283,19 @@ class Bands(unittest.TestCase):
         d = SAME * F(11, 10)
         self.assertEqual(boolean("intersect", block(-5, -5, F(43, 25) - d, 5, 5, 5), TURNED_CUBE)["outcome"], "thin")
 
+    def test_corner_near_a_plane_far_from_its_face(self):
+        # A block 6 mm along x from the cube [0,4]^3, its bottom 0.9 x 2
+        # LINEAR above the cube's top plane z = 4: its corners are near
+        # that plane but 6 mm from the face, so nothing is one place (30c,
+        # seed 31009 case 166) and the union is the two apart: 64, and
+        # 2 x 2 x (2 - d) with area 2 x 4 + 4 x 2 x (2 - d).
+        d = SAME * F(9, 10)
+        r = boolean("union", block(0, 0, 0, 4, 4, 4), block(10, 0, 4 + d, 12, 2, 6))
+        self.assertEqual([(x["volume"], x["area"]) for x in r["bodies"]], [(64, 96), (4 * (2 - d), 8 + 8 * (2 - d))])
+        # Over the cube (x 1..3) the same corners are near its top face.
+        with self.assertRaisesRegex(ModelError, "within tolerance of the plane"):
+            boolean("union", block(0, 0, 0, 4, 4, 4), block(1, 0, 4 + d, 3, 2, 6))
+
     def skew(self, gap):
         # The block [0,4]^3's top edge x = z = 4 and a unit prism's edge
         # along u = (4, 12, -3)/13 passing `gap` outside it, across it: both

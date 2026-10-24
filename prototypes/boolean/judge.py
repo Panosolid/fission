@@ -266,9 +266,14 @@ def prism_rows(a, b, t, margin):
     for s, o, sign in ((b, a, 1), (a, b, -1)):
         for v in s.vertices:
             v_now = plus(v, t) if sign > 0 else v
-            for n, d in o.halfspaces:
-                d_now = d if sign > 0 else d + dot(n, t)
-                g = dot(n, v_now) - d_now
+            gaps = [dot(n, v_now) - (d if sign > 0 else d + dot(n, t)) for n, d in o.halfspaces]
+            if max(gaps) > SAME + margin:
+                # Further than SAME outside one of the other solid's planes,
+                # so further than that from all of its faces: a plane is
+                # near only where its face is (seed 31009 case 166: A's
+                # corner 14 nm off the line of B's side, microns past B).
+                continue
+            for (n, d), g in zip(o.halfspaces, gaps):
                 if abs(abs(g) - SAME) <= margin:
                     raise OnEdge(f"corner {v} is within rounding of 2·LINEAR from a plane")
                 if abs(g) <= SAME:

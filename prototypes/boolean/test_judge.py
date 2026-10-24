@@ -237,6 +237,31 @@ class Prisms(unittest.TestCase):
         self.assertEqual(moved.move, corner)
         self.assertGreater(snap.D, 0)
 
+    def test_a_plane_is_near_only_where_its_face_is(self):
+        # A the block 0..4 cubed; B a 2 x 2 x 2 block with its bottom 14 nm
+        # (under 2·LINEAR) above A's top plane z = 4. Over A (x, y 1..3), B's
+        # four bottom corners are 14 nm above A's top face: four rows, each
+        # n = (0, 0, 1) with d - n . v = 4 - (4 + 14 nm). A's top corners are
+        # 14 nm under B's bottom plane too, but 1 mm or more outside B's
+        # sides, so near no face of B. Moved to x 10..12, B's corners are as
+        # near A's top plane but 6 mm clear of A: nothing is near.
+        a, g = convex_model.block(0, 0, 0, 4, 4, 4), F(14, 10**6)
+        zero = (F(0),) * 3
+        rows = judge.prism_rows(a, convex_model.block(1, 1, 4 + g, 3, 3, 6), zero, judge.rounding(6))
+        self.assertEqual(rows, [((0, 0, 1), -g)] * 4)
+        self.assertEqual(judge.prism_rows(a, convex_model.block(10, 1, 4 + g, 12, 3, 6), zero, judge.rounding(12)), [])
+
+    def test_regression_corner_near_a_plane_far_from_its_face(self):
+        # Seed 31009 case 166 (stacked, B's bottom 1.1 x 2·LINEAR into A, at
+        # micrometre size): A's corner 14 nm off the line of B's side, but
+        # microns past B. Taken as a near place, it and B's sides needed
+        # two moves, so all three ops were beyond the judge.
+        with open(os.path.join(os.path.dirname(__file__), "regressions", "far-plane-31009-166.jsonl")) as f:
+            lines = [json.loads(x) for x in f]
+        out = io.StringIO()
+        self.assertTrue(judge.run(lines, model_answers=True, out=out), out.getvalue())
+        self.assertIn("3 agree, 0 disagree, 0 beyond the judge", out.getvalue())
+
     def test_beyond_the_judge(self):
         # B 0.5 x 2·LINEAR wider than A on both sides in x: one move cannot
         # put both sides on A's (they need opposite moves), and the judge
