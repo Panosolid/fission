@@ -1,11 +1,11 @@
-Fuzzing (the STL reader, the project loader, the sketch-extrude and timeline sessions and the kernel fuzz targets), all runs so far (updated 2026-10-23 00:30 UTC)
-  hours of fuzzing: 39.6
-  timeline rounds 40, inputs 100000, rounds that found something 0, last: none yet
-  placed   rounds 7, inputs 218282, rounds that found something 0, last: none yet
-  sessions rounds 13487, inputs 26974000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
-  stl      rounds 20188, inputs 40376000, rounds that found something 0, last: none yet
-  extrude  rounds 7, inputs 344871, rounds that found something 0, last: none yet
-  sketch   rounds 7, inputs 883223, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
-  project  rounds 46613, inputs 93226000, rounds that found something 5, last: 12602338379209990758 (commit 4834c7d on main)
+Fuzzing (the STL reader, the project loader, the sketch-extrude and timeline sessions and the kernel fuzz targets), all runs so far (updated 2026-10-24 00:27 UTC)
+  hours of fuzzing: 44.9
+  timeline rounds 50, inputs 125000, rounds that found something 0, last: none yet
+  placed   rounds 8, inputs 236612, rounds that found something 0, last: none yet
+  sessions rounds 14158, inputs 28316000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
+  stl      rounds 22187, inputs 44374000, rounds that found something 0, last: none yet
+  extrude  rounds 8, inputs 377555, rounds that found something 0, last: none yet
+  sketch   rounds 8, inputs 990084, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
+  project  rounds 50312, inputs 100624000, rounds that found something 5, last: 12602338379209990758 (commit 4834c7d on main)
 fuzz/log.csv has one line per round; fuzz/failures/seed-<seed>/ has each failing round's
 fuzz-report.txt and its shrunk failing inputs.

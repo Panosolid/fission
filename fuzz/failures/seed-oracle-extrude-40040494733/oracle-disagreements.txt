@@ -1,0 +1,2 @@
+line 770: {"Extrude": {"dist": "500.0", "holes": [], "outer": {"Path": {"bulges": ["6312.5", "2.0", "1.1e-5"], "pts": [["6.3125", "0.6312500000000001"], ["-0.0625", "0.0"], ["0.0", "0.0"]]}}}}
+  step validity: BRepCheck: invalid (faces [0], counted in file order) (as written) (extrude: fuzz/corpus/extrude/9462dd5dfffc06689a840821c760a02ca7019dce)
