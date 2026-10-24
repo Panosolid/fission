@@ -52,15 +52,18 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 
 from OCP.BRep import BRep_Tool
+from OCP.BRepAdaptor import BRepAdaptor_Surface
+from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 from OCP.BRepCheck import BRepCheck_Analyzer
 from OCP.BRepGProp import BRepGProp
+from OCP.GeomAbs import GeomAbs_Plane
 from OCP.GProp import GProp_GProps
 from OCP.IFSelect import IFSelect_RetDone
 from OCP.ShapeBuild import ShapeBuild_ReShape
 from OCP.ShapeFix import ShapeFix_Face
 from OCP.STEPControl import STEPControl_Reader
 from OCP.StepToTopoDS import StepToTopoDS_Builder
-from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX, TopAbs_WIRE
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 from OCP.Transfer import Transfer_TransientProcess
@@ -90,6 +93,7 @@ class Report:
     faces: int = 0
     vertex_tolerance: float = 0.0  # the largest OpenCascade needed
     edge_tolerance: float = 0.0
+    cancelled: float = 0.0  # `cancelled_area`
 
     @property
     def ok(self):
@@ -146,6 +150,40 @@ def _largest_tolerance(shape, kind, cast):
     return max((BRep_Tool.Tolerance_s(cast(s)) for s in _shapes(shape, kind)), default=0.0)
 
 
+def _area(shape):
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(shape, props)
+    return abs(props.Mass())
+
+
+def cancelled_area(shape):
+    """How much loop area cancels on the body's flat faces with holes: for
+    each, every loop's own area added up, less the face's. OpenCascade
+    integrates such a face loop by loop (outline, then each hole taken
+    off), so its rounding grows with the loops' areas, not the face's: a
+    60 x 62 mm frame 0.0011 mm wide (#282) is 3,720 mm2 less 3,719.73, and
+    OpenCascade read its volume 3.7 times the slack off, a file with every
+    corner the nearest double to exact still up to 1,000 times. 0 for a
+    face with one loop, so only such faces get room for it (compare.py's
+    `cancelled_room`). A hole walked the wrong way adds to its face's area
+    instead of cancelling, so it gives no room either."""
+    total = 0.0
+    for f in _shapes(shape, TopAbs_FACE):
+        face = TopoDS.Face(f)
+        wires = list(_shapes(face, TopAbs_WIRE))
+        surface = BRepAdaptor_Surface(face)
+        if len(wires) < 2 or surface.GetType() != GeomAbs_Plane:
+            continue
+        loops = 0.0
+        for w in wires:
+            made = BRepBuilderAPI_MakeFace(surface.Plane(), TopoDS.Wire(w), True)
+            if not made.IsDone():
+                return 0.0  # a loop OpenCascade can't fill: no room at all
+            loops += _area(made.Face())
+        total += max(loops - _area(face), 0.0)
+    return total
+
+
 def check(path):
     report = Report()
     raw, why = _translate(path)
@@ -172,6 +210,7 @@ def check(path):
     BRepGProp.SurfaceProperties_s(shape, area)
     report.volume, report.area = volume.Mass(), area.Mass()
     report.faces = len(list(_shapes(shape, TopAbs_FACE)))
+    report.cancelled = cancelled_area(shape)
     return report
 
 

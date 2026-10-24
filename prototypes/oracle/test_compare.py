@@ -209,6 +209,100 @@ class StepFiles(unittest.TestCase):
         self.assertEqual(step_check.home(cube_text()), (cube_text(), (0.0, 0.0, 0.0)))
 
 
+def frame_text():
+    """regressions/frame-10mm-hole-8mm.step, what kernel/src/step_write.rs
+    writes for a 10 x 10 mm square with an 8 x 8 mm hole in its middle
+    (corners (1, 1) to (9, 9)), extruded 1 mm along z."""
+    with open(os.path.join(os.path.dirname(__file__), "regressions", "frame-10mm-hole-8mm.step")) as f:
+        return f.read()
+
+
+def frame_case(step, volume_slack=0.0):
+    """The oracle's line for `frame_text`'s body: by hand, V = (100 - 64)
+    x 1 = 36 and S = two caps of 36, four outer sides of 10 x 1 and four
+    inner of 8 x 1: 72 + 40 + 32 = 144, ten faces."""
+    square = lambda x0, s: [[repr(x0), repr(x0)], [repr(x0 + s), repr(x0)], [repr(x0 + s), repr(x0 + s)], [repr(x0), repr(x0 + s)]]
+    shape = {"Extrude": {"dist": "1.0", "expect": True, "outer": {"Path": {"bulges": [], "pts": square(0.0, 10.0)}},
+                         "holes": [{"Path": {"bulges": [], "pts": square(1.0, 8.0)[::-1]}}]}}
+    return {"shape": shape, "matrix": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], "faces": 10,
+            "lo": [0.0, 0.0, 0.0], "hi": [10.0, 10.0, 1.0], "max_deviation": 0.0,
+            "volume_slack": volume_slack, "area_slack": 1.0, "curve_volume_slack": 0.0, "curve_area_slack": 0.0,
+            "exact_volume": 36.0, "exact_area": 144.0, "volume": 36.0, "area": 144.0,
+            "step": step, "step_refused": None}
+
+
+@unittest.skipUnless(importlib.util.find_spec("OCP") is not None and importlib.util.find_spec("mpmath") is not None,
+                     "needs cadquery-ocp and mpmath")
+class CancellingLoops(unittest.TestCase):
+    """Room for OpenCascade's rounding on flat faces whose holes nearly
+    fill them (#282: `step_check.cancelled_area`, `compare.cancelled_room`),
+    always listed under CANCELLED_LOOPS, never counted or dropped."""
+
+    def test_a_frames_cancelled_area_by_hand(self):
+        # Each cap: its outline 10 x 10 = 100 and its hole 8 x 8 = 64 add
+        # up to 164; the face is 36; 164 - 36 = 128 cancels. Two caps: 256.
+        # The eight sides have one loop each, so nothing; nor has the cube.
+        import step_check
+        self.assertEqual(step_check.check_text(frame_text()).cancelled, 256.0)
+        self.assertEqual(step_check.check_text(cube_text()).cancelled, 0.0)
+
+    def lifted(self, k):
+        # The frame's top lifted by d (every z = 1 moved to 1 + d): a valid
+        # frame 1 + d tall, volume 36 + 36 d, against the referee's 36.
+        # With volume slack s the room is 256 x s / 144 (area 144), so s
+        # is set to make slack + REL x 36 + room = (36 d) / k.
+        import compare
+        d = 1e-3 / 36.0
+        miss = 36.0 * d
+        s = (miss / k - compare.REL * 36.0) / (1.0 + 256.0 / 144.0)
+        t = edit_points(frame_text(), lambda x, y, z: (x, y, 1.0 + d if z == 1.0 else z))
+        return compare.compare(frame_case(t, s))[1:]
+
+    def test_a_miss_of_09_of_the_room_is_listed_not_counted(self):
+        import compare
+        issues, occ = self.lifted(0.9)
+        self.assertEqual(issues, [])
+        self.assertTrue(any(compare.CANCELLED_LOOPS in o and "step volume" in o for o in occ), occ)
+
+    def test_a_miss_of_11_of_the_room_is_a_finding(self):
+        import compare
+        issues, occ = self.lifted(1.1)
+        self.assertEqual(kinds(issues), ["step volume"], issues)
+        self.assertFalse(any(compare.CANCELLED_LOOPS in o for o in occ), occ)
+
+    def test_a_hole_walked_the_wrong_way_gets_no_room(self):
+        # The bottom cap's hole bound turned (.T. to .F.): its loops then
+        # add up (100 + 64) instead of cancelling, so that face gives no
+        # room (only the top cap's 128 is left), and OpenCascade reads the
+        # face invalid, the volume 21.3 off and the area 272 for 144: all
+        # found, however much room the slack would give.
+        import compare
+        import step_check
+        bad = frame_text().replace("#182 = FACE_BOUND('',#181,.T.);", "#182 = FACE_BOUND('',#181,.F.);")
+        self.assertNotEqual(bad, frame_text())
+        self.assertEqual(step_check.check_text(bad).cancelled, 128.0)
+        issues, occ = compare.compare(frame_case(bad, 1e-6))[1:]
+        self.assertEqual(kinds(issues), ["step area", "step validity", "step volume"], issues)
+
+    def test_issue_282_thin_frame_is_listed_not_counted(self):
+        # Seed 101725249063004, line 3032 (nightly, 29b2's branch, and on
+        # main 684b681): a 60 x 62 mm frame 0.0011 mm wide and 0.001091 mm
+        # tall, turned and placed ~800 mm out. The kernel's volume is the
+        # exact one (8.5e-16 apart); OpenCascade reads the file 4.8e-11
+        # off, 3.7 times the slack of 1.3e-11. Its caps' loops (3,720 and
+        # 3,719.73 mm2) cancel 14,879 mm2, room 1.8e-7.
+        import json
+        import compare
+        here = os.path.join(os.path.dirname(__file__), "regressions", "thin-frame-60mm")
+        with open(here + ".json") as f:
+            case = json.load(f)
+        with open(here + ".step") as f:
+            case["step"] = f.read()
+        issues, occ = compare.compare(case)[1:]
+        self.assertEqual(issues, [])
+        self.assertTrue(any(compare.CANCELLED_LOOPS in o for o in occ), occ)
+
+
 def cylinder_text(r, h, off=0.0):
     """kernel/tests/step/cylinder_r2_h3.step (radius 2, height 3, axis z
     from the origin) made radius r and height h, its top circle's centre
