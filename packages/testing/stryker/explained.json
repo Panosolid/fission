@@ -894,5 +894,26 @@
     "original": "journal",
     "replacement": "true",
     "why": "finish() with no journal: journal.setItem then throws a TypeError inside the try, whose catch leaves journalVersion as it was, exactly as skipping the block does."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "ConditionalExpression",
+    "original": "timer === null && !inFlight",
+    "replacement": "true",
+    "why": "In followed(), `storedVersion === version` already implies no save is waiting or running: every change adds one to `version` and starts the timer, and a save stores a version only once it has finished, so while a timer or a save is live the stored version is below `version`. The `timer === null` and `!inFlight` terms therefore never change the answer."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "LogicalOperator",
+    "original": "timer === null && !inFlight",
+    "replacement": "timer === null || !inFlight",
+    "why": "In followed(), `storedVersion === version` already implies no save is waiting or running: every change adds one to `version` and starts the timer, and a save stores a version only once it has finished, so while a timer or a save is live the stored version is below `version`. The `timer === null` and `!inFlight` terms therefore never change the answer."
+  },
+  {
+    "file": "packages/storage/src/autosave.ts",
+    "mutator": "ConditionalExpression",
+    "original": "timer === null",
+    "replacement": "true",
+    "why": "In followed(), `storedVersion === version` already implies no save is waiting or running: every change adds one to `version` and starts the timer, and a save stores a version only once it has finished, so while a timer or a save is live the stored version is below `version`. The `timer === null` and `!inFlight` terms therefore never change the answer."
   }
 ]
