@@ -32,6 +32,12 @@ pub type FaceId = usize;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vertex {
     pub point: DVec3,
+    /// How far the vertex may be from where each edge it joins ends (B0
+    /// decision 5): the radius of its tolerance ball, which covers the gap
+    /// to every edge end it joins. LINEAR unless an operation grew it to
+    /// what it measured (from step 32a), never above the limits in
+    /// `tolerance.rs` (`TOL_CAP`, `TOL_INPUT_MAX`); `validate` checks both.
+    pub tol: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +47,8 @@ pub struct Edge {
     pub end: VertexId,
     pub t0: f64,
     pub t1: f64,
+    /// How far the edge may be from each face it bounds, as `Vertex::tol`.
+    pub tol: f64,
 }
 
 impl Edge {
@@ -244,8 +252,9 @@ pub struct Body {
 }
 
 impl Body {
+    /// A vertex at `point` with the default tolerance, LINEAR.
     pub fn add_vertex(&mut self, point: DVec3) -> VertexId {
-        self.vertices.push(Vertex { point });
+        self.vertices.push(Vertex { point, tol: crate::tolerance::LINEAR });
         self.vertices.len() - 1
     }
 
@@ -257,8 +266,9 @@ impl Body {
         self.add_edge(Curve::Line { origin: a, dir }, start, end, 0.0, len)
     }
 
+    /// An edge with the default tolerance, LINEAR.
     pub fn add_edge(&mut self, curve: Curve, start: VertexId, end: VertexId, t0: f64, t1: f64) -> EdgeId {
-        self.edges.push(Edge { curve, start, end, t0, t1 });
+        self.edges.push(Edge { curve, start, end, t0, t1, tol: crate::tolerance::LINEAR });
         self.edges.len() - 1
     }
 
@@ -332,7 +342,11 @@ impl Body {
 
     pub fn transformed(&self, tf: &Transform) -> Body {
         Body {
-            vertices: self.vertices.iter().map(|v| Vertex { point: tf.point(v.point) }).collect(),
+            // Each entity keeps its tolerance: it is what the entity is
+            // allowed, not what it measures, and `validate` measures the
+            // moved body against it (a scale that stretched a gap past it
+            // is caught there, as before tolerances had fields).
+            vertices: self.vertices.iter().map(|v| Vertex { point: tf.point(v.point), tol: v.tol }).collect(),
             edges: self
                 .edges
                 .iter()
@@ -342,6 +356,7 @@ impl Body {
                     end: e.end,
                     t0: e.curve.transform_param(e.t0, tf),
                     t1: e.curve.transform_param(e.t1, tf),
+                    tol: e.tol,
                 })
                 .collect(),
             faces: self
@@ -376,7 +391,7 @@ impl Body {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tolerance::{angle_eq, eq, points_eq, ANGULAR, MAX_SIZE};
+    use crate::tolerance::{angle_eq, eq, points_eq, ANGULAR, LINEAR, MAX_SIZE};
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
     #[test]
@@ -392,6 +407,24 @@ mod tests {
         }
         assert_eq!(std::mem::size_of::<Face>(), std::mem::size_of::<Unnamed>());
         assert_eq!(Piece::at(3, 1999), Piece { boundary: 3, piece: 1999 });
+    }
+
+    #[test]
+    fn entities_start_at_linear_and_keep_their_tolerance_when_moved() {
+        // Every constructor gives the default, LINEAR (B0 decision 5); a
+        // move, turn or scale keeps a grown one, since a tolerance is what
+        // an entity is allowed, and `validate` measures the moved body.
+        let mut b = Body::default();
+        let (v0, v1) = (b.add_vertex(DVec3::ZERO), b.add_vertex(DVec3::X));
+        let line = b.add_line(v0, v1);
+        let arc = b.add_edge(Curve::Circle { center: DVec3::ZERO, axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 }, v1, v1, 0.0, PI);
+        assert!(b.vertices.iter().all(|v| v.tol == LINEAR) && [line, arc].iter().all(|&e| b.edges[e].tol == LINEAR));
+        b.vertices[v1].tol = 3e-5;
+        b.edges[arc].tol = 7e-5;
+        let tf = Transform::rotation(DVec3::Y, 0.3).then(Transform::uniform_scale(2.0)).then(Transform::translation(DVec3::splat(5.0)));
+        let moved = b.transformed(&tf);
+        assert_eq!(moved.vertices.iter().map(|v| v.tol).collect::<Vec<_>>(), vec![LINEAR, 3e-5]);
+        assert_eq!(moved.edges.iter().map(|e| e.tol).collect::<Vec<_>>(), vec![LINEAR, 7e-5]);
     }
 
     fn quarter_arc_edge() -> (Body, EdgeId) {
@@ -551,7 +584,7 @@ mod tests {
         assert!(points_eq(lo, DVec3::new(1.0, -1.0, 3.0)) && points_eq(hi, DVec3::new(4.0, 2.0, 5.0)), "{lo} {hi}");
         // Arcs of the unit circle about +Z centred at (5, 0, 2).
         let c = Curve::Circle { center: DVec3::new(5.0, 0.0, 2.0), axis: DVec3::Z, x_dir: DVec3::X, radius: 1.0 };
-        let arc = |t0: f64, t1: f64| Edge { curve: c.clone(), start: 0, end: 1, t0, t1 }.bounds();
+        let arc = |t0: f64, t1: f64| Edge { curve: c.clone(), start: 0, end: 1, t0, t1, tol: LINEAR }.bounds();
         // The left half, t ∈ [π/2, 3π/2]: from (5, 1) through (4, 0) at
         // t = π to (5, −1). Its ends span only x = 5; the least x, 4, is
         // where it passes t = π, half a turn from the greatest (t = 0).
@@ -572,7 +605,7 @@ mod tests {
         let axis = DVec3::new(0.0, 0.6, 0.8);
         let center = DVec3::new(1.0, 2.0, 3.0);
         let circle = |x_dir: DVec3| {
-            let e = Edge { curve: Curve::Circle { center, axis, x_dir, radius: 2.0 }, start: 0, end: 0, t0: 0.0, t1: std::f64::consts::TAU };
+            let e = Edge { curve: Curve::Circle { center, axis, x_dir, radius: 2.0 }, start: 0, end: 0, t0: 0.0, t1: std::f64::consts::TAU, tol: LINEAR };
             e.bounds()
         };
         let x0 = DVec3::X;

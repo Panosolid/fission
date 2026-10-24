@@ -18,6 +18,9 @@
 //! - every edge joins two faces, the one walking it forwards first
 //!   (`edge_faces`), checked against the loops and by geometry
 //!   (`check_edge_pairs`);
+//! - every vertex and edge carries the default tolerance, LINEAR: no
+//!   operation grows one yet (`check_tolerances`, step 31a; intersections
+//!   may from 32a);
 //! - replaying the same chain gives bit-identical bodies and meshes.
 //!
 //! Values are biased towards coincidences (a 0.5 grid, values reused from
@@ -1682,7 +1685,22 @@ fn check_faces(s: &Slot) -> Result<(), String> {
     let baked = b.baked();
     baked_faces_off(s, b, &baked)?;
     placed_centroids_off(s, &b.face_masses())?;
+    check_tolerances(&b.body)?;
     check_edge_pairs(&b.body, &baked)
+}
+
+/// Every vertex and edge carries LINEAR (step 31a): none of today's
+/// operations measures a crossing, so none may grow a tolerance, and one
+/// that did would be loosening a body silently. From 32a an intersection
+/// may grow a new entity's tolerance up to max(TOL_CAP, its inputs'), and
+/// this check becomes that.
+fn check_tolerances(b: &Body) -> Result<(), String> {
+    let vertex = b.vertices.iter().position(|v| v.tol != LINEAR).map(|i| format!("vertex {i} carries {:e}", b.vertices[i].tol));
+    let edge = b.edges.iter().position(|e| e.tol != LINEAR).map(|i| format!("edge {i} carries {:e}", b.edges[i].tol));
+    match vertex.or(edge) {
+        Some(what) => Err(format!("{what} mm, not the default LINEAR: no operation grows a tolerance before 32a")),
+        None => Ok(()),
+    }
 }
 
 /// `check_faces` on the baked body: roles kept, centroids and areas where
@@ -3300,6 +3318,21 @@ fn placed_face_centroids_need_no_allowance_for_far_corners() {
             assert_eq!(got.is_ok(), pass, "{k} × {allowed:e} along {dir}: {got:?}");
         }
     }
+}
+
+#[test]
+fn check_tolerances_catches_a_grown_one() {
+    // A box from the kernel carries LINEAR everywhere; one vertex, or one
+    // edge, at the next double above LINEAR is caught and named.
+    let b = primitives::make_box(1.0, 2.0, 3.0).unwrap();
+    assert_eq!(check_tolerances(&b), Ok(()));
+    let up = f64::from_bits(LINEAR.to_bits() + 1);
+    let mut v = b.clone();
+    v.vertices[5].tol = up;
+    assert!(check_tolerances(&v).unwrap_err().starts_with("vertex 5 carries"));
+    let mut e = b.clone();
+    e.edges[9].tol = up;
+    assert!(check_tolerances(&e).unwrap_err().starts_with("edge 9 carries"));
 }
 
 #[test]

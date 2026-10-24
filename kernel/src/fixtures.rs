@@ -260,3 +260,35 @@ pub fn hand_sphere_octant(r: f64) -> Body {
     b.shells.push(Shell { faces: vec![0, 1, 2, 3] });
     b
 }
+
+/// `body` as an imported body might come (B0r rule 3): every vertex and
+/// edge carries `tol`, and the geometry really uses it, so a check or a
+/// boolean that read LINEAR instead of each entity's own would show. Each
+/// vertex moves 0.45·tol off where its edges end, along one of the eight
+/// diagonals (vertex i takes the one its index's bits give, so neighbours
+/// mostly differ); each flat face's plane moves 0.45·tol along its normal,
+/// outwards for even faces and inwards for odd ones, off the edges it
+/// bounds. So an edge lies 0.45·tol off a face, a vertex 0.45·tol off each
+/// edge end it joins and at most 0.9·tol off each face it bounds: all
+/// within the entities' tolerances, none within LINEAR once tol is past
+/// about 2.2·LINEAR. Curved faces stay where they are. `tol` itself is
+/// not checked: a tolerance out of range is for `validate` to refuse.
+pub fn tolerant(body: &Body, tol: f64) -> Body {
+    let mut b = body.clone();
+    let shift = 0.45 * tol;
+    for (i, v) in b.vertices.iter_mut().enumerate() {
+        let sign = |bit: usize| if i >> bit & 1 == 0 { 1.0 } else { -1.0 };
+        v.point += DVec3::new(sign(0), sign(1), sign(2)) * (shift / 3f64.sqrt());
+        v.tol = tol;
+    }
+    for e in &mut b.edges {
+        e.tol = tol;
+    }
+    for (i, f) in b.faces.iter_mut().enumerate() {
+        if let Surface::Plane { origin, normal, .. } = &mut f.surface {
+            let out = if f.sense { *normal } else { -*normal };
+            *origin += out * if i % 2 == 0 { shift } else { -shift };
+        }
+    }
+    b
+}
