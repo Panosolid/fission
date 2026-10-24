@@ -54,7 +54,7 @@ from fractions import Fraction
 from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
-from OCP.BRepCheck import BRepCheck_Analyzer
+from OCP.BRepCheck import BRepCheck_Analyzer, BRepCheck_Face, BRepCheck_NoError, BRepCheck_Shell, BRepCheck_Wire
 from OCP.BRepGProp import BRepGProp
 from OCP.GeomAbs import GeomAbs_Plane
 from OCP.GProp import GProp_GProps
@@ -65,7 +65,7 @@ from OCP.STEPControl import STEPControl_Reader
 from OCP.StepToTopoDS import StepToTopoDS_Builder
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX, TopAbs_WIRE
 from OCP.TopExp import TopExp_Explorer
-from OCP.TopoDS import TopoDS
+from OCP.TopoDS import TopoDS, TopoDS_Edge
 from OCP.Transfer import Transfer_TransientProcess
 
 LINEAR = 1e-5  # kernel/src/tolerance.rs; the writer puts it in the file too
@@ -94,6 +94,7 @@ class Report:
     vertex_tolerance: float = 0.0  # the largest OpenCascade needed
     edge_tolerance: float = 0.0
     cancelled: float = 0.0  # `cancelled_area`
+    crossing_only: bool = False  # `crossing_only`
 
     @property
     def ok(self):
@@ -184,6 +185,49 @@ def cancelled_area(shape):
     return total
 
 
+def crossing_only(shape):
+    """Whether BRepCheck's only complaint is that a face's loop crosses
+    itself (BRepCheck_SelfIntersectingWire): every face it calls invalid
+    passes its other face and loop checks (loops crossing each other, holes
+    inside the outline, loops' orientation, closed in 3D and 2D) and has a
+    loop that fails SelfIntersect, and every edge and vertex and the shell
+    pass on their own. OpenCascade counts two edges within 1e-7 mm of each
+    other anywhere but their shared vertex as crossing, so a sharp corner
+    that never crosses is called one (#293: a 0.545° spike between a
+    625 mm arc and a 115,763 mm one; its verdict on that file flipped with
+    the big radius moved by one unit in the last place). compare.py
+    excuses such a verdict only when no two pieces meet at 50 digits
+    (crossings.py). A face turned or a loop walked backwards fails other
+    checks, so it is never only this (test_compare.SharpCorners)."""
+    if BRepCheck_Analyzer(shape).IsValid():
+        return False
+    for kind, cast in ((TopAbs_EDGE, TopoDS.Edge), (TopAbs_VERTEX, TopoDS.Vertex)):
+        if not all(BRepCheck_Analyzer(cast(x)).IsValid() for x in _shapes(shape, kind)):
+            return False
+    for sh in _shapes(shape, TopAbs_SHELL):
+        check = BRepCheck_Shell(TopoDS.Shell(sh))
+        if check.Closed() != BRepCheck_NoError or check.Orientation() != BRepCheck_NoError:
+            return False
+    crossing = False
+    for f in _shapes(shape, TopAbs_FACE):
+        if BRepCheck_Analyzer(f).IsValid():
+            continue
+        face = TopoDS.Face(f)
+        check = BRepCheck_Face(face)
+        if any(s != BRepCheck_NoError for s in (check.IntersectWires(), check.ClassifyWires(), check.OrientationOfWires())):
+            return False
+        crossed = False
+        for w in _shapes(face, TopAbs_WIRE):
+            loop = BRepCheck_Wire(TopoDS.Wire(w))
+            if any(s != BRepCheck_NoError for s in (loop.Closed(), loop.Closed2d(face), loop.Orientation(face))):
+                return False
+            crossed |= loop.SelfIntersect(face, TopoDS_Edge(), TopoDS_Edge()) != BRepCheck_NoError
+        if not crossed:
+            return False  # invalid for a reason not looked at here
+        crossing = True
+    return crossing
+
+
 def check(path):
     report = Report()
     raw, why = _translate(path)
@@ -211,6 +255,7 @@ def check(path):
     report.volume, report.area = volume.Mass(), area.Mass()
     report.faces = len(list(_shapes(shape, TopAbs_FACE)))
     report.cancelled = cancelled_area(shape)
+    report.crossing_only = crossing_only(shape)
     return report
 
 
