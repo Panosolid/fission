@@ -1,4 +1,4 @@
-tested commit 4c162ff on main, 2026-10-23 22:38 UTC (https://github.com/Panosolid/fission/actions/runs/39978467279)
+tested commit bc29a66 on claude/project-thread-m584cs, 2026-10-24 03:25 UTC (https://github.com/Panosolid/fission/actions/runs/40051951575)
 core: 8 survivors, all explained: true
 design: 11 survivors, all explained: true
 UNEXPLAINED survivor at packages/storage/src/autosave.ts:195: packages/storage/src/autosave.ts | ConditionalExpression | timer === null && !inFlight && storedVersion === version => true
