@@ -149,3 +149,19 @@ test("in a real DOM: folded at the start, a tool's box opens it, the button pins
   await settle();
   assert.equal(fold.state.tool, false, "closed, it watches nothing");
 });
+
+test("regression (full e2e run, image.mjs): closed when Design is put away, the slot is left as it was found, so the next workspace's panel isn't folded", () => {
+  // The slot is shared: Image mounts its own page in the same #properties after Design's unmount.
+  const doc = new Window().document as unknown as Document;
+  const slot = doc.createElement("aside");
+  slot.id = "properties";
+  doc.body.append(slot);
+  slot.dataset.problem = ""; // a failed rebuild's words were showing
+  const fold = propertiesFold(slot, [], FOLDED_AT_START, null);
+  assert.equal(slot.hasAttribute("data-folded"), true);
+  fold.close();
+  assert.equal(slot.classList.contains("properties-fold"), false);
+  assert.equal(slot.hasAttribute("data-folded"), false, "folded is Design's: the next workspace shows its page");
+  assert.equal(slot.hasAttribute("data-problem"), false, "and no ⚠ of Design's stays");
+  assert.equal(slot.querySelector(`#${HANDLE_ID}`), null, "the button goes too");
+});

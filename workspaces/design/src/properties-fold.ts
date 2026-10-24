@@ -90,7 +90,7 @@ export interface PropertiesFold {
   readonly state: FoldState;
   /** The selection or the tool changed. */
   update(next: Partial<Pick<FoldReasons, "selected" | "tool">>): void;
-  /** Stops watching the tool boxes. */
+  /** Stops watching the tool boxes and takes the fold off the slot (its class, its folded and ⚠ marks, the button). */
   close(): void;
 }
 
@@ -142,9 +142,14 @@ export function propertiesFold(slot: HTMLElement, toolBoxes: readonly HTMLElemen
       return state;
     },
     update: (next) => set(withReasons(state, next)),
+    // The slot is shared with the next workspace (Image shows its page in it): leave it as it was found.
     close: () => {
       watch.disconnect();
       slot.removeEventListener(WORDS_EVENT, onWords);
+      slot.classList.remove("properties-fold");
+      delete slot.dataset.folded;
+      delete slot.dataset.problem;
+      handle.remove();
     },
   };
 }
