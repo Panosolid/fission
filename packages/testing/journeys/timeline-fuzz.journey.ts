@@ -2,22 +2,48 @@
 // real kernel: a short clean round finds nothing and leaves no bodies; a
 // round with a bug planted in Design's side finds it, shrinks it to a
 // 1-minimal list of steps that fails the same check with the bug and
-// passes without it, and writes a report file_issues.py can read.
+// passes without it, and writes a report file_issues.py can read. Each
+// round's simulated-user numbers (src/sim-numbers.ts, step 30d) count what
+// the sessions did, and a planted kernel bug moves its own number.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { runSession, TimelineFailure } from "../src/timeline-session.ts";
 import { designSubject, edgeMatches } from "../src/timeline-design.ts";
 import { REPORT_HEAD, timelineReport, timelineRound, timelineSeed } from "../src/timeline-fuzz.ts";
+import { rates, REFERENCE_CHECKS } from "../src/sim-numbers.ts";
+import { invalidEveryTenth } from "../baseline/naming.ts";
 
 test("a short clean round of timeline sessions finds nothing and leaves the kernel as it was", async () => {
   const kernel = nodeKernel();
   const before = await kernel.call("body_count");
-  const { failures, counts } = await timelineRound(kernel, 25n, { sessions: 2, steps: 60 });
+  const { failures, counts, numbers } = await timelineRound(kernel, 25n, { sessions: 2, steps: 60 });
   assert.deepEqual(failures, []);
   assert.equal(await kernel.call("body_count"), before);
   // The sessions really ran: steps of several kinds, bodies built.
   for (const k of ["op:add-sketch", "op:add-extrude", "op:undo", "status:built"]) assert.ok(counts[k] > 0, `never ${k}`);
+  // The numbers: every step not skipped is a rebuild (the counts' "skipped" are the rest of the 120 steps),
+  // every rebuild and body right, rebuild times at more than one feature count.
+  assert.equal(numbers.sessions, 2);
+  assert.equal(numbers.rebuilds, 120 - (counts.skipped ?? 0));
+  assert.deepEqual([numbers.failedSessions, numbers.wrongRebuilds, numbers.wrongReferences, numbers.invalidBuilds, numbers.crashedBuilds], [0, 0, 0, 0, 0]);
+  assert.equal(numbers.references, Object.entries(counts).filter(([k]) => k.startsWith("ref:")).reduce((s, [, v]) => s + v, 0));
+  assert.ok(numbers.builds > 0 && Object.keys(numbers.timing).length >= 2, JSON.stringify(numbers));
+  const r = rates(numbers);
+  assert.deepEqual([r.wrongRebuildPercent, r.wrongReferencePercent, r.invalidPercent], [0, 0, 0]);
+});
+
+test("a round on a kernel whose every tenth body fails validate counts those bodies, and the sessions they broke as wrong rebuilds", async () => {
+  const kernel = nodeKernel();
+  const { failures, numbers } = await timelineRound(kernel, 25n, { sessions: 2, steps: 60, kernelFault: invalidEveryTenth, shrinkMs: 1 });
+  assert.ok(numbers.invalidBuilds > 0, JSON.stringify(numbers));
+  assert.equal(numbers.crashedBuilds, 0);
+  assert.ok(rates(numbers).invalidPercent > 0);
+  // A body that failed validate shows as a failed feature the model doesn't expect: a wrong rebuild, never a reference.
+  assert.ok(failures.length > 0);
+  assert.equal(numbers.failedSessions, failures.length);
+  assert.equal(numbers.wrongRebuilds, failures.filter((f) => !REFERENCE_CHECKS.includes(f.check) && f.check !== "bodies left in the kernel").length);
+  assert.ok(numbers.wrongRebuilds > 0);
 });
 
 test("session seeds: the same round seed gives the same seeds, each session its own", () => {

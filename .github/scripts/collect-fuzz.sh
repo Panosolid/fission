@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Adds one "Fuzzing" run to the test-results branch: every round's line to
-# fuzz/log.csv, failure folders to fuzz/failures/seed-<seed>/, rewrites
-# fuzz/summary.txt (and its section at the end of summary.txt, which
-# collect-results.sh also appends after rewriting the rest), then files one
-# issue per kind of problem (file_issues.py, next to this script). Called by
+# fuzz/log.csv, the timeline job's simulated-user numbers to
+# fuzz/numbers.jsonl (sim_numbers.py, next to this script, step 30d),
+# failure folders to fuzz/failures/seed-<seed>/, rewrites fuzz/summary.txt
+# (with sim_numbers.py's section; and its section at the end of
+# summary.txt, which collect-results.sh also appends after rewriting the
+# rest), then files one issue per kind of problem (file_issues.py, next to
+# this script). Called by
 # the collect job in .github/workflows/fuzz.yml, from a checkout with full
 # history. A refused push starts again from the branch as it now is, like
 # collect-results.sh (the inputs are all in $IN, so applying twice is safe).
 #
 # Environment:
-#   IN                        downloaded artifacts: fuzz-<target>/ (log.csv, seed-*/)
+#   IN                        downloaded artifacts: fuzz-<target>/ (log.csv, numbers.jsonl, seed-*/)
 #   RUN_URL, COMMIT, BRANCH   what this run tested, written next to every row
 #   GH_TOKEN                  for `gh` (without it file_issues.py only prints)
 set -uo pipefail
 : "${IN:?}" "${RUN_URL:?}" "${COMMIT:?}" "${BRANCH:?}"
 short=$(echo "$COMMIT" | cut -c1-7)
+here=$(cd "$(dirname "$0")" && pwd)
 today=$(date -u '+%Y-%m-%d %H:%M')
 
 add_run() {
@@ -24,6 +28,7 @@ add_run() {
   for d in "$IN"/fuzz-*/; do
     [ -d "$d" ] || continue
     [ -f "$d/log.csv" ] && tail -n +2 "$d/log.csv" | sed "s|\$|,$RUN_URL,$short,$BRANCH|" >>fuzz/log.csv
+    [ -f "$d/numbers.jsonl" ] && COMMIT="$short" python3 "$here/sim_numbers.py" --append "$d/numbers.jsonl" fuzz/numbers.jsonl
     for f in "$d"seed-*; do
       [ -d "$f" ] || continue
       mkdir -p fuzz/failures && cp -r "$f" fuzz/failures/
@@ -41,6 +46,7 @@ add_run() {
       print "fuzz/log.csv has one line per round; fuzz/failures/seed-<seed>/ has each failing round'\''s"
       print "fuzz-report.txt and its shrunk failing inputs."
     }' fuzz/log.csv >fuzz/summary.txt
+  { echo; python3 "$here/sim_numbers.py" fuzz/numbers.jsonl "$today UTC"; } >>fuzz/summary.txt
   # summary.txt: the random-testing part (everything before the fuzzing
   # section) stays as collect-results.sh wrote it.
   if [ -f summary.txt ]; then
@@ -75,6 +81,6 @@ done
 [ $pushed = 1 ] || { echo "Could not push to test-results after 5 attempts."; exit 1; }
 
 if [ "$found" -gt 0 ]; then
-  RUN_URL="$RUN_URL" COMMIT="$short" BRANCH="$BRANCH" python3 "$(dirname "$0")/file_issues.py" "$IN" ||
+  RUN_URL="$RUN_URL" COMMIT="$short" BRANCH="$BRANCH" python3 "$here/file_issues.py" "$IN" ||
     echo "Filing issues failed; the results are on test-results all the same."
 fi

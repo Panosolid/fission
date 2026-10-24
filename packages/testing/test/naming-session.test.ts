@@ -2,7 +2,7 @@
 // Ben's Fusion answers (25a's 1 to 7, step 26's Q1 to Q4) pass, every planted bug is caught (by a hand-worked
 // case and by the random sessions), the comparer sits on MATCH_REL, and
 // failures shrink to a minimal list. Step 26 runs the same cases on Design's
-// sketch on a face (no cuts), booleans' 44/48 on Design's cut.
+// sketch on a face (no cuts), booleans' 34/39a on Design's cut.
 //
 // When a seed fails: the assertion prints the shrunk session; save it as
 // test/regressions/naming/<seed>.json and it replays here forever.
