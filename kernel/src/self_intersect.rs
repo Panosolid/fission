@@ -1,6 +1,14 @@
 //! The self-intersection check in `validate`: no two parts of a body's
-//! boundary may meet or come within LINEAR of each other, except where its
-//! topology says they meet (at shared vertices and along shared edges).
+//! boundary may meet or come within tolerance of each other, except where
+//! its topology says they meet (at shared vertices and along shared edges).
+//!
+//! Tolerance is each entity's own (B0 decision 5, step 31a): a point is on
+//! an edge within the edge's `tol`, at a shared vertex within the vertex's;
+//! two edges meet at a point within each one's own tolerance of it. A face
+//! has none, so a point is on its surface within the tolerance of the edge
+//! it is being tested with, and where two faces cross, within LINEAR, the
+//! default. With every entity at LINEAR, as every body the kernel makes
+//! today, each test is what it was before tolerances had fields.
 //!
 //! Three tests, together complete for faces on planes, cylinders and
 //! spheres bounded by lines and circles:
@@ -18,8 +26,9 @@
 //! them through an edge (test 2 again), so a few points of it decide.
 //!
 //! intersect.rs proposes candidate points; every decision here measures:
-//! a candidate counts only if it is within LINEAR of both parts and, for a
-//! face, strictly inside it (more than LINEAR from its edges).
+//! a candidate counts only if it is within tolerance of both parts and,
+//! for a face, strictly inside it (further from its edges than their
+//! tolerances).
 //!
 //! Known limits (each documented where it applies):
 //! - Faces on other surfaces (NURBS, steps 63–64) are not checked yet.
@@ -137,15 +146,21 @@ pub(crate) fn check(body: &Body, errs: &mut Vec<ValidationError>) {
     }
 }
 
-/// Each edge's box, padded by LINEAR, so parts within LINEAR of each other
-/// have overlapping boxes.
+/// Each edge's box, padded by the edge's tolerance, so parts within
+/// tolerance of each other have overlapping boxes.
 fn edge_boxes(body: &Body) -> Vec<Bounds> {
-    let pad = DVec3::splat(LINEAR);
-    body.edges.iter().map(|e| e.bounds()).map(|(lo, hi)| (lo - pad, hi + pad)).collect()
+    body.edges
+        .iter()
+        .map(|e| {
+            let ((lo, hi), pad) = (e.bounds(), DVec3::splat(e.tol));
+            (lo - pad, hi + pad)
+        })
+        .collect()
 }
 
-/// Each face's box, padded by LINEAR: round its edges' (padded) boxes,
-/// and for a sphere face round its whole ball too.
+/// Each face's box: round its edges' (padded) boxes, and for a sphere face
+/// round its whole ball too, padded by LINEAR (a face has no tolerance of
+/// its own, and a whole sphere has no edges).
 fn face_boxes(body: &Body, edge_boxes: &[Bounds]) -> Vec<Bounds> {
     let pad = DVec3::splat(LINEAR);
     body.faces
@@ -205,6 +220,9 @@ fn edges_meet(body: &Body, i: EdgeId, j: EdgeId) -> Option<DVec3> {
     let mut shared: Vec<VertexId> = [a.start, a.end].into_iter().filter(|v| *v == b.start || *v == b.end).collect();
     shared.dedup();
     let known: Vec<DVec3> = shared.iter().map(|&v| body.vertices[v].point).collect();
+    // Each shared vertex with its own tolerance: a meeting within it is the
+    // vertex itself.
+    let known_tol: Vec<f64> = shared.iter().map(|&v| body.vertices[v].tol).collect();
     let candidates: Vec<DVec3> = if along_each_other(a, b) {
         // On one line or circle: they overlap if an end or a sample of one
         // lies inside the other (an overlap's ends are ends of one of them).
@@ -215,28 +233,31 @@ fn edges_meet(body: &Body, i: EdgeId, j: EdgeId) -> Option<DVec3> {
         c.extend([a.point_at(0.0), a.point_at(1.0), b.point_at(0.0), b.point_at(1.0)]);
         c
     };
-    candidates
-        .into_iter()
-        .find(|&p| a.distance(p) <= LINEAR && b.distance(p) <= LINEAR && known.iter().all(|k| k.distance(p) > LINEAR))
+    candidates.into_iter().find(|&p| {
+        a.distance(p) <= a.tol && b.distance(p) <= b.tol && known.iter().zip(&known_tol).all(|(k, &tol)| k.distance(p) > tol)
+    })
 }
 
-/// Whether each edge's samples lie within LINEAR of the other's line or
-/// circle: the two lie on one curve.
+/// Whether each edge's samples lie within the other's tolerance of the
+/// other's line or circle: the two lie on one curve.
 fn along_each_other(a: &Edge, b: &Edge) -> bool {
-    ALONG.iter().all(|&s| a.curve.distance(b.point_at(s)) <= LINEAR) && ALONG.iter().all(|&s| b.curve.distance(a.point_at(s)) <= LINEAR)
+    ALONG.iter().all(|&s| a.curve.distance(b.point_at(s)) <= a.tol) && ALONG.iter().all(|&s| b.curve.distance(a.point_at(s)) <= b.tol)
 }
 
 /// A point where edge e meets face f other than at a vertex they share.
 fn edge_meets_face(body: &Body, ei: EdgeId, fi: FaceId, face_vertices: &[VertexId]) -> Option<DVec3> {
     let e = &body.edges[ei];
     let surface = &body.faces[fi].surface;
-    let mut known: Vec<(f64, DVec3)> = Vec::new();
+    // The shared vertices: parameter, point and the vertex's tolerance.
+    let mut known: Vec<(f64, DVec3, f64)> = Vec::new();
     for (v, t) in [(e.start, e.t0), (e.end, e.t1)] {
-        if face_vertices.binary_search(&v).is_ok() && !known.iter().any(|k| k.1 == body.vertices[v].point) {
-            known.push((t, body.vertices[v].point));
+        let vx = &body.vertices[v];
+        if face_vertices.binary_search(&v).is_ok() && !known.iter().any(|k| k.1 == vx.point) {
+            known.push((t, vx.point, vx.tol));
         }
     }
-    let in_surface = ALONG.iter().all(|&s| surface.distance(e.point_at(s)) <= LINEAR);
+    // The face has no tolerance, so the edge's own says what is on it.
+    let in_surface = ALONG.iter().all(|&s| surface.distance(e.point_at(s)) <= e.tol);
     let candidates: Vec<DVec3> = if in_surface {
         // The edge's inside meets no edge of f (the edge–edge test), so it
         // is all inside f or all outside: its middle decides.
@@ -249,14 +270,15 @@ fn edge_meets_face(body: &Body, ei: EdgeId, fi: FaceId, face_vertices: &[VertexI
         c
     };
     candidates.into_iter().find(|&p| {
-        e.distance(p) <= LINEAR
-            && surface.distance(p) <= LINEAR
-            && known.iter().all(|k| k.1.distance(p) > LINEAR)
+        e.distance(p) <= e.tol
+            && surface.distance(p) <= e.tol
+            && known.iter().all(|k| k.1.distance(p) > k.2)
             && classify(body, fi, p) == Where::Inside
     })
 }
 
-/// A point inside both faces i and j where their surfaces cross.
+/// A point inside both faces i and j where their surfaces cross (within
+/// LINEAR of each: faces have no tolerance of their own).
 fn faces_meet(body: &Body, i: FaceId, j: FaceId) -> Option<DVec3> {
     let (fa, fb) = (&body.faces[i], &body.faces[j]);
     let (first, second) = fewer_edges_first(body, i, j);
@@ -283,9 +305,10 @@ fn fewer_edges_first(body: &Body, i: FaceId, j: FaceId) -> (FaceId, FaceId) {
 /// Where a point of a face's surface lies relative to the face.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Where {
-    /// More than LINEAR from the face's edges, on the face.
+    /// On the face, further from each of its edges than that edge's
+    /// tolerance.
     Inside,
-    /// Within LINEAR of one of its edges.
+    /// Within an edge's tolerance of that edge.
     Boundary,
     Outside,
     /// The face has an edge this can't measure along (see the module notes).
@@ -317,7 +340,7 @@ pub(crate) fn classify(body: &Body, fi: FaceId, q: DVec3) -> Where {
         }
         let (t, end) = e.closest(q);
         let p = e.curve.eval(t);
-        if p.distance(q) <= LINEAR {
+        if p.distance(q) <= e.tol {
             return Where::Boundary;
         }
         let d = match surface {
@@ -409,7 +432,7 @@ fn measurable_on(e: &Edge, surface: &Surface) -> bool {
         Curve::Line { dir, .. } => dir.cross(axis).length() <= ANGULAR,
         Curve::Circle { center, axis: z, radius: rho, .. } => {
             let off = (center - origin) - axis * (center - origin).dot(axis);
-            z.cross(axis).length() <= ANGULAR && off.length() <= LINEAR && (rho - radius).abs() <= LINEAR
+            z.cross(axis).length() <= ANGULAR && off.length() <= e.tol && (rho - radius).abs() <= e.tol
         }
     }
 }
@@ -515,6 +538,27 @@ mod tests {
         let pair = |g: f64| two_shells(&hand_cube(), &moved(hand_cube(), DVec3::new(0.25, 0.25, 1.0 + g)));
         assert!(!errors(&pair(0.9 * LINEAR)).is_empty());
         assert_eq!(errors(&pair(1.1 * LINEAR)), vec![]);
+    }
+
+    #[test]
+    fn a_gap_within_grown_tolerances_is_touching() {
+        // As `a_gap_of_linear_is_the_boundary`, with every vertex and edge
+        // of both cubes grown to G = 5·LINEAR (B0 decision 5): touching
+        // reaches each entity's own tolerance, so 0.9·G is reported and
+        // 1.1·G is two separate solids; at LINEAR, 0.9·G (4.5 LINEAR)
+        // would be apart.
+        let g = 5.0 * LINEAR;
+        let grown = |mut b: Body| {
+            b.vertices.iter_mut().for_each(|v| v.tol = g);
+            b.edges.iter_mut().for_each(|e| e.tol = g);
+            b
+        };
+        let pair = |gap: f64| two_shells(&grown(hand_cube()), &grown(moved(hand_cube(), DVec3::new(0.25, 0.25, 1.0 + gap))));
+        let errs = errors(&pair(0.9 * g));
+        assert!(!errs.is_empty());
+        assert!(points_of(&errs).iter().all(|p| (p.z - 1.0).abs() <= g), "{errs:?}");
+        assert_eq!(errors(&pair(1.1 * g)), vec![]);
+        assert_eq!(errors(&two_shells(&hand_cube(), &moved(hand_cube(), DVec3::new(0.25, 0.25, 1.0 + 0.9 * g)))), vec![]);
     }
 
     #[test]
@@ -690,6 +734,26 @@ mod tests {
         assert_eq!(classify(&b, 1, DVec3::new(1.0 - 0.9 * LINEAR, 0.5, 1.0)), Where::Boundary);
         assert_eq!(classify(&b, 1, DVec3::new(1.0 - 1.1 * LINEAR, 0.5, 1.0)), Where::Inside);
         assert_eq!(classify(&b, 1, DVec3::new(1.0 + 1.1 * LINEAR, 0.5, 1.0)), Where::Outside);
+        // A point straight off the plane above the edge's middle, 3·LINEAR
+        // up: its nearest boundary point is that middle, 3·LINEAR away, so
+        // it is past the edge's tolerance, and its path along the plane is
+        // nothing, which does not set off into the face: outside. (The
+        // edge–face test passes points within the tested edge's own
+        // tolerance of the plane, which can be more than the face's edges'.)
+        assert_eq!(classify(&b, 1, DVec3::new(1.0, 0.5, 1.0 + 3.0 * LINEAR)), Where::Outside);
+        // With the edge x = 1 grown to G = 5·LINEAR, the boundary reaches
+        // G in from it: 0.9·G boundary, 1.1·G inside.
+        let g = 5.0 * LINEAR;
+        let mut b = hand_cube();
+        for c in b.faces[1].loops[0].coedges.clone() {
+            let e = &mut b.edges[c.edge];
+            if (e.point_at(0.5).x - 1.0).abs() <= LINEAR {
+                e.tol = g;
+            }
+        }
+        assert_eq!(classify(&b, 1, DVec3::new(1.0 - 0.9 * g, 0.5, 1.0)), Where::Boundary);
+        assert_eq!(classify(&b, 1, DVec3::new(1.0 - 1.1 * g, 0.5, 1.0)), Where::Inside);
+        assert_eq!(classify(&b, 1, DVec3::new(0.5, 1.0 - 1.1 * LINEAR, 1.0)), Where::Inside, "the edge y = 1 keeps LINEAR");
     }
 
     #[test]

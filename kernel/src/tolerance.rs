@@ -58,6 +58,31 @@ pub const FP_REL: f64 = 1e-12;
 /// Smallest feature size accepted (1 µm), 100× LINEAR.
 pub const MIN_FEATURE: f64 = 1e-3;
 
+/// The most an operation may grow a vertex's or edge's own tolerance to
+/// (100 nm; B0 decision 5): an intersection sets a new entity's tolerance
+/// to what it measured, up to the larger of this and the largest tolerance
+/// of the inputs it came from, and returns an error past that, never
+/// exceeding it silently. Still 10× below MIN_FEATURE. Every body the
+/// kernel makes today carries LINEAR everywhere; growth starts at 32a.
+pub const TOL_CAP: f64 = 10.0 * LINEAR;
+
+/// The loosest tolerance any vertex or edge may carry (500 nm, B0r rule 3):
+/// two entities are the same when their distance is at most the sum of
+/// their tolerances, so two entities looser than MIN_FEATURE / 2 could be
+/// the same and yet a legal feature apart, and the middle band of the
+/// three would vanish. Only an imported body (steps 71–72) can come near
+/// it; a boolean refuses an input past it, naming the entity, and
+/// `validate` refuses a body with one (`ToleranceOutOfRange`). Our own
+/// geometry is held to TOL_CAP; this never loosens that.
+pub const TOL_INPUT_MAX: f64 = MIN_FEATURE / 2.0;
+
+/// Whether `tol` is a tolerance a vertex or edge may carry: at least the
+/// default, LINEAR (nothing is held tighter than the kernel's own sense of
+/// "the same point"), at most TOL_INPUT_MAX; NaN is neither.
+pub fn tol_in_range(tol: f64) -> bool {
+    (LINEAR..=TOL_INPUT_MAX).contains(&tol)
+}
+
 /// Largest feature size accepted (1 km). Positions may go further out
 /// (MAX_COORD) because a body's shape is kept apart from its placement.
 pub const MAX_SIZE: f64 = 1e6;
@@ -267,6 +292,28 @@ mod tests {
         let q = DVec2::new(1.0, 2.0);
         assert!(points2_eq(q, q + DVec2::Y * LINEAR * 0.9));
         assert!(!points2_eq(q, q + DVec2::Y * LINEAR * 1.1));
+    }
+
+    #[test]
+    fn the_tolerance_limits_by_hand() {
+        // TOL_CAP = 10 × LINEAR = 10 × 1e-5 = 1e-4 mm (100 nm), 10× below
+        // MIN_FEATURE (1e-3). TOL_INPUT_MAX = MIN_FEATURE / 2 = 5e-4 mm
+        // (500 nm): two entities at it are the same within 5e-4 + 5e-4 =
+        // 1e-3 = MIN_FEATURE, exactly where a legal feature starts, so the
+        // bands just touch and never overlap. Each is the double nearest
+        // the decimal it names (10 × fl(1e-5) rounds to fl(1e-4); halving
+        // and doubling are exact).
+        assert_eq!(TOL_CAP, 1e-4);
+        assert_eq!(TOL_INPUT_MAX, 5e-4);
+        assert_eq!(TOL_INPUT_MAX + TOL_INPUT_MAX, MIN_FEATURE);
+        // The range is [LINEAR, TOL_INPUT_MAX], both ends in: 0.9× and
+        // 1.1× of each end, the ends themselves and the cap between.
+        assert!(tol_in_range(LINEAR) && tol_in_range(TOL_CAP) && tol_in_range(TOL_INPUT_MAX));
+        assert!(!tol_in_range(LINEAR * 0.9) && tol_in_range(LINEAR * 1.1));
+        assert!(tol_in_range(TOL_INPUT_MAX * 0.9) && !tol_in_range(TOL_INPUT_MAX * 1.1));
+        for bad in [0.0, -LINEAR, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!tol_in_range(bad), "{bad}");
+        }
     }
 
     #[test]

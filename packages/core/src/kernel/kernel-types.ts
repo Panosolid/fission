@@ -56,6 +56,8 @@ export interface BodyView {
   edge_middles: [number, number, number][];
   /** Each circular edge's centre in the world; null for a line. */
   edge_centres: ([number, number, number] | null)[];
+  /** The largest tolerance (mm) any vertex or edge of the body carries (step 31a): LINEAR, 1e-5, for every body the kernel makes until intersections grow them. */
+  tolerance: number;
   errors: string[];
 }
 

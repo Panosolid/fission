@@ -40,11 +40,13 @@ test("each golden model rebuilds to its hand-worked answers through Design on th
   assert.equal(await kernel.call("body_count"), 0, "every body built was freed");
 });
 
-test("the runner reads every tolerance the kernel's view carries (step 31 adds them; until then a body that validates carries LINEAR)", async () => {
+test("the runner reads every tolerance the kernel's view carries (step 31a: the largest any vertex or edge carries, LINEAR for every body the kernel makes today)", async () => {
   const view = (await kernel.call("make_box", 1, 1, 1)) as BodyView;
-  assert.deepEqual(Object.keys(view).filter((k) => /tol/i.test(k)), [], "the view now carries tolerances: make bodyTolerance read them, and this list");
+  assert.deepEqual(Object.keys(view).filter((k) => /tol/i.test(k)), ["tolerance"], "the view carries another tolerance: make bodyTolerance read it, and this list");
+  assert.equal(view.tolerance, LINEAR);
   assert.equal(bodyTolerance(view), LINEAR);
-  assert.equal(bodyTolerance({ errors: ["vertex 7 is 0.5 mm off edge 3"] }), Infinity, "a body that fails validation carries no tolerance it can be held to");
+  assert.equal(bodyTolerance({ errors: [], tolerance: 7e-5 }), 7e-5, "the view's own tolerance, not LINEAR");
+  assert.equal(bodyTolerance({ errors: ["vertex 7 is 0.5 mm off edge 3"], tolerance: LINEAR }), Infinity, "a body that fails validation carries no tolerance it can be held to");
 });
 
 /** A copy of the model's expectation with one change. */

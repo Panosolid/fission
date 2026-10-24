@@ -31,11 +31,20 @@ pub enum ValidationError {
     ShellNotConnected { shell: usize },
     /// V − E + F − R doesn't give a whole, non-negative genus.
     EulerPoincare { shell: usize, v: usize, e: usize, f: usize, rings: usize },
-    /// An edge's curve doesn't pass through its end vertex.
-    VertexOffEdge { edge: EdgeId, vertex: usize, distance: f64 },
-    /// A point of an edge is not on the surface of a face that uses it.
-    EdgeOffFace { edge: EdgeId, face: FaceId, distance: f64 },
+    /// An edge's curve ends further from its end vertex than the vertex's
+    /// own tolerance `tol` (which covers the gaps to every edge end it
+    /// joins, B0 decision 5).
+    VertexOffEdge { edge: EdgeId, vertex: usize, distance: f64, tol: f64 },
+    /// A point of an edge is further from the surface of a face that uses
+    /// it than the edge's own tolerance `tol`.
+    EdgeOffFace { edge: EdgeId, face: FaceId, distance: f64, tol: f64 },
+    /// An edge no longer than its own tolerance.
     ZeroLengthEdge { edge: EdgeId },
+    /// A vertex's tolerance is outside what any entity may carry: below
+    /// LINEAR, past TOL_INPUT_MAX, or not a number (`tolerance::tol_in_range`).
+    VertexTolerance { vertex: usize, tol: f64 },
+    /// An edge's tolerance is outside that range.
+    EdgeTolerance { edge: EdgeId, tol: f64 },
     ZeroAreaFace { face: FaceId },
     /// A planar face's outer loop runs clockwise seen from outside, i.e.
     /// the face normal disagrees with its boundary.
@@ -73,11 +82,15 @@ impl fmt::Display for ValidationError {
                 f,
                 "shell {shell} breaks Euler–Poincaré: V={v} E={e} F={faces} R={rings}"
             ),
-            VertexOffEdge { edge, vertex, distance } => {
-                write!(f, "vertex {vertex} is {distance:e} mm off edge {edge}")
+            VertexOffEdge { edge, vertex, distance, tol } => {
+                write!(f, "vertex {vertex} is {distance:e} mm off edge {edge}, past the vertex's tolerance of {tol:e} mm")
             }
-            EdgeOffFace { edge, face, distance } => write!(f, "edge {edge} is {distance:e} mm off face {face}"),
+            EdgeOffFace { edge, face, distance, tol } => {
+                write!(f, "edge {edge} is {distance:e} mm off face {face}, past the edge's tolerance of {tol:e} mm")
+            }
             ZeroLengthEdge { edge } => write!(f, "edge {edge} has zero length"),
+            VertexTolerance { vertex, tol } => write!(f, "vertex {vertex} carries a tolerance of {tol:e} mm, {}", tol_range()),
+            EdgeTolerance { edge, tol } => write!(f, "edge {edge} carries a tolerance of {tol:e} mm, {}", tol_range()),
             ZeroAreaFace { face } => write!(f, "face {face} has zero area"),
             FaceOrientation { face } => write!(f, "face {face}: normal disagrees with its boundary loop"),
             LoopOrientation { face, loop_index } => {
@@ -103,6 +116,7 @@ impl ValidationError {
             | VertexOffEdge { edge, .. }
             | EdgeOffFace { edge, .. }
             | ZeroLengthEdge { edge }
+            | EdgeTolerance { edge, .. }
             | EdgeMeetsFace { edge, .. } => vec![edge],
             EdgesMeet { a, b, .. } => vec![a, b],
             _ => vec![],
@@ -112,7 +126,7 @@ impl ValidationError {
     /// Vertices this error is about, for highlighting.
     pub fn vertices(&self) -> Vec<usize> {
         match *self {
-            ValidationError::VertexOffEdge { vertex, .. } => vec![vertex],
+            ValidationError::VertexOffEdge { vertex, .. } | ValidationError::VertexTolerance { vertex, .. } => vec![vertex],
             _ => vec![],
         }
     }
@@ -144,6 +158,11 @@ impl ValidationError {
             _ => vec![],
         }
     }
+}
+
+/// The range a tolerance must be in, in words, for the tolerance errors.
+fn tol_range() -> String {
+    format!("outside the {:e} to {:e} mm any vertex or edge may carry", tolerance::LINEAR, tolerance::TOL_INPUT_MAX)
 }
 
 /// Runs every check and returns all problems found.
@@ -287,14 +306,26 @@ fn check_shells(body: &Body, errs: &mut Vec<ValidationError>) {
 const EDGE_SAMPLES: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
 
 fn check_geometry(body: &Body, errs: &mut Vec<ValidationError>) {
+    // Each vertex and edge is held to its own tolerance (B0 decision 5), so
+    // a tolerance must be one an entity may carry first: a NaN would make
+    // every `distance > tol` below false and pass anything.
+    for (vi, v) in body.vertices.iter().enumerate() {
+        if !tolerance::tol_in_range(v.tol) {
+            errs.push(ValidationError::VertexTolerance { vertex: vi, tol: v.tol });
+        }
+    }
     for (ei, e) in body.edges.iter().enumerate() {
-        if e.length() <= tolerance::LINEAR {
+        if !tolerance::tol_in_range(e.tol) {
+            errs.push(ValidationError::EdgeTolerance { edge: ei, tol: e.tol });
+        }
+        if e.length() <= e.tol {
             errs.push(ValidationError::ZeroLengthEdge { edge: ei });
         }
+        // The vertex's tolerance covers the gap to every edge end it joins.
         for (vertex, t) in [(e.start, e.t0), (e.end, e.t1)] {
-            let distance = e.curve.eval(t).distance(body.vertices[vertex].point);
-            if distance > tolerance::LINEAR {
-                errs.push(ValidationError::VertexOffEdge { edge: ei, vertex, distance });
+            let (distance, tol) = (e.curve.eval(t).distance(body.vertices[vertex].point), body.vertices[vertex].tol);
+            if distance > tol {
+                errs.push(ValidationError::VertexOffEdge { edge: ei, vertex, distance, tol });
             }
         }
     }
@@ -303,8 +334,8 @@ fn check_geometry(body: &Body, errs: &mut Vec<ValidationError>) {
         for &(fi, _) in uses {
             let surface = &body.faces[fi].surface;
             let distance = EDGE_SAMPLES.iter().map(|&s| surface.distance(e.point_at(s))).fold(0.0, f64::max);
-            if distance > tolerance::LINEAR {
-                errs.push(ValidationError::EdgeOffFace { edge: ei, face: fi, distance });
+            if distance > e.tol {
+                errs.push(ValidationError::EdgeOffFace { edge: ei, face: fi, distance, tol: e.tol });
             }
         }
     }
@@ -568,6 +599,193 @@ mod tests {
     }
 
     #[test]
+    fn a_grown_edge_tolerance_holds_its_edges_to_it() {
+        // The top face (1, z = 1) is bounded by four edges. Grown to
+        // G = 5·LINEAR = 5e-5 (as an intersection may grow them, below the
+        // cap), they may lie up to G off it: the plane moved up 0.9·G
+        // leaves each edge 0.9·G off, which passes; 1.1·G fails, naming the
+        // edge's own tolerance. At LINEAR the same 0.9·G fails (it is 4.5
+        // LINEAR), so the edge's field is what lets it pass.
+        let g = 5.0 * tolerance::LINEAR;
+        let top: Vec<usize> = hand_cube().faces[1].loops[0].coedges.iter().map(|c| c.edge).collect();
+        let lifted = |factor: f64, tol: f64| {
+            let mut b = hand_cube();
+            for &e in &top {
+                b.edges[e].tol = tol;
+            }
+            if let Surface::Plane { origin, .. } = &mut b.faces[1].surface {
+                origin.z += g * factor;
+            }
+            validate(&b)
+        };
+        assert_eq!(lifted(0.9, g), Ok(()));
+        let errs = lifted(1.1, g).unwrap_err();
+        assert_eq!(errs.len(), 4, "{errs:?}");
+        for e in &errs {
+            let ValidationError::EdgeOffFace { face: 1, distance, tol, .. } = *e else { panic!("{errs:?}") };
+            assert!(tol == g && tolerance::eq(distance, 1.1 * g), "{e}");
+        }
+        assert!(lifted(0.9, tolerance::LINEAR).unwrap_err().iter().all(|e| matches!(e, ValidationError::EdgeOffFace { face: 1, .. })));
+    }
+
+    #[test]
+    fn a_vertex_tolerance_covers_every_edge_end_it_joins() {
+        // Vertex 7 is (1,1,1), where its three edges end. Grown to G =
+        // 5·LINEAR and moved d along z, it is d from each edge end: 0.9·G
+        // passes, 1.1·G fails once per edge, each naming the vertex's
+        // tolerance. The edges keep LINEAR: the gap is the vertex's to
+        // cover, not theirs (edge 0.9·G off would be 4.5 of their LINEAR).
+        let g = 5.0 * tolerance::LINEAR;
+        let moved = |factor: f64| {
+            let mut b = hand_cube();
+            b.vertices[7].tol = g;
+            b.vertices[7].point.z += g * factor;
+            validate(&b)
+        };
+        assert_eq!(moved(0.9), Ok(()));
+        let errs = moved(1.1).unwrap_err();
+        assert_eq!(errs.len(), 3, "{errs:?}");
+        for e in &errs {
+            let ValidationError::VertexOffEdge { vertex: 7, distance, tol, .. } = *e else { panic!("{errs:?}") };
+            assert!(tol == g && tolerance::eq(distance, 1.1 * g), "{e}");
+        }
+    }
+
+    #[test]
+    fn an_edge_tolerance_does_not_cover_its_vertices() {
+        // The other way round: vertex 7's three edges grown to G, the
+        // vertex left at LINEAR and moved 0.9·G. The gap at each edge end
+        // is the vertex's, so it fails three times, at the vertex's LINEAR.
+        let g = 5.0 * tolerance::LINEAR;
+        let mut b = hand_cube();
+        for e in &mut b.edges {
+            if e.start == 7 || e.end == 7 {
+                e.tol = g;
+            }
+        }
+        b.vertices[7].point.z += 0.9 * g;
+        let errs = validate(&b).unwrap_err();
+        assert_eq!(errs.len(), 3, "{errs:?}");
+        assert!(errs.iter().all(|e| matches!(*e, ValidationError::VertexOffEdge { vertex: 7, tol, .. } if tol == tolerance::LINEAR)), "{errs:?}");
+    }
+
+    #[test]
+    fn a_tolerance_out_of_range_has_its_own_error() {
+        // Any entity may carry LINEAR to TOL_INPUT_MAX (500 nm), both ends
+        // in; the cap (100 nm) is within. 0.9× of LINEAR, 1.1× of
+        // TOL_INPUT_MAX and NaN are refused, each with only its own error.
+        let with = |vertex: Option<f64>, edge: Option<f64>| {
+            let mut b = hand_cube();
+            if let Some(t) = vertex {
+                b.vertices[3].tol = t;
+            }
+            if let Some(t) = edge {
+                b.edges[5].tol = t;
+            }
+            validate(&b)
+        };
+        for ok in [tolerance::LINEAR, tolerance::TOL_CAP, 0.9 * tolerance::TOL_INPUT_MAX, tolerance::TOL_INPUT_MAX] {
+            assert_eq!(with(Some(ok), Some(ok)), Ok(()), "{ok:e}");
+        }
+        for bad in [0.9 * tolerance::LINEAR, 1.1 * tolerance::TOL_INPUT_MAX] {
+            assert_eq!(with(Some(bad), None), Err(vec![ValidationError::VertexTolerance { vertex: 3, tol: bad }]), "{bad:e}");
+            assert_eq!(with(None, Some(bad)), Err(vec![ValidationError::EdgeTolerance { edge: 5, tol: bad }]), "{bad:e}");
+        }
+        // Negative and infinite ones are named too (with what follows from
+        // them: every gap, even 0, is past a negative one, and every edge
+        // is shorter than an infinite one).
+        for bad in [-tolerance::LINEAR, f64::INFINITY] {
+            assert!(with(Some(bad), None).unwrap_err().contains(&ValidationError::VertexTolerance { vertex: 3, tol: bad }), "{bad:e}");
+            assert!(with(None, Some(bad)).unwrap_err().contains(&ValidationError::EdgeTolerance { edge: 5, tol: bad }), "{bad:e}");
+        }
+        // NaN fails every `distance > tol`, so without this check an edge
+        // with a NaN tolerance would pass however far off its faces it
+        // lay: the face moved a whole 0.1 mm, only the tolerance is named.
+        let mut b = hand_cube();
+        b.edges[5].tol = f64::NAN;
+        let face = b.edge_faces()[5][0].0;
+        if let Surface::Plane { origin, normal, .. } = &mut b.faces[face].surface {
+            *origin += *normal * 0.1;
+        }
+        let errs = validate(&b).unwrap_err();
+        assert!(matches!(errs[0], ValidationError::EdgeTolerance { edge: 5, tol } if tol.is_nan()), "{errs:?}");
+        assert!(errs.iter().all(|e| !e.edges().contains(&5) || matches!(e, ValidationError::EdgeTolerance { .. })), "{errs:?}");
+    }
+
+    #[test]
+    fn an_edge_no_longer_than_its_tolerance_has_zero_length() {
+        // A cube 4e-4 mm across (0.4 µm: below MIN_FEATURE, but validate
+        // doesn't judge feature sizes) has edges 4e-4 long. Edge 0 with a
+        // tolerance of length / 0.9 ≈ 4.44e-4 (within TOL_INPUT_MAX) is no
+        // longer than it: zero length. With length / 1.1 ≈ 3.64e-4 it is
+        // an edge. At LINEAR it is 40 tolerances long.
+        let small = hand_cube().transformed(&crate::geom::Transform::uniform_scale(4e-4));
+        let len = small.edges[0].length();
+        assert!(tolerance::rel_eq(len, 4e-4, tolerance::FP_REL));
+        let zero = |tol: f64| {
+            let mut b = small.clone();
+            b.edges[0].tol = tol;
+            validate(&b).err().unwrap_or_default().contains(&ValidationError::ZeroLengthEdge { edge: 0 })
+        };
+        assert!(zero(len / 0.9));
+        assert!(!zero(len / 1.1));
+        assert_eq!(validate(&small), Ok(()));
+    }
+
+    #[test]
+    fn tolerant_bodies_carry_real_gaps_and_validate() {
+        // `fixtures::tolerant` (B0r rule 3): every entity carries tol and the
+        // geometry uses 0.45·tol of it twice over. By hand on the cube at
+        // T = TOL_INPUT_MAX: vertex 0 (the origin, bits 000) moves along
+        // (1,1,1)/√3 by 0.45·T, so it is 0.45·T = 2.25e-4 from the ends of
+        // its three edges, which stay at the origin; the top face (1, odd)
+        // moves 0.45·T inwards (down) off its four edges.
+        let t = tolerance::TOL_INPUT_MAX;
+        let b = crate::fixtures::tolerant(&hand_cube(), t);
+        assert!(b.vertices.iter().all(|v| v.tol == t) && b.edges.iter().all(|e| e.tol == t));
+        let ends: Vec<DVec3> = b.edges.iter().flat_map(|e| [(e.start, e.t0), (e.end, e.t1)].map(|(v, t)| (v, e.curve.eval(t)))).filter(|&(v, _)| v == 0).map(|(_, p)| p).collect();
+        assert_eq!(ends, vec![DVec3::ZERO; 3]);
+        assert!(tolerance::rel_eq(b.vertices[0].point.length(), 2.25e-4, tolerance::FP_REL));
+        assert!(tolerance::rel_eq(b.faces[1].surface.distance(DVec3::new(0.5, 0.5, 1.0)), 2.25e-4, 1e-9));
+        // Every kind of body the kernel makes or tests with: valid with
+        // the cap and with the loosest input tolerance; the same geometry
+        // held to LINEAR fails (the gaps are 22.5 and 4.5 of it, so real);
+        // 1.1× TOL_INPUT_MAX is refused by its range.
+        let v = |p: &[(f64, f64)]| p.iter().map(|&(x, y)| glam::DVec2::new(x, y)).collect::<Vec<_>>();
+        let l = crate::ops::profile::Profile::polygon(v(&[(0.0, 0.0), (10.0, 0.0), (10.0, 2.0), (2.0, 2.0), (2.0, 8.0), (0.0, 8.0)]), vec![]);
+        let ring = crate::ops::profile::Profile::polygon(
+            v(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]),
+            vec![v(&[(3.0, 3.0), (3.0, 7.0), (7.0, 7.0), (7.0, 3.0)])],
+        );
+        use crate::fixtures::*;
+        use crate::ops::{extrude::extrude, primitives};
+        let bodies = [
+            ("hand cube", hand_cube()),
+            ("hand cylinder", hand_cylinder(1.0, 2.0)),
+            ("hand tube", hand_tube(1.0, 2.0, 1.0, 0.0)),
+            ("hand half cylinder", hand_half_cylinder(1.0, 2.0)),
+            ("box", primitives::make_box(3.0, 4.0, 5.0).unwrap()),
+            ("cylinder", primitives::make_cylinder(2.0, 5.0).unwrap()),
+            ("sphere", primitives::make_sphere(2.0).unwrap()),
+            ("L prism", extrude(&l, 3.0).unwrap()),
+            ("square ring", extrude(&ring, 3.0).unwrap()),
+        ];
+        for (name, body) in &bodies {
+            for t in [tolerance::TOL_CAP, tolerance::TOL_INPUT_MAX] {
+                let b = tolerant(body, t);
+                assert_eq!(validate(&b), Ok(()), "{name} at {t:e}");
+                let mut tight = b.clone();
+                tight.vertices.iter_mut().for_each(|v| v.tol = tolerance::LINEAR);
+                tight.edges.iter_mut().for_each(|e| e.tol = tolerance::LINEAR);
+                assert!(validate(&tight).is_err(), "{name} at {t:e}: its gaps are within LINEAR");
+            }
+            let errs = validate(&tolerant(body, 1.1 * tolerance::TOL_INPUT_MAX)).unwrap_err();
+            let loose = errs.iter().filter(|e| matches!(e, ValidationError::VertexTolerance { .. } | ValidationError::EdgeTolerance { .. })).count();
+            assert_eq!(loose, body.vertices.len() + body.edges.len(), "{name}: {errs:?}");
+        }
+    }
+
+    #[test]
     fn shifted_plane_puts_edges_off_face() {
         let mut b = hand_cube();
         if let Surface::Plane { origin, .. } = &mut b.faces[1].surface {
@@ -808,8 +1026,10 @@ mod tests {
             (FaceShellCount { face: 6, shells: 0 }, vec!["face 6", "0 shells"]),
             (ShellNotConnected { shell: 2 }, vec!["shell 2", "not connected"]),
             (EulerPoincare { shell: 1, v: 8, e: 12, f: 5, rings: 0 }, vec!["shell 1", "V=8", "E=12", "F=5", "R=0"]),
-            (VertexOffEdge { edge: 4, vertex: 7, distance: 0.5 }, vec!["vertex 7", "edge 4", "5e-1"]),
-            (EdgeOffFace { edge: 3, face: 1, distance: 0.25 }, vec!["edge 3", "face 1", "2.5e-1"]),
+            (VertexOffEdge { edge: 4, vertex: 7, distance: 0.5, tol: 3e-5 }, vec!["vertex 7", "edge 4", "5e-1", "vertex's tolerance of 3e-5"]),
+            (EdgeOffFace { edge: 3, face: 1, distance: 0.25, tol: 2e-5 }, vec!["edge 3", "face 1", "2.5e-1", "edge's tolerance of 2e-5"]),
+            (VertexTolerance { vertex: 5, tol: 6e-4 }, vec!["vertex 5", "tolerance of 6e-4", "1e-5 to 5e-4"]),
+            (EdgeTolerance { edge: 9, tol: f64::NAN }, vec!["edge 9", "tolerance of NaN", "1e-5 to 5e-4"]),
             (ZeroLengthEdge { edge: 11 }, vec!["edge 11", "zero length"]),
             (ZeroAreaFace { face: 9 }, vec!["face 9", "zero area"]),
             (FaceOrientation { face: 5 }, vec!["face 5", "normal"]),
