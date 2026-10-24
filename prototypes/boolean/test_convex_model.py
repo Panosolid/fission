@@ -197,6 +197,26 @@ class HandWorked(unittest.TestCase):
         self.assertEqual(CUBE_R, ((F(4, 5), F(-9, 25), F(-12, 25)), (0, F(4, 5), F(-3, 5)), (F(3, 5), F(12, 25), F(16, 25))))
         self.assertEqual(TURNED_CUBE.vertices[6], (F(-1, 25), F(1, 5), F(43, 25)))
 
+    def test_an_edge_lying_in_a_plane_of_the_other_solid(self):
+        # Regression (30c long run, seed 31006 case 74): a bar's edge lying
+        # in the slab's top plane, so on each of the bar's sloping faces the
+        # slab's top and the bar's other slope cut along one line. That line
+        # split only the cells the slab could be in, so a bar face kept a
+        # cell running past its own edge. The bar: the triangle (12, 1),
+        # (15, 5), (9, 5) (sides 5, 5, 6, height 4) turned square to y and
+        # run 10 along it, its bottom edge on z = 1 at x = 12, clear of the
+        # slab 0..10 x 0..10 x 0..1. Union keeps both apart: slab V 100,
+        # S 2 x 100 + 4 x 10 = 240; bar V 6 x 4 / 2 x 10 = 120, S two ends
+        # 2 x 12 + two slopes 2 x 5 x 10 + top 6 x 10 = 184, 5 faces, 9
+        # edges, 6 vertices.
+        slab = block(0, 0, 0, 10, 10, 1)
+        bar = Prism([(12, 1), (15, 5), (9, 5)], -10, 0, turn("x", 0, 1, 1))
+        self.assertEqual(bar.vertices[3], (12, 0, 1))
+        self.assertEqual([numbers(x) for x in boolean("union", slab, bar)["bodies"]],
+                         [body(100, 240, 6, 12, 8), body(120, 184, 5, 9, 6)])
+        self.assertEqual([numbers(x) for x in boolean("subtract", slab, bar)["bodies"]], [body(100, 240, 6, 12, 8)])
+        self.assertEqual(boolean("intersect", slab, bar)["outcome"], "empty")
+
     def test_far_out_and_tiny(self):
         # The capped cube moved 1 km out (1e6 mm): the same numbers, the box
         # moved. Shrunk to micrometres (every length times 1/1000) it is
@@ -262,6 +282,19 @@ class Bands(unittest.TestCase):
         # 1.1 x: two places, and the sliver left is thin.
         d = SAME * F(11, 10)
         self.assertEqual(boolean("intersect", block(-5, -5, F(43, 25) - d, 5, 5, 5), TURNED_CUBE)["outcome"], "thin")
+
+    def test_corner_near_a_plane_far_from_its_face(self):
+        # A block 6 mm along x from the cube [0,4]^3, its bottom 0.9 x 2
+        # LINEAR above the cube's top plane z = 4: its corners are near
+        # that plane but 6 mm from the face, so nothing is one place (30c,
+        # seed 31009 case 166) and the union is the two apart: 64, and
+        # 2 x 2 x (2 - d) with area 2 x 4 + 4 x 2 x (2 - d).
+        d = SAME * F(9, 10)
+        r = boolean("union", block(0, 0, 0, 4, 4, 4), block(10, 0, 4 + d, 12, 2, 6))
+        self.assertEqual([(x["volume"], x["area"]) for x in r["bodies"]], [(64, 96), (4 * (2 - d), 8 + 8 * (2 - d))])
+        # Over the cube (x 1..3) the same corners are near its top face.
+        with self.assertRaisesRegex(ModelError, "within tolerance of the plane"):
+            boolean("union", block(0, 0, 0, 4, 4, 4), block(1, 0, 4 + d, 3, 2, 6))
 
     def skew(self, gap):
         # The block [0,4]^3's top edge x = z = 4 and a unit prism's edge
