@@ -1,0 +1,14 @@
+line 770: {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {"bulges": ["0.9434456210367562", "1.0", "1.0"], "pts": [["18750.0", "-625000.0"], ["18750.01", "18749.01"], ["18750.0", "0.0"]]}}}}
+  step validity: BRepCheck: invalid (faces [0], counted in file order) (as written) (sketch: fuzz/corpus/sketch/89e2930363ad7a1407819d4499069491c363423d)
+occ-rounding, line 289: {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {"bulges": ["1.0", "1.0", "1.0"], "pts": [["75625.0", "75625.0"], ["0.0", "0.0"], ["75625.011", "75625.0"]]}}}}
+  validity: occ calls it invalid, but no two pieces meet at 50 digits
+  OpenCascade's tolerance (its own rebuild is invalid too): step validity: BRepCheck: invalid (faces [1], counted in file order) (as written)
+occ-rounding, line 295: {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {"bulges": ["0.0", "1.0", "0.0", "1.0000025266016244", "1.0"], "pts": [["0.0", "0.001"], ["0.0", "1.0"], ["-8.4", "52.0"], ["0.0", "940000.0"], ["-0.625", "1.0"]]}}}}
+  validity: occ calls it invalid, but no two pieces meet at 50 digits
+occ-rounding, line 329: {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {"bulges": ["1.0000000000001157", "1.0", "1.0"], "pts": [["28750.0", "-10.0"], ["187.5", "0.0"], ["1.1", "0.0"]]}}}}
+  validity: occ calls it invalid, but no two pieces meet at 50 digits
+occ-rounding, line 462: {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {"bulges": ["1.0", "1.000000053507849", "1.0000148837763108", "0.9999999800001145", "1.0000106474562127"], "pts": [["5312.5", "2625.0"], ["531250.0", "531250.0"], ["-0.01", "5312.5"], ["-0.01", "2624.99"], ["2624.99", "-0.02"]]}}}}
+  validity: occ calls it invalid, but no two pieces meet at 50 digits
+occ-rounding, line 511: {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {"bulges": ["879.983536736889", "1.0", "1.0"], "pts": [["500.0", "-0.01"], ["500.000000001", "500.0"], ["3.2270886e-316", "0.0"]]}}}}
+  validity: occ calls it invalid, but no two pieces meet at 50 digits
+  OpenCascade's tolerance (its own rebuild is invalid too): step validity: BRepCheck: invalid (faces [1], counted in file order) (as written)

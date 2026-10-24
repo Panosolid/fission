@@ -1,11 +1,21 @@
-Fuzzing (the STL reader, the project loader, the sketch-extrude and timeline sessions and the kernel fuzz targets), all runs so far (updated 2026-10-24 00:27 UTC)
-  hours of fuzzing: 44.9
-  timeline rounds 50, inputs 125000, rounds that found something 0, last: none yet
-  placed   rounds 8, inputs 236612, rounds that found something 0, last: none yet
-  sessions rounds 14158, inputs 28316000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
-  stl      rounds 22187, inputs 44374000, rounds that found something 0, last: none yet
-  extrude  rounds 8, inputs 377555, rounds that found something 0, last: none yet
-  sketch   rounds 8, inputs 990084, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
-  project  rounds 50312, inputs 100624000, rounds that found something 5, last: 12602338379209990758 (commit 4834c7d on main)
+Fuzzing (the STL reader, the project loader, the sketch-extrude and timeline sessions and the kernel fuzz targets), all runs so far (updated 2026-10-24 02:18 UTC)
+  hours of fuzzing: 46.7
+  timeline rounds 55, inputs 137500, rounds that found something 0, last: none yet
+  placed   rounds 9, inputs 243127, rounds that found something 0, last: none yet
+  sessions rounds 14399, inputs 28798000, rounds that found something 19, last: 1300073639247023807 (commit 0a2363b on main)
+  stl      rounds 22987, inputs 45974000, rounds that found something 0, last: none yet
+  extrude  rounds 9, inputs 387929, rounds that found something 0, last: none yet
+  sketch   rounds 9, inputs 1039298, rounds that found something 1, last: 3193865741 (commit 0a2363b on main)
+  project  rounds 51515, inputs 103030000, rounds that found something 5, last: 12602338379209990758 (commit 4834c7d on main)
 fuzz/log.csv has one line per round; fuzz/failures/seed-<seed>/ has each failing round's
 fuzz-report.txt and its shrunk failing inputs.
+
+Simulated users (timeline sessions on the real kernel, Tier 3 item 4; fuzz/numbers.jsonl), updated 2026-10-24 02:18 UTC
+  last run (https://github.com/Panosolid/fission/actions/runs/40051949474, commit bc29a66 on claude/project-thread-m584cs): 25 sessions in 5 rounds
+    rebuilds right:           100% (0 wrong of 11,933)
+    references right:         100% (0 wrong of 81,093)
+    bodies passing validate:  100% (0 failed or crashed of 462,539); 0 inputs refused as the user's
+    rebuilds with a feature failed as the model says (the user's doing, shown in words): 0%
+    rebuild from scratch against features built: -13.2 ms + 0.716 ms per feature (fastest at each of 117 counts)
+      by features built: 1-5: 2.02 ms a rebuild, 0.687 per feature (1,142); 6-10: 5.53 ms a rebuild, 0.698 per feature (1,047); 11-20: 12.8 ms a rebuild, 0.841 per feature (1,946); 21-40: 23.2 ms a rebuild, 0.777 per feature (2,567); 41-80: 47.4 ms a rebuild, 0.81 per feature (3,858); 81+: 76.3 ms a rebuild, 0.828 per feature (1,230)
+      per feature, biggest timelines over smallest: 1.20x (above 1, each feature costs more in a bigger timeline)
