@@ -182,6 +182,13 @@ mod tests {
         assert!(msg.contains("width") && msg.contains("-2"), "{msg}");
         let msg = KernelError::InvalidResult(vec![crate::validate::ValidationError::ZeroLengthEdge { edge: 4 }]).to_string();
         assert!(msg.contains("failed validation") && msg.contains("edge 4"), "{msg}");
+        // Grouped by category, each error saying its own.
+        let errs = vec![
+            crate::validate::ValidationError::FaceOrientation { face: 1 },
+            crate::validate::ValidationError::ZeroLengthEdge { edge: 4 },
+        ];
+        let msg = KernelError::InvalidResult(errs).to_string();
+        assert_eq!(msg, "internal error, result failed validation: geometry: edge 4 has zero length; solid: face 1: normal disagrees with its boundary loop");
     }
 
     #[test]

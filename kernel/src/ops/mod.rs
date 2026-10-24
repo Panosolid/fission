@@ -28,9 +28,8 @@ impl fmt::Display for KernelError {
         match self {
             KernelError::InvalidInput { message, .. } => write!(f, "{message}"),
             KernelError::InvalidResult(errs) => {
-                write!(f, "internal error, result failed validation: ")?;
-                let list: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-                write!(f, "{}", list.join("; "))
+                // Grouped by category (`validate::report_lines`).
+                write!(f, "internal error, result failed validation: {}", crate::validate::report_lines(errs).join("; "))
             }
         }
     }

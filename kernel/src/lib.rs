@@ -148,7 +148,9 @@ pub struct BodyView {
     /// in a body that passed validation. What a golden model's tolerance
     /// is checked against (step 28a).
     pub tolerance: f64,
-    /// Empty when the body passed validation.
+    /// Empty when the body passed validation; otherwise one line per error,
+    /// grouped by category and starting with it ("geometry: vertex 7 is …",
+    /// `validate::report_lines`).
     pub errors: Vec<String>,
 }
 
@@ -169,7 +171,7 @@ fn view_at(body: &Body, placement: &geom::Placement) -> Result<BodyView, ApiErro
         Ok(mesh) => Ok(view_parts(body, placement, &mesh, vec![])),
         Err(errs) => {
             let mesh = tessellate(body, &TessOptions::DISPLAY).map_err(|e| ApiError::internal(format!("face {}: {}", e.face, e.message)))?;
-            Ok(view_parts(body, placement, &mesh, errs.iter().map(|e| e.to_string()).collect()))
+            Ok(view_parts(body, placement, &mesh, validate::report_lines(&errs)))
         }
     }
 }
@@ -947,6 +949,8 @@ mod tests {
         body.vertices[7].point.z += 0.5;
         let v = view_body(&body).unwrap();
         assert!(v.errors.iter().any(|e| e.contains("vertex 7")), "{:?}", v.errors);
+        // Each line says its category: a vertex off its edges is geometry.
+        assert!(v.errors.iter().all(|e| e.starts_with("geometry: vertex 7 is ")), "{:?}", v.errors);
     }
 
     #[test]

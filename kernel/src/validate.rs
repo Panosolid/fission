@@ -5,6 +5,19 @@
 //! no survivors. Ties are pinned by tests: `> LINEAR` for vertex-off-edge
 //! and edge-off-face at exactly LINEAR, and the outer loop's area `< 0.0`
 //! for FaceOrientation at exactly 0 (`a_zero_area_outer_loop_is_not_called_inside_out`).
+//!
+//! Every error belongs to one `Category` (B0 decision 8), and every report
+//! of errors groups them by it (`report_lines`): topology is what the
+//! references and counts say, whatever the coordinates; geometry is whether
+//! each entity sits where its references put it, within its own tolerance,
+//! with a size; solid is whether the body bounds a region the right way
+//! round without crossing itself. The fourth category, whether an
+//! operation gave the right answer, lives in the tests (the boolean
+//! identities, the oracle), not here. The checks run in that order, and
+//! the costly solid ones (the mesh, self-intersection) only on a body whose
+//! topology and geometry are sound; the one solid check that runs earlier
+//! is a planar face's orientation, which falls out of the area the
+//! zero-area check measures anyway.
 
 use crate::geom::{Curve, Surface};
 use crate::mesh::Mesh;
@@ -13,6 +26,41 @@ use crate::tolerance;
 use crate::topology::{Body, EdgeId, Face, FaceId, Loop};
 use glam::{DVec2, DVec3};
 use std::fmt;
+
+/// Which part of being a valid solid an error breaks (B0 decision 8). In
+/// the order the checks run and reports list them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Category {
+    /// The references and counts: indices in their arenas, closed loops,
+    /// every edge used once each way, each face in one shell, shells
+    /// connected, Euler–Poincaré.
+    Topology,
+    /// Where things are: vertices on their edges and edges on their faces,
+    /// each within its own tolerance; tolerances an entity may carry; no
+    /// zero-length edges or zero-area faces.
+    Geometry,
+    /// The region the body bounds: faces and loops the right way round, the
+    /// display mesh closed, positive volume, nothing crossing itself.
+    Solid,
+}
+
+impl Category {
+    pub const ALL: [Category; 3] = [Category::Topology, Category::Geometry, Category::Solid];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Category::Topology => "topology",
+            Category::Geometry => "geometry",
+            Category::Solid => "solid",
+        }
+    }
+}
+
+impl fmt::Display for Category {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationError {
@@ -107,6 +155,39 @@ impl fmt::Display for ValidationError {
 }
 
 impl ValidationError {
+    /// The category this error belongs to. No catch-all arm: a new error
+    /// doesn't compile until it is given one.
+    pub fn category(&self) -> Category {
+        use ValidationError::*;
+        match self {
+            DanglingReference { .. }
+            | EmptyLoop { .. }
+            | LoopNotClosed { .. }
+            | EdgeUseCount { .. }
+            | EdgeSameDirection { .. }
+            | FaceShellCount { .. }
+            | ShellNotConnected { .. }
+            | EulerPoincare { .. } => Category::Topology,
+            VertexOffEdge { .. }
+            | EdgeOffFace { .. }
+            | ZeroLengthEdge { .. }
+            | VertexTolerance { .. }
+            | EdgeTolerance { .. }
+            | ZeroAreaFace { .. } => Category::Geometry,
+            // The mesh is how the kernel finds a body's inside: a face it
+            // can't mesh (its boundary crossing itself) or a mesh with holes
+            // leaves the region it bounds unknown.
+            FaceOrientation { .. }
+            | LoopOrientation { .. }
+            | Tessellation { .. }
+            | MeshNotClosed { .. }
+            | InsideOut { .. }
+            | EdgesMeet { .. }
+            | EdgeMeetsFace { .. }
+            | FacesMeet { .. } => Category::Solid,
+        }
+    }
+
     /// Edges this error is about, for highlighting.
     pub fn edges(&self) -> Vec<EdgeId> {
         use ValidationError::*;
@@ -165,6 +246,16 @@ fn tol_range() -> String {
     format!("outside the {:e} to {:e} mm any vertex or edge may carry", tolerance::LINEAR, tolerance::TOL_INPUT_MAX)
 }
 
+/// Errors as a report, grouped by category: one line per error, each
+/// starting with its category ("geometry: vertex 7 is …"), topology first,
+/// then geometry, then solid, each group in the order the checks found them.
+pub fn report_lines(errs: &[ValidationError]) -> Vec<String> {
+    let mut sorted: Vec<&ValidationError> = errs.iter().collect();
+    // Stable, so each group keeps the order the checks found it in.
+    sorted.sort_by_key(|e| e.category());
+    sorted.iter().map(|e| format!("{}: {e}", e.category())).collect()
+}
+
 /// Runs every check and returns all problems found.
 pub fn validate(body: &Body) -> Result<(), Vec<ValidationError>> {
     validate_meshed(body).map(|_| ())
@@ -209,7 +300,7 @@ pub fn checked_meshed(body: Body) -> Result<(Body, Mesh), Vec<ValidationError>> 
         Ok(mesh) => Ok((body, mesh)),
         Err(errs) => {
             if cfg!(debug_assertions) {
-                let list: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
+                let list = report_lines(&errs);
                 // WebAssembly has no files, and no debug_dump module.
                 #[cfg(not(target_arch = "wasm32"))]
                 let dump = crate::debug_dump::dump_invalid(&body, &list.join("\n"))
@@ -471,6 +562,14 @@ mod tests {
     use crate::topology::{Face, Loop};
     use glam::DVec3;
 
+    /// The categories present in `errs`, in report order, each once.
+    fn categories(errs: &[ValidationError]) -> Vec<Category> {
+        let mut c: Vec<Category> = errs.iter().map(ValidationError::category).collect();
+        c.sort();
+        c.dedup();
+        c
+    }
+
     #[test]
     fn cube_is_valid_with_genus_zero() {
         let b = hand_cube();
@@ -487,6 +586,10 @@ mod tests {
         b.shells[0].faces.pop();
         let errs = validate(&b).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ValidationError::EdgeUseCount { uses: 1, .. })), "{errs:?}");
+        // The four edges round the hole used once, and V − E + F = 8 − 12 +
+        // 5 = 1 is odd: counting only, the other five faces still sit
+        // where their edges are.
+        assert_eq!(categories(&errs), [Category::Topology], "{errs:?}");
     }
 
     #[test]
@@ -499,6 +602,12 @@ mod tests {
         }
         let errs = validate(&b).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ValidationError::EdgeSameDirection { .. })), "{errs:?}");
+        // Its four edges now run the same way in both their faces
+        // (topology), and the loop runs clockwise round the face's normal,
+        // so the face's area is negative (solid, the orientation check that
+        // runs with the geometry ones); where everything is, is unchanged.
+        assert_eq!(categories(&errs), [Category::Topology, Category::Solid], "{errs:?}");
+        assert!(errs.contains(&ValidationError::FaceOrientation { face: 0 }) && errs[0].category() == Category::Topology, "{errs:?}");
     }
 
     #[test]
@@ -507,6 +616,14 @@ mod tests {
         b.faces[1].loops[0].coedges.swap(0, 1);
         let errs = validate(&b).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ValidationError::LoopNotClosed { face: 1, .. })), "{errs:?}");
+        // The loop is broken (topology), and its corners, taken at each
+        // coedge's start, now come B, A, C, D round the top square A B C D:
+        // a bow tie, whose two triangles' areas cancel, so the face has
+        // zero area (geometry). Unit square A (0,0), B (1,0), C (1,1),
+        // D (0,1) seen from above: shoelace terms B→A 0, A→C 0, C→D 1,
+        // D→B −1, sum 0.
+        assert_eq!(categories(&errs), [Category::Topology, Category::Geometry], "{errs:?}");
+        assert!(errs.contains(&ValidationError::ZeroAreaFace { face: 1 }), "{errs:?}");
     }
 
     #[test]
@@ -515,6 +632,8 @@ mod tests {
         b.faces[2].loops[0].coedges[0].edge = 999;
         let errs = validate(&b).unwrap_err();
         assert!(matches!(errs[0], ValidationError::DanglingReference { face: 2, .. }));
+        // Nothing else is checked once a reference dangles.
+        assert_eq!(categories(&errs), [Category::Topology], "{errs:?}");
     }
 
     #[test]
@@ -523,6 +642,8 @@ mod tests {
         b.shells[0].faces.retain(|&f| f != 3);
         let errs = validate(&b).unwrap_err();
         assert!(errs.contains(&ValidationError::FaceShellCount { face: 3, shells: 0 }));
+        // And the shell counts 5 faces: V − E + F = 1, odd.
+        assert_eq!(categories(&errs), [Category::Topology], "{errs:?}");
     }
 
     #[test]
@@ -541,6 +662,10 @@ mod tests {
         b.vertices[7].point.z += 1e-3;
         let errs = validate(&b).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ValidationError::VertexOffEdge { vertex: 7, .. })), "{errs:?}");
+        // Off its three edges and nothing else: the edges' own curves, and
+        // so the faces' areas, are unchanged.
+        assert_eq!(categories(&errs), [Category::Geometry], "{errs:?}");
+        assert_eq!(errs.len(), 3, "{errs:?}");
     }
 
     #[test]
@@ -552,6 +677,7 @@ mod tests {
             b.vertices[7].point.z += tolerance::LINEAR * factor;
             let r = validate(&b);
             assert_eq!(r.is_ok(), ok, "{factor}× tolerance: {r:?}");
+            assert!(r.err().unwrap_or_default().iter().all(|e| e.category() == Category::Geometry), "{factor}×");
         }
     }
 
@@ -595,6 +721,7 @@ mod tests {
             }
             let r = validate(&b);
             assert_eq!(r.is_ok(), ok, "{factor}× tolerance: {r:?}");
+            assert!(r.err().unwrap_or_default().iter().all(|e| e.category() == Category::Geometry), "{factor}×");
         }
     }
 
@@ -625,6 +752,7 @@ mod tests {
             let ValidationError::EdgeOffFace { face: 1, distance, tol, .. } = *e else { panic!("{errs:?}") };
             assert!(tol == g && tolerance::eq(distance, 1.1 * g), "{e}");
         }
+        assert_eq!(categories(&errs), [Category::Geometry]);
         assert!(lifted(0.9, tolerance::LINEAR).unwrap_err().iter().all(|e| matches!(e, ValidationError::EdgeOffFace { face: 1, .. })));
     }
 
@@ -649,6 +777,7 @@ mod tests {
             let ValidationError::VertexOffEdge { vertex: 7, distance, tol, .. } = *e else { panic!("{errs:?}") };
             assert!(tol == g && tolerance::eq(distance, 1.1 * g), "{e}");
         }
+        assert_eq!(categories(&errs), [Category::Geometry]);
     }
 
     #[test]
@@ -667,6 +796,7 @@ mod tests {
         let errs = validate(&b).unwrap_err();
         assert_eq!(errs.len(), 3, "{errs:?}");
         assert!(errs.iter().all(|e| matches!(*e, ValidationError::VertexOffEdge { vertex: 7, tol, .. } if tol == tolerance::LINEAR)), "{errs:?}");
+        assert_eq!(categories(&errs), [Category::Geometry]);
     }
 
     #[test]
@@ -691,6 +821,9 @@ mod tests {
             assert_eq!(with(Some(bad), None), Err(vec![ValidationError::VertexTolerance { vertex: 3, tol: bad }]), "{bad:e}");
             assert_eq!(with(None, Some(bad)), Err(vec![ValidationError::EdgeTolerance { edge: 5, tol: bad }]), "{bad:e}");
         }
+        // A tolerance is part of where an entity may be: geometry.
+        assert_eq!(ValidationError::VertexTolerance { vertex: 3, tol: 0.0 }.category(), Category::Geometry);
+        assert_eq!(ValidationError::EdgeTolerance { edge: 5, tol: 0.0 }.category(), Category::Geometry);
         // Negative and infinite ones are named too (with what follows from
         // them: every gap, even 0, is past a negative one, and every edge
         // is shorter than an infinite one).
@@ -710,6 +843,8 @@ mod tests {
         let errs = validate(&b).unwrap_err();
         assert!(matches!(errs[0], ValidationError::EdgeTolerance { edge: 5, tol } if tol.is_nan()), "{errs:?}");
         assert!(errs.iter().all(|e| !e.edges().contains(&5) || matches!(e, ValidationError::EdgeTolerance { .. })), "{errs:?}");
+        // The face's other three edges are off it too: geometry, all of it.
+        assert_eq!(categories(&errs), [Category::Geometry], "{errs:?}");
     }
 
     #[test]
@@ -725,7 +860,9 @@ mod tests {
         let zero = |tol: f64| {
             let mut b = small.clone();
             b.edges[0].tol = tol;
-            validate(&b).err().unwrap_or_default().contains(&ValidationError::ZeroLengthEdge { edge: 0 })
+            let errs = validate(&b).err().unwrap_or_default();
+            assert!(errs.iter().all(|e| e.category() == Category::Geometry), "{errs:?}");
+            errs.contains(&ValidationError::ZeroLengthEdge { edge: 0 })
         };
         assert!(zero(len / 0.9));
         assert!(!zero(len / 1.1));
@@ -782,6 +919,7 @@ mod tests {
             let errs = validate(&tolerant(body, 1.1 * tolerance::TOL_INPUT_MAX)).unwrap_err();
             let loose = errs.iter().filter(|e| matches!(e, ValidationError::VertexTolerance { .. } | ValidationError::EdgeTolerance { .. })).count();
             assert_eq!(loose, body.vertices.len() + body.edges.len(), "{name}: {errs:?}");
+            assert_eq!(categories(&errs), [Category::Geometry], "{name}: {errs:?}");
         }
     }
 
@@ -793,6 +931,7 @@ mod tests {
         }
         let errs = validate(&b).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ValidationError::EdgeOffFace { face: 1, .. })), "{errs:?}");
+        assert_eq!(categories(&errs), [Category::Geometry], "{errs:?}");
     }
 
     #[test]
@@ -812,6 +951,9 @@ mod tests {
             .map(|(face, loop_index)| ValidationError::LoopOrientation { face, loop_index })
             .to_vec();
         assert_eq!(errs, expected);
+        // Every edge still used once each way, every curve where it was:
+        // only which side the face is on is wrong.
+        assert_eq!(categories(&errs), [Category::Solid]);
     }
 
     #[test]
@@ -848,6 +990,9 @@ mod tests {
         let mut errs = vec![];
         check_geometry(&b, &mut errs);
         assert_eq!(errs, vec![ValidationError::FaceOrientation { face: f }]);
+        // Found by the geometry pass, but which way a face faces is the
+        // solid's question.
+        assert_eq!(categories(&errs), [Category::Solid]);
     }
 
     #[test]
@@ -856,6 +1001,7 @@ mod tests {
         b.faces[4].sense = false;
         let errs = validate(&b).unwrap_err();
         assert_eq!(errs, vec![ValidationError::FaceOrientation { face: 4 }]);
+        assert_eq!(categories(&errs), [Category::Solid]);
     }
 
     #[test]
@@ -877,6 +1023,8 @@ mod tests {
         let errs = validate(&b).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ValidationError::ZeroLengthEdge { .. })), "{errs:?}");
         assert!(errs.iter().any(|e| matches!(e, ValidationError::ZeroAreaFace { face: 2 })), "{errs:?}");
+        // The counts are a cube's still; only sizes went to zero.
+        assert_eq!(categories(&errs), [Category::Geometry], "{errs:?}");
     }
 
     #[test]
@@ -894,6 +1042,7 @@ mod tests {
         // Every local check is consistent; only the enclosed volume gives it away.
         let errs = validate(&b).unwrap_err();
         assert!(matches!(errs.as_slice(), [ValidationError::InsideOut { shell: 0, .. }]), "{errs:?}");
+        assert_eq!(categories(&errs), [Category::Solid]);
     }
 
     #[test]
@@ -902,6 +1051,7 @@ mod tests {
         b.edges[0].end = 999;
         let errs = validate(&b).unwrap_err();
         assert!(matches!(errs[0], ValidationError::DanglingReference { .. }), "{errs:?}");
+        assert_eq!(categories(&errs), [Category::Topology], "{errs:?}");
     }
 
     #[test]
@@ -924,6 +1074,8 @@ mod tests {
         b.shells[0].faces.extend(nf..nf + 6);
         let errs = validate(&b).unwrap_err();
         assert!(errs.contains(&ValidationError::ShellNotConnected { shell: 0 }), "{errs:?}");
+        // Two cubes apart are fine geometry; one shell can't hold both.
+        assert_eq!(categories(&errs), [Category::Topology], "{errs:?}");
     }
 
     #[test]
@@ -938,7 +1090,7 @@ mod tests {
             }
         }
         match validate(&b).unwrap_err().as_slice() {
-            [ValidationError::InsideOut { volume, .. }] => assert!(tolerance::eq(*volume, -1.0), "{volume}"),
+            [e @ ValidationError::InsideOut { volume, .. }] => assert!(tolerance::eq(*volume, -1.0) && e.category() == Category::Solid, "{volume}"),
             other => panic!("{other:?}"),
         }
     }
@@ -1050,6 +1202,261 @@ mod tests {
     }
 
     #[test]
+    fn every_error_is_in_the_category_decision_8_gives_it() {
+        // B0 decision 8, worked from what each check asks, not from the
+        // match: topology needs only indices and counts; geometry needs
+        // coordinates and tolerances but no idea of inside; solid asks
+        // which side is inside, or whether the body crosses itself.
+        use ValidationError::*;
+        let p = DVec3::ZERO;
+        let table = [
+            (DanglingReference { face: 0, what: "edge 9".into() }, Category::Topology), // an index past its arena
+            (EmptyLoop { face: 0, loop_index: 0 }, Category::Topology),                    // a list's length
+            (LoopNotClosed { face: 0, loop_index: 0, position: 0 }, Category::Topology),   // vertex indices compared
+            (EdgeUseCount { edge: 0, uses: 1 }, Category::Topology),                       // a count of uses
+            (EdgeSameDirection { edge: 0 }, Category::Topology),                           // two reversed flags compared
+            (FaceShellCount { face: 0, shells: 0 }, Category::Topology),                   // a count of shells
+            (ShellNotConnected { shell: 0 }, Category::Topology),                          // a walk over shared edges
+            (EulerPoincare { shell: 0, v: 8, e: 12, f: 5, rings: 0 }, Category::Topology), // V − E + F − R
+            (VertexOffEdge { edge: 0, vertex: 0, distance: 1.0, tol: 1e-5 }, Category::Geometry), // a distance
+            (EdgeOffFace { edge: 0, face: 0, distance: 1.0, tol: 1e-5 }, Category::Geometry),     // a distance
+            (ZeroLengthEdge { edge: 0 }, Category::Geometry),                              // a length
+            (VertexTolerance { vertex: 0, tol: 0.0 }, Category::Geometry),                 // how far it may be off
+            (EdgeTolerance { edge: 0, tol: 0.0 }, Category::Geometry),                     // how far it may be off
+            (ZeroAreaFace { face: 0 }, Category::Geometry),                                // an area's size
+            (FaceOrientation { face: 0 }, Category::Solid),                                // an area's sign: which side is out
+            (LoopOrientation { face: 0, loop_index: 0 }, Category::Solid),                 // which side of a loop the face is
+            (Tessellation { face: 0, message: "face boundary crosses itself".into() }, Category::Solid), // no region to mesh
+            (MeshNotClosed { problems: 1 }, Category::Solid),                              // the mesh bounds no region
+            (InsideOut { shell: 0, volume: -1.0 }, Category::Solid),                       // the region's sign
+            (EdgesMeet { a: 0, b: 1, point: p }, Category::Solid),                         // crossing itself
+            (EdgeMeetsFace { edge: 0, face: 1, point: p }, Category::Solid),               // crossing itself
+            (FacesMeet { a: 0, b: 1, point: p }, Category::Solid),                         // crossing itself
+        ];
+        for (e, want) in &table {
+            assert_eq!(e.category(), *want, "{e}");
+        }
+        // Every variant once: 8 topology, 6 geometry, 8 solid, 22 in all
+        // (`category` has no catch-all arm, so a new one won't compile
+        // without a category; this table must then grow too).
+        let count = |c: Category| table.iter().filter(|(_, w)| *w == c).count();
+        assert_eq!((count(Category::Topology), count(Category::Geometry), count(Category::Solid)), (8, 6, 8));
+        assert_eq!(Category::ALL.map(Category::name), ["topology", "geometry", "solid"]);
+        assert_eq!(Category::Geometry.to_string(), "geometry");
+        assert!(Category::Topology < Category::Geometry && Category::Geometry < Category::Solid, "reports list them in this order");
+    }
+
+    #[test]
+    fn reports_group_errors_by_category() {
+        // Found in this order (as `check_geometry` finds a zero-area face
+        // and a clockwise one in the same pass, then a short edge): the
+        // report lists the topology error first, then the two geometry ones
+        // in the order found, then the solid one, each saying its category.
+        use ValidationError::*;
+        let found = [ZeroAreaFace { face: 2 }, FaceOrientation { face: 5 }, ZeroLengthEdge { edge: 3 }, EdgeUseCount { edge: 1, uses: 1 }];
+        assert_eq!(
+            report_lines(&found),
+            [
+                "topology: edge 1 is used 1 times (must be 2)",
+                "geometry: face 2 has zero area",
+                "geometry: edge 3 has zero length",
+                "solid: face 5: normal disagrees with its boundary loop",
+            ]
+        );
+        assert!(report_lines(&[]).is_empty());
+        // A real body: face 0's loop turned round (`flipped_loop_breaks_orientation`)
+        // reports its four edges' topology before the face's orientation.
+        let mut b = hand_cube();
+        let l = &mut b.faces[0].loops[0].coedges;
+        l.reverse();
+        l.iter_mut().for_each(|c| c.reversed = !c.reversed);
+        let lines = report_lines(&validate(&b).unwrap_err());
+        assert_eq!(lines.len(), 5, "{lines:?}");
+        assert!(lines[..4].iter().all(|l| l.starts_with("topology: edge ") && l.ends_with("used twice in the same direction")), "{lines:?}");
+        assert_eq!(lines[4], "solid: face 0: normal disagrees with its boundary loop");
+    }
+
+    /// splitmix64, so every run breaks the same bodies the same way.
+    fn splitmix(state: &mut u64) -> u64 {
+        *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = *state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+
+    #[test]
+    fn seeded_breaks_land_in_the_category_their_kind_predicts() {
+        // Model: a break that touches only references and counts gives
+        // topology errors only; one that moves an entity or its tolerance
+        // gives geometry errors only; one that turns a face or the whole
+        // body round, or overlaps two solids, gives solid errors only. For
+        // each break the model also names the exact errors where it can
+        // (which vertex, which edges, which face). Bodies: boxes, cubes
+        // moved far out, L prisms, square rings, cylinders and tubes, of
+        // seeded sizes; 1,200 breaks from one seed.
+        use crate::ops::{extrude::extrude, primitives};
+        use crate::ops::profile::Profile;
+        use crate::geom::Transform;
+        const SEED: u64 = 0x31b0_ca7e;
+        let mut state = SEED;
+        let mut unit = || (splitmix(&mut state) >> 11) as f64 / (1u64 << 53) as f64;
+        let mut kinds = [0usize; 10];
+        for case in 0..1200 {
+            let size = 0.5 + 49.5 * unit();
+            let v = |p: &[(f64, f64)]| p.iter().map(|&(x, y)| glam::DVec2::new(x * size, y * size)).collect::<Vec<_>>();
+            let shape = (unit() * 6.0) as usize;
+            let body = match shape {
+                0 => primitives::make_box(size, 0.5 + 49.5 * unit(), 0.5 + 49.5 * unit()).unwrap(),
+                1 => hand_cube().transformed(&Transform::uniform_scale(size)).transformed(&Transform::translation(DVec3::splat(1e3 * unit()))),
+                2 => extrude(&Profile::polygon(v(&[(0.0, 0.0), (1.0, 0.0), (1.0, 0.2), (0.2, 0.2), (0.2, 0.8), (0.0, 0.8)]), vec![]), size).unwrap(),
+                3 => extrude(&Profile::polygon(v(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]), vec![v(&[(0.3, 0.3), (0.3, 0.7), (0.7, 0.7), (0.7, 0.3)])]), size).unwrap(),
+                4 => primitives::make_cylinder(size, 0.5 + 49.5 * unit()).unwrap(),
+                _ => crate::fixtures::hand_tube(size, 2.0 * size, size, 0.0),
+            };
+            assert_eq!(validate(&body), Ok(()), "case {case}: the unbroken body");
+            let pick = |u: f64, n: usize| ((u * n as f64) as usize).min(n - 1);
+            let planar: Vec<usize> = (0..body.faces.len()).filter(|&f| matches!(body.faces[f].surface, Surface::Plane { .. })).collect();
+            let mut b = body.clone();
+            let kind = pick(unit(), kinds.len());
+            kinds[kind] += 1;
+            // (category, the errors the model names exactly, or None when it
+            // names only one that must be among them)
+            let (want, exact, among): (Category, Option<Vec<ValidationError>>, Option<ValidationError>) = match kind {
+                0 => {
+                    // A face dropped from its shell (left in the arena).
+                    let f = b.shells[0].faces.remove(pick(unit(), body.shells[0].faces.len()));
+                    (Category::Topology, None, Some(ValidationError::FaceShellCount { face: f, shells: 0 }))
+                }
+                1 => {
+                    // A face listed twice in its shell.
+                    let f = body.shells[0].faces[pick(unit(), body.shells[0].faces.len())];
+                    b.shells[0].faces.push(f);
+                    (Category::Topology, None, Some(ValidationError::FaceShellCount { face: f, shells: 2 }))
+                }
+                2 => {
+                    // A coedge pointing past the edges: that alone, since
+                    // nothing else is checked once a reference dangles.
+                    let f = pick(unit(), b.faces.len());
+                    let edge = b.edges.len() + pick(unit(), 1000);
+                    b.faces[f].loops[0].coedges[0].edge = edge;
+                    (Category::Topology, Some(vec![ValidationError::DanglingReference { face: f, what: format!("edge {edge}") }]), None)
+                }
+                3 => {
+                    // An empty loop added to a face.
+                    let f = pick(unit(), b.faces.len());
+                    b.faces[f].loops.push(Loop { coedges: vec![] });
+                    let loop_index = b.faces[f].loops.len() - 1;
+                    (Category::Topology, None, Some(ValidationError::EmptyLoop { face: f, loop_index }))
+                }
+                4 => {
+                    // A vertex moved 1.1 to 10,000 of its tolerances in a
+                    // seeded direction: off every edge end it joins, at
+                    // that distance (the ends stay; the edges' curves, so
+                    // the faces' areas, don't move).
+                    let vtx = pick(unit(), b.vertices.len());
+                    let d = b.vertices[vtx].tol * 1.1 * crate::fmath::powf(10.0, 4.0 * unit());
+                    // Uniform on the sphere: z uniform in [−1, 1], longitude uniform.
+                    let z = 2.0 * unit() - 1.0;
+                    let (sin, cos) = crate::fmath::sin_cos(std::f64::consts::TAU * unit());
+                    let r = (1.0 - z * z).sqrt();
+                    b.vertices[vtx].point += DVec3::new(r * cos, r * sin, z) * d;
+                    let mut want = vec![];
+                    for (ei, e) in b.edges.iter().enumerate() {
+                        for (vertex, t) in [(e.start, e.t0), (e.end, e.t1)] {
+                            if vertex == vtx {
+                                let distance = e.curve.eval(t).distance(b.vertices[vtx].point);
+                                assert!(tolerance::rel_eq(distance, d, 1e-6), "case {case}: {distance} vs {d}");
+                                want.push(ValidationError::VertexOffEdge { edge: ei, vertex, distance, tol: b.vertices[vtx].tol });
+                            }
+                        }
+                    }
+                    (Category::Geometry, Some(want), None)
+                }
+                5 | 6 => {
+                    // A tolerance no entity may carry, on a vertex (5) or
+                    // an edge (6): below LINEAR, past TOL_INPUT_MAX, or NaN.
+                    let tol = match pick(unit(), 3) {
+                        0 => tolerance::LINEAR * (0.01 + 0.89 * unit()),
+                        1 => tolerance::TOL_INPUT_MAX * (1.1 + unit()),
+                        _ => f64::NAN,
+                    };
+                    let e = if kind == 5 {
+                        let vertex = pick(unit(), b.vertices.len());
+                        b.vertices[vertex].tol = tol;
+                        ValidationError::VertexTolerance { vertex, tol }
+                    } else {
+                        let edge = pick(unit(), b.edges.len());
+                        b.edges[edge].tol = tol;
+                        ValidationError::EdgeTolerance { edge, tol }
+                    };
+                    (Category::Geometry, Some(vec![e]), None)
+                }
+                7 => {
+                    // A plane moved 1.1 to 1,000 of its edges' tolerance
+                    // along its normal, either way: each of its edges off it.
+                    let f = planar[pick(unit(), planar.len())];
+                    let d = tolerance::LINEAR * 1.1 * crate::fmath::powf(10.0, 3.0 * unit()) * if unit() < 0.5 { -1.0 } else { 1.0 };
+                    if let Surface::Plane { origin, normal, .. } = &mut b.faces[f].surface {
+                        *origin += *normal * d;
+                    }
+                    let mut edges: Vec<usize> = b.faces[f].loops.iter().flat_map(|l| l.coedges.iter().map(|c| c.edge)).collect();
+                    edges.sort_unstable();
+                    let want = edges.iter().map(|&edge| ValidationError::EdgeOffFace { edge, face: f, distance: d.abs(), tol: b.edges[edge].tol }).collect();
+                    (Category::Geometry, Some(want), None)
+                }
+                8 => {
+                    // A planar face turned to face inwards: its outer loop
+                    // now runs clockwise round its normal, and that alone.
+                    let f = planar[pick(unit(), planar.len())];
+                    b.faces[f].sense = !b.faces[f].sense;
+                    (Category::Solid, Some(vec![ValidationError::FaceOrientation { face: f }]), None)
+                }
+                _ => {
+                    // The body and a copy moved along every axis: two
+                    // shells, each sound, crossing. Across the profile by 2
+                    // to 15% of the body's box, less than the L's and the
+                    // ring's arms are wide (20%, 30%), so the copy's corner
+                    // overlaps the original's (an L moved 30% each way
+                    // sits in its own notch, touching nothing); up the
+                    // extrusion by 10 to 70%.
+                    let (lo, hi) = body.bounds();
+                    let shift = (hi - lo) * DVec3::new(0.02 + 0.13 * unit(), 0.02 + 0.13 * unit(), 0.1 + 0.6 * unit());
+                    b = crate::fixtures::two_shells(&body, &body.transformed(&Transform::translation(shift)));
+                    (Category::Solid, None, None)
+                }
+            };
+            let errs = validate(&b).expect_err(&format!("case {case}, kind {kind}, shape {shape}: the break went unnoticed"));
+            assert_eq!(categories(&errs), [want], "case {case}, kind {kind} (seed {SEED:#x}): {errs:?}");
+            if let Some(e) = among {
+                assert!(errs.contains(&e), "case {case}, kind {kind}: {e:?} not in {errs:?}");
+            }
+            if let Some(mut want) = exact {
+                // Distances and tolerances compared to the model's within
+                // rounding, NaN as NaN; everything else exactly.
+                let key = |e: &ValidationError| format!("{:?}", ValidationError::category(e)) + &e.edges().iter().chain(&e.vertices()).chain(&e.faces()).map(|i| format!(" {i}")).collect::<String>();
+                let mut got = errs.clone();
+                got.sort_by_key(key);
+                want.sort_by_key(key);
+                assert_eq!(got.len(), want.len(), "case {case}, kind {kind}: {got:?} vs {want:?}");
+                for (g, w) in got.iter().zip(&want) {
+                    let close = |a: f64, b: f64| (a.is_nan() && b.is_nan()) || tolerance::rel_eq(a, b, 1e-6);
+                    let same = match (g, w) {
+                        (ValidationError::VertexOffEdge { edge: a, vertex: v, distance: d, tol: t }, ValidationError::VertexOffEdge { edge: b, vertex: u, distance: e, tol: s }) => a == b && v == u && close(*d, *e) && t == s,
+                        (ValidationError::EdgeOffFace { edge: a, face: f, distance: d, tol: t }, ValidationError::EdgeOffFace { edge: b, face: g, distance: e, tol: u }) => a == b && f == g && close(*d, *e) && t == u,
+                        (ValidationError::VertexTolerance { vertex: a, tol: t }, ValidationError::VertexTolerance { vertex: b, tol: u })
+                        | (ValidationError::EdgeTolerance { edge: a, tol: t }, ValidationError::EdgeTolerance { edge: b, tol: u }) => a == b && close(*t, *u),
+                        _ => g == w,
+                    };
+                    assert!(same, "case {case}, kind {kind}: got {g:?}, model says {w:?}");
+                }
+            }
+        }
+        // Every kind of break ran often enough to mean something.
+        assert!(kinds.iter().all(|&n| n >= 80), "{kinds:?}");
+    }
+
+    #[test]
     fn checked_writes_a_failure_dump_before_panicking() {
         // Vertex 7 lifted off its edges: the panic names the dump, and the
         // dump's page lists the same errors.
@@ -1059,7 +1466,8 @@ mod tests {
         let message = message.downcast_ref::<String>().unwrap();
         let path = message.split("failure dump: ").nth(1).expect("the panic names its dump");
         let html = std::fs::read_to_string(std::path::Path::new(path).join("index.html")).unwrap();
-        assert!(html.contains("vertex 7 is 2.5e-1 mm off edge 5"), "{message}");
+        assert!(html.contains("geometry: vertex 7 is 2.5e-1 mm off edge 5"), "{message}");
+        assert!(message.contains("\n  geometry: vertex 7 is 2.5e-1 mm off edge 5"), "the panic groups its errors too: {message}");
     }
 
     #[test]
@@ -1112,7 +1520,7 @@ mod tests {
             }
         }
         match validate(&crate::fixtures::two_shells(&big, &small)).unwrap_err().as_slice() {
-            [ValidationError::InsideOut { shell: 1, volume }] => assert!(tolerance::eq(*volume, -1.0), "{volume}"),
+            [e @ ValidationError::InsideOut { shell: 1, volume }] => assert!(tolerance::eq(*volume, -1.0) && e.category() == Category::Solid, "{volume}"),
             other => panic!("{other:?}"),
         }
     }
