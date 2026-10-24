@@ -122,7 +122,7 @@ export const REL = 1e-9;
 export const POINT_ABS = 1e-6;
 /** A unit normal's components agree to the kernel's angular tolerance (ANGULAR, 1e-9 rad). */
 export const NORMAL_ABS = 1e-9;
-/** The kernel's linear tolerance (kernel/src/tolerance.rs LINEAR): every entity carries it until step 31 gives each its own. */
+/** The kernel's linear tolerance (kernel/src/tolerance.rs LINEAR): the default every vertex and edge carries until an intersection grows its own (step 31a gave each one a field; growth starts at 32a). */
 export const LINEAR = 1e-5;
 
 /**
@@ -382,7 +382,7 @@ const minus = (a: readonly number[], b: readonly number[]): Vec3 => [a[0] - b[0]
  * of a flat face it bounds (the plane through the face's centroid along
  * its normal): how far the body's corners have crept off its faces, which
  * no volume shows. Curved faces aren't measured here (the view doesn't
- * carry their surfaces); validation holds them to LINEAR.
+ * carry their surfaces); validation holds each edge to its own tolerance.
  */
 export function planeGap(view: Pick<BodyView, "face_normals" | "face_centroids" | "edge_faces" | "edge_vertices" | "edge_middles" | "vertex_points">): number {
   let gap = 0;
@@ -424,14 +424,14 @@ export function shellCount(view: Pick<BodyView, "faces" | "edge_faces">): number
 }
 
 /**
- * The largest tolerance the body's vertices and edges carry. The kernel
- * gives each its own at step 31 (kernel/CLAUDE.md, B0 decision 5); until
- * then validation holds every one to LINEAR, so a body that validated
- * carries LINEAR. `journeys/golden.journey.ts` fails when the view gains a
- * tolerance field this doesn't read, so step 31 can't forget it.
+ * The largest tolerance the body's vertices and edges carry, as the
+ * kernel's view says (`tolerance`, step 31a; kernel/CLAUDE.md, B0 decision
+ * 5): validation holds each vertex and edge to its own. A body that failed
+ * validation carries none it can be held to. `journeys/golden.journey.ts`
+ * fails when the view gains a tolerance field this doesn't read.
  */
-export function bodyTolerance(view: Pick<BodyView, "errors">): number {
-  return view.errors.length === 0 ? LINEAR : Infinity;
+export function bodyTolerance(view: Pick<BodyView, "errors" | "tolerance">): number {
+  return view.errors.length === 0 ? view.tolerance : Infinity;
 }
 
 export interface MeasuredBody {

@@ -142,6 +142,12 @@ pub struct BodyView {
     pub edge_middles: Vec<[f64; 3]>,
     /// Each circular edge's centre in the world; null for a line.
     pub edge_centres: Vec<Option<[f64; 3]>>,
+    /// The largest tolerance any vertex or edge of the body carries (B0
+    /// decision 5, step 31a): LINEAR for every body the kernel makes until
+    /// intersections grow them (32a), never past `tolerance::TOL_INPUT_MAX`
+    /// in a body that passed validation. What a golden model's tolerance
+    /// is checked against (step 28a).
+    pub tolerance: f64,
     /// Empty when the body passed validation.
     pub errors: Vec<String>,
 }
@@ -208,6 +214,7 @@ fn view_parts(body: &Body, placement: &geom::Placement, mesh: &mesh::Mesh, error
                 geom::Curve::Line { .. } => None,
             })
             .collect(),
+        tolerance: body.vertices.iter().map(|v| v.tol).chain(body.edges.iter().map(|e| e.tol)).fold(0.0, f64::max),
         errors,
     }
 }
@@ -940,6 +947,20 @@ mod tests {
         body.vertices[7].point.z += 0.5;
         let v = view_body(&body).unwrap();
         assert!(v.errors.iter().any(|e| e.contains("vertex 7")), "{:?}", v.errors);
+    }
+
+    #[test]
+    fn the_view_carries_the_largest_tolerance() {
+        // Every body the kernel makes carries LINEAR everywhere; one vertex
+        // grown to 3e-5 and one edge to 7e-5 make the largest 7e-5, read
+        // from the edges as well as the vertices.
+        let mut body = ops::primitives::make_box(1.0, 2.0, 3.0).unwrap();
+        assert_eq!(view_body(&body).unwrap().tolerance, tolerance::LINEAR);
+        body.vertices[2].tol = 3e-5;
+        assert_eq!(view_body(&body).unwrap().tolerance, 3e-5);
+        body.edges[4].tol = 7e-5;
+        let v = view_body(&body).unwrap();
+        assert!(v.tolerance == 7e-5 && v.errors.is_empty(), "{} {:?}", v.tolerance, v.errors);
     }
 
     #[test]
