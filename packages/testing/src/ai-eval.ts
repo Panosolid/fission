@@ -73,7 +73,7 @@ export const EVAL_CASES: readonly EvalCase[] = [
     prompt: "Add a 5 mm hole in the middle of the top face.",
     setup: [{ op: "set_part", shape: "box", width: 40, depth: 30, height: 20 }],
     expected: [{ op: "hole", face: "<stable id of the top face>", diameter: 5, depth: "through" }],
-    waitsFor: "the hole command and stable face ids (steps 24 and 49)",
+    waitsFor: "the hole command and stable face ids (steps 24 and 54)",
   },
 ];
 

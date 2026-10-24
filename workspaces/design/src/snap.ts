@@ -29,7 +29,7 @@
 //
 // Snapping is only where the click lands: nothing is remembered as a rule
 // (a line drawn horizontal is not kept horizontal); that is what the
-// constraints of step 36 add. The reach is in screen pixels, turned into mm
+// constraints of step 47 add. The reach is in screen pixels, turned into mm
 // by the size of a pixel on the plane at the pointer (SketchPointer.pixel),
 // so it feels the same at any zoom. It is a pick radius, not a geometric
 // tolerance: nothing is judged equal by it (SAME_PLACE is what is).

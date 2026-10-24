@@ -8,7 +8,7 @@ bodies (one per connected piece, B0 decision 3), each body's faces, edges,
 vertices, shells (voids) and genus after tidying (decision 6: coplanar
 neighbours merged, collinear edges joined), its box, and whether the result
 must be refused instead: empty (F3, F3b), non-manifold (decision 2, with
-where) or thin (rule 1 and decision 6, with where). 32a, 33b and 34c test
+where) or thin (rule 1 and decision 6, with where). 32a, 33b and 35c test
 against it; 30c's generator and judge feed it the kernel's inputs.
 
 How it works. The coordinates of every box are sorted per axis into a grid;

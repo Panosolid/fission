@@ -1,6 +1,6 @@
 {
   "model": "bracket-two-holes",
-  "what": "The ready-made plate 80 × 40 × 6: two holes r 0.15 · 40 = 6 round (20, 20) and (60, 20), a quarter in from each end, cut as holes in its profile (as Extrude cuts once 39a lands: 28a2).",
+  "what": "The ready-made plate 80 × 40 × 6: two holes r 0.15 · 40 = 6 round (20, 20) and (60, 20), a quarter in from each end, cut as holes in its profile (as Extrude cuts once 39 lands: 28a2).",
   "bodies": [
     {
       "body": "Body 1",

@@ -30,7 +30,7 @@ export interface MaterialLibrary {
   update(id: string, change: Partial<Material>): void;
 }
 
-/** The project's materials library. Not implemented yet (with step 62, I3). */
+/** The project's materials library. Not implemented yet (with step 66, I3). */
 export function materialLibrary(): MaterialLibrary {
   throw new Error("not implemented");
 }

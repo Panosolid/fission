@@ -82,7 +82,7 @@ export type SessionOp =
   | { op: "hold-ref"; pick: number }
   | WaitingOp;
 
-/** The operations a boolean move can ask for (34b: union, subtract, intersect). */
+/** The operations a boolean move can ask for (35b: union, subtract, intersect). */
 export type BooleanKind = "join" | "cut" | "intersect";
 
 /**
@@ -92,13 +92,13 @@ export type BooleanKind = "join" | "cut" | "intersect";
  * Design can answer its moves fails loudly instead of passing quietly.
  */
 export type WaitingOp =
-  /** 34: a Combine of the `target`th body shown with the `tool`th other one; the tool kept or used up. */
+  /** 35: a Combine of the `target`th body shown with the `tool`th other one; the tool kept or used up. */
   | { op: "add-combine"; target: number; tool: number; operation: BooleanKind; keep: boolean }
-  /** 34: the `pick`th Combine's operation changed, an edit early in the timeline that every later feature must survive. */
+  /** 35: the `pick`th Combine's operation changed, an edit early in the timeline that every later feature must survive. */
   | { op: "set-combine"; pick: number; operation: BooleanKind }
-  /** 39a: an extrude of the `pick`th sketch that joins, cuts or intersects the bodies it overlaps. */
+  /** 39: an extrude of the `pick`th sketch that joins, cuts or intersects the bodies it overlaps. */
   | { op: "add-extrude-into"; pick: number; distance: number; operation: BooleanKind }
-  /** 39a: the `pick`th extrude's operation changed, a new body included. */
+  /** 39: the `pick`th extrude's operation changed, a new body included. */
   | { op: "set-extrude-operation"; pick: number; operation: BooleanKind | "new-body" };
 
 /** One waiting move: when it turns on, how often it is drawn, and what the model and Design must answer once it does. */
@@ -118,25 +118,25 @@ export interface WaitingMove {
 const BOOLEAN_KINDS: readonly BooleanKind[] = ["join", "cut", "intersect"];
 
 /**
- * The moves Combine (34) and Extrude's operations (39a) bring to the
+ * The moves Combine (35) and Extrude's operations (39) bring to the
  * timeline sessions, written before either exists, as the golden models
  * waiting for those steps are (golden.ts, `from`). The naming sessions
  * already model the owner's cut cases (naming-session.ts, `cuts`), which run
- * on Design from 39a2.
+ * on Design from 39b.
  */
 export const WAITING_MOVES: readonly WaitingMove[] = [
   {
     op: "add-combine",
-    from: "34",
+    from: "35",
     weight: 6,
-    does: "Combine (34f): pick a target body and a tool body among those shown before where the new item goes, Join, Cut or Intersect, Keep tools off unless asked; a new timeline item built on both.",
+    does: "Combine (35f): pick a target body and a tool body among those shown before where the new item goes, Join, Cut or Intersect, Keep tools off unless asked; a new timeline item built on both.",
     model:
-      "The result is the boolean of the two bodies as they are built at that point (34b), so its volume is the exact one of the two inputs' shapes; a result touching itself along an edge or at a corner fails with its places (B0 decision 2), an intersect of parts that only touch or miss gives no body, a cut that leaves pieces gives one body per piece (decision 3), and a face thinner than MIN_FEATURE fails naming it (decision 6). A body with a curved face (cylinder, sphere, arc sides) is refused naming the face until 37/38a, and faces lying on each other until 35a. The target keeps its row and is shown from the Combine on (40a rule 1); a tool is used up unless kept. Editing, suppressing, deleting or moving either input rebuilds the Combine, and deleting one asks first (timeline rules).",
+      "The result is the boolean of the two bodies as they are built at that point (35b), so its volume is the exact one of the two inputs' shapes; a result touching itself along an edge or at a corner fails with its places (B0 decision 2), an intersect of parts that only touch or miss gives no body, a cut that leaves pieces gives one body per piece (decision 3), and a face thinner than MIN_FEATURE fails naming it (decision 6). A body with a curved face (cylinder, sphere, arc sides) is refused naming the face until 37/38a, and faces lying on each other until 36a. The target keeps its row and is shown from the Combine on (34a rule 1); a tool is used up unless kept. Editing, suppressing, deleting or moving either input rebuilds the Combine, and deleting one asks first (timeline rules).",
     draw: (r) => ({ op: "add-combine", target: r.next(), tool: r.next(), operation: pick(r, BOOLEAN_KINDS), keep: r.next() < 0.25 }),
   },
   {
     op: "set-combine",
-    from: "34",
+    from: "35",
     weight: 3,
     does: "Edit a Combine and change its operation (Join to Cut, say).",
     model: "The Combine's result is redone with the new operation and everything after it rebuilds against it; held references to faces the new result no longer has resolve to nothing, never to another face (25a4).",
@@ -144,16 +144,16 @@ export const WAITING_MOVES: readonly WaitingMove[] = [
   },
   {
     op: "add-extrude-into",
-    from: "39a",
+    from: "39",
     weight: 8,
-    does: "Extrude a sketch with Join, Cut or Intersect (39a1): the bodies it overlaps when made are the ones it changes, kept by body id.",
+    does: "Extrude a sketch with Join, Cut or Intersect (39a): the bodies it overlaps when made are the ones it changes, kept by body id.",
     model:
       "The extrude's own body, then the boolean with each body it overlaps when made (Fusion check F4: a body made later in its path is not changed, even with the extrude dragged after it). \"No target body\" when it overlaps none (Ben's answers 2 and 6); a cut that would leave a body with nothing fails with words and changes nothing (F3); the rest as add-combine.",
     draw: (r) => ({ op: "add-extrude-into", pick: r.next(), distance: int(r, 1, 50), operation: pick(r, BOOLEAN_KINDS) }),
   },
   {
     op: "set-extrude-operation",
-    from: "39a",
+    from: "39",
     weight: 4,
     does: "Edit an extrude and change its operation, New body included.",
     model: "As add-extrude-into with the new operation, against the bodies the extrude was made with; to New body, the bodies it had changed come back as they were.",

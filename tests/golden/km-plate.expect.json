@@ -1,7 +1,7 @@
 {
   "model": "km-plate",
-  "what": "A 100 × 60 × 10 plate a kilometre from the origin (x 1,000,000 to 1,000,100 mm), with a blind pocket 30 × 20 × 5 cut into its bottom: the modelling range's 1 km (kernel/CLAUDE.md, 'Supported modelling range'; a boolean brings both bodies near their overlap first, 34a).",
-  "from": "34",
+  "what": "A 100 × 60 × 10 plate a kilometre from the origin (x 1,000,000 to 1,000,100 mm), with a blind pocket 30 × 20 × 5 cut into its bottom: the modelling range's 1 km (kernel/CLAUDE.md, 'Supported modelling range'; a boolean brings both bodies near their overlap first, 35a).",
+  "from": "35",
   "recipe": [
     {
       "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."

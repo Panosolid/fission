@@ -1,7 +1,7 @@
 {
   "model": "box-minus-box",
-  "what": "A 40 × 30 × 20 block across the front and side planes (x −20..20, y −15..15, z 0..20) less a 20 × 25 × 20 box over its front right top corner: a corner notch 10 × 15 × 10. Each face of the tool crosses the block or misses it; none lies on one of the block's (that needs 35).",
-  "from": "34",
+  "what": "A 40 × 30 × 20 block across the front and side planes (x −20..20, y −15..15, z 0..20) less a 20 × 25 × 20 box over its front right top corner: a corner notch 10 × 15 × 10. Each face of the tool crosses the block or misses it; none lies on one of the block's (that needs 36).",
+  "from": "35",
   "recipe": [
     {
       "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."

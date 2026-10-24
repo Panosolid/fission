@@ -31,7 +31,7 @@
 //! tolerances).
 //!
 //! Known limits (each documented where it applies):
-//! - Faces on other surfaces (NURBS, steps 63–64) are not checked yet.
+//! - Faces on other surfaces (NURBS, steps 67–68) are not checked yet.
 //! - A cylinder face bounded by anything other than lines along it and
 //!   circles round it can't be classified (booleans make such faces,
 //!   steps 37–38); points on it are not reported.

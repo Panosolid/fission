@@ -34,7 +34,7 @@ export interface FileFormatInfo {
   extensions: readonly string[];
   /** The representation its contents arrive in (null: a whole project, not one object). */
   representation: RepresentationKind | null;
-  /** Who will take it once an importer exists, and as what (docs/roadmap.md: STL X10, SVG V2/L2, DXF L2, STEP 71, PDF Y3). */
+  /** Who will take it once an importer exists, and as what (docs/roadmap.md: STL X10, SVG V2/L2, DXF L2, STEP 75, PDF Y3). */
   planned: { workspaces: readonly WorkspaceId[]; as: string };
 }
 

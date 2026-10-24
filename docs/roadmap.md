@@ -2,40 +2,30 @@
 
 Every step of the plan, done and to do, as detailed as it needs to be: this file is read only when a session needs it. The next couple of steps (now 18) live in `CLAUDE.md` instead, which every session reads; each item is in one file only, and items move into CLAUDE.md as work reaches them and back here once done. Mark items [x] when done.
 
-Renumbering of 2026-10-23 (owner's ask: the numbers run in build order again, as after the renumbering of 2026-10-17). Steps 1–27 and 58 onwards keep their numbers; substep letters stay with their step (old 47a is now 38a, old 50a is 40a). Older pull requests, threads, the CHANGELOG and memories use the old numbers.
+Renumbering of 2026-10-24 (owner's ask: "it makes no sense going 32, 33, 40"; the numbers run in build order again, every substep under its own step). Steps 1–33 and 37 keep their numbers; 38 keeps only its first substep (38a); old 38b–38f, 39b, 40a and the kernel half of 51 became steps or substeps of their own where they are built, so everything from 58 moves up by 4. Older pull requests, threads, the CHANGELOG and memories use the old numbers; the renumbering of 2026-10-23 (PR #272) and of 2026-10-17 (PR #81) came before this one.
 
 | Old | New | Step |
 |---|---|---|
-| 38 | 28 | Golden models |
-| 39 | 29 | OpenCascade oracle (39b STEP writer is now 29b) |
-| 40 | 30 | Overnight fuzzing and the simulated user |
-| 41 | 31 | Plane–plane and line–plane intersection |
-| 42 | 32 | Splitting planar faces |
-| 43 | 33 | Inside/outside classification |
-| 44 | 34 | Union/subtract/intersect for planar solids, Combine |
-| 45 | 35 | Coplanar faces, touching edges, shared vertices |
-| 29 | 36 | Constraint solver core |
-| 46 | 37 | Plane–cylinder intersection |
-| 47 | 38 | Cylinder–cylinder, plane–sphere (47f, the general crossing finder added by the outside review, is 38f) |
-| 48 | 39 | Extrude modes |
-| 50 | 40 | Full topological naming (50a is now 40a) |
-| 55 | 41 | Chamfer |
-| 56 | 42 | Fillet between planar faces |
-| 57 | 43 | Fillet planar–curved, edge chains |
-| 28 | 44 | Profile detection (regions) |
-| 30 | 45 | Parallel, perpendicular, equal, tangent |
-| 31 | 46 | Editable dimensions |
-| 32 | 47 | Constraint status colours |
-| 33 | 48 | Trim, extend, offset, mirror |
-| 49 | 49 | Hole feature (unchanged) |
-| 34 | 50 | User parameters and expressions |
-| 35 | 51 | Cone and torus surfaces |
-| 36 | 52 | Revolve |
-| 37 | 53 | Per-feature error display |
-| 51 | 54 | Cached feature results |
-| 52 | 55 | Construction planes, axes, points |
-| 53 | 56 | Sketch on construction planes |
-| 54 | 57 | Patterns, mirror |
+| 31–33 | 31–33 | Plane–plane intersection, splitting planar faces, inside/outside (unchanged) |
+| 40a | 34 (34a) | Naming rules for booleans |
+| 34 (34a–34g) | 35 (35a–35g) | Union/subtract/intersect for planar solids; Combine is 35f |
+| 35 (35a–35e) | 36 (36a–36e) | Coplanar faces, touching edges, shared vertices |
+| 37 | 37 | Plane–cylinder intersection (unchanged) |
+| 38a | 38 (38a) | Cylinder and sphere special cases, general tessellator |
+| 39a (39a1–39a3) | 39 (39a–39c) | Extrude join, cut, intersect, new body |
+| 40 (40b–40d) | 40 (40a–40c) | Full topological naming |
+| 38b–38e | 41 (41a–41d) | Cylinder crossings in general position |
+| 51, kernel half | 42 | Cone and torus surfaces in the kernel |
+| 38f | 43 | General crossing finder |
+| 41–43 | 44–46 | Chamfer, fillets |
+| 36 | 47 | Constraint solver core |
+| 44–48 | 48–52 | Profile detection, constraints, dimensions, colours, trim/offset |
+| 39b | 53 | Extrude symmetric, to-face, taper |
+| 49 | 54 | Hole feature |
+| 50 | 55 | User parameters and expressions |
+| 51, app half; 52 | 56 | Revolve (with cones and tori in the app) |
+| 53–57 | 57–61 | Error display, cached results, construction planes, sketch on them, patterns |
+| 58–84 | 62–88 | Shell onwards (each + 4) |
 
 Kernel foundations
 - [x] 1. Testing rules in repo; tolerance module with exact predicates
@@ -49,10 +39,10 @@ Kernel foundations
 - [x] 9. Extrude polygon profiles with holes; property test volume = area × distance
 - [x] 10. Arcs/circles in profiles (cylindrical side faces); cylinder primitive
 - [x] 11. Sphere primitive; accurate volume and area
-- [x] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 34). Acceptance case: today a 26.5 × 0.0124 × 27 box placed 37.8 km out and moved back loses 8.7e-8 of its volume to rounding there (OpenCascade oracle, seed 0x5eed, 3000 cases); after this step it must not
+- [x] 12. Move/rotate bodies; property test volume/area invariance. Bodies keep their geometry in local coordinates plus a placement transform; move/rotate only compose the placement, so moving far away and back loses nothing. Placements are baked once, into one body's frame, when two bodies meet (booleans, 35). Acceptance case: today a 26.5 × 0.0124 × 27 box placed 37.8 km out and moved back loses 8.7e-8 of its volume to rounding there (OpenCascade oracle, seed 0x5eed, 3000 cases); after this step it must not
 - [x] 13. STL export + download button + round-trip test
 - [x] 14. Failure dumps: STL + HTML viewer with problem edges highlighted
-- [x] 15. Self-intersection check in validate(). Easy for planes/cylinders/spheres; must be extended for general surfaces when NURBS arrive (63–64).
+- [x] 15. Self-intersection check in validate(). Easy for planes/cylinders/spheres; must be extended for general surfaces when NURBS arrive (67–68).
   - [x] 15a. The check itself (`kernel/src/self_intersect.rs`, `intersect.rs`, new `validate` errors).
   - [x] 15b. Mutation run on the three files (829 mutants, `-- --lib`, ~1 h of CPU, no usage): 98 survived. Hand-worked tests at odd radii, angles and positions (commit eef89a3) killed 40; 58 remain. List them again with `cd kernel && cargo mutants -f src/intersect.rs -f src/self_intersect.rs -f src/validate.rs -j 3 -- --lib` (or `--re '<name>'` for a few).
   - [x] 15c. intersect.rs: 22 survivors re-run (100 mutants on their lines); five new hand-worked tests (tilted circle off a rod's axis, a lopsided small loop, a flat discriminant, a rod and ball mirrored through the origin, ring points spread evenly) killed 8; the 14 left are equivalent and written up in the file's top comment, with the `trig_zeros` budget limit. 15d starts at self_intersect.rs: list its survivors with `cd kernel && cargo mutants -f src/self_intersect.rs -j 3 -- --lib` (~1 min per mutant per job; build time dominates, so use `--re 'self_intersect.rs:(LINE|LINE):'` once the lines are known).
@@ -86,7 +76,7 @@ App shell (18: in CLAUDE.md)
 - [x] 20. Undo/redo of whole-document snapshots, kept for good: every timeline edit is one recorded step, so this already is timeline undo (decided in the design check, docs/document-model.md, section 4). Keys (chosen while the owner was away; easy to change): Ctrl+Z undo, Ctrl+Shift+Z and Ctrl+Y redo (Cmd on a Mac); inside a text box the browser's own text undo is left alone.
   - [x] 20a. The history in core: `createHistory({capture, restore, limit, mergeMs, now})` in `packages/core/src/model/history.ts` keeps whole-project snapshots (text from `capture`, the shell will pass `projectToJson`): `record(label, mergeKey?)`, `undo`/`redo` (return the step's label), `undoLabel`/`redoLabel`, `reset` (a project opened), `onChange`. Rules: recording the same text as the present is a no-op (so a restore that reports a change records nothing, and a record made during a restore is ignored); a new step drops the redo; steps with one merge key less than `MERGE_MS` = 1000 ms apart, straight after a record, are one step (the window runs from the last key, so steady typing is one step), and typing back to where that step began removes it; `UNDO_LIMIT` = 100 steps, oldest dropped; a restore that throws leaves the history unmoved. Verified: hand-worked unit tests (`packages/core/test/history.test.ts`: 40 → 50 → 60 → 70 with labels and restores, 0.9×/1.1× of the merge time, the limit at 3, reset, refusals) and seeded sessions on a real project (`packages/testing/test/history-fuzz.test.ts`: Design's part document through `projectToJson`/`projectFromJson`, 5 seeds × 2,000 steps against a two-stack model, with restore failures, NaN widths refused, resets and full undo/redo walks). Seven deliberate breaks (no restore guard, merging after an undo, a wider merge window, no fold-back, the limit off by one, redo kept after an edit, a failed restore moving) each fail at least one test. `historyNotBuilt` still sits in the shell's context until 20b.
   - [x] 20b. The history in the shell (`apps/fission/src/main.ts`): `createHistory` with `capture: projectToJson(ctx.project)` and `restoreSnapshot` (read with `projectFromJson`, `pool.forgetAll()`, `show(current)`, re-mount the split, autosave); `projectChanged(label = "Edit", mergeKey?)` on `WorkspaceContext` records a step; Design names its steps ("Change width" with the box as merge key, "Change shape to Cylinder"). A change a workspace makes while it is being mounted (Design's default box) is not a step: `show`/`mountSplit` run inside `mountingDone`, which calls the new `History.amend()` (the present takes the project as it is; a step left equal to the one before is removed; ends a merge; ignored during a restore). Open and start-up call `reset`. Undo/Redo (↶ ↷) sit before Save: on the bar on wide screens, the first row of Menu at phone width (the bar keeps three whole tabs), off when there is nothing, titled "Undo Change width (Ctrl+Z)"; keys `undo` Mod+Z, `redo` Mod+Shift+Z, `redo-y` Mod+Y in `SHELL_SHORTCUTS`, not in text fields. Verified: amend hand-worked tests and the undo keys (`packages/core/test/history.test.ts`, `shortcuts.test.ts`), amends added to the seeded fuzz (5 seeds × 2,000 steps), `e2e/undo.mjs` (buttons and labels, typing 60 is one step, keys incl. Cmd, the browser's own undo inside a field, undo from Laser, no step for Design's default when first shown, phone menu), full e2e. Ten deliberate breaks (amend keeping an empty step, merging across an amend, amending during a restore, a restore that doesn't remount, recording while mounting, the pane dropping labels, undo in text fields, Ctrl+Y unwired, no merge key, buttons not refreshed) each fail a test.
-  - [x] 20c. The selection follows undo, one step for hand-overs and AI commands, the camera, phone width. Core: `History.step(label, run)` makes everything `run` changes ONE undo step named `label` (records inside fold in and return false, a nested step joins the outer one, unrecorded changes before it are taken in first, no change records nothing and keeps the redo, a throw or an unsaveable result puts the project back and passes the error on, never merges, counts towards the limit; undo/redo/reset inside are refused) and `History.restoring()` (true while a snapshot is put back). `transferOwnership` returns `label` ("Hand Hole spacing to Circuit"); the value is stored inside `history.step(label, …)`, and Undo gives the old owner back (the snapshot; `inverse` waits for the timeline at 24). `@fission/ai` `acceptCommands(history, label, commands, run)` runs accepted commands as one "AI: …" step, all or nothing (the preview, `proposeAction`, still waits for 47; nothing in the app hands values over or accepts AI commands yet, so these are ready for E3 and the assistant). Design: a mount by Undo or Redo (or the first mount after an undo made in another workspace) keeps the camera, re-framing only when the body no longer fits (`needsRefit`, the rule edits use; a box ↔ cylinder undo re-frames because the parts sit in different places); an opened file is still framed; the selection is compared with the body Design last built (`lastBuilt`, kept across mounts), so a face that is still the same one stays and one that is gone is dropped with 17e's note (before, a remount compared indices only, so a cylinder's face 1 stayed selected as the box's face 1). Phone width (decided while the owner was away; easy to change): Undo and Redo leave Menu for the main viewport's bottom-right corner, one above the other (44 px targets, clear of the View buttons at 320 and 375 px), so undo is one tap; wide screens keep them on the bar. Verified: hand-worked tests (`history.test.ts` nine for steps, `ownership.test.ts` the hand-over as one step, `packages/ai/test/accept.test.ts` four), steps (inner records, failures part way, no-change steps) added to the seeded fuzz (5 seeds × 2,000 steps against the two-stack model, which also checks `restoring()` during every restore), `e2e/undo.mjs` six new checks (selection kept through undo and redo and drawn; a cylinder's pick dropped with the note on undo to the box; the top view kept through undo/redo with no fit; an undo made from Laser keeps Design's camera; an opened file is still framed; 375 and 320 px placement, one tap, back on the bar when wide), full e2e. Deliberate breaks: nine in `history.ts` (eight caught; making a step mergeable is equivalent, since a step has no merge key) and five in Design and the shell (index-only selection after a remount, an undone shape change framed, an undo from another workspace forgotten, an opened file not framed, never docked), each caught by the e2e. Screenshots looked at: `e2e/undo-375.png`, `undo-320.png`.
+  - [x] 20c. The selection follows undo, one step for hand-overs and AI commands, the camera, phone width. Core: `History.step(label, run)` makes everything `run` changes ONE undo step named `label` (records inside fold in and return false, a nested step joins the outer one, unrecorded changes before it are taken in first, no change records nothing and keeps the redo, a throw or an unsaveable result puts the project back and passes the error on, never merges, counts towards the limit; undo/redo/reset inside are refused) and `History.restoring()` (true while a snapshot is put back). `transferOwnership` returns `label` ("Hand Hole spacing to Circuit"); the value is stored inside `history.step(label, …)`, and Undo gives the old owner back (the snapshot; `inverse` waits for the timeline at 24). `@fission/ai` `acceptCommands(history, label, commands, run)` runs accepted commands as one "AI: …" step, all or nothing (the preview, `proposeAction`, still waits for 51; nothing in the app hands values over or accepts AI commands yet, so these are ready for E3 and the assistant). Design: a mount by Undo or Redo (or the first mount after an undo made in another workspace) keeps the camera, re-framing only when the body no longer fits (`needsRefit`, the rule edits use; a box ↔ cylinder undo re-frames because the parts sit in different places); an opened file is still framed; the selection is compared with the body Design last built (`lastBuilt`, kept across mounts), so a face that is still the same one stays and one that is gone is dropped with 17e's note (before, a remount compared indices only, so a cylinder's face 1 stayed selected as the box's face 1). Phone width (decided while the owner was away; easy to change): Undo and Redo leave Menu for the main viewport's bottom-right corner, one above the other (44 px targets, clear of the View buttons at 320 and 375 px), so undo is one tap; wide screens keep them on the bar. Verified: hand-worked tests (`history.test.ts` nine for steps, `ownership.test.ts` the hand-over as one step, `packages/ai/test/accept.test.ts` four), steps (inner records, failures part way, no-change steps) added to the seeded fuzz (5 seeds × 2,000 steps against the two-stack model, which also checks `restoring()` during every restore), `e2e/undo.mjs` six new checks (selection kept through undo and redo and drawn; a cylinder's pick dropped with the note on undo to the box; the top view kept through undo/redo with no fit; an undo made from Laser keeps Design's camera; an opened file is still framed; 375 and 320 px placement, one tap, back on the bar when wide), full e2e. Deliberate breaks: nine in `history.ts` (eight caught; making a step mergeable is equivalent, since a step has no merge key) and five in Design and the shell (index-only selection after a remount, an undone shape change framed, an undo from another workspace forgotten, an opened file not framed, never docked), each caught by the e2e. Screenshots looked at: `e2e/undo-375.png`, `undo-320.png`.
 
 Sketcher and timeline (in build order: the owner's decision 2026-10-17 put the timeline right after 23, and the steps were renumbered the same day so the numbers run in order; the timeline was 32 and 33, 26 to 33 were 24 to 31; how sketches, features, the timeline and undo fit together: docs/document-model.md)
 - [x] 21. Sketch on ground plane: lines with grid snapping, saved with stable ids, the line tool, and Extrude of a closed sketch (21a–21d; docs/document-model.md, section 6)
@@ -97,17 +87,17 @@ Sketcher and timeline (in build order: the owner's decision 2026-10-17 put the t
 - [ ] 26. Sketch on any planar face (the sketch's plane is the face's stable id from 24, never a kernel index)
 - [ ] 27. Project/include edges into a sketch, linked to their source edges by stable id from 24
 
-Build order from step 27 (owner's asks, 2026-10-22: "attempt the big battle sooner instead of making more and more assumptions", then front-load the hardest parts to get into a rhythm with them): after 27 and the break that follows it, (1) B0's outside review and golden models (28), with 29b's minimal STEP writer; (2) flat booleans 31–35, with the Combine tool at 34 and 40a's naming rules before it; (3) curved booleans 37 (37a first) and 38a, then join, cut, intersect and new body in Extrude (39a); (4) full topological naming (40); (5) the rest of the curved booleans, 38b–38f; (6) chamfer and fillets 41–43, because they need all of the above (with 51's kernel half, cones and tori, before 41); (7) the constraint solver core (36), last of the hard block; then the easier sketch steps 44–48, then 39b, 49, 50–53 and on. Shell (58), NURBS (63–69) and STEP (70–72) stay where they are. Reason: every step built before booleans adds faces, edges and links that booleans must later split, merge and rename, and every surface type added before them (cones and tori at 51–52) adds intersection cases; 44–48 work inside one sketch, so they add almost nothing booleans must undo, and the solver (36) is the one sketch step hard enough to belong in the hard block. The solver moved from after 35 to after 43 on 2026-10-24 (owner's ask: fillets as soon as logically possible after booleans): nothing in 37–43 uses sketch constraints (curved booleans, Extrude modes, naming and fillets work on bodies and their faces and edges, and a fillet's or chamfer's size is a feature value, not a sketch dimension), so fillets wait on nothing the solver gives, and the solver still comes before 45–47, which build on it. It keeps its number rather than renumbering 37–43 again, which would change the numbers on in-flight boolean work and its plan. The steps were renumbered on 2026-10-23 (owner's ask) so the numbers run in this build order again; the table at the top of this file maps the old numbers. The steps and substeps that still run out of their number's order are 29b (with 28), 36 (after 43), 40a (before 34), 38b–38f (after 40), 39b (after 48) and 51's kernel half (before 41).
+Build order from step 27 (owner's asks, 2026-10-22: "attempt the big battle sooner instead of making more and more assumptions", then front-load the hardest parts to get into a rhythm with them; 2026-10-24: fillets as soon as logically possible after booleans): after 27 and the break that follows it, (1) B0's outside review and golden models (28), with 29b's minimal STEP writer; (2) flat booleans 31–36, with the naming rules for booleans (34) before the Combine tool (35); (3) curved booleans 37 (37a first) and 38, then join, cut, intersect and new body in Extrude (39); (4) full topological naming (40); (5) the rest of the curved booleans (41), cones and tori in the kernel (42) and the general crossing finder (43); (6) chamfer and fillets 44–46, because they need all of the above; (7) the constraint solver core (47), last of the hard block; then the easier sketch steps 48–52, Extrude's other modes (53), holes (54) and on. Shell (62), NURBS (67–73) and STEP (74–76) come later. Reason: every step built before booleans adds faces, edges and links that booleans must later split, merge and rename, and every surface type added before them adds intersection cases (cones and tori come in at 42 only because the fillets need them); 48–52 work inside one sketch, so they add almost nothing booleans must undo, and the solver (47) is the one sketch step hard enough to belong in the hard block. The solver comes after the fillets because nothing in 37–46 uses sketch constraints (curved booleans, Extrude modes, naming and fillets work on bodies and their faces and edges, and a fillet's or chamfer's size is a feature value, not a sketch dimension), so fillets wait on nothing the solver gives, and the solver still comes before 49–51, which build on it. The steps were renumbered on 2026-10-24 (owner's ask) so the numbers run in this build order again, with every substep under its own step; the table at the top of this file maps the old numbers. The one piece still out of its number's order is 29b (done with 28); 34 may run alongside 31–33 (it is testing-area work, they are kernel) but must land before 35.
 
 Test infrastructure (in place before booleans, which are built against it)
 - [ ] 28. Golden models in tests/golden/ + tests/baseline.json metrics (the one piece of 28–30 not built yet: 29 and 30 already run on primitives and timelines, and booleans join them the day each lands)
-- [ ] 29. OpenCascade oracle comparison (Python + cadquery/OCP): volume, area, face count, bounding box (`prototypes/oracle/compare.py` already does this for the harness's primitives; boolean results join it at 34). 29b (architecture review, 2026-10-22; with 28, before 31): a minimal STEP writer for the oracle, so OpenCascade reads our actual bodies, checks them with its own validity checker (BRepCheck) and runs its booleans on exactly our inputs; planes, cylinders, spheres, lines and circles first, ellipses join at 37. Substeps: `docs/progress/booleans.md`
+- [ ] 29. OpenCascade oracle comparison (Python + cadquery/OCP): volume, area, face count, bounding box (`prototypes/oracle/compare.py` already does this for the harness's primitives; boolean results join it at 35). 29b (architecture review, 2026-10-22; with 28, before 31): a minimal STEP writer for the oracle, so OpenCascade reads our actual bodies, checks them with its own validity checker (BRepCheck) and runs its booleans on exactly our inputs; planes, cylinders, spheres, lines and circles first, ellipses join at 37. Substeps: `docs/progress/booleans.md`
 - [ ] 30. Overnight fuzzing + simulated-user bot (Tier 3), extended as each new feature lands; for booleans, the fuzzing harness and its exact models first. Substeps: `docs/progress/booleans.md`
 
 Booleans
-- [x] B0. Boolean design review (before 31; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. Decisions written and confirmed by the owner 2026-10-16 in kernel/CLAUDE.md, "Boolean design (B0 decisions)", with the boolean test plan. The outside review (B0r) was done 2026-10-23 as a fresh high-effort thread: verdicts in `docs/progress/booleans.md`, clarifications in the B0 section (sum of tolerances, one authority, inputs up to MIN_FEATURE / 2, the general crossing finder 38f before fillets). From an expert's review of the B-rep (2026-10-16):
+- [x] B0. Boolean design review (before 31; no boolean code until it is done). Decide with the owner, write each decision and its reason into CLAUDE.md, and show them to an outside reviewer. Decisions written and confirmed by the owner 2026-10-16 in kernel/CLAUDE.md, "Boolean design (B0 decisions)", with the boolean test plan. The outside review (B0r) was done 2026-10-23 as a fresh high-effort thread: verdicts in `docs/progress/booleans.md`, clarifications in the B0 section (sum of tolerances, one authority, inputs up to MIN_FEATURE / 2, the general crossing finder 43 before fillets). From an expert's review of the B-rep (2026-10-16):
   - P-curves: store each edge's curve in every face's uv space, or write down why uv computed on demand from the 3D edge is exact for the supported surfaces (and when that stops holding: 37–38, NURBS).
-  - Model contract: closed, manifold solids only, stated as a rule (validate's "every edge used exactly twice" follows from it). What a boolean does with a non-manifold result (two boxes touching along an edge): an error, or separate bodies (35).
+  - Model contract: closed, manifold solids only, stated as a rule (validate's "every edge used exactly twice" follows from it). What a boolean does with a non-manifold result (two boxes touching along an edge): an error, or separate bodies (36).
   - Bodies with several pieces and with voids (a subtraction that splits a part or seals a hollow): how Body and Shell represent them, and what validate and the inside-out check then require.
   - Curve types for intersection curves: an ellipse (slanted plane through a cylinder, 37) and a representation for general crossings (cylinder–cylinder, 38): fitted spline or procedural "where these two surfaces meet".
   - Tolerance model: one global LINEAR, or per-edge/per-vertex tolerances for intersection edges that never lie exactly on both surfaces.
@@ -117,97 +107,101 @@ Booleans
 - [ ] 31. Plane–plane and line–plane intersection. Add per-vertex and per-edge tolerance fields (all LINEAR) and the four validation categories first (B0 decisions 5, 8). The tolerance fields land here, at 31a, not at 37a (architecture review): flat booleans already make edges that need their own tolerance, and every check from 31 on reads each entity's own tolerance, never the global one
 - [ ] 32. Splitting planar faces along intersection lines
 - [ ] 33. Inside/outside classification with exact predicates: three-valued IN/OUT/ON, seeded ray retries (B0 decision 7)
-- [ ] 34. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 1 km frame with 1 µm walls, turned and baked, gives 4010.3 instead of 4000.0 today; 37231 instead of 40000 at the old 10 km limit; see the step 12 regressions). The Combine tool (from 49) lands with 34, the first piece of booleans to try in the app: join, cut or intersect two chosen bodies; a body with curved faces is refused with a message naming the face until 37 and 38a (a tracked compromise, never a wrong answer). Before 34: 40a, the naming rules for booleans (architecture review item 1; listed under 40). With 34, as 34d (architecture review): a kernel watchdog in `kernel-client.ts` (a kernel call that hangs or the worker dies is reported and the worker restarted, never a frozen app), and the body store keeps a display mesh only for bodies on screen, made when asked for
-- [ ] 35. Coplanar faces, touching edges, shared vertices; the vertex-fan check and `NonManifoldResult`, decided on the result (B0 decision 2); merging faces and edges, and the history map (decision 6)
+- [ ] 34. Naming rules for booleans (pulled forward from full naming, 40, by the architecture review of 2026-10-22, item 1; testing area, so it can run alongside 31–33, which are kernel; it must land before 35). Today a name belongs to one feature, but Combine mixes features, so a name must be able to say which features' faces made it, and edges between faces of different features must be nameable (fillets need them). Every name valid today stays valid (old names are a subset of the new rules), and 35's history map carries the names through. 40 finishes the rest after 39. Substeps: `docs/progress/booleans.md` (34a)
+- [ ] 35. Union/subtract/intersect for planar solids + boolean property tests + oracle comparison; add cargo-fuzz (coverage-guided) over the harness's operation set. Baking a placement rounds corners off their planes: before booleans bake turned geometry, `mass.rs` needs a volume formula that stays consistent then (a 1 km frame with 1 µm walls, turned and baked, gives 4010.3 instead of 4000.0 today; 37231 instead of 40000 at the old 10 km limit; see the step 12 regressions). The Combine tool (from 54) lands with 35, as 35f, the first piece of booleans to try in the app: join, cut or intersect two chosen bodies; a body with curved faces is refused with a message naming the face until 37 and 38 (a tracked compromise, never a wrong answer). With 35, as 35d (architecture review): a kernel watchdog in `kernel-client.ts` (a kernel call that hangs or the worker dies is reported and the worker restarted, never a frozen app), and the body store keeps a display mesh only for bodies on screen, made when asked for
+- [ ] 36. Coplanar faces, touching edges, shared vertices; the vertex-fan check and `NonManifoldResult`, decided on the result (B0 decision 2); merging faces and edges, and the history map (decision 6)
 
 Curved booleans and extrude modes
 - [ ] 37. Plane–cylinder intersection (drill a hole through a box): the Ellipse curve, stored p-curves on curved faces, uv point-in-face, and the self-intersection check on such faces (B0 decisions 1, 4, 7, 8)
   - [ ] 37a (first, its own pull request; owner's request after the health check of 2026-10-17, risk 3). The data before the geometry: each coedge on a curved face gains its p-curve (its edge in the face's uv, decision 1; the edge tolerance field it once also held moved to 31a), with validate checking it, every existing test passing with unchanged answers, before any ellipse or intersection-curve code. With it, one general surface and curve interface (architecture review item 2): every surface and curve answers the same questions (point and derivatives at a uv, closest point, period, poles), so intersection, tessellation and validation stop matching on each surface type, and the closed forms stay as fast paths.
-- [ ] 38. Cylinder–cylinder, plane–sphere (B0 decision 4). Build order: 38a before 39a (a hole cut through a rounded corner meets a parallel cylinder, and every sketch extruded the same way gives parallel cylinders), 38b–38e after 40. Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces. Substeps:
+- [ ] 38. Cylinder–cylinder and sphere special cases (B0 decision 4), before 39 because a hole cut through a rounded corner meets a parallel cylinder, and every sketch extruded the same way gives parallel cylinders; the general position comes at 41. Before making sphere faces other than hemispheres, give `mass.rs` a stable formula for sphere faces much smaller than their sphere (see its "Known limit") and teach tessellation general sphere faces.
   - [ ] 38a. Exact special cases: coaxial and parallel cylinders, plane–sphere, sphere–sphere; and one general tessellator working in uv through 37a's surface questions (architecture review item 2), checked against today's tessellation, which also gives general sphere faces
-  - [ ] 38b. The procedural cylinder–quadric curve: evaluation, derivatives, inversion, branches split at turning points, hand-worked tests
-  - [ ] 38c. Cylinder–cylinder booleans in general position (a small pipe through a big one), Steinmetz solid volume check
-  - [ ] 38d. The equal-radius tee (two crossing ellipses, four edges at one vertex) and nearly-equal radii (parametrisation switch), at 0.9×/1.1× of the snap threshold
-  - [ ] 38e. Tangent cases: cylinder tangent to a plane, to a cylinder, sphere kissing a face; oracle comparison over all of 38
-  - [ ] 38f. The general crossing finder (B0r, 2026-10-23; after 38e and the kernel half of 51, before 41): a procedural curve for surface pairs with no closed form (cylinder–torus, plane–torus, cones), defined by its two surfaces and seed points, every point re-solved by Newton to within tolerance; needed because fillets trim their own pieces against each other and a cut through a filleted part meets a torus. Substeps: `docs/progress/booleans.md`
-- [ ] 39. Extrude modes. 39a: join, cut, intersect and new body in Design's Extrude; the naming harness's cut cases (Ben's Fusion answers 1–7, Q6 a sketch on a cut's floor, and the split face) then run on Design for real instead of only on the model, and the ambiguous-name path (25a4) gets real split faces. 39b: symmetric, to-face, taper (taper makes slanted planes and cones, so after 51)
+- [ ] 39. Extrude join, cut, intersect and new body in Design's Extrude; the naming harness's cut cases (Ben's Fusion answers 1–7, Q6 a sketch on a cut's floor, and the split face) then run on Design for real instead of only on the model, and the ambiguous-name path (25a4) gets real split faces. Extrude's other modes (symmetric, to-face, taper) are 53. Substeps: `docs/progress/booleans.md`
 - [ ] Later: an optional "keep as separate bodies" for union/subtract results that only touch along an edge or at a vertex (B0 decision 2)
 
-Robustness, pulled forward (right after 39a, so names survive booleans before more is built on them)
-- [ ] 40. Full topological naming on top of the 24 scheme (faces split by booleans, merged faces, history matching)
-  - [ ] 40a (BEFORE 34, pulled forward by the architecture review of 2026-10-22, item 1). Naming rules for booleans: today a name belongs to one feature, but Combine mixes features, so a name must be able to say which features' faces made it, and edges between faces of different features must be nameable (fillets need them). Every name valid today stays valid (old names are a subset of the new rules), and 34's history map carries the names through. 40 finishes the rest after 39a. Substeps: `docs/progress/booleans.md`
+Robustness, pulled forward (right after 39, so names survive booleans before more is built on them)
+- [ ] 40. Full topological naming on top of the 24 scheme and 34's rules (faces split by booleans, merged faces, history matching). Substeps: `docs/progress/booleans.md` (40a–40c)
 
-Chamfer and fillets (right after 38b–38f; the solver core 36 follows them and closes the hard block)
-- [ ] 41. Chamfer (with 42–43, right after 38b–38f and before the solver core 36; see the build-order note)
-- [ ] 42. Fillet between planar faces
-- [ ] 43. Fillet planar–curved, edge chains (needs 38f, the general crossing finder, and 51's kernel half, cones and tori: a fillet along a cylinder–plane edge is a torus piece that must be trimmed against its neighbours)
+Curved booleans in general position, cones and tori (after 40; all three before the fillets, which need them)
+- [ ] 41. Cylinder–cylinder and cylinder–sphere in general position (B0 decision 4). Substeps:
+  - [ ] 41a. The procedural cylinder–quadric curve: evaluation, derivatives, inversion, branches split at turning points, hand-worked tests
+  - [ ] 41b. Cylinder–cylinder booleans in general position (a small pipe through a big one), Steinmetz solid volume check
+  - [ ] 41c. The equal-radius tee (two crossing ellipses, four edges at one vertex) and nearly-equal radii (parametrisation switch), at 0.9×/1.1× of the snap threshold
+  - [ ] 41d. Tangent cases: cylinder tangent to a plane, to a cylinder, sphere kissing a face; oracle comparison over all of 38 and 41
+- [ ] 42. Cone and torus surfaces in the kernel: the surfaces, their crossings with what booleans already handle, validation and tessellation (architecture review item 3: chamfers and fillets make cones and tori, so they need them first). In the app they arrive with taper (53) and revolve (56)
+- [ ] 43. The general crossing finder (B0r, 2026-10-23; after 41 and 42, before 44): a procedural curve for surface pairs with no closed form (cylinder–torus, plane–torus, cones), defined by its two surfaces and seed points, every point re-solved by Newton to within tolerance; needed because fillets trim their own pieces against each other and a cut through a filleted part meets a torus. Substeps: `docs/progress/booleans.md`
 
-Constraint solver core (the end of the front-loaded hard block, right after 43, moved there from after 35 on 2026-10-24; keeps its number; the rest of the sketcher waits until 44)
-- [ ] 36. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical (in the kernel, on K1's curves, with its tolerances). Extra-heavy testing (owner's ask, 2026-10-21): the harness comes before any solver code (hand-worked cases), then thousands of seeded random sketches checked against the SolveSpace oracle, deliberately planted solver bugs that the tests must catch, and browser drag tests checking that shapes never flip or jump; split into small substeps, each tested hard before the next starts
+Chamfer and fillets (right after 43; the solver core 47 follows them and closes the hard block)
+- [ ] 44. Chamfer
+- [ ] 45. Fillet between planar faces
+- [ ] 46. Fillet planar–curved, edge chains (needs 43, the general crossing finder, and 42, cones and tori: a fillet along a cylinder–plane edge is a torus piece that must be trimmed against its neighbours)
+
+Constraint solver core (the end of the front-loaded hard block, right after 46; owner's ask, 2026-10-24: fillets as soon as logically possible after booleans)
+- [ ] 47. Constraint solver core (Newton–Raphson): coincident, horizontal, vertical (in the kernel, on K1's curves, with its tolerances). Extra-heavy testing (owner's ask, 2026-10-21): the harness comes before any solver code (hand-worked cases), then thousands of seeded random sketches checked against the SolveSpace oracle, deliberately planted solver bugs that the tests must catch, and browser drag tests checking that shapes never flip or jump; split into small substeps, each tested hard before the next starts
 
 Sketcher, continued (after the hard block; see the build-order note above)
-- [ ] 44. Profile detection (closed regions, nested); an extrude names its region by the ids of the curves around it, never by an index (docs/document-model.md, section 3)
-- [ ] 45. Parallel, perpendicular, equal, tangent
-- [ ] 46. Editable dimensions (length, radius, angle)
-- [ ] 47. Constraint status colours
-- [ ] 48. Trim, extend, offset, mirror (offsets in K1, shared with Laser kerf and Vector)
+- [ ] 48. Profile detection (closed regions, nested); an extrude names its region by the ids of the curves around it, never by an index (docs/document-model.md, section 3)
+- [ ] 49. Parallel, perpendicular, equal, tangent
+- [ ] 50. Editable dimensions (length, radius, angle)
+- [ ] 51. Constraint status colours
+- [ ] 52. Trim, extend, offset, mirror (offsets in K1, shared with Laser kerf and Vector)
 
-Holes
-- [ ] 49. Hole feature (after 40; the Combine tool moved to 34)
+Extrude modes, holes
+- [ ] 53. Extrude symmetric, to-face and taper (taper makes slanted planes and cones, on 42's cones)
+- [ ] 54. Hole feature (after 40; the Combine tool moved to 35)
 
 Parametric
-- [ ] 50. User parameters and expressions
-- [ ] 51. Cone and torus surfaces. The kernel half (the surfaces, their intersections with what booleans already handle, validation and tessellation) comes BEFORE 41 (architecture review item 3): chamfers and fillets make cones and tori, so they need it first; the app half (taper, revolve) stays here
-- [ ] 52. Revolve
-- [ ] 53. Per-feature error display on the timeline
+- [ ] 55. User parameters and expressions
+- [ ] 56. Revolve (makes cones and tori from a sketch, on 42's surfaces)
+- [ ] 57. Per-feature error display on the timeline
 
 Robustness
-- [ ] 54. Cached feature results, incremental rebuild
+- [ ] 58. Cached feature results, incremental rebuild
 
 Modelling tools
-- [ ] 55. Construction planes, axes, points
-- [ ] 56. Sketch on construction planes
-- [ ] 57. Rectangular/circular patterns, mirror
-- [ ] 58. Shell
-- [ ] 59. Draft
-- [ ] 60. Move/copy/align bodies
-- [ ] 61. Measure, section view
-- [ ] 62. Appearances, physical properties
+- [ ] 59. Construction planes, axes, points
+- [ ] 60. Sketch on construction planes
+- [ ] 61. Rectangular/circular patterns, mirror
+- [ ] 62. Shell
+- [ ] 63. Draft
+- [ ] 64. Move/copy/align bodies
+- [ ] 65. Measure, section view
+- [ ] 66. Appearances, physical properties
 
 Advanced geometry
-- [ ] 63. NURBS curves (eval, knot insertion)
-- [ ] 64. NURBS surfaces; extend the self-intersection check to general surfaces
-- [ ] 65. Sketch splines
-- [ ] 66. Sweep
-- [ ] 67. Loft
-- [ ] 68. NURBS surface–surface intersection (marching)
-- [ ] 69. General fillets on curved faces
+- [ ] 67. NURBS curves (eval, knot insertion)
+- [ ] 68. NURBS surfaces; extend the self-intersection check to general surfaces
+- [ ] 69. Sketch splines
+- [ ] 70. Sweep
+- [ ] 71. Loft
+- [ ] 72. NURBS surface–surface intersection (marching)
+- [ ] 73. General fillets on curved faces
 
 Interoperability
-- [ ] 70. STEP export
-- [ ] 71. STEP import (simple parts)
-- [ ] 72. Healing imported geometry
-- [ ] 73. 3MF and OBJ export
+- [ ] 74. STEP export
+- [ ] 75. STEP import (simple parts)
+- [ ] 76. Healing imported geometry
+- [ ] 77. 3MF and OBJ export
 
 Assemblies and drawings
-- [ ] 74. Components with their own bodies/timelines. Before 74 or X12, whichever comes first (architecture review): ids get a namespace per component, so bringing in a component or a recipe never renumbers existing ids
-- [ ] 75. Joints: rigid, revolute, slider
-- [ ] 76. Interference checking
-- [ ] 77. Drawings: projected views
-- [ ] 78. Hidden-line removal
-- [ ] 79. Drawing dimensions, PDF/DXF export
+- [ ] 78. Components with their own bodies/timelines. Before 78 or X12, whichever comes first (architecture review): ids get a namespace per component, so bringing in a component or a recipe never renumbers existing ids
+- [ ] 79. Joints: rigid, revolute, slider
+- [ ] 80. Interference checking
+- [ ] 81. Drawings: projected views
+- [ ] 82. Hidden-line removal
+- [ ] 83. Drawing dimensions, PDF/DXF export
 
 Extras
-- [ ] 80. Realistic rendering
-- [ ] 81. Tetrahedral meshing + FEM stress
-- [ ] 82. CAM: 2.5D toolpaths, G-code
-- [ ] 83. Sheet metal
-- [ ] 84. Cloud saving, versions, sharing (recipes, origin and remix lineage: X12)
+- [ ] 84. Realistic rendering
+- [ ] 85. Tetrahedral meshing + FEM stress
+- [ ] 86. CAM: 2.5D toolpaths, G-code
+- [ ] 87. Sheet metal
+- [ ] 88. Cloud saving, versions, sharing (recipes, origin and remix lineage: X12)
 
 Integration (the priority whenever a workspace is built; each item lands before the workspace that first needs it). Every link between workspaces, with what flows and when it can be built, is planned in `docs/integration-map.md`; a workspace's rows there become its integration tests
 - [ ] I1. Project file holds every workspace's data; save/load round-trips it (with step 19). Save/load half done at step 19 (one .spindlelabs.json holds every workspace's part, each read by its own `readData`; save then open gives an equal project; browser storage and autosave on top). Remains: each workspace adds its own round-trip test as it becomes real; and before the first binary file (an image, a mesh, a render) is saved into a project, the project file becomes a zip container holding the JSON plus those files (architecture review), with today's plain JSON files still opening
 - [ ] I2. Stable-ID references, re-resolved after every rebuild, warning when unresolved (rule: packages/CLAUDE.md, "Ecosystem"; with steps 24–25, completed at 40)
-- [ ] I3. One materials library used by Design appearances (62) and every later workspace
+- [ ] I3. One materials library used by Design appearances (66) and every later workspace
 - [ ] I4. One selection and one undo/redo history across workspaces (with steps 17 and 20; the selection half is done at step 17)
 - [ ] I5. Switching workspaces keeps camera and selection; a workspace's view of the design updates live after an edit. Camera and selection halves done (17e, 18d, each with an e2e check); the live view in another workspace waits for a real second workspace.
 - [ ] I6. Cross-workspace tests: edit the design, check every workspace's references still resolve (or warn) in the harness and e2e
@@ -236,7 +230,7 @@ Integration experience (owner's spec "Integration as the flagship", 2026-10-16; 
 - [x] X3. NOW (UI kit): split view: any two workspaces side by side, each with its own viewport view of the one project. Done: X3a, one scene with several cameras (`packages/viewport/src/viewer.ts`: `ViewportView`, `viewer.addView`/`removeView`; `clientToNdc`/`ndcToClient` per view); X3b, the Split layout: `packages/viewport/src/pane.ts` `paneViewports(viewer)` gives each workspace on screen a `SharedViewport` over its own view (scene calls to the viewer, camera calls to the view; the viewer picks for the pane that set its handler last and still has one), the shell (`apps/fission/src/main.ts`) uses a pane for the first workspace too; Split (bottom right of the viewport, 900 px and wider: `SPLIT_MIN_WIDTH_PX` and `splitChoices`/`defaultSplit` in `packages/ui/src/split.ts`) opens a second pane (`#split` in index.html: its own toolbar, browser, properties and view with its View buttons; "Beside it" chooses its workspace, never the one in the first pane; Close split) on a second context sharing the project, selection, history, graph and registries; choosing the second pane's workspace in the switcher swaps the panes; a window narrowed under 900 px closes it; the new view is framed again once the grid has settled its size. Tests: pane routing and pick hand-over (hand-worked; a plain forward fails them), split choices and the width (hand-worked); e2e: Split opens Render beside Design, both canvases draw the body and the box fits the second view, cameras independent, one selection picked from either view, changing and swapping the second workspace, Close split restores one view and its canvas goes, closed under 900 px and never offered on a phone, no sideways scroll; desktop focus order now includes Split. Remaining: live updates proved when a second workspace is real (I5's live-view half); the first view keeps its camera when it narrows, so the part can look cropped until Fit
 - [x] X4. NOW (interface and component): downstream chips. Done: X4a, `packages/core/src/model/downstream.ts` (`DownstreamSource`, `DownstreamRegistry`: register refuses repeats, bad ids, Design itself, empty labels and no node; `summaries(viewer, graph)`; `summarize`: `missing`, `fresh`, `updating` (cheap) or `needs-rerun` (expensive), from the graph only) and `packages/ui/src/downstream-chip.ts` (`downstreamChip`: "Print: 2 h 14 m · 38 g" with its mark, a dash when missing, tooltip with the preview, why and "Click to open Slice"); X4b, Design shows the chips: `registerDownstream?(registry)` on `WorkspacePlugin`, `downstream`, `openWorkspace(id)` and `workspaceTitle(id)` on `WorkspaceContext`; the shell builds one `DownstreamRegistry` for both panes, and `openFrom` opens a chip's workspace in the other pane when a split is open, else in place; Design's properties panel has a "Downstream" section (`#downstream`, hidden while there are none: today no workspace registers one), redrawn from `ctx.downstream.summaries("design", ctx.graph)` after every graph change Design makes (`markStale`). Tests: X4a's hand-worked and 5 × 2,000 random graph steps; panel (hidden when empty, redraws replace, click hands the target on); Design mounted with three fake Slice summaries (needs-rerun keeps its value, fresh, missing shows a dash; redrawn on an edit; click opens Slice); removing the redraw or the hiding fails them; e2e: no Downstream section shows today. Remaining: e2e with the first real chip (Slice's "Print: time · weight" at P6), which will also check the click in a split; a source whose value changes on its own (a background rebuild) has no way yet to ask Design to redraw: add one with P6
 - [x] X5. NOW (core and UI kit): change notes. Done: X5a, `packages/core/src/model/change-notes.ts` (`ChangeNotes.record(cause, staleness, graph)`: one note per result in another workspace than the cause's, a newer cause replaces it with a new id; `current(graph)` oldest first, state from the graph: `updating`, `needs-rerun`, `updated`; `dismiss`; `noteText`; `chain` from the new `graph.path`) and `packages/ui/src/change-note.ts` (`changeNote`: role=status, the line, "Why?" with the chain, × with `data-dismiss`); X5b, the app shows them: `changeNotes` on `WorkspaceContext`, one per open project (the shell builds it, both panes share it; Open replaces it with the graph); `DependencyGraph.onChange` and `ChangeNotes.onChange` (told after each change that can alter what is shown); Design's `syncGraph(graph, doc, before, notes)` records every change and removal with `changeWords` ("you changed the box", "you changed the extrusion", "you removed the profile"); the shell draws a notes strip over each pane's viewport with the notes about the workspace in that pane, redrawn once per change, keeping an opened "Why?" open, × dismisses; `?test-hooks` exposes `window.fissionTest` (graph, notes) for the browser test only. Tests: X5a's hand-worked and 5 × 2,000 random steps; X5b hand-worked Design edit and removal with stand-in Slice/Simulate/Laser results, 5 seeds × 1,000 random Design edits against a model written from what the panel shows, `onChange` counts worked by hand, the real-kernel journey now checks the print plate's note and chain; e2e: no note in normal use, a stand-in Slice plate gets a note only in Slice's pane, Why? shows the chain, state follows markFresh, × dismisses, a newer edit makes a new note, closing the split hides it and showing Slice brings it back; deliberate breaks: 14 of 15 caught (the missed one, the cause's label on an edit, can't change what is shown because the chain reads labels from the graph). Remaining: the first real note with the first cross-workspace link (P6's print estimate)
-- [x] X6. NOW for Design's formats: file and clipboard routing through the representation registry. Done: X6a (files in) and X6b (copy a profile as SVG), details below. STL in (as a mesh body) with X10, SVG/DXF in with V2/L2, PNG/JPEG with G1, STEP with 71, PDF with Y3
+- [x] X6. NOW for Design's formats: file and clipboard routing through the representation registry. Done: X6a (files in) and X6b (copy a profile as SVG), details below. STL in (as a mesh body) with X10, SVG/DXF in with V2/L2, PNG/JPEG with G1, STEP with 75, PDF with Y3
   - [x] X6a. Files in: `packages/core/src/model/files.ts`: `identifyFile` (strong signatures decide alone: PNG, JPEG, PDF, STEP, project, SVG; STL and DXF only with their extension; a name claiming a format its contents don't match is "renamed"), `FILE_FORMATS` (each format's representation and who will take it), `routeFiles` (one file at a time, through importers registered on the representation registry: `registerImporter`/`importerFor`, one per format); the shell registers projects, Image registers PNG/JPEG (`openImageFile`); drop anywhere or paste outside a text field, refusals in the top bar naming the workspace that will take them, a dashed outline while files are dragged over. Tests: hand-worked signatures and binary STL sizes (134 = 80 + 4 + 50; 133 and 135 refused), every message in full, 5 seeds × 2,000 files built by construction against a model of the rules, 13 deliberate breaks all caught; `e2e/files.mjs` in Chromium (drop, paste, split pane, project, refusals, screenshots), 2 shell breaks caught. PR #37, branch `claude/project-thread-ij761e`.
   - [x] X6b. Copy out: `packages/core/src/model/svg.ts` `outlineToSvg` (one path, holes by evenodd, y flipped, width/height in mm matching the viewBox, numbers to 1e-6 mm, arcs as A commands of at most a quarter turn so rounding the radius can't move the centre (one A for a 1 m half circle could be ~0.02 mm off), circles as four quarter arcs, the viewBox the exact box including arc extremes); a profile is selectable from Design's new Profiles group in the browser (`OutlineReference` in core, `profileReference` "outline:profile-1" in Design) and offers Copy as SVG from the action registry, through the representation registry, writing image/svg+xml (where supported) and text/plain; Ctrl+C with one profile selected does the same; a change to a box drops the profile with a note. Tests: hand-worked rectangle, slot, quarter and three-quarter arcs, plate with holes, 1 m half circle, star box; 0.9×/1.1× of the rounding step and the quarter/half-turn splits; every refusal; 5 seeds × 400 random outlines (1 µm to 1 km, up to 100 km out) against a sagitta model read back with the SVG spec's centre conversion; 16 deliberate breaks of svg.ts all caught; `e2e/copy-svg.mjs` in Chromium, 2 shell breaks caught. The arc maths in svg.ts is only what the format needs and moves to the kernel's 2D curve library when it exists. Pasting an SVG back is still refused until V2. Branch `claude/project-thread-54a3xa`.
 - [x] X7. NOW (after 19a, which also changes the shell): warm workspaces and switch speed: switching hides instead of unmounting; a browser test measures switching time and fails above 100 ms; one shortcut table shared by all workspaces. Done: X7a (warm workspaces) and X7b (one shortcut table), detail below.
@@ -246,44 +240,44 @@ Integration experience (owner's spec "Integration as the flagship", 2026-10-16; 
   - [x] X8a. Click-and-time journey harness. Done: `packages/testing/src/magic.ts` (`MAGIC_JOURNEYS`: name, steps, click limit, seconds limit, ready or what it waits for; `judge` gives pass, fail with each reason, or pending, and a pending journey never passes whatever was measured; `reportLine`); `apps/fission/e2e/journeys.mjs` walks "Design: shape to STL" in Chromium 5 times (from a cylinder: Box, click the width and type 50, STL; the file checked: 684 bytes, volume exactly 30,000), counts trusted clicks on the window (the app's own download anchor doesn't count), times first click to the file, judges the slowest walk (limits 3 clicks, 5 s) and lists the five others as PENDING. Measured: 3 clicks every walk, median about 0.35 s, slowest about 0.65 s (the first walk). Tests: hand-worked verdicts, 0.9×/1.1× time boundaries, the click limit and one over, bad measurements, 5 seeds × 500 random runs against a simple model; e2e also checks the counter is exactly 3 and ignores a script's click, and that an extra click fails. Deliberate breaks caught: click limit 2 (e2e), counting untrusted clicks (e2e), a time limit 10% loose (2 unit tests).
   - [x] X8b. Journey baseline (owner confirmed X8a's numbers, 2026-10-16): `tests/baseline.json` "journeys" holds Design shape to STL at 3 clicks and 700 ms for the slowest walk; `packages/testing/src/magic.ts` adds `parseBaselines` (every entry names a journey, whole clicks ≥ 1, time > 0, else it throws naming the entry), `compareToBaseline` (pending stays pending; no baseline or not walked is flagged; any click over is flagged; a slowest walk more than 15% over is flagged, exactly 15% is not, worked in integers: ms × 100 > baseline × 115) and `baselineLine`. `e2e/journeys.mjs` compares every journey after walking: an extra click fails every run (clicks are deterministic); the time flag fails only with JOURNEY_NIGHTLY=1, and JOURNEY_REPORT writes the lines. Nightly (`nightly.yml`, job journeys) builds the app, walks the journeys and goes red on a flag; `collect-results.sh` puts the lines in summary.txt and `journeys/latest.txt`, and every FLAG line in `journeys/flags.txt` on test-results. Tests: hand-worked (700 ms → flag above 805 ms; 4 clicks against 3), 0.9×/1.1× of the 15% margin (794.5 ms OK, 815.5 ms flagged), the click boundary, missing/pending cases, the real file holds a baseline for each ready journey and only those, broken baselines throw, 5 seeds × 500 random cases against a float model; e2e: a real walk with an extra click flagged, a real walk at 13.5%/16.5% over a baseline OK/flagged. Deliberate breaks caught: margin 17% (4 unit tests), `>=` at the line (hand-worked test), one click of slack (3 unit tests), baseline 2 clicks (e2e fails in PR mode), baseline 400 ms (e2e fails nightly, passes in PR mode); collect script run twice against a local remote, plus a run with no report.
 - [ ] X9. Transition helper in the UI kit (about half a second, skippable, off under reduced motion), with the first real cross-workspace move
-- [ ] X10. Mesh bodies in Design: a marked kind of body with the operation list in docs/integration.md; STL import as a mesh body (after 20); mesh booleans with exact solids, giving a marked mesh (after 35, sharing its predicates)
+- [ ] X10. Mesh bodies in Design: a marked kind of body with the operation list in docs/integration.md; STL import as a mesh body (after 20); mesh booleans with exact solids, giving a marked mesh (after 36, sharing its predicates)
 - [ ] X11. Smart defaults: `WorkspacePlugin.receive` (draft in the Workspace API, version 2) returns a set-up proposal for an arriving object; each workspace fills it when it becomes real (Slice orientation, filament and printer; Laser flat faces, thickness, kerf, nesting; Simulate materials and bolt-hole fixtures; Render materials, camera and lights)
 - [ ] X12. Recipe format: project format bump for `recipe`, `origin` and `lineage` (docs/project-format.md, "Planned"), after 19; "Make it for my machine" with the machine library (I15); "Update available from the author" as a three-way merge of timeline features, with C4
-- [ ] X13. Conversion: solid box → finger-jointed laser panels, sheet thickness a parameter, live (after L1, 50 and 39)
-- [ ] X14. Conversion: solid → sheet-metal part (after 83)
+- [ ] X13. Conversion: solid box → finger-jointed laser panels, sheet thickness a parameter, live (after L1, 55 and 39)
+- [ ] X14. Conversion: solid → sheet-metal part (after 87)
 - [ ] X15. Conversion: logo → stamp, cookie cutter or keychain (after V3, 39 and the curve library's offsets)
 - [ ] X16. Conversion: photo → lithophane ("relief from image", a mesh body) → print (after G2, P1 and X10)
-- [ ] X17. Biarc fitting of Vector curves in the kernel's curve library, with the faces from one curve grouped as one logical face for naming (after V1 and 24); exact at 65 with no reference changes
-- [ ] X18. Fit exact surfaces (reverse engineering), started by the user only: planes, cylinders and spheres fitted to regions of a mesh body, previewed with their distance from the scan, giving a new exact body (after 69 and X10)
+- [ ] X17. Biarc fitting of Vector curves in the kernel's curve library, with the faces from one curve grouped as one logical face for naming (after V1 and 24); exact at 69 with no reference changes
+- [ ] X18. Fit exact surfaces (reverse engineering), started by the user only: planes, cylinders and spheres fitted to regions of a mesh body, previewed with their distance from the scan, giving a new exact body (after 73 and X10)
 - [ ] D1. Flagship demo 1: box → laser panels, flawless (reliable, fast, explained, magic journey under its click and time limits) (after L1–L3 and X13)
 - [ ] D2. Flagship demo 2: logo → emboss, engrave and render (after V1–V3, L1, R1 and D1)
 - [ ] D3. Flagship demo 3: enclosure and board side by side (after E3, X2, X3 and D2)
-- [ ] K1. Kernel 2D curve library (owner's decision 5): lines and arcs with steps 21–23, offsets with 48, Béziers, path booleans and biarc fitting with V1–V3; every operation in the stateful harness and with its own 2D checks
+- [ ] K1. Kernel 2D curve library (owner's decision 5): lines and arcs with steps 21–23, offsets with 52, Béziers, path booleans and biarc fitting with V1–V3; every operation in the stateful harness and with its own 2D checks
 
-Render workspace (starts after CAD step 48, the end of the sketch work; owner's decision, 2026-10-21, so it does not compete with steps 26, 27 and 44 to 48 for usage and pull request slots)
+Render workspace (starts after CAD step 52, the end of the sketch work; owner's decision, 2026-10-21, so it does not compete with steps 26, 27 and 48 to 52 for usage and pull request slots)
 - [ ] R1. Scenes in the project: bodies by reference, materials from the shared library, environment, cameras
 - [ ] R2. Path-traced preview in the shared viewport; final render to an image
 - [ ] R3. Scene updates live when the design changes
 
-Laser workspace (starts after CAD step 48, when the sketcher is solid)
+Laser workspace (starts after CAD step 52, when the sketcher is solid)
 - [ ] L1. Jobs from design faces and sketches by reference; cut, engrave and score layers with power and speed
 - [ ] L2. DXF and SVG import and export
 - [ ] L3. Job preview and time estimate
-- [ ] L4. Machine control for common controllers; sheet-metal flat patterns after step 83
+- [ ] L4. Machine control for common controllers; sheet-metal flat patterns after step 87
 
 Simulate workspace (starts after CAD step 40, booleans and full topological naming)
 - [ ] S1. Studies in the project; loads and constraints on design faces by reference
-- [ ] S2. Tetrahedral meshing from the exact geometry (shares step 81)
+- [ ] S2. Tetrahedral meshing from the exact geometry (shares step 85)
 - [ ] S3. Static stress: stress, displacement, safety factor in the viewport
 - [ ] S4. Thermal and modal studies
 
 Manufacture workspace (starts after CAD step 40, booleans and full topological naming)
 - [ ] M1. Setups, stock, work coordinates; a tool library shared across projects
-- [ ] M2. 2D/2.5D strategies on referenced faces and edges (shares step 82)
+- [ ] M2. 2D/2.5D strategies on referenced faces and edges (shares step 86)
 - [ ] M3. Toolpath simulation in the viewport
 - [ ] M4. G-code through post-processors for different machines; 3D strategies
 
-Slice workspace (3D printing; starts right after CAD step 48, ahead of Render or taking turns with it, since both use the "everything else" pull request slot; owner's decision, 2026-10-22). It slices a triangle mesh made from each design body at the printer's resolution, so it needs no kernel step past 48. Decisions, substeps and test plans: `docs/progress/slice.md`. The first printer is the owner's Bambu Lab P1S with an AMS (four spools).
+Slice workspace (3D printing; starts right after CAD step 52, ahead of Render or taking turns with it, since both use the "everything else" pull request slot; owner's decision, 2026-10-22). It slices a triangle mesh made from each design body at the printer's resolution, so it needs no kernel step past 52. Decisions, substeps and test plans: `docs/progress/slice.md`. The first printer is the owner's Bambu Lab P1S with an AMS (four spools).
 - [ ] P0. Test harness before any slicing code: a G-code reader that replays our output and checks it (plastic laid down matches the part's volume, nothing leaves the bed, no travel crosses a wall, no move outside the printer's limits), PrusaSlicer's command line as the oracle in `prototypes/oracle/`, hand-worked parts (a 20 mm cube, a cylinder, a bridge, an overhang ramp)
 - [ ] P1. Plate and printer: design bodies by reference on a plate that updates when the design changes, move, turn and lay flat on a picked face, a check that every body fits the bed, a basic printer profile (bed size, nozzle size, G-code flavour), the mesh made from each body at the printer's resolution
 - [ ] P2. Layers: the mesh cut into closed outlines at each layer height (holes kept as holes), and a layer slider preview in the shared viewport from the start so every later step can be seen
@@ -293,19 +287,19 @@ Slice workspace (3D printing; starts right after CAD step 48, ahead of Render or
 - [ ] P6. G-code out: extrusion amounts, temperatures, fan, retraction, start and end code; Bambu's flavour first, written as the `.gcode.3mf` file Bambu Studio and the printer's SD card take, then plain Marlin and Klipper; a time and weight estimate that becomes Design's "Print: time · weight" chip (X4) and the first real change note (X5). File only: nothing is sent to a printer
 - [ ] P7. Profiles and settings: printer, filament and quality presets; a beginner view with four choices (quality, strength, supports on or off, filament) and an Advanced view with everything; PrusaSlicer profile import
 - [ ] P8. Multi-colour with the AMS: a colour per body or per face, tool changes, a purge tower
-- [ ] P9. Exact slicing: section the exact body instead of its mesh, so holes and curves print as true arcs (G2/G3) and round holes come out round (after kernel steps 31–35 and 37; removes the mesh-first compromise)
+- [ ] P9. Exact slicing: section the exact body instead of its mesh, so holes and curves print as true arcs (G2/G3) and round holes come out round (after kernel steps 31–36 and 37; removes the mesh-first compromise)
 - [ ] P10. Feature-aware printing: Slice reads each feature's intent (I11), so a hole knows its size and is grown to make up for the plastic's shrink, and a face can be marked as mating (fine layers, accurate size) or cosmetic; bolts and pins fit first time
 - [ ] P11. Settings stick to faces through edits: painted supports, seams, per-face settings and AMS colours are tied to each face's stable name (24, then 40), so changing the design keeps them, where other slicers lose them on re-import; a face that splits or vanishes warns, never guesses
 - [ ] P12. Printing feedback while designing: the print time and weight chip, overhangs and walls too thin for the nozzle shown live in Design as the part is modelled
 - [ ] P13. Calibration that feeds the design: print a small test piece, type in what you measure, and the printer and filament's shrink and fit allowances flow back into every hole and fit in the project (through P10)
 - [ ] P14. Later: tree supports, variable-width walls (Arachne), adaptive layer heights, seam placement, ironing, several plates per project; sending a job to a printer only much later and only behind the confirmation screen (I15)
 
-Circuit workspace (PCB / electronics; starts after CAD step 75: full topological naming at 40, assemblies and joints at 74–75)
+Circuit workspace (PCB / electronics; starts after CAD step 79: full topological naming at 40, assemblies and joints at 78–79)
 - [ ] E1. Schematic capture and a component library
 - [ ] E2. Board layout, routing, design-rule checks; Gerber and drill export
 - [ ] E3. ECAD–MCAD co-design: board outline from a Design face or sketch by reference; components in 3D inside the enclosure with live collision checks; mounting holes linked both ways with the enclosure's screw posts
 
-Vector workspace (logo / 2D design; starts after CAD step 48: reuses the sketcher's curves and constraints)
+Vector workspace (logo / 2D design; starts after CAD step 52: reuses the sketcher's curves and constraints)
 - [ ] V1. Paths, shapes, Bézier editing, layers (curves from K1)
 - [ ] V2. Boolean path operations, text to outlines, SVG import and export
 - [ ] V3. A graphic becomes, live-linked: an emboss or deboss in Design, an engraving or cut in Laser, a decal in Render, silkscreen in Circuit
@@ -399,7 +393,7 @@ Testing Video as heavily as the kernel (details per substep in `docs/progress/vi
 - [ ] FT6. Speed and memory: playback and export speeds and the memory used by cached frames in `tests/baseline.json`, and a check after every browser test that no decoded frame was left open
 - [ ] FT7. Mutation testing of the Video modules (StrykerJS), every surviving mutant killed or explained
 
-Office workspaces (planned, not yet in the app; added on the owner's request, 2026-10-18). Three workspaces in the style of a word processor, a spreadsheet and a slides editor, each with its familiar layout and keyboard shortcuts (Word, Excel and PowerPoint are the models for behaviour only: never their icons, artwork, trademarked names or wording). What makes them worth having inside SpindleLabs is that they are linked to the design: a picture, a dimension or a parts list in them follows the part when it changes. They start late, after CAD step 77 (drawings), so they never take time from the core CAD work; each gets a placeholder page in the switcher first, like Layout did.
+Office workspaces (planned, not yet in the app; added on the owner's request, 2026-10-18). Three workspaces in the style of a word processor, a spreadsheet and a slides editor, each with its familiar layout and keyboard shortcuts (Word, Excel and PowerPoint are the models for behaviour only: never their icons, artwork, trademarked names or wording). What makes them worth having inside SpindleLabs is that they are linked to the design: a picture, a dimension or a parts list in them follows the part when it changes. They start late, after CAD step 81 (drawings), so they never take time from the core CAD work; each gets a placeholder page in the switcher first, like Layout did.
 
 Document workspace (word processor: build instructions, reports, school write-ups)
 - [ ] W1. Pages with headings, paragraphs, lists, tables, page numbers and a contents list; styles; the usual text keys (Ctrl+B, Ctrl+I, Ctrl+Z through the shared history)
@@ -425,7 +419,7 @@ AI assistant (owner's spec "AI assistant — architecture and placeholders"; opt
 - [x] A3. NOW (draft): context: a compact structured summary (active workspace, selection with stable IDs and intent, timeline features and parameters, units, materials, recent errors and failed features, the relevant part of the dependency graph), small enough for small local models; larger providers get more. Done: `buildContext` in `packages/ai/src/context.ts`, real for what exists (selection is empty until step 17)
 - [x] A4. NOW (placeholders): specialist local models (ONNX Runtime Web / WebGPU), separate interface: background removal and segmentation, upscaling, inpainting (Image); image tracing to paths (Vector, Laser); print-failure classification from photos (Slice, later). Each downloaded on first use with a size warning. Done: `specialists.ts` placeholders
 - [x] A5. NOW (placeholders): one assistant panel shared across workspaces, aware of the active one; indicator of the active provider and whether data stays local; settings page (choose provider, download/remove local models with sizes, enter/remove API keys). Done: the "AI off" button and the assistant panel placeholder in the app shell (`apps/fission/src/assistant.ts`), e2e-checked
-- [ ] A6. NOW: evaluation suite in packages/testing (fixed prompts + project states → expected commands, e.g. "add a 5 mm hole in the middle of the top face" → the hole command with the right face ID), success rate per task type per provider, tracked over time like the fuzzer; tests that AI actions are single undo steps and rejected previews leave the project unchanged. Structure now, real runs from A7. NOW part done: `EVAL_CASES`, `runEval`, `successRates` in `packages/testing/src/ai-eval.ts`; the spec's hole case waits for steps 24 and 49. The single-undo-step / rejected-preview tests are done (AI2). Remaining: tracking rates over time
+- [ ] A6. NOW: evaluation suite in packages/testing (fixed prompts + project states → expected commands, e.g. "add a 5 mm hole in the middle of the top face" → the hole command with the right face ID), success rate per task type per provider, tracked over time like the fuzzer; tests that AI actions are single undo steps and rejected previews leave the project unchanged. Structure now, real runs from A7. NOW part done: `EVAL_CASES`, `runEval`, `successRates` in `packages/testing/src/ai-eval.ts`; the spec's hole case waits for steps 24 and 54. The single-undo-step / rejected-preview tests are done (AI2). Remaining: tracking rates over time
 - [ ] A7. Design commands for real (after step 24): plain-English commands, parameter edits, failure explanations, design review (printability, thin walls), parameter variants
 - [ ] A8. Each workspace's AI features once that workspace is real: Render (scene setup, material suggestions, camera framing); Simulate (loads and constraints in plain English, explain results, suggest fixes, parameter sweeps); Manufacture (strategies, tools, feeds/speeds with reasons, explain G-code, flag risky moves; never runs a machine); Laser (power/speed suggestions, parametric finger-joint boxes, photo tracing); Slice (diagnose failures from descriptions or photos, settings and orientation); Circuit (datasheet and component Q&A, explain DRC errors, schematic drafts marked "AI draft — review required"); Vector (tracing, clean-up, layout; image generation only via the user's own API key); Image (background removal, upscaling, smart selection, inpainting); suite-wide ("what breaks if I change this?" from the dependency graph, project questions like total filament, cost and parts, build instructions). The lists are in `packages/ai/src/features.ts` and shown in the assistant panel
 - [x] A9. NOW: docs/ai.md (architecture, how a workspace exposes its commands) and the AI rules in CLAUDE.md. Done: docs/ai.md; the rules are in docs/ai.md, pointed to from "Ecosystem" in CLAUDE.md

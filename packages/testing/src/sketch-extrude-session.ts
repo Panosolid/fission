@@ -20,7 +20,7 @@
 // than the sampling error (`clearlySimple`), and no corner is near a cusp
 // or near straight. Anything else is drawn again from the next numbers.
 //
-// Until booleans (steps 34-39) an extrude replaces the part, so that is
+// Until booleans (steps 35-39) an extrude replaces the part, so that is
 // what the model expects; "Join" gets its own model when step 39 lands.
 //
 // A session is fixed by its seed: `runSession(kernel, { seed, steps })`

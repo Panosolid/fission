@@ -82,11 +82,11 @@ Every linked value has exactly one owner. An edit made from the side that doesn'
 - The UI shows the owner next to the value ("Owned by Design"), so it is clear why an edit became a suggestion.
 - Ownership can be transferred per value. Sometimes the enclosure drives the mounting holes, sometimes the board does. Transferring is itself an undoable command, recorded in the value's provenance.
 
-### 2. Vector curves in Design before NURBS (step 65)
+### 2. Vector curves in Design before NURBS (step 69)
 
 Until the kernel has exact splines, a Vector Bézier entering Design is fitted with biarcs: pairs of arcs that meet tangent to each other and to their neighbours, within the kernel's tolerance. Printed or cut parts have no visible kinks, because the fitted outline is tangent-continuous. Design shows a note saying the curve is approximated.
 
-- All faces created from one fitted curve form one logical face for topological naming (step 24). References point to that group, never to an individual arc face, so the switch to exact NURBS at step 65 changes no references.
+- All faces created from one fitted curve form one logical face for topological naming (step 24). References point to that group, never to an individual arc face, so the switch to exact NURBS at step 69 changes no references.
 - The original stays in Vector as the owner (decision 1), so nothing is lost and the Vector → Design → Vector round trip is exact.
 - Biarc fitting is an operation of the kernel's 2D curve library (decision 5), so it uses the kernel's tolerance.
 
@@ -102,7 +102,7 @@ Mesh bodies can:
 - be shown, moved, turned, measured (volume, area, bounding box) and sectioned;
 - be printed, rendered, and sent to Laser as a projected outline;
 - be used as a reference to sketch over (projected points and outlines, step 27);
-- be combined with an exact solid or another mesh body by a mesh boolean (after step 35, sharing its exact predicates). The result is a mesh body, clearly marked, and the exact input is kept unchanged in the timeline;
+- be combined with an exact solid or another mesh body by a mesh boolean (after step 36, sharing its exact predicates). The result is a mesh body, clearly marked, and the exact input is kept unchanged in the timeline;
 - be exported as STL or 3MF.
 
 Mesh bodies cannot be filleted, chamfered, shelled or drafted, and their faces cannot be picked as exact faces. A mesh body must be closed and consistently oriented to be printed or used in a boolean; the kernel's watertight mesh check (step 5) decides.
@@ -111,7 +111,7 @@ A later, user-initiated "fit exact surfaces" feature (reverse engineering: fitti
 
 ### 5. One 2D curve library, in the kernel
 
-The sketcher, Vector, Laser and Layout share one 2D curve library: lines, arcs, Béziers, offsets, path booleans, biarc fitting, and later the constraint solver's geometry. It lives in the Rust kernel and uses `tolerance.rs`, not TypeScript, so sketcher constraints, Vector path booleans and laser kerf offsets use exactly the same maths. Its operations go through `validate`-style checks for 2D results and into the stateful random-testing harness like any kernel operation. It is built a piece at a time as its users need it: lines and arcs with the sketcher (steps 21–23), offsets with step 48, Béziers, path booleans and biarc fitting with Vector (V1–V3).
+The sketcher, Vector, Laser and Layout share one 2D curve library: lines, arcs, Béziers, offsets, path booleans, biarc fitting, and later the constraint solver's geometry. It lives in the Rust kernel and uses `tolerance.rs`, not TypeScript, so sketcher constraints, Vector path booleans and laser kerf offsets use exactly the same maths. Its operations go through `validate`-style checks for 2D results and into the stateful random-testing harness like any kernel operation. It is built a piece at a time as its users need it: lines and arcs with the sketcher (steps 21–23), offsets with step 52, Béziers, path booleans and biarc fitting with Vector (V1–V3).
 
 ## Experience principles
 

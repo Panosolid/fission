@@ -1,7 +1,7 @@
 """The judge for step 30c's boolean fuzzing: is the kernel's answer right?
 
 Each line (kernel/tests/support/boolean_cases.rs writes them) holds two
-solids, an op and, from step 34 on, the kernel's `answer`: either its bodies
+solids, an op and, from step 35 on, the kernel's `answer`: either its bodies
 (each with volume, area, faces, edges, vertices, shells, box, and rings and
 genus if it gives them) or an error and where it is:
 
@@ -20,7 +20,7 @@ How it judges. The exact models (box_model.py for boxes, convex_model.py for
 turned prisms) answer the same booleans with no rounding. First rule 1: two
 places within 2·LINEAR (the sum of two default tolerances) are one place to
 the kernel, which the models cannot see (they refuse such inputs), so the
-judge snaps first, moving B onto A (A keeps its planes, as 35c's tidying
+judge snaps first, moving B onto A (A keeps its planes, as 36c's tidying
 keeps A's plane):
 - boxes: each of B's coordinates within 2·LINEAR of one of A's on the same
   axis becomes A's;

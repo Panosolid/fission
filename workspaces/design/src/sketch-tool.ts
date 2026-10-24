@@ -168,7 +168,7 @@ export function clickAt<T extends SketchTool>(doc: DesignDocument, tool: T, at: 
  * from the report list): on top of the other, three line ends would meet
  * at both points and the outline would break ("3 ends meet"). A line that
  * only partly overlaps another still gets the kernel's warning; two
- * regions from overlapping curves come with step 44.
+ * regions from overlapping curves come with step 48.
  */
 export const SAME_LINE = "There is a line between these two points already: a second one on top of it would break the outline.";
 

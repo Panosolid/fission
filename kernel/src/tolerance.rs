@@ -70,7 +70,7 @@ pub const TOL_CAP: f64 = 10.0 * LINEAR;
 /// two entities are the same when their distance is at most the sum of
 /// their tolerances, so two entities looser than MIN_FEATURE / 2 could be
 /// the same and yet a legal feature apart, and the middle band of the
-/// three would vanish. Only an imported body (steps 71–72) can come near
+/// three would vanish. Only an imported body (steps 75–76) can come near
 /// it; a boolean refuses an input past it, naming the entity, and
 /// `validate` refuses a body with one (`ToleranceOutOfRange`). Our own
 /// geometry is held to TOL_CAP; this never loosens that.

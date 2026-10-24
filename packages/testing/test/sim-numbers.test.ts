@@ -98,7 +98,7 @@ test("the waiting moves: one list of landed steps, each move its own op, drawn a
   // Golden models and session moves read the same list (landed.ts), so a step turns both on at once.
   assert.equal(GOLDEN_LANDED, LANDED);
   assert.equal(LANDED.size, 0, "a step landed: its waiting moves now need the model (see WAITING_MOVES)");
-  assert.deepEqual(WAITING_MOVES.map((m) => [m.op, m.from]), [["add-combine", "34"], ["set-combine", "34"], ["add-extrude-into", "39a"], ["set-extrude-operation", "39a"]]);
+  assert.deepEqual(WAITING_MOVES.map((m) => [m.op, m.from]), [["add-combine", "35"], ["set-combine", "35"], ["add-extrude-into", "39"], ["set-extrude-operation", "39"]]);
   const r = seeded(5n);
   for (const m of WAITING_MOVES) {
     assert.ok(m.weight > 0 && m.does.length > 20 && m.model.length > 20, m.op);
@@ -120,7 +120,7 @@ test("with nothing landed every seed draws exactly the steps it drew before the 
 });
 
 test("a landed step's moves are drawn as often as their weights say, and only that step's", () => {
-  // The 16 moves of WEIGHTS weigh 121 together; with 34 landed, add-combine (6) and set-combine (3) join:
+  // The 16 moves of WEIGHTS weigh 121 together; with 35 landed, add-combine (6) and set-combine (3) join:
   // 6/130 = 4.615% and 3/130 = 2.308% of draws. Over 40,000 draws the standard error is about 0.1 points, so
   // each must land within 0.5 points (five of them).
   const count = (landed: Set<string>) => {
@@ -132,12 +132,12 @@ test("a landed step's moves are drawn as often as their weights say, and only th
     }
     return c;
   };
-  const c34 = count(new Set(["34"]));
-  assert.ok(Math.abs((c34["add-combine"] / 40_000) * 100 - (6 / 130) * 100) < 0.5, `${c34["add-combine"]}`);
-  assert.ok(Math.abs((c34["set-combine"] / 40_000) * 100 - (3 / 130) * 100) < 0.5, `${c34["set-combine"]}`);
-  assert.equal(c34["add-extrude-into"], undefined);
-  assert.equal(c34["set-extrude-operation"], undefined);
-  const both = count(new Set(["34", "39a"]));
+  const c35 = count(new Set(["35"]));
+  assert.ok(Math.abs((c35["add-combine"] / 40_000) * 100 - (6 / 130) * 100) < 0.5, `${c35["add-combine"]}`);
+  assert.ok(Math.abs((c35["set-combine"] / 40_000) * 100 - (3 / 130) * 100) < 0.5, `${c35["set-combine"]}`);
+  assert.equal(c35["add-extrude-into"], undefined);
+  assert.equal(c35["set-extrude-operation"], undefined);
+  const both = count(new Set(["35", "39"]));
   for (const m of WAITING_MOVES) assert.ok(both[m.op] > 0, m.op);
 });
 
@@ -150,8 +150,8 @@ test("a landed move the model doesn't know yet stops the session with words nami
       (e: Error) => e instanceof WaitingMoveError && e.message.includes(`${m.op} waits for step ${m.from}`) && e.message.includes("timeline-model.ts"),
     );
   }
-  // A whole seeded session with 34 landed meets one.
-  const steps = randomSession(1n, 400, new Set(["34"]));
+  // A whole seeded session with 35 landed meets one.
+  const steps = randomSession(1n, 400, new Set(["35"]));
   assert.ok(steps.some((s) => s.op === "add-combine" || s.op === "set-combine"));
   await assert.rejects(runSession(modelSubject(), steps), WaitingMoveError);
 });

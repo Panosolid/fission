@@ -1,7 +1,7 @@
 {
   "model": "small-cube-halved",
   "what": "A 2.2 µm cube with half of it cut away, leaving a block 1.1 µm thick, 1.1 × MIN_FEATURE, so it builds: micron-cube-halved's pair, at the bottom of the modelling range (kernel/CLAUDE.md).",
-  "from": "34",
+  "from": "35",
   "recipe": [
     {
       "do": "Start a new part and delete its ready-made box (feature-1) from the timeline, as the L bracket's make does, so the counter goes on from 2."
