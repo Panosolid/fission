@@ -689,7 +689,9 @@ try {
     // The part's Timeline row selects the same body (24f6): lit with Body 1's.
     const both = ["feature-1", "body-1"];
     assert.deepEqual(await current(), both);
-    // Origin rows select nothing until sketches need them (step 21).
+    // Origin rows select nothing until sketches need them (step 21). The Origin starts folded (U0a), so it is opened first.
+    assert.equal(await page.$eval("#browser [data-node=origin]", (el) => el.open), false, "the Origin starts folded");
+    await page.click("#browser [data-node=origin] summary");
     await page.click("#browser [data-node=origin-z]");
     assert.deepEqual(await current(), both);
     // Folding a group keeps it folded when an edit rebuilds the tree.

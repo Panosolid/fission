@@ -11,9 +11,13 @@
 // fail there. Split view keeps its browser columns; a workspace with no
 // timeline (Image) gives the row back; at 375 px the column layout keeps the
 // timeline under the view with nothing wider than the screen. Screenshots
-// at 1280 and 375 px go to E2E_SHOTS when set.
+// at 1280 and 375 px go to E2E_SHOTS when set. From U0a the rows are slim
+// single lines like Fusion's (a long label ends in "…" with the whole of it
+// in the tooltip), the Timeline and Origin groups start folded, a row's ⋯
+// shows only under the mouse, and a five-item design needs no scroll bar.
 // Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
 
@@ -189,6 +193,45 @@ const rolledBack = {
   },
 };
 
+/** A real design with long labels: the golden stepped boss (box, two face sketches, two extrudes). */
+const steppedBoss = readFileSync(new URL("../../../tests/golden/stepped-boss.panosolid.json", import.meta.url));
+/** The tallest a slim row may be: an 18 px line, 1 px padding and a 1 px border above and below (U0a). */
+const SLIM_ROW = 22;
+
+/** The browser's groups (open or not) and every shown row: its height, whether its words are cut, how they end, its tooltip. */
+const slimRows = (page) =>
+  page.evaluate(() => {
+    const panel = document.querySelector("#browser");
+    const groups = Object.fromEntries([...panel.querySelectorAll(".tree details[data-node]")].map((d) => [d.dataset.node, d.open]));
+    const shown = (el) => el.getClientRects().length > 0;
+    const rows = [...panel.querySelectorAll(".tree summary, .tree-row")].filter(shown).map((el) => {
+      const r = el.getBoundingClientRect();
+      return { text: el.textContent, node: el.dataset.node, h: r.height, right: r.right, cut: el.scrollWidth > el.clientWidth, ending: getComputedStyle(el).textOverflow, title: el.getAttribute("title") };
+    });
+    return { groups, rows, panelRight: panel.getBoundingClientRect().right, scrolls: panel.scrollHeight > panel.clientHeight };
+  });
+
+/** Slim rows: every shown row one line at most SLIM_ROW tall inside the panel; a cut label ends in "…" with its whole label as the tooltip. */
+function checkSlim({ rows, panelRight }) {
+  for (const r of rows) {
+    assert.ok(r.h <= SLIM_ROW + 0.5, `"${r.text}" is one slim line (${r.h} px, at most ${SLIM_ROW})`);
+    assert.ok(r.right <= panelRight + 0.5, `"${r.text}" stays inside the panel`);
+    if (r.cut) {
+      assert.equal(r.ending, "ellipsis", `"${r.text}" is cut with "…"`);
+      assert.equal(r.title, r.text, `"${r.text}": the tooltip has the whole label`);
+    }
+  }
+}
+
+/** The ⋯ of a row: its opacity with the mouse away from its row and then on the row. */
+async function moreShows(page, node) {
+  await page.mouse.move(640, 400);
+  const away = await page.$eval(`#browser [data-more="${node}"]`, (el) => getComputedStyle(el).opacity);
+  await page.hover(`#browser .tree-row[data-node="${node}"]`);
+  const on = await page.$eval(`#browser [data-more="${node}"]`, (el) => getComputedStyle(el).opacity);
+  return { away, on };
+}
+
 const check = async (name, fn) => {
   await fn();
   console.log(`ok - ${name}`);
@@ -225,6 +268,71 @@ try {
   await check("the timeline shows the new project's one item with the marker after it", async () => {
     assert.deepEqual(await barItems(page), [["feature-1", "box", false, false], "|"]);
     assert.equal(await page.getAttribute("#timeline [data-item=feature-1]", "title"), "1. Box: 40 × 30 × 20 mm");
+  });
+
+  await check("the browser's rows are slim single lines, the Timeline and Origin folded (U0a)", async () => {
+    const start = await slimRows(page);
+    // Fusion's browser starts with the origin folded and has no timeline group (its timeline is the bar along the bottom).
+    assert.deepEqual(start.groups, { timeline: false, sketches: true, profiles: true, bodies: true, origin: false });
+    checkSlim(start);
+    // The stepped boss at a laptop's height: its five items stay folded under Timeline, so nothing scrolls.
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.setInputFiles("#open-file", { name: "boss.panosolid.json", mimeType: "application/json", buffer: steppedBoss });
+    await page.waitForFunction(() => document.querySelectorAll('#browser [data-node="bodies"] .tree-row').length === 3);
+    const boss = await slimRows(page);
+    assert.equal(boss.scrolls, false, "the browser needs no scroll bar");
+    checkSlim(boss);
+    await page.click('#browser details[data-node="timeline"] > summary');
+    const open = await slimRows(page);
+    checkSlim(open);
+    // "2. Sketch 1 on a face of Feature 1 (box)" is about 250 px of 13 px words, wider than the 240 px panel less its ⋯: cut.
+    const long = open.rows.find((r) => r.node === "sketch-2");
+    assert.equal(long.text, "2. Sketch 1 on a face of Feature 1 (box)");
+    assert.ok(long.cut, "the long label is cut");
+    if (shots) await page.screenshot({ path: `${shots}/browser-slim-1280.png` });
+  });
+
+  await check("a row's ⋯ shows only under the mouse or the keyboard (U0a)", async () => {
+    assert.deepEqual(await moreShows(page, "sketch-2"), { away: "0", on: "1" });
+    await page.mouse.move(640, 400);
+    await page.focus('#browser [data-more="sketch-2"]');
+    assert.equal(await page.$eval('#browser [data-more="sketch-2"]', (el) => getComputedStyle(el).opacity), "1", "focused, it shows");
+    await page.$eval('#browser [data-more="sketch-2"]', (el) => el.blur());
+  });
+
+  await check("the browser's scroll bar is thin and shows only under the pointer (U0a)", async () => {
+    await page.mouse.move(640, 400);
+    const away = await page.$eval("#browser", (el) => [getComputedStyle(el).scrollbarWidth, getComputedStyle(el).scrollbarColor]);
+    assert.deepEqual(away, ["thin", "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)"], "away from the panel its scroll bar can't be seen");
+    await page.hover('#browser .tree-row[data-node="body-1"]');
+    const over = await page.$eval("#browser", (el) => getComputedStyle(el).scrollbarColor);
+    assert.notEqual(over, "rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)", "over the panel it shows");
+  });
+
+  await check("the slim-row checks fail on the old rows", async () => {
+    // Rows wrapping onto two lines as before U0a: the long label takes two lines.
+    const wrap = await page.addStyleTag({ content: "#workspace #browser .tree-row:not(#none) { white-space: normal !important; }" });
+    await assert.rejects(async () => checkSlim(await slimRows(page)), /is one slim line/);
+    await wrap.evaluate((el) => el.remove());
+    // The old 4 px padding: 18 + 8 + 2 = 28 px rows.
+    const tall = await page.addStyleTag({ content: "#workspace #browser .tree-row:not(#none) { padding: 4px 8px !important; }" });
+    await assert.rejects(async () => checkSlim(await slimRows(page)), /is one slim line/);
+    await tall.evaluate((el) => el.remove());
+    // A cut label with no "…".
+    const clip = await page.addStyleTag({ content: "#workspace #browser .tree-row:not(#none) { text-overflow: clip !important; }" });
+    await assert.rejects(async () => checkSlim(await slimRows(page)), /is cut with "…"/);
+    await clip.evaluate((el) => el.remove());
+    // The ⋯ always shown, as before.
+    const always = await page.addStyleTag({ content: "#workspace #browser .delete-ask-more:not(#none) { opacity: 1 !important; }" });
+    assert.notDeepEqual(await moreShows(page, "sketch-2"), { away: "0", on: "1" });
+    await always.evaluate((el) => el.remove());
+    // Every group open, as before, on a shorter window: the no-scroll-bar check can fail (22 rows of 24 px are 528 px; the panel gets about 440).
+    await page.setViewportSize({ width: 1280, height: 620 });
+    await page.click('#browser details[data-node="origin"] > summary');
+    assert.equal((await slimRows(page)).scrolls, true, "with every group open the rows overflow at 620 px");
+    for (const g of ["origin", "timeline"]) await page.click(`#browser details[data-node="${g}"] > summary`);
+    checkSlim(await slimRows(page));
+    await page.setViewportSize({ width: 1280, height: 800 });
   });
 
   await check("a rolled-back and a suppressed item, with the marker between", async () => {
@@ -301,6 +409,7 @@ try {
 
   await check("a long browser still scrolls with the wheel over its rows", async () => {
     await page.setViewportSize({ width: 1280, height: 400 });
+    for (const g of ["timeline", "origin"]) await page.click(`#browser details[data-node="${g}"] > summary`); // folded at the start (U0a)
     assert.equal(await page.$eval("#browser", (el) => el.scrollHeight > el.clientHeight), true, "at 400 px tall the rows overflow the panel");
     await page.$eval("#browser", (el) => (el.scrollTop = 0));
     const first = await page.$eval("#browser [data-node=timeline] summary", (el) => el.getBoundingClientRect());

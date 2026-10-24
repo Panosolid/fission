@@ -122,8 +122,9 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
 /** Whether two sets of ids hold the same ids. */
 const sameIds = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((id) => b.has(id));
 
-/** Browser groups the user folded, kept across rebuilds and workspace switches. */
-const folded = new Set<string>();
+/** Browser groups the user folded (false) or opened (true), kept across rebuilds and workspace switches; any other group starts as its node says (`startsFolded`). */
+const folding = new Map<string, boolean>();
+const isOpen = (n: { id: string; startsFolded?: boolean }) => folding.get(n.id) ?? !n.startsFolded;
 
 /** Lights the browser rows whose geometry is selected (aria-current), and only those; `failed`, the last rebuild's failed ids, select nothing. */
 function lightRows(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<string>, items: readonly GeometryReference[]) {
@@ -154,10 +155,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
-  for (const d of slot.querySelectorAll<HTMLDetailsElement>("details[data-node]")) {
-    if (d.open) folded.delete(d.dataset.node!);
-    else folded.add(d.dataset.node!);
-  }
+  for (const d of slot.querySelectorAll<HTMLDetailsElement>("details[data-node]")) folding.set(d.dataset.node!, d.open);
   const list = (nodes: BrowserNode[]) => {
     const ul = document.createElement("ul");
     ul.className = "tree";
@@ -165,10 +163,10 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
       const li = document.createElement("li");
       if (n.children) {
         const details = document.createElement("details");
-        details.open = !folded.has(n.id);
+        details.open = isOpen(n);
         details.dataset.node = n.id; // read by the e2e test
         details.addEventListener("toggle", () => {
-          if (details.isConnected) details.open ? folded.delete(n.id) : folded.add(n.id);
+          if (details.isConnected) folding.set(n.id, details.open);
         });
         const summary = document.createElement("summary");
         summary.textContent = n.label;
@@ -180,6 +178,9 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
         if (ref) row.setAttribute("type", "button");
         row.className = "tree-row";
         row.textContent = n.label;
+        // One line per row (U0a): a label too long for it ends in "…", and the tooltip has it whole.
+        row.title = n.label;
+        row.dataset.label = n.label;
         row.dataset.node = n.id;
         if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
         if (items.has(n.id) || n.id.startsWith("sketches/")) {
@@ -215,9 +216,9 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
   const fold = document.createElement("details");
   fold.className = "browser-fold";
   fold.dataset.node = "browser";
-  fold.open = !folded.has("browser");
+  fold.open = isOpen({ id: "browser" });
   fold.addEventListener("toggle", () => {
-    if (fold.isConnected) fold.open ? folded.delete("browser") : folded.add("browser");
+    if (fold.isConnected) folding.set("browser", fold.open);
   });
   const title = document.createElement("summary");
   title.textContent = "Browser";
@@ -407,7 +408,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     for (const row of ctx.browser.querySelectorAll<HTMLElement>(".tree-row")) {
       const words = rows.get(row.dataset.node!);
       if (words !== undefined) row.title = words;
-      else if (row.classList.contains("kept")) row.removeAttribute("title");
+      else if (row.classList.contains("kept")) row.title = row.dataset.label ?? "";
       row.classList.toggle("kept", words !== undefined);
     }
   }
@@ -600,7 +601,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       row.classList.toggle("timeline-menu-rolled-back", grey);
       row.classList.toggle("timeline-menu-greyed", by !== undefined);
       if (by !== undefined) row.title = `Greyed: ${by} is suppressed`;
-      else if (row.title.startsWith("Greyed: ")) row.removeAttribute("title");
+      else if (row.title.startsWith("Greyed: ")) row.title = row.dataset.label ?? "";
     }
   }
 

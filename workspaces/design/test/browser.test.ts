@@ -80,3 +80,22 @@ test("sketches are timeline rows in build order and rows of their own in Sketche
   assert.deepEqual(tree[0].children!.map((n) => n.id), ["feature-1", "sketch-2", "sketch-6"]);
   assert.deepEqual(tree[1].children!.map((n) => n.id), ["sketches/sketch-2", "sketches/sketch-6"]);
 });
+
+test("U0a: the Timeline and the Origin start folded, every other group open, like Fusion's browser", () => {
+  // Fusion's browser has no Timeline group (the bar along the bottom is its
+  // timeline) and shows the Origin folded; Sketches, Profiles and Bodies are
+  // the rows people use, so they start open. Leaves never fold.
+  const tree = browserTree(partDocument("box", 40, 30, 20));
+  assert.deepEqual(
+    tree.map((n) => [n.id, n.startsFolded === true]),
+    [
+      ["timeline", true],
+      ["sketches", false],
+      ["profiles", false],
+      ["bodies", false],
+      ["origin", true],
+    ],
+  );
+  const leaves = tree.flatMap((n) => n.children ?? []);
+  assert.ok(leaves.length > 0 && leaves.every((n) => n.startsFolded === undefined), "no row is a folding group");
+});
