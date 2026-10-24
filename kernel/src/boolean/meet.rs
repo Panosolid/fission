@@ -304,6 +304,11 @@ mod tests {
         // 0, 0) − w) = −4, h₂ = Y·((0, 2, 0) − w) = 5, p = w − 4X + 5Y.
         let l = line_of(&a, &b, DVec3::new(5.0, -3.0, 7.0));
         assert_eq!(l.point, DVec3::new(1.0, 2.0, 7.0));
+        // Its bound, 64 ulps of |w| = √83, |o₁ − w| = |(−4, 3, −7)| = √74,
+        // |o₂ − w| = |(−5, 5, −7)| = √99, (|h₁| + |h₂|) ÷ sin = 9 and
+        // |p − w| = |(−4, 5, 0)| = √41.
+        let sum = 83f64.sqrt() + 74f64.sqrt() + 99f64.sqrt() + 9.0 + 41f64.sqrt();
+        assert!((l.err / (64.0 * f64::EPSILON * sum) - 1.0).abs() < 1e-12, "{l:?} vs {sum}");
         // Swapped, the line runs the other way: Y × X = −Z.
         assert_eq!(line_of(&b, &a, DVec3::ZERO).dir, DVec3::NEG_Z);
         // The bound: 64 ulps of |w| + |o₁ − w| + |o₂ − w| + (|h₁| + |h₂|)
@@ -409,6 +414,13 @@ mod tests {
         assert_eq!((t, p), (5.0, DVec3::ZERO));
         // The bound: 64 ulps of |o − origin| + |t| + |point| = 5 + 5 + 0.
         assert_eq!(err, 64.0 * f64::EPSILON * 10.0);
+        // Down from (0, 0, 5) onto z = 2, given through (3, 4, 2): h = n·(o
+        // − origin) = −3, n·dir = −1, so t = 3, at (0, 0, 2); the bound is
+        // 64 ulps of |(3, 4, −3)| + 3 + 2 = √34 + 5.
+        let shelf = plane([3.0, 4.0, 2.0], [0.0, 0.0, 1.0]);
+        let (t, p, err) = crossing(DVec3::new(0.0, 0.0, 5.0), DVec3::NEG_Z, &shelf);
+        assert_eq!((t, p), (3.0, DVec3::new(0.0, 0.0, 2.0)));
+        assert_eq!(err, 64.0 * f64::EPSILON * (34f64.sqrt() + 5.0));
         // From (0, 0, 1) along (1, 0, −1), not unit: down 1 while across
         // 1, so it lands at (1, 0, 0), √2 along the unit direction.
         let (t, p, err) = crossing(DVec3::new(0.0, 0.0, 1.0), DVec3::new(1.0, 0.0, -1.0), &floor);
@@ -452,6 +464,7 @@ mod tests {
             assert_eq!(floor.side(at(0.9 * tol), tol), Side::On, "{tol}");
             assert_eq!(floor.side(at(-0.9 * tol), tol), Side::On, "{tol}");
             assert_eq!(floor.side(at(tol), tol), Side::On, "exactly at {tol} is ON");
+            assert_eq!(floor.side(at(-tol), tol), Side::On, "exactly at −{tol} is ON");
             assert_eq!(floor.side(at(1.1 * tol), tol), Side::Above, "{tol}");
             assert_eq!(floor.side(at(-1.1 * tol), tol), Side::Below, "{tol}");
         }
