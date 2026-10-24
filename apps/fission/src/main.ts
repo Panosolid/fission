@@ -876,4 +876,4 @@ const started = start();
 ctx.kernel.call("kernel_version").then((v) => {
   $("version").textContent = `kernel v${v}`;
   $("version").parentElement!.title = `Panosolid, kernel v${v}`; // where the version shows when the bar has no room for it
-});
+}, () => {}); // a kernel that didn't start says so where the part would be (Design's error line), not as an uncaught error

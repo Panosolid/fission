@@ -2,7 +2,7 @@
 // Run with `npm test` (Node's built-in test runner).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { KernelError, kernelFailure, latestOnly } from "../src/kernel/kernel-client.ts";
+import { KernelClient, KernelError, kernelFailure, latestOnly } from "../src/kernel/kernel-client.ts";
 
 /** A promise we resolve by hand, to force replies out of order. */
 function deferred<T>() {
@@ -73,3 +73,79 @@ test("anything else thrown is an internal failure with no inputs", () => {
   assert.deepEqual(kernelFailure("text"), { kind: "internal", inputs: [], message: "text" });
   assert.deepEqual(kernelFailure(null), { kind: "internal", inputs: [], message: "null" });
 });
+
+/**
+ * A stand-in for the browser's Worker: records what is posted and lets a test
+ * fire the worker's error event, as a browser does when the worker's script
+ * can't be fetched (the page left while it loaded, a dropped connection) or
+ * throws while it starts. Daily bug hunt 3e: WebKit's smoke test found a page
+ * whose worker load was cancelled reporting "kernel worker crashed: undefined"
+ * as an uncaught error, and every call made after that waited forever.
+ */
+class FakeWorker {
+  static last: FakeWorker;
+  onmessage: ((e: { data: unknown }) => void) | null = null;
+  onerror: ((e: { message?: string; preventDefault(): void }) => void) | null = null;
+  posted: unknown[] = [];
+  constructor() {
+    FakeWorker.last = this;
+  }
+  postMessage(m: unknown) {
+    this.posted.push(m);
+  }
+  /** Fires the error event; true if the client took it (preventDefault), so the browser doesn't also report it. */
+  fail(message?: string) {
+    let prevented = false;
+    this.onerror?.({ message, preventDefault: () => (prevented = true) });
+    return prevented;
+  }
+  answer(id: number, value: unknown) {
+    this.onmessage?.({ data: { id, ok: true, value } });
+  }
+}
+
+async function withFakeWorker(fn: (client: KernelClient, worker: FakeWorker) => Promise<void>) {
+  const real = (globalThis as { Worker?: unknown }).Worker;
+  (globalThis as { Worker?: unknown }).Worker = FakeWorker;
+  try {
+    await fn(new KernelClient(), FakeWorker.last);
+  } finally {
+    (globalThis as { Worker?: unknown }).Worker = real;
+  }
+}
+
+test("calls are answered by id through the worker", () =>
+  withFakeWorker(async (client, worker) => {
+    const v = client.call("kernel_version");
+    assert.deepEqual(worker.posted, [{ id: 1, op: "kernel_version", args: [] }]);
+    worker.answer(1, "0.30.1");
+    assert.equal(await v, "0.30.1");
+  }));
+
+test("a worker that didn't load fails the call waiting on it and every later one, in words, and is taken as handled", () =>
+  withFakeWorker(async (client, worker) => {
+    const waiting = client.call("kernel_version");
+    // A script that can't be fetched fires an error event with no message.
+    assert.equal(worker.fail(undefined), true);
+    const words = /The geometry kernel didn't start \(its worker didn't load\)\. Reload the page to try again\.$/;
+    await assert.rejects(waiting, (e: KernelError) => e instanceof KernelError && e.kind === "internal" && words.test(e.message));
+    // Nothing answers a worker that never loaded: a later call fails at once instead of waiting forever.
+    const later = client.call("body_count");
+    assert.equal(worker.posted.length, 1, "nothing more is posted to the dead worker");
+    await assert.rejects(later, words);
+  }));
+
+test("a worker that throws while it starts says what it threw, for this call and every later one", () =>
+  withFakeWorker(async (client, worker) => {
+    const waiting = client.call("kernel_version");
+    assert.equal(worker.fail("SyntaxError: unexpected token"), true);
+    const words = /The geometry kernel stopped \(kernel worker crashed: SyntaxError: unexpected token\)\. Reload the page to try again\.$/;
+    await assert.rejects(waiting, words);
+    await assert.rejects(client.call("body_count"), words);
+    // An empty message is no message: the same words as a worker that didn't load.
+    await withFakeWorker(async (c2, w2) => {
+      const p = c2.call("kernel_version");
+      w2.fail("");
+      await assert.rejects(p, /didn't load/);
+    });
+  }));

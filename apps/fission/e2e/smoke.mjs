@@ -2,7 +2,7 @@
 // what is on screen. Run with `npm run e2e` (after `npm run build`).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { launch } from "./browser.mjs";
+import { launch, browserName } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
 
@@ -1148,10 +1148,21 @@ try {
       for (let i = 0; i < 120 && regions.at(-1)?.id !== "properties"; i++) {
         await page.keyboard.press("Tab");
         const r = await page.evaluate(() => {
-          const el = document.activeElement?.closest("#topbar, #toolbar, #panel-toggles, #browser, #undo-redo, #view-controls, #timeline, #properties");
-          return el ? { id: el.id, top: el.getBoundingClientRect().top + document.querySelector("#workspace").scrollTop } : { id: "other", top: -1 };
+          const at = document.activeElement;
+          // Firefox gives every scroll container a tab stop of its own (Chromium and WebKit only one with nothing
+          // focusable in it): the page's #workspace and #toolbar, both full of controls (hunt 3e).
+          const scroller = (at?.id === "workspace" || at?.id === "toolbar") && /auto|scroll/.test(getComputedStyle(at).overflowY + getComputedStyle(at).overflowX);
+          const control = !!at?.matches("button, input, select, textarea, a[href], summary, [tabindex='0']");
+          const el = at?.closest("#topbar, #toolbar, #panel-toggles, #browser, #undo-redo, #view-controls, #timeline, #properties");
+          const top = el ? el.getBoundingClientRect().top + document.querySelector("#workspace").scrollTop : -1;
+          return { id: el && !scroller ? el.id : scroller ? `scroller:${at.id}` : "other", top, control, what: at?.outerHTML.slice(0, 80) };
         });
-        if (r.id !== regions.at(-1)?.id) regions.push(r);
+        if (r.id.startsWith("scroller:")) {
+          assert.equal(browserName, "firefox", `a scroll container is a tab stop in ${browserName}: ${r.what}`);
+          continue;
+        }
+        assert.ok(r.control, `every tab stop is a control: ${r.what}`);
+        if (r.id !== regions.at(-1)?.id) regions.push({ id: r.id, top: r.top });
       }
       return regions;
     };
@@ -1176,7 +1187,11 @@ try {
 
   await check("Save, reload, Open: the saved part and its numbers come back, re-framed", async () => {
     await page.goto(url + "#design");
-    await page.reload(); // the same URL keeps the page, so start from a fresh app
+    // In WebKit the goto loads the page afresh; reloading before it has started
+    // leaves it mid-start, and WebKit logs the kernel's cancelled loads as
+    // console errors (hunt 3e). So wait for the part, as a person would see it.
+    await page.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
+    await page.reload(); // the same URL keeps the page in Chromium, so start from a fresh app
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
     await setSize("width", 50);
     // V = 50·30·20 = 30000.
@@ -1904,6 +1919,32 @@ try {
       await wide.screenshot({ path: "e2e/change-note-marker.png" });
     } finally {
       await wide.close();
+    }
+  });
+
+  await check("a kernel whose worker doesn't load says so in words, with no uncaught error, and nothing waits forever", async () => {
+    // Hunt 3e: WebKit cancels the worker's load when the page is left while
+    // it starts (the smoke test's reloads), and the app reported "kernel
+    // worker crashed: undefined" as an uncaught error; any call made after
+    // the worker was gone waited forever. Here its script never comes.
+    const bare = await browser.newPage({ viewport: { width: 1000, height: 640 } });
+    const errors = [];
+    bare.on("pageerror", (e) => errors.push(e.message));
+    try {
+      await bare.route(/kernel\.worker[^/]*\.js$/, (r) => r.abort());
+      await bare.goto(url);
+      const words = "The geometry kernel didn't start (its worker didn't load). Reload the page to try again.";
+      await bare.waitForFunction((w) => document.querySelector("#error")?.textContent === w, words);
+      // The box's build was answered (with the failure), so nothing is still rebuilding.
+      await bare.waitForFunction(() => document.querySelector("#viewport")?.dataset.rebuilding === "false");
+      assert.equal(await bare.textContent("#volume"), "—");
+      // An edit made afterwards is refused at once with the same words, not left waiting.
+      await bare.fill("#width", "41");
+      await bare.waitForFunction(() => document.querySelector("#viewport")?.dataset.rebuilding === "false");
+      assert.equal(await bare.textContent("#error"), words);
+      assert.deepEqual(errors, []);
+    } finally {
+      await bare.close();
     }
   });
 

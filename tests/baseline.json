@@ -99,7 +99,7 @@
     "app.rebuild_20_arcs_edit_first.kernel_calls": 43,
     "app.rebuild_20_arcs_edit_first.relative_time": 0.0543,
     "app.simulated_users.invalid_percent": 0,
-    "app.simulated_users.relative_time": 0.0082,
+    "app.simulated_users.relative_time": 0.0088,
     "app.simulated_users.wrong_percent": 0,
     "kernel.extrude_arcs_200.allocations": 67430,
     "kernel.extrude_arcs_200.instructions": 206460565,
