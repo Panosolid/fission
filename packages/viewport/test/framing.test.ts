@@ -82,4 +82,9 @@ test("hand-worked: Fit frames the box round the body and every finished sketch, 
   assert.deepEqual(partFraming([]), { centre: [0, 0, 0], radius: 0 });
   assert.deepEqual(partFraming([[NaN, 0, 0], [1, 2]]), { centre: [0, 0, 0], radius: 0 });
   assert.deepEqual(partFraming([...body, [Infinity, 0, 0]]), alone);
+  // One point is a box of size 0 there, not nothing: centre (5, 6, 7), radius 0.
+  assert.deepEqual(partFraming([[5, 6, 7]]), { centre: [5, 6, 7], radius: 0 });
+  // A box not starting at the origin, (1, 2, 3) to (4, 6, 15): sides 3, 4, 12, so the
+  // diagonal is √(9 + 16 + 144) = 13 and the radius 6.5; centre (2.5, 4, 9).
+  assert.deepEqual(partFraming([[1, 2, 3], [4, 6, 15]]), { centre: [2.5, 4, 9], radius: 6.5 });
 });
