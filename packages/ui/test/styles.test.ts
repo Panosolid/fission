@@ -10,6 +10,22 @@ import { join, resolve } from "node:path";
 const repo = resolve(import.meta.dirname, "../../..");
 const dirs = [join(repo, "packages/ui/src/styles"), ...readdirSync(join(repo, "workspaces")).map((w) => join(repo, "workspaces", w, "src/styles"))];
 
+/** A selector list split at its own commas, not those inside :is(…) or :not(…). */
+function topLevel(list: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i] === "(") depth++;
+    else if (list[i] === ")") depth--;
+    else if (list[i] === "," && depth === 0) {
+      parts.push(list.slice(from, i));
+      from = i + 1;
+    }
+  }
+  return [...parts, list.slice(from)];
+}
+
 /** Selectors of every top-level rule (comments and @-rules' own lines skipped). */
 export function selectors(css: string): string[] {
   const body = css.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -17,7 +33,7 @@ export function selectors(css: string): string[] {
   for (const m of body.matchAll(/([^{}]+)\{/g)) {
     const head = m[1].trim();
     if (head.startsWith("@")) continue;
-    out.push(...head.split(",").map((s) => s.trim()));
+    out.push(...topLevel(head).map((s) => s.trim()));
   }
   return out;
 }
@@ -31,6 +47,14 @@ test("selectors are read by hand-worked example", () => {
   // and a media query whose own line is skipped: four selectors.
   const css = "/* a { b */ .x { c: d; }\n.x:hover, .x .y { e: f; }\n@media (max-width: 9px) { .x.z { g: h; } }";
   assert.deepEqual(selectors(css), [".x", ".x:hover", ".x .y", ".x.z"]);
+});
+
+test("a comma inside :is(…) or :not(…) is part of its selector, not a new one (hand-worked)", () => {
+  // Two selectors: the first holds two commas in brackets, the second one in :not(…).
+  const css = ".x :is(.a, .b:not(.c, .d)) { } .x:not(:hover, :focus) { }";
+  assert.deepEqual(selectors(css), [".x :is(.a, .b:not(.c, .d))", ".x:not(:hover, :focus)"]);
+  // A stray hidden after a bracket's comma is still found: the list's own comma splits it off.
+  assert.deepEqual(strays("x", ".x :is(.a, .b), .y { }"), [".y"]);
 });
 
 test("a selector for another feature, or a bare element, is caught", () => {

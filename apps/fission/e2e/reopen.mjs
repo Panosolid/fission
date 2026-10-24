@@ -87,6 +87,7 @@ async function freshValved(width) {
   });
   await page.goto(url + "?test-hooks#design");
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await pinProperties(page);
   return { context, page };
 }
 
