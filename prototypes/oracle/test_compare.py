@@ -303,6 +303,99 @@ class CancellingLoops(unittest.TestCase):
         self.assertTrue(any(compare.CANCELLED_LOOPS in o for o in occ), occ)
 
 
+SHARP_SHAPE = {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {
+    "bulges": ["40.01986857113923", "1.0555288956816682", "1.0", "1.0"],
+    "pts": [["-231250.0", "-0.0"], ["-231251.0", "-62.5"], ["-62.5", "-625.0"], ["-6875.0", "0.0"]]}}}}
+
+
+def sharp_text():
+    """regressions/sharp-corner-arc.step: what the writer writes for
+    SHARP_SHAPE (#293, nightly fuzzing at 684b681, sketch corpus line 803)."""
+    with open(os.path.join(os.path.dirname(__file__), "regressions", "sharp-corner-arc.step")) as f:
+        return f.read()
+
+
+@unittest.skipUnless(importlib.util.find_spec("OCP") is not None and importlib.util.find_spec("mpmath") is not None,
+                     "needs cadquery-ocp and mpmath")
+class SharpCorners(unittest.TestCase):
+    """OpenCascade calling a loop crossed at a sharp corner that never
+    crosses (#293: `step_check.crossing_only`, `compare.never_crosses`),
+    listed under SHARP_CORNER, never counted or dropped."""
+
+    def judge(self, text, shape=SHARP_SHAPE):
+        import compare
+        import exact
+        _, solid, _ = compare.build(shape)
+        rebuilt = compare.measure(solid)[:2]
+        ref = tuple(float(x) for x in exact.volume_area(shape))
+        return compare.step_issues({"shape": shape, "faces": 6, "step": text, "step_refused": None},
+                                   rebuilt, ref, (1e-6 * ref[0], 1e-6 * ref[1]))
+
+    def test_issue_293_is_listed_not_counted(self):
+        # The arcs of radius 625.78 and 115,763 leave their shared corner
+        # (-231251, -62.5) 0.545 degrees apart. Their circles' other
+        # meeting point is 11.8 mm away and on neither arc (worked at 50
+        # digits in #293), and no other pieces meet: OpenCascade calls the
+        # bottom cap's loop crossed, and that is all it calls wrong.
+        import compare
+        import step_check
+        r = step_check.check_text(sharp_text())
+        self.assertFalse(r.ok)
+        self.assertTrue(r.crossing_only)
+        self.assertTrue(compare.never_crosses(SHARP_SHAPE))
+        issues, occ = self.judge(sharp_text())
+        self.assertEqual(issues, [])
+        self.assertTrue(occ and all(compare.SHARP_CORNER in o for o in occ), occ)
+
+    def test_its_verdict_flips_with_one_unit_in_the_last_place(self):
+        # Why it is OpenCascade's rounding: the big arc's radius two doubles
+        # up reads valid, one double up invalid; both pass the oracle.
+        import math
+        import step_check
+        r = 115763.43219960624
+        up1, up2 = math.nextafter(r, math.inf), math.nextafter(math.nextafter(r, math.inf), math.inf)
+        one = sharp_text().replace(repr(r), repr(up1))
+        two = sharp_text().replace(repr(r), repr(up2))
+        self.assertFalse(step_check.check_text(one).ok)
+        self.assertTrue(step_check.check_text(two).ok)  # if this fails, OpenCascade's rounding moved
+        self.assertEqual(self.judge(one)[0], [])
+        self.assertEqual(self.judge(two)[0], [])
+
+    def test_a_flipped_face_on_it_is_counted(self):
+        # The planted fault (the first face's same_sense swapped): other
+        # checks fail too, so it is not only a crossing.
+        import step_check
+        old = "#109 = ADVANCED_FACE('',(#108),#102,.T.);"
+        bad = sharp_text().replace(old, old.replace(".T.);", ".F.);"))
+        self.assertNotEqual(bad, sharp_text())
+        self.assertFalse(step_check.check_text(bad).crossing_only)
+        self.assertIn("step validity", kinds(self.judge(bad)[0]))
+
+    def test_a_loop_walked_backwards_is_counted(self):
+        import re
+        import step_check
+        bound = re.search(r"#\d+ = FACE_BOUND\('',#\d+,\.T\.\);", sharp_text()).group(0)
+        bad = sharp_text().replace(bound, bound.replace(".T.", ".F."))
+        self.assertFalse(step_check.check_text(bad).crossing_only)
+        self.assertIn("step validity", kinds(self.judge(bad)[0]))
+
+    def test_a_real_crossing_is_never_excused(self):
+        # By hand: corners (0,0), (2,2), (2,0), (0,2) walk a bow tie whose
+        # first and third sides cross at (1,1).
+        import compare
+        bow = {"Extrude": {"dist": "1.0", "holes": [], "outer": {"Path": {"bulges": [],
+               "pts": [["0.0", "0.0"], ["2.0", "2.0"], ["2.0", "0.0"], ["0.0", "2.0"]]}}}}
+        self.assertFalse(compare.never_crosses(bow))
+        self.assertFalse(compare.never_crosses({"Box": {"w": "1.0", "d": "1.0", "h": "1.0"}}))
+        # The same file judged as if its profile crossed: counted.
+        saved = compare.never_crosses
+        compare.never_crosses = lambda shape: False
+        try:
+            self.assertIn("step validity", kinds(self.judge(sharp_text())[0]))
+        finally:
+            compare.never_crosses = saved
+
+
 def cylinder_text(r, h, off=0.0):
     """kernel/tests/step/cylinder_r2_h3.step (radius 2, height 3, axis z
     from the origin) made radius r and height h, its top circle's centre
