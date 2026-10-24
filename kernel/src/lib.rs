@@ -46,6 +46,7 @@
 
 pub mod accurate;
 pub mod api_error;
+pub mod boolean;
 pub mod geom;
 pub mod intersect;
 pub mod mass;
