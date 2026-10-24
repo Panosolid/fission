@@ -191,7 +191,7 @@ test("the system prompt opens with what the model does, and describes only lengt
   // "Stryker was here!" (a text parameter has no kind note).
   const spec = { op: "name", summary: "Name it.", params: { label: { type: "text" as const, maxLength: 20, description: "the name" }, side: { type: "choice" as const, values: ["a", "b"], description: "which side", optional: true } } };
   const lines = systemPrompt([], [spec]).split("\n");
-  assert.deepEqual(lines.slice(0, 5), ["You edit a CAD part in Panosolid by answering with commands.", "The commands you can use:", "- name: Name it.", "  label: the name", "  side: which side (one of: a, b; optional)"]);
+  assert.deepEqual(lines.slice(0, 5), ["You edit a CAD part in SpindleLabs by answering with commands.", "The commands you can use:", "- name: Name it.", "  label: the name", "  side: which side (one of: a, b; optional)"]);
 });
 
 // ---------- local.ts ----------

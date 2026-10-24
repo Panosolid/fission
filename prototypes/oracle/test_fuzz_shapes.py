@@ -63,7 +63,7 @@ class Allowed(unittest.TestCase):
 
 
 class ExactChecks(unittest.TestCase):
-    """Panosolid against the exact values, OpenCascade left out."""
+    """SpindleLabs against the exact values, OpenCascade left out."""
 
     def test_the_right_numbers_pass(self):
         self.assertEqual(fuzz_shapes.check(RECT_CASE), ([], []))

@@ -147,7 +147,7 @@ try {
         // 64 MB + 1 byte: 67,108,865 bytes, 64.000001 MB, shown rounded up to a tenth.
         assert.deepEqual(await dropMade(page, "big.fission.json", empty, MAX_PROJECT_BYTES + 1), [MAX_PROJECT_BYTES + 1, true]);
         await page.waitForFunction(() => document.querySelector("#file-status").textContent !== "");
-        assert.equal(await status(page), "Couldn't open “big.fission.json”: it is 64.1 MB, and a Panosolid project may be at most 64 MB.");
+        assert.equal(await status(page), "Couldn't open “big.fission.json”: it is 64.1 MB, and a SpindleLabs project may be at most 64 MB.");
         assert.equal(await page.isVisible("#file-status"), true);
         assert.equal(await volume(page), "24,000 mm³");
         if (shots) await page.screenshot({ path: `${shots}/too-big-${width}.png` });

@@ -24,10 +24,12 @@ function binaryStl(count: number, size: number, header = " ".repeat(80)): Uint8A
 }
 
 test("the name's claim, worked out by hand", () => {
-  // "plate.panosolid.json" ends in ".panosolid.json": a project. Plain ".json" is not in the table.
+  // "plate.spindlelabs.json" ends in ".spindlelabs.json": a project. Plain ".json" is not in the table.
+  assert.equal(claimedFormat("plate.spindlelabs.json"), "project");
+  assert.equal(claimedFormat("PLATE.SPINDLELABS.JSON"), "project"); // case doesn't matter
+  // Saved as Panosolid (2026-10-18 to 10-24) or as Fission before that: both are still projects, so old files open.
   assert.equal(claimedFormat("plate.panosolid.json"), "project");
-  assert.equal(claimedFormat("PLATE.PANOSOLID.JSON"), "project"); // case doesn't matter
-  // Saved before the rename to Panosolid: ".fission.json" is still a project, so old files open.
+  assert.equal(claimedFormat("PLATE.PANOSOLID.JSON"), "project");
   assert.equal(claimedFormat("plate.fission.json"), "project");
   assert.equal(claimedFormat("PLATE.FISSION.JSON"), "project");
   assert.equal(claimedFormat("plate.panoshape.json"), null); // no file was ever saved under this name
@@ -128,17 +130,17 @@ test("routing: a registered importer takes its formats; the rest are refused wit
   registry.registerImporter(image);
   const png = routeFiles(registry, [file("photo.png", new Uint8Array([...PNG]))]);
   assert.ok(png?.kind === "open" && png.importer === image && png.format === "png");
-  const project = routeFiles(registry, [file("plate.panosolid.json", projectToJson(emptyProject()))]);
+  const project = routeFiles(registry, [file("plate.spindlelabs.json", projectToJson(emptyProject()))]);
   assert.ok(project?.kind === "open" && project.importer === shell && project.format === "project");
   const old = routeFiles(registry, [file("plate.fission.json", projectToJson(emptyProject()))]); // saved before the rename
   assert.ok(old?.kind === "open" && old.importer === shell && old.format === "project");
   // The messages, written out in full.
-  assert.equal(refusal(registry, file("part.stl", "solid x\n")), "Couldn't open “part.stl”: Panosolid can't open STL meshes yet. Design will take them as mesh bodies.");
-  assert.equal(refusal(registry, file("logo.svg", "<svg/>")), "Couldn't open “logo.svg”: Panosolid can't open SVG drawings yet. Vector and Laser will take them as outlines.");
-  assert.equal(refusal(registry, file("plate.dxf", "0\nSECTION\n")), "Couldn't open “plate.dxf”: Panosolid can't open DXF drawings yet. Laser will take them as outlines.");
-  assert.equal(refusal(registry, file("bracket.step", "ISO-10303-21;")), "Couldn't open “bracket.step”: Panosolid can't open STEP models yet. Design will take them as exact solids.");
-  assert.equal(refusal(registry, file("poster.pdf", "%PDF-1.4")), "Couldn't open “poster.pdf”: Panosolid can't open PDF documents yet. Layout will take them as pages.");
-  assert.equal(refusal(registry, file("notes.docx", "PK\x03\x04")), "Couldn't open “notes.docx”: Panosolid doesn't know this type of file. It opens Panosolid projects (.panosolid.json), PNG images and JPEG images.");
+  assert.equal(refusal(registry, file("part.stl", "solid x\n")), "Couldn't open “part.stl”: SpindleLabs can't open STL meshes yet. Design will take them as mesh bodies.");
+  assert.equal(refusal(registry, file("logo.svg", "<svg/>")), "Couldn't open “logo.svg”: SpindleLabs can't open SVG drawings yet. Vector and Laser will take them as outlines.");
+  assert.equal(refusal(registry, file("plate.dxf", "0\nSECTION\n")), "Couldn't open “plate.dxf”: SpindleLabs can't open DXF drawings yet. Laser will take them as outlines.");
+  assert.equal(refusal(registry, file("bracket.step", "ISO-10303-21;")), "Couldn't open “bracket.step”: SpindleLabs can't open STEP models yet. Design will take them as exact solids.");
+  assert.equal(refusal(registry, file("poster.pdf", "%PDF-1.4")), "Couldn't open “poster.pdf”: SpindleLabs can't open PDF documents yet. Layout will take them as pages.");
+  assert.equal(refusal(registry, file("notes.docx", "PK\x03\x04")), "Couldn't open “notes.docx”: SpindleLabs doesn't know this type of file. It opens SpindleLabs projects (.spindlelabs.json), PNG images and JPEG images.");
   assert.equal(refusal(registry, file("photo.png", "GIF89a")), "Couldn't open “photo.png”: it is named like a PNG image, but its contents aren't one (it may be damaged, or renamed from another type).");
   // Routing opens nothing by itself.
   assert.deepEqual([shell.opened, image.opened], [[], []]);
@@ -149,12 +151,12 @@ test("routing: one file at a time, nothing for nothing, and the lists follow wha
   assert.equal(routeFiles(registry, []), null);
   const two = routeFiles(registry, [file("a.png", ""), file("b.png", "")]);
   assert.deepEqual(two, { kind: "refused", message: "Drop or paste one file at a time (there were 2)." });
-  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: Panosolid doesn't know this type of file. It can't open any files yet.");
-  assert.equal(refusal(registry, file("p.fission.json", '{"formatVersion":2}')), "Couldn't open “p.fission.json”: nothing here opens Panosolid projects (.panosolid.json).");
+  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: SpindleLabs doesn't know this type of file. It can't open any files yet.");
+  assert.equal(refusal(registry, file("p.fission.json", '{"formatVersion":2}')), "Couldn't open “p.fission.json”: nothing here opens SpindleLabs projects (.spindlelabs.json).");
   // A PNG with nobody registered for it is refused naming Image, the workspace that takes images.
-  assert.equal(refusal(registry, file("a.png", new Uint8Array(PNG))), "Couldn't open “a.png”: Panosolid can't open PNG images yet. Image will take them as images.");
+  assert.equal(refusal(registry, file("a.png", new Uint8Array(PNG))), "Couldn't open “a.png”: SpindleLabs can't open PNG images yet. Image will take them as images.");
   registry.registerImporter(importer(["jpeg"], "image"));
-  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: Panosolid doesn't know this type of file. It opens JPEG images.");
+  assert.equal(refusal(registry, file("x", "?")), "Couldn't open “x”: SpindleLabs doesn't know this type of file. It opens JPEG images.");
 });
 
 test("one importer per format: a second is refused and the first stays", () => {
@@ -290,10 +292,10 @@ test("a project file over MAX_PROJECT_BYTES is refused by its size, before the s
   const at = routeFiles(registry, [project(MAX_PROJECT_BYTES)]);
   assert.ok(at?.kind === "open" && at.importer === shell);
   // 64 MB + 1 byte is 64.000001 MB, shown rounded up: 64.1.
-  assert.equal(refusal(registry, project(MAX_PROJECT_BYTES + 1)), "Couldn't open “big.fission.json”: it is 64.1 MB, and a Panosolid project may be at most 64 MB.");
+  assert.equal(refusal(registry, project(MAX_PROJECT_BYTES + 1)), "Couldn't open “big.fission.json”: it is 64.1 MB, and a SpindleLabs project may be at most 64 MB.");
   // The limit is a project's: an image that big goes on to Image, which has its own limits.
   const png = routeFiles(registry, [{ name: "big.png", size: MAX_PROJECT_BYTES + 1, head: new Uint8Array(PNG) }]);
   assert.ok(png?.kind === "open" && png.importer === image);
   // With no importer for projects the old refusal stands (nothing opens them), size aside.
-  assert.match(refusal(new RepresentationRegistry(), project(MAX_PROJECT_BYTES + 1)), /nothing here opens Panosolid projects/);
+  assert.match(refusal(new RepresentationRegistry(), project(MAX_PROJECT_BYTES + 1)), /nothing here opens SpindleLabs projects/);
 });

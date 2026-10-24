@@ -9,7 +9,7 @@ Contents of `packages/core`; the rules are in packages/CLAUDE.md and the root CL
   - `kernel-types.ts` holds the shapes of kernel results and inputs (`BodyHandle`, `KernelFailure` with `KernelErrorKind` and `KernelInput`; `Outline`, the kernel's `ProfileIn`; `SketchLine` and `SketchOutline` for the sketch ops `snap_to_grid` and `sketch_outline`, step 21a).
   - `npm run kernel` (in `apps/fission`) builds the WASM package into `src/kernel/wasm/` (generated, gitignored).
 - `src/model/` (see docs/integration.md), built:
-  - `project.ts`: format version and migrations, `projectToJson`/`projectFromJson`: the .panosolid.json file.
+  - `project.ts`: format version and migrations, `projectToJson`/`projectFromJson`: the .spindlelabs.json file.
   - `representation.ts`: the representation registry (producers, converters, and the file importers: `registerImporter`/`importerFor`, one per format).
   - `actions.ts`: the one action registry: verbs per selection kind and representation; `ctx.actions`.
   - `feature.ts`: intent, provenance, timeline.

@@ -282,7 +282,7 @@ export function namingDesignSubject(kernel: KernelCalls, faults: Iterable<Naming
           if (target === undefined) throw new Error(`harness: Design offers no ${JSON.stringify(op.pin)} to ${op.sketch}`);
           doc = movePointOnto(doc, op.sketch, m.centre, target);
         } else doc = movePoint(doc, op.sketch, m.centre, op.centre[0], op.centre[1]);
-        // A circle's radius has no edit yet: written into the data, as a later Panosolid would.
+        // A circle's radius has no edit yet: written into the data, as a later SpindleLabs would.
         const sketches = doc.sketches.map((x) => (x.id === op.sketch ? { ...x, curves: x.curves.map((c) => (c.id === m.circle && c.kind === "circle" ? { ...c, radius: op.radius } : c)) } : x));
         return { state: { doc: { ...doc, sketches }, meta }, made: [] };
       }

@@ -147,7 +147,7 @@ try {
     await typeWidth(page, "50", false);
     await volume(page, "30,000 mm³"); // 50 · 30 · 20
     assert.equal(await status(page), "saving", "opened before autosave's quiet moment");
-    await page.setInputFiles("#open-file", { name: "sixty.panosolid.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(file)) });
+    await page.setInputFiles("#open-file", { name: "sixty.spindlelabs.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(file)) });
     await volume(page, "36,000 mm³");
     await until(page, (o) => document.body.dataset.projectId && document.body.dataset.projectId !== o, old, "the file kept as a new project");
     await until(page, () => document.querySelector("#save-status").dataset.state === "saved", null, "the file stored");

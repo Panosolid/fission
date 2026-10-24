@@ -30,7 +30,7 @@ function describe(name: string, p: ParamSpec): string {
  */
 export function systemPrompt(setup: readonly Command[], specs: readonly CommandSpec[], notes: readonly string[] = []): string {
   return [
-    "You edit a CAD part in Panosolid by answering with commands.",
+    "You edit a CAD part in SpindleLabs by answering with commands.",
     "The commands you can use:",
     ...specs.flatMap((s) => [`- ${s.op}: ${s.summary}`, ...Object.entries(s.params).map(([name, p]) => describe(name, p))]),
     setup.length === 0 && notes.length > 0 ? "No command you can use makes the part as it is now." : `The part now is made by these commands: ${JSON.stringify(setup)}`,

@@ -57,16 +57,16 @@ export const CHAPTERS: Chapter[] = [
   {
     id: "welcome",
     part: "Using Design",
-    title: "How Panosolid works",
+    title: "How SpindleLabs works",
     status: "built",
     text: [
-      "Panosolid is a free CAD app for designing real things. You draw a part with exact sizes, and the same project can later be rendered, printed, cut on a laser or milled on a CNC machine.",
+      "SpindleLabs is a free CAD app for designing real things. You draw a part with exact sizes, and the same project can later be rendered, printed, cut on a laser or milled on a CNC machine.",
       "This guide goes from what you see on screen down to the maths underneath. Scroll to move through it; the picture follows you. Drag the picture to turn it.",
     ],
     terms: [
       { term: "CAD", meaning: "Computer-aided design: drawing real objects on a computer with exact sizes, so they can be made." },
       { term: "CNC", meaning: "A machine that cuts material away with a spinning tool, following a path the computer gives it." },
-      { term: "project", meaning: "Everything you made, in every part of the app, kept together in one .panosolid.json file." },
+      { term: "project", meaning: "Everything you made, in every part of the app, kept together in one .spindlelabs.json file." },
     ],
     scene: "hero",
     tint: "#2747ff",
@@ -77,7 +77,7 @@ export const CHAPTERS: Chapter[] = [
     title: "A part is a recipe",
     status: "built",
     text: [
-      "In Panosolid a part is not a lump of clay you push around. It is a recipe: a list of steps, each with numbers you typed, like a box 40 mm wide.",
+      "In SpindleLabs a part is not a lump of clay you push around. It is a recipe: a list of steps, each with numbers you typed, like a box 40 mm wide.",
       "Change a number and the recipe runs again, so the shape follows. That is what parametric means: the shape comes from its parameters. Scroll, and watch the width change.",
     ],
     terms: [
@@ -103,7 +103,7 @@ export const CHAPTERS: Chapter[] = [
       { term: "snapping", meaning: "Pulling a click onto a nearby exact spot: a grid point, a midpoint or an end.", match: /\bsnap(s|ping)?\b/i },
       { term: "profile", meaning: "A closed loop of sketch lines with no gaps or crossings; a solid is made from it." },
       { term: "loop", meaning: "A closed ring: a profile in a sketch, or the edges round a face (one more per hole)." },
-      { term: "kernel", meaning: "The maths engine inside Panosolid that builds, checks and measures every shape." },
+      { term: "kernel", meaning: "The maths engine inside SpindleLabs that builds, checks and measures every shape." },
     ],
     scene: "sketch",
     tint: "#1f5fe0",
@@ -115,7 +115,7 @@ export const CHAPTERS: Chapter[] = [
     status: "built",
     text: [
       "Extrude pushes a profile straight out of its plane, like squeezing icing through a shaped nozzle. A rectangle becomes a block; a circle becomes a rod; the slot here becomes a bar with rounded ends.",
-      "You type the distance. The volume Panosolid shows is worked out exactly from the shape, never estimated from the picture, so a rod 20 mm across and 10 mm long reads 1000π mm³.",
+      "You type the distance. The volume SpindleLabs shows is worked out exactly from the shape, never estimated from the picture, so a rod 20 mm across and 10 mm long reads 1000π mm³.",
     ],
     terms: [{ term: "extrude", meaning: "Push a profile straight out of its plane by a distance to make a solid.", match: /\bextrud(e|es|ed|ing)\b/i }],
     scene: "extrude",
@@ -127,7 +127,7 @@ export const CHAPTERS: Chapter[] = [
     title: "The timeline: the recipe, in order",
     status: "partly",
     text: [
-      "Every step you take is a feature, kept in order on the timeline: Sketch 1, Extrude 1 and so on. Panosolid already lists and saves them.",
+      "Every step you take is a feature, kept in order on the timeline: Sketch 1, Extrude 1 and so on. SpindleLabs already lists and saves them.",
       "The goal: change an early feature and everything after it replays. That is being built now.",
       "The hard part: a later step might put a hole on the top side, but after an edit, which side is the top? Side names that survive a rebuild are topological naming.",
     ],
@@ -145,7 +145,7 @@ export const CHAPTERS: Chapter[] = [
     title: "Undo and your project file",
     status: "built",
     text: [
-      "The whole project is one file, a .panosolid.json. Every area of the app keeps its share of the project in it, and Panosolid saves it in your browser a moment after each change.",
+      "The whole project is one file, a .spindlelabs.json. Every area of the app keeps its share of the project in it, and SpindleLabs saves it in your browser a moment after each change.",
       "Undo works on that whole project: each change you make becomes one step you can take back or do again, whichever area of the app made it.",
     ],
     terms: [],
@@ -176,7 +176,7 @@ export const CHAPTERS: Chapter[] = [
     title: "From your click to a shape",
     status: "built",
     text: [
-      "Panosolid has two halves. The app draws the screen and keeps your project. The kernel does the geometry: it builds shapes, checks them and measures them.",
+      "SpindleLabs has two halves. The app draws the screen and keeps your project. The kernel does the geometry: it builds shapes, checks them and measures them.",
       "When you press OK on an extrude, the app sends the profile and distance to the kernel, which runs in the background so the screen never freezes. Back come the solid, its exact volume and triangles to draw.",
       "Keeping them apart means the maths is tested on its own, on thousands of random shapes every night.",
     ],
@@ -191,7 +191,7 @@ export const CHAPTERS: Chapter[] = [
     status: "built",
     text: [
       "The kernel is written in Rust, a programming language that runs as fast as C++ (what most paid CAD is written in) but its compiler refuses to build programs with a whole family of mistakes, like using memory that was already given back.",
-      "Panosolid adds its own rule on top: no kernel operation may crash, whatever it is given. A nonsense request gets a clear invalid input answer instead.",
+      "SpindleLabs adds its own rule on top: no kernel operation may crash, whatever it is given. A nonsense request gets a clear invalid input answer instead.",
     ],
     terms: [
       { term: "Rust", meaning: "A fast programming language whose compiler refuses code with many common mistakes; the kernel is written in it." },
@@ -208,7 +208,7 @@ export const CHAPTERS: Chapter[] = [
     text: [
       "Browsers normally run JavaScript. WebAssembly (WASM) is a second, compact language they run almost as fast as an installed program.",
       "The Rust kernel is compiled into WebAssembly, so it runs inside your browser tab: nothing to install, and no shape is sent to a server.",
-      "The same Rust builds as a normal program for testing, and both give bit-for-bit the same answers, even for sine and cosine, because Panosolid does that maths in its own code.",
+      "The same Rust builds as a normal program for testing, and both give bit-for-bit the same answers, even for sine and cosine, because SpindleLabs does that maths in its own code.",
     ],
     terms: [
       { term: "WebAssembly", meaning: "A compact program format browsers run at near-installed speed; the kernel is compiled into it.", match: /\b(WebAssembly|WASM)\b/i },
@@ -291,10 +291,10 @@ export const CHAPTERS: Chapter[] = [
     title: "Tolerance: how close counts as touching",
     status: "built",
     text: [
-      "Computers round every number a tiny bit, so two corners that should meet can end up a hair apart. Panosolid's tolerance is 10 nanometres, thousands of times thinner than a human hair: points closer than that are the same point.",
+      "Computers round every number a tiny bit, so two corners that should meet can end up a hair apart. SpindleLabs's tolerance is 10 nanometres, thousands of times thinner than a human hair: points closer than that are the same point.",
       "Scroll to close the gap. At 11 nm the two ends are still apart; at 9 nm they count as one. The tolerance lives in one place in the kernel, and parts from 1 micrometre to 1 kilometre stay well inside what it can handle.",
     ],
-    terms: [{ term: "tolerance", meaning: "The distance under which two points count as the same: 10 nanometres in Panosolid." }],
+    terms: [{ term: "tolerance", meaning: "The distance under which two points count as the same: 10 nanometres in SpindleLabs." }],
     scene: "tolerance",
     tint: "#15803d",
   },
@@ -371,7 +371,7 @@ export const CHAPTERS: Chapter[] = [
   {
     id: "testing",
     part: "Inside the kernel",
-    title: "How Panosolid is tested",
+    title: "How SpindleLabs is tested",
     status: "built",
     text: [
       "Geometry bugs are quiet: a face a ten-thousandth of a millimetre off looks fine until something fails later, so nothing is done until a test checks it.",

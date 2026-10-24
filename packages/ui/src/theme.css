@@ -172,13 +172,11 @@ label input, label select { flex: 1; min-width: 0; padding: 6px 8px; background:
   #topbar[data-menu="open"] #topbar-actions { display: flex; }
   #topbar #topbar-actions button { text-align: left; padding: 12px 16px; border-bottom: none; border-left: 2px solid transparent; }
   #topbar #topbar-actions button[aria-pressed="true"] { border-left-color: #4aa8ff; }
-  /* The save status as one small mark beside the name, taking no room from
-     the tabs (the words stay for screen readers and the tooltip); a failed
-     save shows its words in full on a row of its own. */
-  #save-status:not([data-state="error"]) { position: absolute; left: 62px; top: 8px; font-size: 0; }
-  #save-status:not([data-state="error"])::before { font-size: 11px; }
-  #save-status[data-state="saved"]::before { content: "✓"; }
-  #save-status[data-state="saving"]::before { content: "…"; }
+  /* The save status takes no room from the tabs: its words stay for screen
+     readers and the tooltip, and the name shows it as one small mark
+     (styles/save-mark.css); a failed save shows its words in full on a row
+     of its own. */
+  #save-status:not([data-state="error"]) { position: absolute; font-size: 0; }
 }
 [hidden] { display: none !important; }
 #assistant { width: 320px; padding: 16px; background: #1c1f24; border-left: 1px solid #2a2e35; overflow-y: auto; }

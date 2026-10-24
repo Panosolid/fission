@@ -32,7 +32,7 @@ const other = createServer((req, res) => {
 await new Promise((done) => other.listen(0, "127.0.0.1", done));
 const otherOrigin = `http://127.0.0.1:${other.address().port}`;
 
-const FRAMED_MESSAGE = "Panosolid doesn't run inside another page's frame, so no other site can catch your clicks or reach your projects.";
+const FRAMED_MESSAGE = "SpindleLabs doesn't run inside another page's frame, so no other site can catch your clicks or reach your projects.";
 const shots = process.env.E2E_SHOTS;
 const browser = await launch();
 let failed = 0;

@@ -90,8 +90,8 @@ fn refuse(message: String) -> KernelError {
 /// No time stamp or author, so the same body always gives the same file.
 const HEADER: &str = "ISO-10303-21;
 HEADER;
-FILE_DESCRIPTION(('Panosolid body'),'2;1');
-FILE_NAME('body.step','',(''),(''),'Panosolid','Panosolid','');
+FILE_DESCRIPTION(('SpindleLabs body'),'2;1');
+FILE_NAME('body.step','',(''),(''),'SpindleLabs','SpindleLabs','');
 FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
 ENDSEC;
 DATA;
@@ -182,7 +182,7 @@ impl Writer {
         let rad = self.add("(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.))".to_string());
         let sr = self.add("(NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT())".to_string());
         let unc = self.add(format!(
-            "UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({}),#{mm},'distance_accuracy_value','Panosolid LINEAR')",
+            "UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({}),#{mm},'distance_accuracy_value','SpindleLabs LINEAR')",
             real(LINEAR)
         ));
         let ctx = self.add(format!(

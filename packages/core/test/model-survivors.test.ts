@@ -345,7 +345,7 @@ test("the format table, as refusals and lists word it", () => {
   assert.deepEqual(
     FILE_FORMATS.map((f) => [f.format, f.one, f.many, f.extensions.join(" "), f.representation, f.planned.workspaces.join(" "), f.planned.as]),
     [
-      ["project", "a Panosolid project", "Panosolid projects (.panosolid.json)", ".panosolid.json .fission.json", null, "", "projects"],
+      ["project", "a SpindleLabs project", "SpindleLabs projects (.spindlelabs.json)", ".spindlelabs.json .panosolid.json .fission.json", null, "", "projects"],
       ["png", "a PNG image", "PNG images", ".png", "image", "image", "images"],
       ["jpeg", "a JPEG image", "JPEG images", ".jpg .jpeg", "image", "image", "images"],
       ["svg", "an SVG drawing", "SVG drawings", ".svg", "outline", "vector laser", "outlines"],

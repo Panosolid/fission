@@ -114,10 +114,10 @@ test("a selected sketch is named as the browser names it, kept while it has curv
 
 // ---- Download STL of one body and of several ----
 
-/** A binary STL of `n` triangles, each 50 bytes of `fill + t`, under `name`'s header (as the kernel writes it: "Panosolid STL: <name>", spaces after). */
+/** A binary STL of `n` triangles, each 50 bytes of `fill + t`, under `name`'s header (as the kernel writes it: "SpindleLabs STL: <name>", spaces after). */
 function stl(name: string, n: number, fill: number): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(84 + 50 * n).fill(0x20, 0, 80);
-  bytes.set(new TextEncoder().encode(`Panosolid STL: ${name}`));
+  bytes.set(new TextEncoder().encode(`SpindleLabs STL: ${name}`));
   new DataView(bytes.buffer).setUint32(80, n, true);
   for (let t = 0; t < n; t++) bytes.fill(fill + t, 84 + 50 * t, 84 + 50 * (t + 1));
   return bytes;
@@ -129,7 +129,7 @@ test("hand-worked: two STL files joined: one header, the counts summed, the tria
   // endian (03 00 00 00); then A's triangle, then B's two.
   const joined = joinStl([stl("box", 1, 10), stl("extrude", 2, 20)], "2 bodies");
   assert.equal(joined.length, 234);
-  assert.equal(new TextDecoder().decode(joined.subarray(0, 80)), "Panosolid STL: 2 bodies".padEnd(80, " "));
+  assert.equal(new TextDecoder().decode(joined.subarray(0, 80)), "SpindleLabs STL: 2 bodies".padEnd(80, " "));
   assert.deepEqual([...joined.subarray(80, 84)], [3, 0, 0, 0]);
   assert.ok(joined.subarray(84, 134).every((b) => b === 10));
   assert.ok(joined.subarray(134, 184).every((b) => b === 20));
