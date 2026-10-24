@@ -387,3 +387,61 @@ test("showing again restarts the wait: the earlier showing's timer is stopped (w
   await clock.advance(1000);
   assert.equal(items.has(OPENING_KEY), false);
 });
+
+// ---------- autosave.ts: followed() (commit 0bcd719) ----------
+
+/** The undo history reduced to what autosave follows: a listener the test calls by hand. */
+function fakeHistory() {
+  let listener = () => {};
+  return { onChange: (l: () => void) => ((listener = l), () => {}), fire: () => listener() };
+}
+
+test("following a history change back to the stored state while a save is in flight still saves that state", async () => {
+  // Kills `timer === null && !inFlight && storedVersion === version` => true (and `storedVersion === version` => true).
+  // The store holds width 10. Edit to 20: the save of 20 is in flight (held). The history then goes back
+  // to 10, which equals the text last *written*, but the store is about to hold 20. Taking that as "no
+  // change" would leave 20 stored under a project that is 10. By hand: asked saves = [20, 10].
+  const held = heldStore();
+  await projectStore(held.kv, []).save("p", part(10));
+  let project = part(10);
+  const history = fakeHistory();
+  const clock = fakeTimers();
+  const autosave = startAutosave(held.store, "p", () => project, () => {}, { timers: clock.timers, follows: history, stored: true });
+  project = part(20);
+  autosave.changed();
+  await clock.advance(1000);
+  assert.equal(held.asked(), 1, "the save of 20 is in flight");
+  project = part(10);
+  history.fire();
+  await held.finishOne();
+  await clock.advance(1000);
+  await held.finishOne();
+  assert.equal(widthOf(await held.store.open("p")), 10, "the store ends with the project as it is");
+  autosave.stop();
+});
+
+test("following a history change back to the written state after a failed save saves again and says so", async () => {
+  // Kills the same mutants through storedVersion: the save of 20 failed, so the store holds 10 but the
+  // project's change (20) was never stored. Back at 10 the project equals the text written, yet the
+  // status must leave "error": a change was counted, so a save runs and finds nothing to write ("saved").
+  const inner = projectStore(memoryKeyValue(), []);
+  await inner.save("p", part(10));
+  let failing = true;
+  const store: ProjectStore = { ...inner, save: (id, p) => (failing ? Promise.reject(new Error("disk full")) : inner.save(id, p)) };
+  let project = part(10);
+  const history = fakeHistory();
+  const clock = fakeTimers();
+  const statuses: AutosaveStatus[] = [];
+  const autosave = startAutosave(store, "p", () => project, (s) => statuses.push(s), { timers: clock.timers, follows: history, stored: true });
+  project = part(20);
+  autosave.changed();
+  await clock.advance(1000);
+  assert.deepEqual(statuses.at(-1), { state: "error", message: "disk full" });
+  failing = false;
+  project = part(10);
+  history.fire();
+  assert.deepEqual(statuses.at(-1), { state: "saving" }, "a change, not a no-op");
+  await clock.advance(1000);
+  assert.deepEqual(statuses.at(-1), { state: "saved" });
+  autosave.stop();
+});
