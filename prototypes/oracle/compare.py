@@ -78,6 +78,13 @@ OCC_TOLERANCE = "OpenCascade's tolerance (its own rebuild is invalid too)"
 # listed under this heading, never dropped, so the nightly results show
 # every miss it excuses.
 CANCELLED_LOOPS = "OpenCascade's cancelling loops"
+# A STEP file whose only BRepCheck complaint is a loop crossing itself
+# (`step_check.crossing_only`) when no two pieces of the profile meet at 50
+# digits (crossings.py): OpenCascade's 1e-7 mm at a sharp corner (#293,
+# owner's decision 2026-10-24; its verdict there flipped with one unit in
+# the last place). Listed under this heading, never dropped, and only the
+# checker's verdict: the file's faces, volume and area still count.
+SHARP_CORNER = "OpenCascade's tolerance at a sharp corner (no crossing at 50 digits)"
 
 
 def wire(ps, ccw):
@@ -228,7 +235,7 @@ def step_issues(case, rebuilt, ref, slack, occ_invalid=False):
     moved, shift = step_check.home(text)
     if any(shift):
         copies.append((f"moved home by {shift}", moved))
-    tried = []
+    tried, simple = [], None
     for label, t in copies:
         r = step_check.check_text(t)
         found, rounding = one_step_copy(case, r, rebuilt, ref, slack)
@@ -236,6 +243,12 @@ def step_issues(case, rebuilt, ref, slack, occ_invalid=False):
         if occ_invalid:
             excused = [f"{OCC_TOLERANCE}: {note} ({label})" for note in found if note.startswith("step validity")]
             found = [note for note in found if not note.startswith("step validity")]
+        elif r.crossing_only and any(n.startswith("step validity") for n in found):
+            if simple is None:
+                simple = never_crosses(case["shape"])
+            if simple:
+                excused = [f"{SHARP_CORNER}: {note} ({label})" for note in found if note.startswith("step validity")]
+                found = [note for note in found if not note.startswith("step validity")]
         if not found:
             occ_only += [f"{note} (as written; passes {label})" for _, notes, _ in tried for note in notes if "validity" in note]
             return issues, occ_only + rounding + excused
@@ -292,6 +305,20 @@ def small_reach(text):
     diagonal = math.dist([min(p[k] for p in points) for k in range(3)], [max(p[k] for p in points) for k in range(3)])
     return (sum(math.pi * r * r * diagonal for r in small),
             sum(2.0 * math.pi * r * diagonal + 2.0 * math.pi * r * r for r in small))
+
+
+def never_crosses(shape):
+    """Whether the shape is a profile none of whose pieces meet anywhere
+    but the corners neighbours share, worked out at 50 digits
+    (crossings.py); False for any other shape or without mpmath, so
+    nothing is excused then."""
+    if "Extrude" not in shape:
+        return False
+    try:
+        import crossings
+    except ImportError:
+        return False
+    return not crossings.crossings(shape)
 
 
 def cancelled_room(case, r):
@@ -437,6 +464,9 @@ def main():
     print(f"  {len(occ_lines) - small} more where only OpenCascade was off the exact value (its own rounding, not counted)")
     print(f"  {cancelling} of them a STEP volume missed on flat faces whose holes nearly fill them "
           f"(its cancelling loops, #282; listed, not counted)")
+    sharp = sum(1 for l in occ_lines if SHARP_CORNER in l)
+    print(f"  {sharp} of them a STEP file called crossed at a sharp corner that never crosses at 50 digits "
+          f"(its tolerance, #293; listed, not counted)")
     print(f"  {small} more with a radius under {SMALL_FEATURE} mm that OpenCascade couldn't read from the STEP file "
           f"in any copy (its small-feature limit, not counted)")
     for k, v in sorted(per_kind.items()):

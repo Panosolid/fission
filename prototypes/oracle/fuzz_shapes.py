@@ -208,6 +208,9 @@ def main():
     print(f"  {len(occ_lines) - small} more where only OpenCascade disagreed with the exact values (its own rounding or tolerance, not counted)")
     print(f"  {small} more with a radius under {compare.SMALL_FEATURE} mm that OpenCascade couldn't read from the STEP file "
           f"in any copy (its small-feature limit, not counted)")
+    sharp = sum(1 for l in occ_lines if compare.SHARP_CORNER in l)
+    print(f"  {sharp} of them a STEP file called crossed at a sharp corner that never crosses at 50 digits "
+          f"(its tolerance, #293; listed, not counted)")
     for k, v in sorted(per.items()):
         print(f"  {k:<8} {v}")
     if out:
