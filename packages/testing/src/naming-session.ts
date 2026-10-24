@@ -3,7 +3,7 @@
 // anything that builds the owner's test part: the model itself now, with bugs
 // planted to prove each check fails; Design's sketch on a face from step 26
 // (a subject without cuts: the circle becomes a new body); and Design with
-// booleans' cut (44/48), which runs every case.
+// booleans' cut (34/39a), which runs every case.
 //
 // Each step runs on the model and the subject, then the harness checks:
 // - the edit's outcome (done, unchanged, refused and why) is the model's;

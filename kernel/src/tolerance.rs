@@ -63,9 +63,10 @@ pub const MIN_FEATURE: f64 = 1e-3;
 pub const MAX_SIZE: f64 = 1e6;
 
 /// Every point must stay within ±MAX_COORD (100 km) of the origin. There a
-/// double resolves ~15 nm, about LINEAR: fine for placing a body, too
-/// coarse to intersect there, so geometry is intersected in a body's own
-/// frame, near its local origin.
+/// double resolves 2⁻²⁶ mm, ~15 pm, a thousandth of LINEAR: fine for
+/// placing a body, but shallow crossings magnify that rounding many times
+/// over, so geometry is intersected in a body's own frame, near its local
+/// origin.
 pub const MAX_COORD: f64 = 1e8;
 
 /// How many units in the last place a short chain of arithmetic may drift.
@@ -428,7 +429,7 @@ mod tests {
         assert_eq!(area_sign(&[p(0.5, 0.5), p(12.0, 12.0), p(24.0, 24.0)]), 0);
         assert_eq!((area_sign(&[p(3.0, 4.0)]), area_sign(&[])), (0, 0));
         // 100 km out (x = y = 1e8), a right triangle with legs 2⁻¹⁰ mm
-        // (~1 µm) and 2⁻²⁶ mm (~15 nm, the spacing of doubles there, so
+        // (~1 µm) and 2⁻²⁶ mm (~15 pm, the spacing of doubles there, so
         // every coordinate is exact): twice the area is the product of the
         // legs, 2⁻³⁶, while the shoelace products are ~1e16 and cancel.
         let (b, h) = ((2f64).powi(-10), (2f64).powi(-26));

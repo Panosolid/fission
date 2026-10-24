@@ -15,7 +15,8 @@
 // with a planted bug.
 
 import type { KernelCalls } from "@fission/core";
-import { randomSession, runSession, TimelineFailure, type SessionCounts, type SessionOp } from "./timeline-session.ts";
+import { emptySessionNumbers, randomSession, runSession, TimelineFailure, type SessionCounts, type SessionNumbers, type SessionOp } from "./timeline-session.ts";
+import { addSession, emptyNumbers, validateCounter, type SimNumbers } from "./sim-numbers.ts";
 import { designSubject, edgeMatches, type DesignFault } from "./timeline-design.ts";
 
 /** The first line of a report, as .github/scripts/file_issues.py knows it. */
@@ -36,10 +37,10 @@ export interface TimelineFuzzFailure {
 }
 
 /** Runs `steps` on a fresh Design subject; the failure, or null. Frees every body it built either way. */
-async function attempt(kernel: KernelCalls, steps: readonly SessionOp[], faults: readonly DesignFault[], counts?: SessionCounts): Promise<TimelineFailure | null> {
+async function attempt(kernel: KernelCalls, steps: readonly SessionOp[], faults: readonly DesignFault[], counts?: SessionCounts, numbers?: SessionNumbers): Promise<TimelineFailure | null> {
   const subject = designSubject(kernel, faults);
   try {
-    const c = await runSession(subject, steps, edgeMatches);
+    const c = await runSession(subject, steps, edgeMatches, undefined, numbers);
     if (counts) for (const [k, v] of Object.entries(c)) counts[k] = (counts[k] ?? 0) + v;
     return null;
   } catch (e) {
@@ -78,25 +79,37 @@ export interface RoundOptions {
   faults?: readonly DesignFault[];
   /** Milliseconds each failing session may spend shrinking. */
   shrinkMs?: number;
+  /** A bug planted in the kernel the sessions (and their shrinking) see, to prove a number moves. */
+  kernelFault?: (kernel: KernelCalls) => KernelCalls;
 }
 
-/** One round: `sessions` sessions of `steps` steps from `seed`; every failure (a check, or bodies left in the kernel) with its shrunk steps, and the counts of what the clean sessions reached. */
-export async function timelineRound(kernel: KernelCalls, seed: bigint, o: RoundOptions): Promise<{ failures: TimelineFuzzFailure[]; counts: SessionCounts }> {
+/**
+ * One round: `sessions` sessions of `steps` steps from `seed`; every failure
+ * (a check, or bodies left in the kernel) with its shrunk steps, the counts
+ * of what the clean sessions reached, and Tier 3's simulated-user numbers
+ * over every session (sim-numbers.ts; shrinking's reruns not counted).
+ */
+export async function timelineRound(kernel: KernelCalls, seed: bigint, o: RoundOptions): Promise<{ failures: TimelineFuzzFailure[]; counts: SessionCounts; numbers: SimNumbers }> {
   const faults = o.faults ?? [];
   const failures: TimelineFuzzFailure[] = [];
   const counts: SessionCounts = {};
+  const numbers = emptyNumbers();
+  const seen = o.kernelFault ? o.kernelFault(kernel) : kernel;
+  const counted = validateCounter(seen, numbers);
   for (let i = 0; i < o.sessions; i++) {
     const s = timelineSeed(seed, i);
     const steps = randomSession(s, o.steps);
     const before = await kernel.call("body_count");
-    const failed = await attempt(kernel, steps, faults, counts);
+    const reached = emptySessionNumbers();
+    const failed = await attempt(counted, steps, faults, counts, reached);
     const left = (await kernel.call("body_count")) - before;
+    addSession(numbers, reached, failed ? failed.check : left !== 0 ? "bodies left in the kernel" : null);
     if (failed) {
-      const { steps: shrunk, minimal } = await shrinkTimeline(kernel, steps, failed, faults, Date.now() + (o.shrinkMs ?? 10 * 60_000));
+      const { steps: shrunk, minimal } = await shrinkTimeline(seen, steps, failed, faults, Date.now() + (o.shrinkMs ?? 10 * 60_000));
       failures.push({ seed: s, steps: o.steps, check: failed.check, message: failed.message, shrunk, minimal });
     } else if (left !== 0) failures.push({ seed: s, steps: o.steps, check: "bodies left in the kernel", message: `${left} more bodies after the session than before it`, shrunk: steps, minimal: false });
   }
-  return { failures, counts };
+  return { failures, counts, numbers };
 }
 
 /** The report the nightly workflow keeps and files an issue from: the head line, one "failure:" line, the shrunk steps. */

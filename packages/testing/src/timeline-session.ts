@@ -33,6 +33,7 @@
 // subject's answers may be promises.
 
 import { seeded, type SeededRandom } from "./index.ts";
+import { LANDED } from "./landed.ts";
 import {
   applyOp,
   bodyKeys,
@@ -78,7 +79,95 @@ export type SessionOp =
   | { op: "undo" }
   | { op: "redo" }
   | { op: "save-open" }
-  | { op: "hold-ref"; pick: number };
+  | { op: "hold-ref"; pick: number }
+  | WaitingOp;
+
+/** The operations a boolean move can ask for (34b: union, subtract, intersect). */
+export type BooleanKind = "join" | "cut" | "intersect";
+
+/**
+ * A move the session bots gain when its step lands (`WAITING_MOVES`, step
+ * 30d). Until then `randomOp` never draws one, and a session that meets one
+ * stops with a `WaitingMoveError`, so a step turned on before the model and
+ * Design can answer its moves fails loudly instead of passing quietly.
+ */
+export type WaitingOp =
+  /** 34: a Combine of the `target`th body shown with the `tool`th other one; the tool kept or used up. */
+  | { op: "add-combine"; target: number; tool: number; operation: BooleanKind; keep: boolean }
+  /** 34: the `pick`th Combine's operation changed, an edit early in the timeline that every later feature must survive. */
+  | { op: "set-combine"; pick: number; operation: BooleanKind }
+  /** 39a: an extrude of the `pick`th sketch that joins, cuts or intersects the bodies it overlaps. */
+  | { op: "add-extrude-into"; pick: number; distance: number; operation: BooleanKind }
+  /** 39a: the `pick`th extrude's operation changed, a new body included. */
+  | { op: "set-extrude-operation"; pick: number; operation: BooleanKind | "new-body" };
+
+/** One waiting move: when it turns on, how often it is drawn, and what the model and Design must answer once it does. */
+export interface WaitingMove {
+  op: WaitingOp["op"];
+  /** The step that turns it on (in `LANDED`, landed.ts). */
+  from: string;
+  /** Its weight among `WEIGHTS` once on. */
+  weight: number;
+  /** What the user does in Design, as the step's panel will have it. */
+  does: string;
+  /** What the timeline model and the harness must answer, from the decisions already made; the step's thread writes it into timeline-model.ts and timeline-design.ts. */
+  model: string;
+  draw(r: SeededRandom): WaitingOp;
+}
+
+const BOOLEAN_KINDS: readonly BooleanKind[] = ["join", "cut", "intersect"];
+
+/**
+ * The moves Combine (34) and Extrude's operations (39a) bring to the
+ * timeline sessions, written before either exists, as the golden models
+ * waiting for those steps are (golden.ts, `from`). The naming sessions
+ * already model the owner's cut cases (naming-session.ts, `cuts`), which run
+ * on Design from 39a2.
+ */
+export const WAITING_MOVES: readonly WaitingMove[] = [
+  {
+    op: "add-combine",
+    from: "34",
+    weight: 6,
+    does: "Combine (34f): pick a target body and a tool body among those shown before where the new item goes, Join, Cut or Intersect, Keep tools off unless asked; a new timeline item built on both.",
+    model:
+      "The result is the boolean of the two bodies as they are built at that point (34b), so its volume is the exact one of the two inputs' shapes; a result touching itself along an edge or at a corner fails with its places (B0 decision 2), an intersect of parts that only touch or miss gives no body, a cut that leaves pieces gives one body per piece (decision 3), and a face thinner than MIN_FEATURE fails naming it (decision 6). A body with a curved face (cylinder, sphere, arc sides) is refused naming the face until 37/38a, and faces lying on each other until 35a. The target keeps its row and is shown from the Combine on (40a rule 1); a tool is used up unless kept. Editing, suppressing, deleting or moving either input rebuilds the Combine, and deleting one asks first (timeline rules).",
+    draw: (r) => ({ op: "add-combine", target: r.next(), tool: r.next(), operation: pick(r, BOOLEAN_KINDS), keep: r.next() < 0.25 }),
+  },
+  {
+    op: "set-combine",
+    from: "34",
+    weight: 3,
+    does: "Edit a Combine and change its operation (Join to Cut, say).",
+    model: "The Combine's result is redone with the new operation and everything after it rebuilds against it; held references to faces the new result no longer has resolve to nothing, never to another face (25a4).",
+    draw: (r) => ({ op: "set-combine", pick: r.next(), operation: pick(r, BOOLEAN_KINDS) }),
+  },
+  {
+    op: "add-extrude-into",
+    from: "39a",
+    weight: 8,
+    does: "Extrude a sketch with Join, Cut or Intersect (39a1): the bodies it overlaps when made are the ones it changes, kept by body id.",
+    model:
+      "The extrude's own body, then the boolean with each body it overlaps when made (Fusion check F4: a body made later in its path is not changed, even with the extrude dragged after it). \"No target body\" when it overlaps none (Ben's answers 2 and 6); a cut that would leave a body with nothing fails with words and changes nothing (F3); the rest as add-combine.",
+    draw: (r) => ({ op: "add-extrude-into", pick: r.next(), distance: int(r, 1, 50), operation: pick(r, BOOLEAN_KINDS) }),
+  },
+  {
+    op: "set-extrude-operation",
+    from: "39a",
+    weight: 4,
+    does: "Edit an extrude and change its operation, New body included.",
+    model: "As add-extrude-into with the new operation, against the bodies the extrude was made with; to New body, the bodies it had changed come back as they were.",
+    draw: (r) => ({ op: "set-extrude-operation", pick: r.next(), operation: pick(r, [...BOOLEAN_KINDS, "new-body"] as const) }),
+  },
+];
+
+/** A waiting move met in a session: its step is in `LANDED` but the model doesn't know it yet. */
+export class WaitingMoveError extends Error {
+  constructor(op: WaitingOp) {
+    const m = WAITING_MOVES.find((w) => w.op === op.op)!;
+    super(`the session move ${op.op} waits for step ${m.from}: teach timeline-model.ts and timeline-design.ts what it does (WAITING_MOVES: ${m.model})`);
+  }
+}
 
 type Maybe<T> = T | Promise<T>;
 
@@ -180,42 +269,50 @@ const WEIGHTS: [SessionOp["op"], number][] = [
   ["hold-ref", 8],
   ["add-face-sketch", 8],
 ];
-const TOTAL = WEIGHTS.reduce((s, [, w]) => s + w, 0);
 
-/** One random step. */
-export function randomOp(r: SeededRandom): SessionOp {
-  let x = r.next() * TOTAL;
-  const [kind] = WEIGHTS.find(([, w]) => (x -= w) < 0) ?? WEIGHTS[0];
-  switch (kind) {
+/**
+ * One random step. The waiting moves whose step is in `landed` join the
+ * draw after `WEIGHTS`; with none landed, every seed draws exactly the
+ * steps it drew before they were written.
+ */
+export function randomOp(r: SeededRandom, landed: ReadonlySet<string> = LANDED): SessionOp {
+  const on = WAITING_MOVES.filter((m) => landed.has(m.from));
+  const weights: [SessionOp["op"], number][] = [...WEIGHTS, ...on.map((m): [SessionOp["op"], number] => [m.op, m.weight])];
+  let x = r.next() * weights.reduce((s, [, w]) => s + w, 0);
+  const [kind] = weights.find(([, w]) => (x -= w) < 0) ?? weights[0];
+  const waiting = on.find((m) => m.op === kind);
+  if (waiting) return waiting.draw(r);
+  const base = kind as Exclude<SessionOp["op"], WaitingOp["op"]>;
+  switch (base) {
     case "add-sketch":
-      return { op: kind, shape: randomShape(r) };
+      return { op: base, shape: randomShape(r) };
     case "add-face-sketch":
-      return { op: kind, pick: r.next(), shape: randomShape(r) };
+      return { op: base, pick: r.next(), shape: randomShape(r) };
     case "add-extrude":
-      return { op: kind, pick: r.next(), distance: int(r, 1, 50) };
+      return { op: base, pick: r.next(), distance: int(r, 1, 50) };
     case "add-preset": {
       const k = pick(r, ["box", "cylinder", "sphere"] as const);
-      return { op: kind, kind: k, sizes: Array.from({ length: k === "box" ? 3 : k === "cylinder" ? 2 : 1 }, () => int(r, 1, 60)) };
+      return { op: base, kind: k, sizes: Array.from({ length: k === "box" ? 3 : k === "cylinder" ? 2 : 1 }, () => int(r, 1, 60)) };
     }
     case "set-size":
-      return { op: kind, pick: r.next(), value: int(r, 1, 60) };
+      return { op: base, pick: r.next(), value: int(r, 1, 60) };
     case "move-corner":
-      return { op: kind, pick: r.next(), to: [int(r, -60, 60), int(r, -60, 60)] };
+      return { op: base, pick: r.next(), to: [int(r, -60, 60), int(r, -60, 60)] };
     case "reorder":
-      return { op: kind, pick: r.next(), to: r.next() };
+      return { op: base, pick: r.next(), to: r.next() };
     case "undo":
     case "redo":
     case "save-open":
-      return { op: kind };
+      return { op: base };
     default:
-      return { op: kind, pick: r.next() };
+      return { op: base, pick: r.next() };
   }
 }
 
 /** A seeded session's steps: the same seed gives the same steps. */
-export const randomSession = (seed: bigint, steps: number): SessionOp[] => {
+export const randomSession = (seed: bigint, steps: number, landed: ReadonlySet<string> = LANDED): SessionOp[] => {
   const r = seeded(seed);
-  return Array.from({ length: steps }, () => randomOp(r));
+  return Array.from({ length: steps }, () => randomOp(r, landed));
 };
 
 // ---------------------------------------------------------------- resolving steps
@@ -319,6 +416,11 @@ export function resolveStep(doc: ModelDoc, step: SessionOp): Resolved {
       const name = choose(faces, step.pick);
       return name ? { kind: "hold-ref", name } : null;
     }
+    case "add-combine":
+    case "set-combine":
+    case "add-extrude-into":
+    case "set-extrude-operation":
+      throw new WaitingMoveError(step);
   }
 }
 
@@ -460,12 +562,32 @@ export interface RefTally {
 }
 
 /**
+ * What a session reached, for Tier 3's simulated-user numbers (step 30d,
+ * sim-numbers.ts). Counted as the session goes, each before the checks it
+ * stands for, so a session that fails has counted the step it failed at;
+ * counting never changes what fails.
+ */
+export interface SessionNumbers {
+  /** Steps run (not skipped), each followed by a rebuild checked against the model. */
+  rebuilds: number;
+  /** Of those, the rebuilds in which the model has a feature failed: the user's doing (a deleted sketch, an open outline), shown on its row with words. */
+  withFailedFeature: number;
+  /** Held references checked against the model. */
+  references: number;
+  /** Rebuilds from scratch, timed (when the subject has one): features built → [rebuilds, fastest ms, total ms]. */
+  timing: Record<number, [number, number, number]>;
+}
+
+export const emptySessionNumbers = (): SessionNumbers => ({ rebuilds: 0, withFailedFeature: 0, references: 0, timing: {} });
+
+/**
  * Runs the steps on a fresh model and the subject, checking every step;
  * throws a TimelineFailure at the first check that fails. `edgeClose`
  * compares edges with the model's (exact by default); `tally` counts the
- * reference checks instead of failing on them (RefTally).
+ * reference checks instead of failing on them (RefTally); `numbers` counts
+ * what the session reached (SessionNumbers).
  */
-export async function runSession(subject: TimelineSubject, steps: readonly SessionOp[], edgeClose?: EdgeClose, tally?: RefTally): Promise<SessionCounts> {
+export async function runSession(subject: TimelineSubject, steps: readonly SessionOp[], edgeClose?: EdgeClose, tally?: RefTally, numbers?: SessionNumbers): Promise<SessionCounts> {
   const model: TimelineModel = createModel();
   const ids = new Map<string, string>(); // model id → subject id
   for (const { op, ids: made } of subject.initial ?? []) {
@@ -495,6 +617,7 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
       count("skipped");
       continue;
     }
+    if (numbers) numbers.rebuilds++;
     let edited: string | null = null;
     if (resolved.kind === "save-open") {
       const text = await subject.save();
@@ -555,7 +678,15 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
     const d2 = rebuildDiff(now, await subject.rebuild());
     if (d2 !== null) fail("rebuilding twice differs", d2);
     if (subject.rebuildFromScratch) {
-      const d3 = rebuildDiff(now, await subject.rebuildFromScratch());
+      const t = performance.now();
+      const scratch = await subject.rebuildFromScratch();
+      if (numbers) {
+        const ms = performance.now() - t;
+        const n = scratch.order.filter((id) => scratch.results[id].status === "built").length;
+        const [k, fastest, total] = numbers.timing[n] ?? [0, Infinity, 0];
+        numbers.timing[n] = [k + 1, Math.min(fastest, ms), total + ms];
+      }
+      const d3 = rebuildDiff(now, scratch);
       if (d3 !== null) fail("the rebuild differs from a rebuild from scratch", d3);
     }
     if (edited !== null) {
@@ -568,6 +699,7 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
     }
 
     const expected = rebuild(model.doc);
+    if (numbers && expected.order.some((id) => expected.results[id].status === "failed")) numbers.withFailedFeature++;
     const d4 = rebuildDiff(now, translateRebuild(expected, to), edgeClose);
     if (d4 !== null) fail("the rebuild differs from the model", d4);
 
@@ -575,6 +707,7 @@ export async function runSession(subject: TimelineSubject, steps: readonly Sessi
       const there = resolveFace(expected, ref) !== null;
       const name = nameTo(ref, to);
       const found = await subject.resolve(name);
+      if (numbers) numbers.references++;
       // The model's names are unique (checked above), so a name the subject finds on two faces is always wrong here.
       if (tally) {
         tally.checked++;

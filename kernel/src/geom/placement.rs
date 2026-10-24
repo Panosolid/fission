@@ -4,8 +4,8 @@
 //! Moving and rotating a body only changes its placement, never its
 //! geometry, so a part moved 40 km out and back, or turned a thousand
 //! times, has exactly the shape (and volume and area) it started with. Its
-//! position carries the rounding of the shift: at 100 km out that is ~15 nm,
-//! far below LINEAR. Placements are baked into geometry only where two
+//! position carries the rounding of the shift: at 100 km out that is at most
+//! half of 2⁻²⁶ mm (~7.5 pm), far below LINEAR. Placements are baked into geometry only where two
 //! bodies must share coordinates (booleans, step 34).
 //!
 //! The rotation is a unit quaternion, renormalised after every composition,

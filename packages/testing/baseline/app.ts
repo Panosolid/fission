@@ -18,6 +18,11 @@
 // - `naming_sessions` (step 25b4, `naming.ts`): the naming success rate as
 //   `miss_percent` (0 is 100%) over the `references` checked;
 //   FISSION_BASELINE_FAULT=lose-refs plants a bug there;
+// - `simulated_users` (step 30d, `naming.ts`, the same sessions): Tier 3's
+//   simulated-user numbers, `wrong_percent` (rebuilds the model disagrees
+//   with), `invalid_percent` (bodies failing validate) and `relative_time`
+//   (rebuild time from scratch per feature); FISSION_BASELINE_FAULT=
+//   invalid-bodies, wrong-rebuild or slow-rebuild plants a bug there;
 // - `golden_<model>` and `golden_models` (step 28b, `golden.ts`): each
 //   golden model's rebuild, timed as above and its kernel calls counted
 //   exactly, and `failed_percent`, the models whose answers are wrong
@@ -31,7 +36,7 @@ import { designWorkspace, partDocument } from "@fission/design";
 import * as wasm from "../../core/src/kernel/wasm/fission_kernel.js";
 import { READERS } from "../src/project-fuzz.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
-import { namingRate } from "./naming.ts";
+import { SESSION_FAULTS, sessionMetrics, type SessionFault } from "./naming.ts";
 import { goldenMetrics, volumeOff } from "./golden.ts";
 import { buildable } from "../golden/rebuild.ts";
 import { BodyCache, countingKernel, editFirst, REBUILD_FAULTS, rebuildPart, showEdit, type RebuildFault } from "./rebuild.ts";
@@ -103,8 +108,10 @@ out.kernel_memory = { wasm_bytes: exports.memory.buffer.byteLength };
 // the worker does). Each run moves the first sketch's corner the other
 // way, so every run is a real edit with one body to build.
 const planted = process.env.FISSION_BASELINE_FAULT;
-if (planted !== undefined && planted !== "lose-refs" && planted !== "golden-volume" && !(REBUILD_FAULTS as readonly string[]).includes(planted)) throw new Error(`FISSION_BASELINE_FAULT is ${planted}, not lose-refs, golden-volume or one of ${REBUILD_FAULTS.join(", ")}`);
-const fault = planted === "lose-refs" || planted === "golden-volume" ? undefined : (planted as RebuildFault | undefined);
+const sessionFault = (SESSION_FAULTS as readonly string[]).includes(planted ?? "") ? (planted as SessionFault) : undefined;
+if (planted !== undefined && sessionFault === undefined && planted !== "golden-volume" && !(REBUILD_FAULTS as readonly string[]).includes(planted))
+  throw new Error(`FISSION_BASELINE_FAULT is ${planted}, not golden-volume or one of ${[...SESSION_FAULTS, ...REBUILD_FAULTS].join(", ")}`);
+const fault = sessionFault !== undefined || planted === "golden-volume" ? undefined : (planted as RebuildFault | undefined);
 {
   const kernel = countingKernel(nodeKernel());
   const cache = new BodyCache(kernel);
@@ -131,6 +138,7 @@ const fault = planted === "lose-refs" || planted === "golden-volume" ? undefined
 }
 // The golden models (28b, baseline/golden.ts): each one's rebuild timed and its kernel calls counted, and how many fail their answers.
 Object.assign(out, await goldenMetrics(buildable(), planted === "golden-volume" ? volumeOff(nodeKernel()) : nodeKernel()));
-// The naming success rate (25b4): every held reference in seeded timeline sessions, counted against the model.
-out.naming_sessions = await namingRate(nodeKernel(), planted === "lose-refs" ? "lose-refs" : undefined);
+// The naming success rate (25b4): every held reference in seeded timeline sessions, counted against the model;
+// and from the same sessions, Tier 3's simulated-user numbers (30d).
+Object.assign(out, await sessionMetrics(nodeKernel(), sessionFault));
 console.log(JSON.stringify(out, null, 2));

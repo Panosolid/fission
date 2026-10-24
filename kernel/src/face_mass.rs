@@ -456,7 +456,8 @@ mod tests {
     fn far_from_the_origin_and_turned_the_centroids_move_with_the_body() {
         // A move and a turn are exact maps, so each face keeps its role and
         // its centroid lands where the transform takes the old one. 100 km
-        // out a double resolves ~15 nm, so compare to that.
+        // out a double resolves 2⁻²⁶ mm (~15 pm), and the turn and the
+        // centroid's sums round many times, so compare to 1 nm.
         let corners = [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)];
         let b = extrude(&Profile { outer: path(&corners, &[0.0, 1.0, 0.0, 1.0]), holes: vec![] }, 10.0).unwrap();
         let tf = Transform::rotation(DVec3::new(1.0, 2.0, 3.0).normalize(), 0.7).then(Transform::translation(DVec3::new(9e7, -4e7, 3e7)));

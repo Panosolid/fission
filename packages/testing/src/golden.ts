@@ -21,6 +21,7 @@
 // (`shells`), and an item may be expected to fail with words (`refused`),
 // as the boolean rules in docs/progress/booleans.md say.
 
+import { LANDED } from "./landed.ts";
 import type { BodyView } from "@fission/core";
 
 /** A number worked out by hand: arithmetic (`evaluate`) or a plain number, and the working. */
@@ -99,11 +100,12 @@ export interface GoldenExpect {
 }
 
 /**
- * The steps after 27 that have landed, so their models run. A step's thread
- * adds its number here the day it lands, and must then add the project
- * file of every model waiting for it (`plan` fails until it does).
+ * The steps after 27 that have landed, so their models run (landed.ts, the
+ * one list the session bots' waiting moves read too). A step's thread adds
+ * its number there the day it lands, and must then add the project file of
+ * every model waiting for it (`plan` fails until it does).
  */
-export const LANDED: ReadonlySet<string> = new Set<string>();
+export { LANDED };
 
 /**
  * Exact answers agree to a billionth of their size (the kernel's volumes

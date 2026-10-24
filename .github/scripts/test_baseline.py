@@ -170,6 +170,37 @@ class TheRealBaseline(unittest.TestCase):
         self.assertEqual(judged(round(1 / 4466 * 100, 4))[m], "fail")
         self.assertEqual(judged(14.8007)[m], "fail")
 
+    def test_the_simulated_users_fail_each_planted_bug(self):
+        # Step 30d: the naming baseline's 8 seeded sessions of 150 steps run 1,136 steps and the kernel answers
+        # 14,478 body builds, every rebuild and body right, so wrong_percent and invalid_percent are 0. The smallest
+        # rise is one wrong of all of them, 1 / 1136 = 0.088% and 1 / 14478 = 0.0069%: each fails. Measured with
+        # FISSION_BASELINE_FAULT: invalid-bodies (every tenth build failing validate) 10% invalid, 15 of 150
+        # answered before the sessions it broke stopped, and 9.7561% wrong; wrong-rebuild (Design's
+        # cache-by-feature bug) 8.4211% wrong; slow-rebuild (every rebuild from scratch 2.5 times as long)
+        # relative_time 0.0197 against 0.0078 to 0.0082 on the same machine, +140%, past the 100% that fails.
+        with open(baseline.BASELINE) as f:
+            b = json.load(f)
+        names = {m: v for m, v in b["metrics"].items() if m.startswith("app.simulated_users.")}
+        w, i, t = (f"app.simulated_users.{k}" for k in ("wrong_percent", "invalid_percent", "relative_time"))
+        self.assertEqual(set(names), {w, i, t})
+        self.assertEqual((names[w], names[i]), (0, 0))
+        self.assertEqual((b["margins"]["wrong_percent"]["fail"], b["margins"]["invalid_percent"]["fail"]), (0, 0))
+
+        def judged(new):
+            return {k: v for k, _, _, _, v in compare({"margins": b["margins"], "metrics": names}, dict({w: 0, i: 0, t: names[t]}, **new))}
+
+        self.assertEqual(judged({"app.simulated_users.rebuilds": 1136}), {w: "ok", i: "ok", t: "ok", "app.simulated_users.rebuilds": "info"})
+        self.assertEqual(judged({w: round(1 / 1136 * 100, 4)})[w], "fail")
+        self.assertEqual(judged({i: round(1 / 14478 * 100, 4)})[i], "fail")
+        self.assertEqual(judged({i: 10, w: 9.7561}), {w: "fail", i: "fail", t: "ok"})
+        self.assertEqual(judged({w: 8.4211})[w], "fail")
+        # Time: 2.4 times the baseline fails; 1.9 times (0.9 of the 100% margin past it) only flags; 1.1 of the 15%
+        # flag (+16.5%) flags; 0.9 of it (+13.5%) is ok.
+        self.assertEqual(judged({t: names[t] * 2.4})[t], "fail")
+        self.assertEqual(judged({t: names[t] * 1.9})[t], "flag")
+        self.assertEqual(judged({t: names[t] * 1.165})[t], "flag")
+        self.assertEqual(judged({t: names[t] * 1.135})[t], "ok")
+
     def test_the_golden_models_counts_and_success_rate(self):
         # Step 28b: one rebuild from nothing asks the kernel for each sketch's
         # outline once, and builds and views each body once (the frees after

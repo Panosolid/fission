@@ -54,6 +54,14 @@
       "fail": 0,
       "why": "held references the naming sessions resolved otherwise than the model says (lost, moved, or found on two faces), as a percent of those checked, so 0 is a 100% naming success rate (step 25b4, packages/testing/baseline/naming.ts); any miss is a naming bug, so any rise from 0 fails (owner, 2026-10-21)"
     },
+    "wrong_percent": {
+      "fail": 0,
+      "why": "steps of the seeded timeline sessions whose rebuild the model disagrees with, as a percent of the steps run (step 30d, Tier 3's simulated users, packages/testing/baseline/naming.ts), so 0 is 100% of rebuilds right; a session stops at its first wrong rebuild, so any rise from 0 is a bug and fails"
+    },
+    "invalid_percent": {
+      "fail": 0,
+      "why": "the kernel's body_build answers in the same sessions that failed validate or crashed, as a percent of those answered (step 30d), so 0 is 100% of bodies passing validate; any is a kernel bug, so any rise from 0 fails"
+    },
     "failed_percent": {
       "fail": 0,
       "why": "golden models whose rebuild differs from their hand-worked answers, as a percent of those that build today (step 28b, packages/testing/baseline/golden.ts), so 0 is a 100% golden success rate; any wrong answer is a bug, so any rise from 0 fails"
@@ -90,6 +98,9 @@
     "app.rebuild_20_arcs_edit_first.body_builds": 1,
     "app.rebuild_20_arcs_edit_first.kernel_calls": 43,
     "app.rebuild_20_arcs_edit_first.relative_time": 0.0543,
+    "app.simulated_users.invalid_percent": 0,
+    "app.simulated_users.relative_time": 0.0088,
+    "app.simulated_users.wrong_percent": 0,
     "kernel.extrude_arcs_200.allocations": 67430,
     "kernel.extrude_arcs_200.instructions": 206460565,
     "kernel.extrude_arcs_200.peak_bytes": 783768,

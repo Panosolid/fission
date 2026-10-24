@@ -8,13 +8,20 @@
 // is a line of <dir>/log.csv, and a failing session writes
 // <dir>/seed-<seed>/fuzz-report.txt (what failed, how to replay it, the
 // shrunk steps) and steps.json ({ seed, check, steps }, the shrunk steps to
-// keep as a regression). Exits 1 if anything failed.
+// keep as a regression), and each round is a line of <dir>/numbers.jsonl:
+// Tier 3's simulated-user numbers (src/sim-numbers.ts: rebuilds and
+// references right, bodies passing validate, rebuild time by feature count,
+// with the calibration workload's fastest time on this machine, so nights
+// on different runners compare), summed by .github/scripts/sim_numbers.py.
+// Exits 1 if anything failed.
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { splitmix64 } from "../src/index.ts";
 import { nodeKernel } from "../src/node-kernel.ts";
 import { timelineReport, timelineRound } from "../src/timeline-fuzz.ts";
+import { numbersLine } from "../src/sim-numbers.ts";
+import { calibration, fastest } from "../baseline/calibration.ts";
 
 const whole = (name: string, fallback: number) => {
   const v = process.env[name]?.trim();
@@ -39,7 +46,7 @@ do {
   const t = Date.now();
   // A failing session may shrink for up to a quarter of the time left, so the round still ends near the deadline.
   const shrinkMs = Math.max(60_000, (seconds * 1000 - (Date.now() - start)) / 4);
-  const { failures } = await timelineRound(kernel, seed, { sessions: SESSIONS, steps: STEPS, shrinkMs });
+  const { failures, numbers } = await timelineRound(kernel, seed, { sessions: SESSIONS, steps: STEPS, shrinkMs });
   sessions += SESSIONS;
   for (const f of failures) {
     const report = timelineReport(f);
@@ -50,11 +57,17 @@ do {
     writeFileSync(join(dir, "fuzz-report.txt"), report);
     writeFileSync(join(dir, "steps.json"), JSON.stringify({ seed: String(f.seed), check: f.check, steps: f.shrunk }, null, 1) + "\n");
   }
-  console.log(`round ${seed}: ${SESSIONS} sessions × ${STEPS} steps, ${failures.length} failed, ${((Date.now() - t) / 1000).toFixed(0)} s`);
+  console.log(
+    `round ${seed}: ${SESSIONS} sessions × ${STEPS} steps, ${failures.length} failed, ${((Date.now() - t) / 1000).toFixed(0)} s; ` +
+      `rebuilds wrong ${numbers.wrongRebuilds} of ${numbers.rebuilds}, references wrong ${numbers.wrongReferences} of ${numbers.references}, ` +
+      `bodies failing validate ${numbers.invalidBuilds + numbers.crashedBuilds} of ${numbers.builds + numbers.invalidBuilds + numbers.crashedBuilds}`,
+  );
   if (out) {
     const log = join(out, "log.csv");
     if (!existsSync(log)) writeFileSync(log, "target,seed,cases,failures,seconds\n");
     appendFileSync(log, `timeline,${seed},${SESSIONS * STEPS},${failures.length},${((Date.now() - t) / 1000).toFixed(1)}\n`);
+    const calibrationMs = fastest(calibration, 25) / 1e6;
+    appendFileSync(join(out, "numbers.jsonl"), numbersLine(numbers, { seed: String(seed), steps: STEPS, calibrationMs }) + "\n");
   }
   found += failures.length;
   seed = splitmix64(seed)[0];
