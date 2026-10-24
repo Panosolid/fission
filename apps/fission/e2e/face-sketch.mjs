@@ -451,7 +451,15 @@ try {
         assert.deepEqual(await flags(), [[sketch, "w"], [ext, "w"]]);
         assert.match(await titleOf(sketch), new RegExp(`\\(warning: ${LOST.replace(/[()'.]/g, "\\$&")}\\)$`));
         assert.equal(await page.textContent("#kept-warning"), `${LOST} ${SOURCE}`);
+        // On a wide screen the panel stays folded for a warning, its button marked ⚠ (U0b): pressed, the warning
+        // is there; pressed again, folded, so the pixel probes below see the whole view.
+        const folded = (await page.isVisible("#properties-handle")) && (await page.getAttribute("#properties-handle", "aria-expanded")) === "false";
+        if (folded) {
+          assert.equal(await page.$eval("#properties", (el) => el.hasAttribute("data-problem")), true, "the folded panel's button warns");
+          await press(page, "#properties-handle", tap);
+        }
         assert.equal(await page.isVisible("#kept-warning"), true);
+        if (folded) await press(page, "#properties-handle", tap);
         assert.equal(await rowClasses(sketch), "kept");
         assert.equal(await rowClasses(ext), "kept");
         const red = await page.$eval(`#timeline [data-item="${sketch}"]`, (li) => getComputedStyle(li).color);

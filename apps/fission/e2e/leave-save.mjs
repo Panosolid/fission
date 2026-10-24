@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
-import { pinProperties } from "./properties.mjs";
+import { withPropertiesFolded, pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4232, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4232/";
@@ -110,11 +110,14 @@ try {
     await until(page, () => document.querySelector("#viewport").dataset.sketching === "true", null, "sketching");
     await page.check("#sketch-grid-snap");
     await page.click("#sketch-tool-rectangle");
-    for (const p of [
-      [50, 0],
-      [60, 10],
-    ])
-      await clickPlane(page, p, TOP);
+    // The sketch's panel floats over the square's corners on a wide screen (U0b).
+    await withPropertiesFolded(page, async () => {
+      for (const p of [
+        [50, 0],
+        [60, 10],
+      ])
+        await clickPlane(page, p, TOP);
+    });
     await until(page, () => document.querySelector("#sketch-status")?.textContent === "4 lines, a closed outline.", null, "the square closed");
     await page.click("#sketch-extrude");
     await page.fill("#extrude-distance", "10");
