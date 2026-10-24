@@ -1,5 +1,5 @@
 """OpenCascade oracle: rebuild every body the stateful harness produced and
-compare it with what the Panosolid kernel reported.
+compare it with what the SpindleLabs kernel reported.
 
 Input: the JSONL file written by the harness with FISSION_ORACLE_OUT. Each
 line has the primitive ("shape"), the 3x4 placement matrix the harness
@@ -10,7 +10,7 @@ count, and the mesh's largest deviation from the exact surface).
 OpenCascade isn't always right either: disagreements are logged for review,
 not treated as kernel failures. Every shape the harness makes also has an
 exact volume and area (exact.py, 50 digits, needs mpmath), which referees:
-Panosolid is compared with the exact value, and a case where only
+SpindleLabs is compared with the exact value, and a case where only
 OpenCascade is off is its own rounding, listed as "occ-rounding" at the end
 of the file but not counted as a disagreement (without mpmath, OpenCascade
 is the reference, as before).
@@ -53,7 +53,7 @@ try:
 except ImportError:  # pip install mpmath
     exact = None
 
-# Faces Panosolid uses per primitive vs OpenCascade. Panosolid splits a sphere
+# Faces SpindleLabs uses per primitive vs OpenCascade. SpindleLabs splits a sphere
 # into two hemispheres (one face with no edges can't satisfy Euler-Poincare
 # in its data structure); OpenCascade uses one face with a seam.
 FACES = {"Box": (6, 6), "Cylinder": (3, 3), "Sphere": (2, 1)}
@@ -390,7 +390,7 @@ def compare(case):
     aslack = case["area_slack"] + REL * area
     # The kernel's exact volume and area (from its B-rep, not its mesh)
     # have no chords to allow for: they must match to rounding. The exact
-    # value referees when Panosolid and OpenCascade differ.
+    # value referees when SpindleLabs and OpenCascade differ.
     ev, ea = (exact.volume_area(case["shape"]) if exact else None) or (None, None)
     for name, ours, theirs, ref, slack in (("exact volume", case["exact_volume"], vol, ev, vslack),
                                            ("exact area", case["exact_area"], area, ea, aslack)):

@@ -13,8 +13,8 @@ ISO-10303-21;
    No seam: the side has two loops. Volume pi r^2 h = 12 pi, area
    2 pi r h + 2 pi r^2 = 12 pi + 8 pi = 20 pi. */
 HEADER;
-FILE_DESCRIPTION(('Panosolid body'),'2;1');
-FILE_NAME('body.step','',(''),(''),'Panosolid','Panosolid','');
+FILE_DESCRIPTION(('SpindleLabs body'),'2;1');
+FILE_NAME('body.step','',(''),(''),'SpindleLabs','SpindleLabs','');
 FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));
 ENDSEC;
 DATA;
@@ -29,7 +29,7 @@ DATA;
 #9 = (LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
 #10 = (NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));
 #11 = (NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT());
-#12 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-5),#9,'distance_accuracy_value','Panosolid LINEAR');
+#12 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-5),#9,'distance_accuracy_value','SpindleLabs LINEAR');
 #13 = (GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#12)) GLOBAL_UNIT_ASSIGNED_CONTEXT((#9,#10,#11)) REPRESENTATION_CONTEXT('',''));
 #14 = CARTESIAN_POINT('',(2.0,0.0,0.0));
 #15 = VERTEX_POINT('',#14);

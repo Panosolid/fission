@@ -75,7 +75,7 @@ export type EdgeShape =
   | { kind: "circle"; centre: SketchXY; radius: number }
   | { kind: "arc"; start: SketchXY; end: SketchXY; centre: SketchXY };
 
-/** Why an edge can't be projected: too short a line seen from the sketch, a round edge slanted to it (an ellipse), or a curve this Panosolid doesn't know. */
+/** Why an edge can't be projected: too short a line seen from the sketch, a round edge slanted to it (an ellipse), or a curve this SpindleLabs doesn't know. */
 export type EdgeRefusal = { refused: "short" | "slanted" | "unknown"; message: string };
 
 /** The words for each refusal. */

@@ -11,12 +11,12 @@
 // own: no workspace mounts, no kernel worker starts, storage is never read.
 
 /** The message shown in place of the app, so a framing page can't pass it off as broken. */
-export const FRAMED_MESSAGE = "Panosolid doesn't run inside another page's frame, so no other site can catch your clicks or reach your projects.";
+export const FRAMED_MESSAGE = "SpindleLabs doesn't run inside another page's frame, so no other site can catch your clicks or reach your projects.";
 
 /** Thrown to stop the entry scripts. */
 export class FramedError extends Error {
   constructor() {
-    super("Panosolid refused to run inside a frame (audit S10).");
+    super("SpindleLabs refused to run inside a frame (audit S10).");
     this.name = "FramedError";
   }
 }
@@ -35,7 +35,7 @@ export function refuseIfFramed(win: Window): void {
   open.href = win.location.href;
   open.target = "_blank";
   open.rel = "noopener noreferrer";
-  open.textContent = "Open Panosolid on its own";
+  open.textContent = "Open SpindleLabs on its own";
   const main = doc.createElement("main");
   main.id = "framed";
   // Styled here, with the theme's colours, so it reads the same whichever stylesheets loaded.

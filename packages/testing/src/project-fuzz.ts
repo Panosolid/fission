@@ -95,7 +95,7 @@ export function outerModel(data: unknown): { refusal: string | null; upgraded?: 
   if (!isObj(data)) return { refusal: "expected an object" };
   const v = data.formatVersion;
   if (typeof v !== "number" || !Number.isInteger(v) || v < 1) return { refusal: "no format version" };
-  if (v > FORMAT_VERSION) return { refusal: "saved by a newer Panosolid" };
+  if (v > FORMAT_VERSION) return { refusal: "saved by a newer SpindleLabs" };
   // The one upgrade so far, 1 → 2: links arrive, empty.
   const p = v === 1 ? { ...data, formatVersion: 2, links: [] } : data;
   for (const key of ["name", "units", "materials", "links", "workspaces"]) if (!Object.hasOwn(p, key)) return { refusal: `"${key}" is missing` };
@@ -256,7 +256,7 @@ function projectSome(r: SeededRandom, doc: DesignDocument): DesignDocument {
 }
 
 /**
- * Design's data as Panosolid saves it: sometimes with sketches (lines, some
+ * Design's data as SpindleLabs saves it: sometimes with sketches (lines, some
  * chained, so they share points, circles (22b), some round a point
  * already there, and arcs (23a), some from a point already there;
  * sometimes the part extrudes one; from 24d1 several solid features and a
@@ -305,7 +305,7 @@ function designData(r: SeededRandom, part: DesignDocument): unknown {
   return doc;
 }
 
-/** A real project's text: what Panosolid saves (sometimes in the old format 1). */
+/** A real project's text: what SpindleLabs saves (sometimes in the old format 1). */
 export function validProjectText(r: SeededRandom): string {
   const size = () => Math.round(10 ** (r.next() * 4 - 1) * 1000) / 1000;
   const p: Project = { ...emptyProject(pick(r, ["Untitled", "Bracket", "Gehäuse 2", "", "a\"quote\\and\nnewline"])), units: { length: pick(r, ["mm", "cm", "m", "in"] as const) } };
@@ -478,7 +478,7 @@ export const DESIGN_RULES: BuildRules = { buildingItems, builds, partFeature };
 
 // ---- The checks.
 
-const OWN_MESSAGES = [/^not a Panosolid project: /, /^this project was saved by a newer Panosolid /, /^can't open the [a-z]+ workspace's data: /];
+const OWN_MESSAGES = [/^not a SpindleLabs project: /, /^this project was saved by a newer SpindleLabs /, /^can't open the [a-z]+ workspace's data: /];
 const ENGINE_WORDS = /Cannot read propert|Cannot convert|is not a function|is not iterable|Maximum call stack|Invalid array length|Cannot destructure/;
 
 export interface Problem {

@@ -100,7 +100,7 @@ const STL_TRIANGLE = 50;
 
 /**
  * Binary STL files joined into one (25c1): an 80-byte header with `name`
- * after "Panosolid STL: " (as the kernel writes its own), the sum of their
+ * after "SpindleLabs STL: " (as the kernel writes its own), the sum of their
  * triangle counts, then every file's triangles unchanged, in order. A file
  * whose length disagrees with its count throws, and nothing is written.
  */
@@ -115,7 +115,7 @@ export function joinStl(files: readonly Uint8Array[], name: string): Uint8Array<
   const out = new Uint8Array(STL_HEADER + 4 + STL_TRIANGLE * triangles);
   // Spaces after the name, as the kernel pads its header; never "solid" first (that reads as ASCII STL).
   out.fill(0x20, 0, STL_HEADER);
-  const text = new TextEncoder().encode(`Panosolid STL: ${name}`).subarray(0, STL_HEADER);
+  const text = new TextEncoder().encode(`SpindleLabs STL: ${name}`).subarray(0, STL_HEADER);
   out.set(text, 0);
   new DataView(out.buffer).setUint32(STL_HEADER, triangles, true);
   let at = STL_HEADER + 4;

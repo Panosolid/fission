@@ -2,14 +2,14 @@
 // dropping or pasting a file anywhere routes it through the representation
 // registry. identifyFile says what a file is from its first bytes and its
 // name; routeFiles finds the workspace that registered an importer for that
-// format, or refuses with a message saying why: a type Panosolid will open
+// format, or refuses with a message saying why: a type SpindleLabs will open
 // later names the workspace that will take it, a damaged or renamed file
-// says so, and an unknown one lists what Panosolid opens today.
+// says so, and an unknown one lists what SpindleLabs opens today.
 //
 // What a file is, in order:
 // 1. Contents with a strong signature decide alone, whatever the name says:
 //    PNG (its 8 signature bytes), JPEG (FF D8 FF), PDF ("%PDF-"), STEP
-//    ("ISO-10303-21;"), a Panosolid project (a JSON object with
+//    ("ISO-10303-21;"), a SpindleLabs project (a JSON object with
 //    "formatVersion" near the start) and SVG (its first element is <svg).
 // 2. STL and DXF have weak signatures (an ASCII STL starts with "solid",
 //    which plenty of text does; a binary STL has no signature at all, only
@@ -38,9 +38,9 @@ export interface FileFormatInfo {
   planned: { workspaces: readonly WorkspaceId[]; as: string };
 }
 
-/** Every format Panosolid knows, in the order lists name them. */
+/** Every format SpindleLabs knows, in the order lists name them. */
 export const FILE_FORMATS: readonly FileFormatInfo[] = [
-  { format: "project", one: "a Panosolid project", many: "Panosolid projects (.panosolid.json)", extensions: [".panosolid.json", ".fission.json"], representation: null, planned: { workspaces: [], as: "projects" } },
+  { format: "project", one: "a SpindleLabs project", many: "SpindleLabs projects (.spindlelabs.json)", extensions: [".spindlelabs.json", ".panosolid.json", ".fission.json"], representation: null, planned: { workspaces: [], as: "projects" } },
   { format: "png", one: "a PNG image", many: "PNG images", extensions: [".png"], representation: "image", planned: { workspaces: ["image"], as: "images" } },
   { format: "jpeg", one: "a JPEG image", many: "JPEG images", extensions: [".jpg", ".jpeg"], representation: "image", planned: { workspaces: ["image"], as: "images" } },
   { format: "svg", one: "an SVG drawing", many: "SVG drawings", extensions: [".svg"], representation: "outline", planned: { workspaces: ["vector", "laser"], as: "outlines" } },
@@ -172,7 +172,7 @@ export function routeFiles(registry: RepresentationRegistry, files: readonly Fil
     return { kind: "refused", message: `Couldn't open ${name}: it is named like ${formatInfo(found.claimed).one}, but its contents aren't one (it may be damaged, or renamed from another type).` };
   if (!found.ok) {
     const opens = FILE_FORMATS.filter((f) => registry.importerFor(f.format)).map((f) => f.many);
-    return { kind: "refused", message: `Couldn't open ${name}: Panosolid doesn't know this type of file. ${opens.length ? `It opens ${andList(opens)}.` : "It can't open any files yet."}` };
+    return { kind: "refused", message: `Couldn't open ${name}: SpindleLabs doesn't know this type of file. ${opens.length ? `It opens ${andList(opens)}.` : "It can't open any files yet."}` };
   }
   const importer = registry.importerFor(found.format);
   // Refused by its size alone, before the shell reads the whole file.
@@ -182,5 +182,5 @@ export function routeFiles(registry: RepresentationRegistry, files: readonly Fil
   const info = formatInfo(found.format);
   if (info.planned.workspaces.length === 0) return { kind: "refused", message: `Couldn't open ${name}: nothing here opens ${info.many}.` };
   const who = andList(info.planned.workspaces.map(workspaceName));
-  return { kind: "refused", message: `Couldn't open ${name}: Panosolid can't open ${info.many} yet. ${who} will take them as ${info.planned.as}.` };
+  return { kind: "refused", message: `Couldn't open ${name}: SpindleLabs can't open ${info.many} yet. ${who} will take them as ${info.planned.as}.` };
 }

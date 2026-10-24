@@ -1,5 +1,5 @@
 #!/bin/bash
-# Makes old-file corpus files by running an older Panosolid's own code:
+# Makes old-file corpus files by running an older SpindleLabs's own code:
 #   ./make.sh <commit> <script.ts>   (from packages/testing/old-files/make)
 # A worktree of <commit> borrows this checkout's node_modules (its @fission
 # packages pointing into the worktree), builds that commit's WASM kernel

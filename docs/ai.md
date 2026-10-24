@@ -1,6 +1,6 @@
 # The AI assistant
 
-Panosolid's assistant is optional and costs the project nothing to run. Each user chooses where the model runs: in their browser, on their own computer with Ollama, through their own API key, or with their browser's built-in model if it has one. Every feature in Panosolid works without it, and nothing is looked for or sent until the user opens the assistant panel. The first time it is opened, with no choice ever made, it picks an AI that runs on the user's own computer if one is found (the browser's built-in model, then Ollama if the user looked for it and it answered, then the in-browser model, whose download is still confirmed with its size first); it never picks an API key, which costs the user money. Choosing Off is remembered.
+SpindleLabs's assistant is optional and costs the project nothing to run. Each user chooses where the model runs: in their browser, on their own computer with Ollama, through their own API key, or with their browser's built-in model if it has one. Every feature in SpindleLabs works without it, and nothing is looked for or sent until the user opens the assistant panel. The first time it is opened, with no choice ever made, it picks an AI that runs on the user's own computer if one is found (the browser's built-in model, then Ollama if the user looked for it and it answered, then the in-browser model, whose download is still confirmed with its size first); it never picks an API key, which costs the user money. Choosing Off is remembered.
 
 The assistant never creates geometry or data itself. It sends the same commands a user could, through the public command API, so every result is:
 
@@ -32,7 +32,7 @@ This page explains the architecture for contributors. The code is in `packages/a
 | Provider | Where it runs | Notes |
 |---|---|---|
 | In your browser | the user's GPU through WebGPU | The default local option. The model is downloaded once, after its size is shown. Weak GPUs get a suggestion to use another provider, not a failure. |
-| Ollama | the user's own computer | Ollama must allow the page: set `OLLAMA_ORIGINS` to Panosolid's address. |
+| Ollama | the user's own computer | Ollama must allow the page: set `OLLAMA_ORIGINS` to SpindleLabs's address. |
 | Your own API key | the provider (Anthropic, OpenAI or others) | The user pays for their own usage, and is shown what will be sent first. |
 | Browser built-in | the browser | Offered only when the browser has a built-in model. |
 
@@ -102,17 +102,17 @@ Each one is downloaded on first use, after its size is shown. They are placehold
 - **Evaluation** (`packages/testing/src/ai-eval.ts`). `EVAL_CASES` holds fixed prompts, each with a project state and the expected commands. `runEval` scores any provider, and `successRates` gives the rate for each task type, which is tracked over time like the fuzzer's metrics. Cases that need commands not built yet name what they wait for.
 - **Preview and undo.** `packages/ai/test/propose.test.ts` checks that an accepted action is exactly one undo step and a rejected or stale one leaves the project unchanged; `apps/fission/e2e/assistant.mjs` checks the same in the browser, with the model's answers stood in by the test.
 
-## Panosolid's own model (planned, starts after step 24)
+## SpindleLabs's own model (planned, starts after step 24)
 
-Users can bring any provider in the table above. Panosolid will also ship a model of its own: a small one that runs on the user's device and is held to the rules below. It is one more entry in `PROVIDERS`, so nothing else in the app changes when it arrives.
+Users can bring any provider in the table above. SpindleLabs will also ship a model of its own: a small one that runs on the user's device and is held to the rules below. It is one more entry in `PROVIDERS`, so nothing else in the app changes when it arrives.
 
 ### Why it exists
 
-The point is to let anyone drive Panosolid in plain English, for free, without their designs leaving their computer. A general model has to know everything. This one only has to know Panosolid's commands, which is why it can be small: 0.5 to 1.5 billion parameters, about 300 MB to 1 GB to download after quantising it to 4 bits.
+The point is to let anyone drive SpindleLabs in plain English, for free, without their designs leaving their computer. A general model has to know everything. This one only has to know SpindleLabs's commands, which is why it can be small: 0.5 to 1.5 billion parameters, about 300 MB to 1 GB to download after quantising it to 4 bits.
 
-If an existing open model already passes the evaluation gate (phase 1 below) without training, Panosolid ships that model instead and trains nothing. Having a model of our own is a fallback for quality, not a goal in itself.
+If an existing open model already passes the evaluation gate (phase 1 below) without training, SpindleLabs ships that model instead and trains nothing. Having a model of our own is a fallback for quality, not a goal in itself.
 
-### Rules for Panosolid's model
+### Rules for SpindleLabs's model
 
 These rules are in addition to the ones at the top of this page.
 
@@ -121,14 +121,14 @@ These rules are in addition to the ones at the top of this page.
 3. **It never changes behind the user's back.** It is a file on the user's machine and works offline. It updates only when the user chooses, and old versions stay downloadable. Each model is labelled with the command API version it learned.
 4. **Mistakes are caught.** A model can still be wrong. The rules at the top of this page (commands only, kernel validation, preview, one undo step, never a machine) mean a wrong answer costs a rejected preview, not a broken project.
 5. **Full working out.** It explains its reasoning in plain words first, for example: "the top face is F12, its centre is at x 20 y 15, so the hole goes there". The commands follow, then the kernel's checks. The user can edit the commands before accepting them.
-6. **Open.** The model weights, the training scripts and the generated training data are open source, like the rest of Panosolid.
+6. **Open.** The model weights, the training scripts and the generated training data are open source, like the rest of SpindleLabs.
 7. **Honest and concise.** No flattery or padding. Claims carry evidence ("this wall is 0.8 mm and your nozzle is 0.4 mm").
 8. **Small.** It runs on hardware the user already owns. On a computer too weak for it, the assistant is simply unavailable, and every feature still works without it.
 
 ### How it is made
 
 - **Base model.** Start from the best small open model available when work begins. Its licence must let us modify it and give it away for free.
-- **Fine-tuning, not pretraining.** Pretraining a model from scratch at a useful size costs hundreds of thousands of dollars. Instead, LoRA (a cheap kind of fine-tuning that trains a small add-on to the model) teaches the base model Panosolid's commands. One run takes hours on a single GPU, which is free on hosted notebook tiers or costs tens of dollars rented.
+- **Fine-tuning, not pretraining.** Pretraining a model from scratch at a useful size costs hundreds of thousands of dollars. Instead, LoRA (a cheap kind of fine-tuning that trains a small add-on to the model) teaches the base model SpindleLabs's commands. One run takes hours on a single GPU, which is free on hosted notebook tiers or costs tens of dollars rented.
 - **Training data is generated and checked.** A script samples random valid commands from every workspace's `CommandSpec` list, using the same machinery as the command fuzzer. Each command is built on the real kernel, and only commands that produce a valid result are kept. The English side of each example comes from templates, plus paraphrases from a model whose terms allow that use. Opted-in user examples (rule 1) are added once a server for them exists; it is the same open question as in `community.md`.
 - **Evaluation.** The model is scored with `runEval` on `EVAL_CASES`, plus a larger held-out set written by hand that never comes from the data generator. Four rates are reported per task type: valid on the first try, exactly the intended command, the right stable id, and needing the retry. It ships only if it clearly beats the untrained base model.
 - **Delivered** in two formats: one for the in-browser provider (WebGPU) and one for Ollama. The download is hosted for free, and the size is shown before it starts.
@@ -141,7 +141,7 @@ The roadmap tracks these as A10 to A13.
 - **A10, the gate** (with A7, after step 24). Score two or three off-the-shelf small models through Ollama on the evaluation suite, using constrained output. If one is good enough, it becomes the in-browser default and the phases stop here.
 - **A11, the data generator.** Only if A10 falls short.
 - **A12, the training runs.** Free tiers first, with a cap of about 100 US dollars until the model ships.
-- **A13, shipping.** "Panosolid model" joins `PROVIDERS` and becomes the default only if it wins on the evaluations. From then on, it is retrained as each workspace adds commands (A8). A retrain is a rerun of the scripts, not a new project.
+- **A13, shipping.** "SpindleLabs model" joins `PROVIDERS` and becomes the default only if it wins on the evaluations. From then on, it is retrained as each workspace adds commands (A8). A retrain is a rerun of the scripts, not a new project.
 
 ### Guardrails for the main project
 

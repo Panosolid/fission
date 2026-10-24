@@ -1,5 +1,5 @@
 // The old-file corpus (daily bug hunt 3d): 17 projects saved by older
-// Panosolids, each made by running that version's own code (its document
+// versions of the app, each made by running that version's own code (its document
 // functions, or its Design app through its design-app.ts on its own WASM
 // kernel; old-files/make/ has the scripts and the commit each ran at), kept
 // as they were saved. Each must open through today's reader, upgraded to
@@ -28,7 +28,7 @@ type Want =
   | "sketch";
 
 interface OldFile {
-  /** The Panosolid that saved it: the commit and its step. */
+  /** The SpindleLabs that saved it: the commit and its step. */
   savedBy: string;
   /** Design's data version as saved. */
   version: 1 | 2 | 3;
@@ -104,7 +104,7 @@ const CORPUS: Record<string, OldFile> = {
     version: 2,
     items: [["sketch-2", "sketch", false], ["feature-13", "extrude", false]],
     nextId: 14,
-    // A 60 × 40 rectangle with a circle inside: two loops, which a sketch can't make one outline of yet. That Panosolid refused it
+    // A 60 × 40 rectangle with a circle inside: two loops, which a sketch can't make one outline of yet. That SpindleLabs refused it
     // in the same words (checked at 9de34d8a on its own kernel), so the file opens and the extrude fails, naming why.
     build: { "sketch-2": "sketch", "feature-13": { failed: "open-outline" } },
     warning: null,
@@ -115,7 +115,7 @@ const CORPUS: Record<string, OldFile> = {
     items: [["sketch-2", "sketch", false], ["sketch-14", "sketch", false], ["feature-17", "extrude", false]],
     nextId: 18,
     // The second sketch's circle r 5 round (0, 50) on YZ (sketch x = Y, y = Z, normal Y × Z = +X), extruded 20: 25π · 20 = 500π,
-    // caps round (0, 0, 50) and (20, 0, 50). That Panosolid only extruded XY sketches; today's builds this one.
+    // caps round (0, 0, 50) and (20, 0, 50). That SpindleLabs only extruded XY sketches; today's builds this one.
     build: { "sketch-2": "sketch", "sketch-14": "sketch", "feature-17": { volume: 500 * PI, caps: [[0, 0, 50], [20, 0, 50]] } },
     warning: null,
   },
@@ -312,7 +312,7 @@ test("the corpus and its hand-worked answers list the same files", () => {
   assert.equal(files().length, 17);
 });
 
-test("every old file is as its Panosolid saved it: the outer format 2 and Design's version as recorded", () => {
+test("every old file is as its SpindleLabs saved it: the outer format 2 and Design's version as recorded", () => {
   for (const file of files()) {
     const raw = JSON.parse(text(file));
     assert.equal(raw.formatVersion, 2, file);

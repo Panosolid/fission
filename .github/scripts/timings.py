@@ -23,7 +23,7 @@ early, a cancel is cut short); failures are counted beside them.
 Usage: python3 .github/scripts/timings.py [--days 14] [--steps] [--only e2e] [--json]
 Reads the API with GITHUB_TOKEN if set, otherwise through `gh api`.
 Finished runs never change, so their jobs and PR timelines are cached in
---cache (default ~/.cache/panosolid-timings) and a second run is quick.
+--cache (default ~/.cache/spindlelabs-timings) and a second run is quick.
 
 The maths (`percentile`, `median`, `summarize`, `pr_times`) is pure and
 tested in test_timings.py.
@@ -231,7 +231,7 @@ def main(argv=None):
     ap.add_argument("--min-step", type=float, default=60, help="seconds; shorter steps are left out")
     ap.add_argument("--only", help="print only the rows whose name holds this text (any case), e.g. e2e")
     ap.add_argument("--json", action="store_true", help="print the numbers as JSON instead")
-    ap.add_argument("--cache", default=os.path.expanduser("~/.cache/panosolid-timings"))
+    ap.add_argument("--cache", default=os.path.expanduser("~/.cache/spindlelabs-timings"))
     args = ap.parse_args(argv)
     data = collect(Api(args.cache), args.days, args.steps)
     if args.json:
