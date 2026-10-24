@@ -47,6 +47,10 @@
 //!   meeting. Checked: 1200 pairs of star prisms (with and without arcs),
 //!   cubes and half cylinders turned by 1e-6, 1e-3 and 1 rad and moved by
 //!   as much gave identical reports.
+//!   For the same reason, `along_each_other` reading LINEAR instead of
+//!   each edge's own tolerance (a fault planted by hand in step 31a, not a
+//!   cargo-mutants mutant) changes no verdict: two edges on one line or
+//!   circle that overlap have an end of one within the gap of the other.
 //! - `<=` → `>` in `fewer_edges_first`: only the order of the two
 //!   `classify` calls in `faces_meet`, which must both say inside.
 //! - In `classify`: `d < best` → `<=`, a tie between equally near boundary
@@ -559,6 +563,80 @@ mod tests {
         assert!(points_of(&errs).iter().all(|p| (p.z - 1.0).abs() <= g), "{errs:?}");
         assert_eq!(errors(&pair(1.1 * g)), vec![]);
         assert_eq!(errors(&two_shells(&hand_cube(), &moved(hand_cube(), DVec3::new(0.25, 0.25, 1.0 + 0.9 * g)))), vec![]);
+    }
+
+    #[test]
+    fn each_test_reads_the_tolerances_of_its_own_entities() {
+        // Edge against edge, by hand: a from (0,0,0) to (2,0,0), b from
+        // (1,−1,d) to (1,1,d), crossing above it. Their closest points are
+        // (1,0,0) on a and (1,0,d) on b, d apart, and no end is near: they
+        // meet when that point of one is within the other's tolerance.
+        // Both grown to G = 5·LINEAR: 0.9·G meets, 1.1·G doesn't; at
+        // LINEAR, 0.9·G (4.5 LINEAR) doesn't.
+        let g = 5.0 * LINEAR;
+        let crossing = |d: f64, tol: f64| {
+            let mut b = Body::default();
+            let p = [DVec3::ZERO, DVec3::new(2.0, 0.0, 0.0), DVec3::new(1.0, -1.0, d), DVec3::new(1.0, 1.0, d)].map(|q| b.add_vertex(q));
+            let (ea, eb) = (b.add_line(p[0], p[1]), b.add_line(p[2], p[3]));
+            b.edges[ea].tol = tol;
+            b.edges[eb].tol = tol;
+            edges_meet(&b, ea, eb)
+        };
+        assert!(crossing(0.9 * g, g).is_some_and(|p| (p.x - 1.0).abs() <= LINEAR && p.y.abs() <= LINEAR), "{:?}", crossing(0.9 * g, g));
+        assert_eq!(crossing(1.1 * g, g), None);
+        assert_eq!(crossing(0.9 * g, LINEAR), None);
+        // Edge against face: an extra edge from (0.3, 0.5, 1 + d) to
+        // (0.7, 0.5, 1 + d) over the middle of the cube's top (face 1,
+        // z = 1), far from its edges. Grown to G it rests on the face at
+        // 0.9·G (its middle is inside), and is clear of it at 1.1·G (it
+        // runs parallel to the plane, so it crosses it nowhere, and its
+        // ends are 1.1·G off); at LINEAR, 0.9·G is clear.
+        let resting = |d: f64, tol: f64| {
+            let mut b = hand_cube();
+            let (p, q) = (b.add_vertex(DVec3::new(0.3, 0.5, 1.0 + d)), b.add_vertex(DVec3::new(0.7, 0.5, 1.0 + d)));
+            let e = b.add_line(p, q);
+            b.edges[e].tol = tol;
+            let mut on_top: Vec<VertexId> = b.faces[1].loops[0].coedges.iter().map(|c| b.edges[c.edge].start).collect();
+            on_top.sort_unstable();
+            edge_meets_face(&b, e, 1, &on_top)
+        };
+        assert!(resting(0.9 * g, g).is_some_and(|p| (p.z - 1.0 - 0.9 * g).abs() <= LINEAR), "{:?}", resting(0.9 * g, g));
+        assert_eq!(resting(1.1 * g, g), None);
+        assert_eq!(resting(0.9 * g, LINEAR), None);
+        // The same lying across the whole face, from x = −0.5 to 1.5: its
+        // ends are off the face, so only its being in the surface, within
+        // its own tolerance, finds its middle (0.5, 0.5, 1 + d) inside.
+        let across = |d: f64, tol: f64| {
+            let mut b = hand_cube();
+            let (p, q) = (b.add_vertex(DVec3::new(-0.5, 0.5, 1.0 + d)), b.add_vertex(DVec3::new(1.5, 0.5, 1.0 + d)));
+            let e = b.add_line(p, q);
+            b.edges[e].tol = tol;
+            let mut on_top: Vec<VertexId> = b.faces[1].loops[0].coedges.iter().map(|c| b.edges[c.edge].start).collect();
+            on_top.sort_unstable();
+            edge_meets_face(&b, e, 1, &on_top)
+        };
+        assert!(across(0.9 * g, g).is_some());
+        assert_eq!(across(1.1 * g, g), None);
+        assert_eq!(across(0.9 * g, LINEAR), None);
+        // A circle round a cylinder whose radius is 0.9·G off the
+        // cylinder's, grown to G with its seam vertex: on the side face
+        // within its tolerance, so the side can still be measured along
+        // (`classify` answers, here inside at the far side halfway up); at
+        // 1.1·G it is a circle the check can't measure along, and the body
+        // is invalid besides (the circle is off the side face).
+        let grown_top = |d: f64| {
+            let mut b = hand_cylinder(1.0, 2.0);
+            if let Curve::Circle { radius, .. } = &mut b.edges[1].curve {
+                *radius += d;
+            }
+            b.edges[1].tol = g;
+            b.vertices[1].tol = g;
+            b
+        };
+        let b = grown_top(0.9 * g);
+        assert_eq!(validate(&b), Ok(()));
+        assert_eq!(classify(&b, 2, DVec3::new(-1.0, 0.0, 1.0)), Where::Inside);
+        assert_eq!(classify(&grown_top(1.1 * g), 2, DVec3::new(-1.0, 0.0, 1.0)), Where::Unknown);
     }
 
     #[test]
