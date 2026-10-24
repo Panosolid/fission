@@ -12,6 +12,7 @@ import { crc32, deflateSync } from "node:zlib";
 import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 /** A 20 × 10 RGBA PNG, all mid grey, with no size in mm (Image shows it at 96 DPI). */
 function grey() {
@@ -44,6 +45,7 @@ async function fresh(width = 1280, touch = false) {
   });
   await page.goto(url + "#design");
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 

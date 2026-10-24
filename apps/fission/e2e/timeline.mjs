@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 import { browserName, launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4211, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4211/?test-hooks";
@@ -60,6 +61,7 @@ async function fresh(width, touch) {
   });
   await page.goto(url + "#design");
   await until(page, () => document.querySelector("#volume")?.textContent === "24,000 mm³", null, "the box");
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 

@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4219, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4219/";
@@ -46,6 +47,7 @@ async function fresh(width) {
   });
   await page.goto(url);
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return { context, page };
 }
 

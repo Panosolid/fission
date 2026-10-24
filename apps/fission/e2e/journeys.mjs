@@ -17,6 +17,7 @@ import { launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
 import { MAGIC_JOURNEYS, baselineLine, compareToBaseline, judge, parseBaselines, reportLine } from "../../../packages/testing/src/magic.ts";
+import { pinProperties } from "./properties.mjs";
 
 /** Walks per journey; the slowest one is judged, so a limit holds every time. */
 const WALKS = 5;
@@ -45,6 +46,7 @@ async function fresh() {
   });
   await page.goto(url);
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 

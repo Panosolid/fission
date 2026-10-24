@@ -1,6 +1,6 @@
 // Browser check of the window's layout (sketch feel SF3d): the browser
 // floats over the 3D view's top-left corner instead of taking a column, the
-// view runs the full width left of the properties, the timeline is a thin
+// view runs the full width (from U0b the properties float over its right side and fold away), the timeline is a thin
 // row along the very bottom under the view's own buttons (each item in build
 // order, the rollback marker between two, rolled-back items greyed, a
 // suppressed one crossed out), the browser's rows float as compact blocks
@@ -70,7 +70,8 @@ const measure = (page) =>
 /** The floating browser at 1280 px: worked from the layout rules (8 px in from the view's corner, the view the whole width left of the properties). */
 function checkFloating(m) {
   assert.equal(m.viewport.x, 0, "the view starts at the window's left edge: the browser takes no column");
-  assert.ok(Math.abs(m.viewport.w + m.properties.w - m.window.w) <= 1, `the view and the properties fill the width (${m.viewport.w} + ${m.properties.w} vs ${m.window.w})`);
+  // From U0b the properties float over the view too (or fold to one button), so the view is the window's whole width.
+  assert.ok(Math.abs(m.viewport.w - m.window.w) <= 1, `the view fills the width: the properties take no column (${m.viewport.w} vs ${m.window.w})`);
   assert.ok(Math.abs(m.browser.x - (m.viewport.x + 8)) <= 1 && Math.abs(m.browser.y - (m.viewport.y + 8)) <= 1, `the browser sits 8 px into the view's corner (${m.browser.x}, ${m.browser.y})`);
   assert.ok(m.browser.right <= m.viewport.right && m.browser.bottom <= m.bar.y, "the browser stays over the view and clear of its buttons");
   assert.equal(m.atBrowser, "browser", "the browser is on top of the view");
@@ -130,7 +131,9 @@ async function checkFloatingRows(page, { panel, blocks }) {
   }
   const body = blocks.find((b) => b.text === "Body 1");
   assert.ok(body.w < panel.w / 2, `the Body 1 row is sized to its words (${body.w} of ${panel.w} px)`);
-  const gap = { x: body.right + 20, y: body.y + body.h / 2 };
+  // Past the row's ⋯ too (U0a: a Body row has its feature's menu), which takes clicks though it shows only under the mouse.
+  const lineEnd = Math.max(...blocks.filter((b) => Math.abs(b.y - body.y) < 2).map((b) => b.right));
+  const gap = { x: lineEnd + 20, y: body.y + body.h / 2 };
   assert.ok(gap.x < panel.right, "that spot is inside the panel's box");
   assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName, gap), "CANVAS", "beside a short row, the view takes the click");
 }
@@ -231,6 +234,90 @@ async function moreShows(page, node) {
   const on = await page.$eval(`#browser [data-more="${node}"]`, (el) => getComputedStyle(el).opacity);
   return { away, on };
 }
+
+/** The properties at 1280 px (U0b): folded or not, the button's words and box, the panel's box, the view's width, the view cube's box. */
+const fold = (page) =>
+  page.evaluate(() => {
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+    };
+    const panel = document.querySelector("#properties");
+    const handle = document.querySelector("#properties-handle");
+    const shown = (el) => el && getComputedStyle(el).display !== "none";
+    return {
+      folded: panel.hasAttribute("data-folded"),
+      expanded: handle?.getAttribute("aria-expanded"),
+      words: handle && shown(handle) ? handle.textContent + getComputedStyle(handle, "::after").content.replace(/^none$/, "") : null,
+      handle: handle && shown(handle) ? box(handle) : null,
+      panel: box(panel),
+      // What a person sees of the panel: the selection's words, the size boxes.
+      sizesShown: shown(document.querySelector("#width")) && document.querySelector("#width").getClientRects().length > 0,
+      view: box(document.querySelector("#viewport")),
+      cube: box(document.querySelector("#viewport .view-cube")),
+    };
+  });
+
+/** Folded: one small button under the view cube's corner, nothing else of the panel, the view the whole width. */
+function checkFolded(f, width) {
+  assert.equal(f.folded, true, "the panel is folded");
+  assert.equal(f.expanded, "false");
+  assert.ok(f.handle && f.handle.w < 140 && f.handle.h < 30, `only a small button shows (${JSON.stringify(f.handle)})`);
+  assert.equal(f.sizesShown, false, "the size boxes are folded away");
+  assert.ok(Math.abs(f.view.w - width) <= 1, `the view has the whole width (${f.view.w})`);
+  assert.ok(f.handle.y >= f.cube.bottom && Math.abs(f.handle.right - (f.view.right - 8)) <= 1, "the button sits under the view cube, 8 px in from the right");
+}
+
+/** Shown: 300 px over the view's right side, 112 px down (under the view cube), the view still the whole width. */
+function checkShown(f, width) {
+  assert.equal(f.folded, false, "the panel shows");
+  assert.equal(f.expanded, "true");
+  assert.equal(f.sizesShown, true, "the size boxes show");
+  assert.ok(Math.abs(f.panel.w - 300) <= 1 && Math.abs(f.panel.right - (f.view.right - 8)) <= 1 && Math.abs(f.panel.y - (f.view.y + 112)) <= 1, `300 px wide, 8 px in, 112 px down (${JSON.stringify(f.panel)})`);
+  assert.ok(Math.abs(f.view.w - width) <= 1, "opening it resized nothing: the view keeps the whole width");
+}
+
+/** A Design whose one extrude fails: its sketch has nothing drawn. Written by hand as docs/project-format.md describes. */
+const failing = {
+  formatVersion: 2,
+  name: "Failing",
+  units: { length: "mm" },
+  materials: [],
+  links: [],
+  workspaces: {
+    design: {
+      version: 3,
+      nextId: 4,
+      profiles: [],
+      sketches: [{ id: "sketch-2", points: [], curves: [], constraints: [] }],
+      timeline: {
+        features: [
+          {
+            id: "feature-1",
+            intent: { type: "box", parameters: { width: 40, depth: 30, height: 20 }, summary: "Box: 40 × 30 × 20 mm" },
+            provenance: { self: { workspace: "design", id: "feature-1", label: "Feature 1 (box)" }, from: [] },
+            dependsOn: [],
+            suppressed: false,
+          },
+          {
+            id: "sketch-2",
+            intent: { type: "sketch", parameters: { plane: "XY" }, summary: "Sketch 1 on the XY plane" },
+            provenance: { self: { workspace: "design", id: "sketch-2", label: "Sketch 1" }, from: [] },
+            dependsOn: [],
+            suppressed: false,
+          },
+          {
+            id: "feature-3",
+            intent: { type: "extrude", parameters: { sketch: "sketch-2", distance: 5 }, summary: "Extrude Sketch 1 by 5 mm" },
+            provenance: { self: { workspace: "design", id: "feature-3", label: "Extrude 1" }, from: [{ workspace: "design", id: "sketch-2", label: "Sketch 1" }] },
+            dependsOn: ["sketch-2"],
+            suppressed: false,
+          },
+        ],
+      },
+    },
+  },
+};
 
 const check = async (name, fn) => {
   await fn();
@@ -351,6 +438,90 @@ try {
     checkTimelineRow(await measure(page));
   });
 
+  await check("the properties fold away until something is selected, without resizing the view (U0b)", async () => {
+    await page.keyboard.press("Escape");
+    await page.mouse.move(640, 400);
+    checkFolded(await fold(page), 1280);
+    assert.equal((await fold(page)).words, "Properties ‹");
+    await page.click('#browser .tree-row[data-node="body-1"]');
+    await page.waitForFunction(() => !document.querySelector("#properties").hasAttribute("data-folded"));
+    checkShown(await fold(page), 1280);
+    assert.equal((await fold(page)).words, "Fold ›");
+    if (shots) await page.screenshot({ path: `${shots}/properties-shown-1280.png` });
+    // Escape clears the selection: folded again.
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector("#properties").hasAttribute("data-folded"));
+    checkFolded(await fold(page), 1280);
+    if (shots) await page.screenshot({ path: `${shots}/properties-folded-1280.png` });
+  });
+
+  await check("Fold folds a selection's panel until the selection changes (U0b)", async () => {
+    await page.click('#browser .tree-row[data-node="body-1"]');
+    await page.waitForFunction(() => !document.querySelector("#properties").hasAttribute("data-folded"));
+    await page.click("#properties-handle");
+    checkFolded(await fold(page), 1280);
+    assert.equal(await page.getAttribute('#browser .tree-row[data-node="body-1"]', "aria-current"), "true", "the body is still selected");
+    await page.keyboard.press("Escape");
+    await page.click('#browser .tree-row[data-node="body-1"]');
+    await page.waitForFunction(() => !document.querySelector("#properties").hasAttribute("data-folded"));
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector("#properties").hasAttribute("data-folded"));
+  });
+
+  await check("a tool's box opens the panel and folds it after (U0b)", async () => {
+    await page.click("#create-sketch");
+    await page.waitForFunction(() => !document.querySelector("#properties").hasAttribute("data-folded"));
+    assert.equal(await page.isVisible("#sketch-panel"), true, "Create sketch's plane choice shows");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector("#properties").hasAttribute("data-folded"));
+    checkFolded(await fold(page), 1280);
+  });
+
+  await check("the button pins the panel open, kept after a reload, until folded (U0b)", async () => {
+    await page.click("#properties-handle");
+    checkShown(await fold(page), 1280);
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    checkShown(await fold(page), 1280);
+    await page.click("#properties-handle");
+    checkFolded(await fold(page), 1280);
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+    checkFolded(await fold(page), 1280);
+  });
+
+  await check("a failed rebuild opens the folded panel with its words; folded, its button says there is a problem (U0b)", async () => {
+    await page.setInputFiles("#open-file", { name: "failing.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(failing)) });
+    await page.waitForFunction(() => document.querySelector("#error")?.textContent !== "");
+    const open = await fold(page);
+    assert.equal(open.folded, false, "the error's words are shown");
+    assert.equal(await page.isVisible("#error"), true);
+    await page.click("#properties-handle");
+    const f = await fold(page);
+    assert.equal(f.folded, true);
+    assert.equal(f.words, 'Properties ‹" ⚠"', "the folded button carries the warning mark");
+    assert.equal(await page.$eval("#properties-handle", (el) => getComputedStyle(el).color), "rgb(245, 177, 76)", "in amber");
+    // The design that builds again takes the mark away.
+    await page.setInputFiles("#open-file", { name: "rolled.fission.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(rolledBack)) });
+    await page.waitForFunction(() => document.querySelector("#error")?.textContent === "" && !document.querySelector("#properties").hasAttribute("data-problem"));
+    assert.equal((await fold(page)).words, "Properties ‹");
+  });
+
+  await check("the fold checks fail on the old panel", async () => {
+    // The panel back in a column of its own, always shown, as before U0b.
+    const column = await page.addStyleTag({ content: "#workspace #properties.properties-fold:not(#none) { grid-column: 3; margin: 0; } #workspace #properties[data-folded]:not(#none) > * { display: block !important; }" });
+    await assert.rejects(async () => checkFolded(await fold(page), 1280), /the size boxes are folded away|the view has the whole width/);
+    await column.evaluate((el) => el.remove());
+    // A panel that pushes the view aside when shown.
+    await page.click('#browser .tree-row[data-node="body-1"]');
+    await page.waitForFunction(() => !document.querySelector("#properties").hasAttribute("data-folded"));
+    const pushing = await page.addStyleTag({ content: "#workspace #properties.properties-fold:not(#none) { grid-column: 3; margin: 0; }" });
+    await assert.rejects(async () => checkShown(await fold(page), 1280), /8 px in|resized nothing/);
+    await pushing.evaluate((el) => el.remove());
+    checkShown(await fold(page), 1280);
+    await page.keyboard.press("Escape");
+  });
+
   await check("the browser folds away and stays folded through an edit", async () => {
     const open = await measure(page);
     await page.click("#browser .browser-fold > summary");
@@ -360,6 +531,7 @@ try {
     const spot = { x: open.browser.x + 30, y: open.browser.y + 120 };
     assert.ok(open.browser.h > 140, "the open browser covered that spot");
     assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName, spot), "CANVAS");
+    await page.click("#properties-handle"); // the size boxes are in the folded panel (U0b): pinned open
     await page.fill("#width", "41");
     await page.press("#width", "Tab");
     await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,600 mm³");

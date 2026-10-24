@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { launch, browserName } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4174, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4174/";
@@ -120,6 +121,7 @@ try {
   // And for the box's first build: the panel is drawn at once and filled when the kernel's rebuild lands, later on a
   // slow runner (E2E_KERNEL_DELAY makes it late here, browser.mjs; e2e-races).
   await rebuilt();
+  await pinProperties(page); // the checks below type sizes into the panel, folded at the start on a wide screen (U0b)
 
   /**
    * The browser floats over the view's top-left corner (SF3d), where this

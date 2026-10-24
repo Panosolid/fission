@@ -18,6 +18,7 @@ import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
 import { browserTree, rowItem, rowReferences, type BrowserNode } from "./browser.ts";
 import { callOffDrag, showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey } from "./properties.ts";
+import { FOLDED_AT_START, propertiesFold, readPinned, type FoldState, type PropertiesFold } from "./properties-fold.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
 import { deleteAsk } from "./delete-ask.ts";
 import { itemName } from "./timeline-edits.ts";
@@ -62,6 +63,8 @@ let putAwayByRestore = false;
 let editingSketch: { id: string; grid: number; typed: string; tool: ToolKind } | null = null;
 /** Grid snap on or off (sketch feel SF1; off by default: points go where you click), kept for every sketch until the page reloads. */
 let gridSnap = DEFAULT_GRID_SNAP;
+/** The properties' fold a new mount starts with (U0b): the user's pin, kept across Undo, Redo and switching; null until the first mount reads it from storage. */
+let foldKept: FoldState | null = null;
 /** How many times Design has framed the part, read by the e2e test (an undo must not add one). */
 let fits = 0;
 
@@ -290,6 +293,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     else ctx.selection.set([ref]);
   }
 
+  /** The properties' fold (U0b), made once the tool boxes are in the panel; a selection drawn before then folds nothing. */
+  let fold: PropertiesFold | null = null;
   /** The ids of the sketches whose outlines are selected, as the last showSelection found them. */
   let selectedSketches: ReadonlySet<string> = new Set();
   /** Draws the selection: the viewport's colours, the lit browser rows, the properties' rows. */
@@ -309,6 +314,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     );
     viewport.showSelection(highlightOf(items, lastScene));
     lightRows(ctx.browser, doc, failedNow, items);
+    fold?.update({ selected: items.length > 0 });
     panel.showSelection(selectionRows(items, lastScene, doc));
     // The Feature and Body sections describe the selected feature (else the part), with the browser's number for its body.
     const focus = panelFocus(items, lastScene, doc);
@@ -1154,6 +1160,14 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     cancel: () => leaveEdit(),
   });
 
+  // The panel folds away until something is selected or a tool's box is in it (U0b); the user's pin is kept across mounts.
+  fold = propertiesFold(
+    ctx.properties,
+    ["sketch-panel", "extrude-panel", "feature-edit"].map((id) => ctx.properties.querySelector<HTMLElement>(`#${id}`)!),
+    foldKept ?? { ...FOLDED_AT_START, pinned: readPinned() },
+  );
+  fold.update({ selected: ctx.selection.items.length > 0 });
+
   /** Opens item `id`'s sizes in the Edit feature panel, out of any sketch or Extrude panel first. */
   function openEdit(id: string) {
     leaveExtrude();
@@ -1533,6 +1547,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       viewport.showSketches([]);
       typed.element.remove();
       hint.element.remove();
+      if (fold) {
+        foldKept = { ...FOLDED_AT_START, pinned: fold.state.pinned };
+        fold.close();
+      }
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties, ctx.timeline]) slot?.replaceChildren();
     },
   };

@@ -1,0 +1,35 @@
+/* The properties panel folding away (U0b, properties-fold.ts). On a wide
+   screen with one workspace the panel takes no column: it floats over the
+   view's right side under the view cube, as the browser floats over its
+   left, so opening or folding it never resizes the view. Folded, only its
+   small "Properties ‹" button shows there, left of where the panel opens.
+   Phones keep their Properties toggle and split view its columns (theme.css),
+   so there the button is hidden and nothing folds. */
+@media (min-width: 641px) {
+  .properties-fold:is(#workspace:not([data-split="on"]) #properties) {
+    grid-column: 2;
+    grid-row: 2;
+    z-index: 2;
+    align-self: start;
+    justify-self: end;
+    margin: 112px 8px 0 0;
+    width: 300px;
+    max-height: calc(100% - 112px - 56px);
+    padding: 10px 14px 14px;
+    background: rgba(28, 31, 36, 0.96);
+    border: 1px solid #353a43;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  .properties-fold:is(#workspace:not([data-split="on"]) #properties)[data-folded] { width: auto; max-height: none; padding: 0; gap: 0; background: none; border: none; box-shadow: none; overflow: visible; }
+  .properties-fold:is(#workspace:not([data-split="on"]) #properties)[data-folded] > :not(.properties-fold-handle) { display: none !important; }
+  .properties-fold:is(#workspace:not([data-split="on"]) #properties) > .properties-fold-handle:not(#none) { align-self: flex-end; padding: 2px 8px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #b5bbc4; background: rgba(28, 31, 36, 0.84); border: 1px solid #353a43; border-radius: 4px; }
+  .properties-fold:is(#workspace:not([data-split="on"]) #properties) > .properties-fold-handle:not(#none):hover { color: #e6e9ee; background: rgba(42, 46, 53, 0.96); }
+  /* Words the folded panel holds that matter: a failed rebuild or a kept shape's warning (properties.ts sets data-problem). */
+  .properties-fold:is(#workspace:not([data-split="on"]) #properties)[data-folded][data-problem] > .properties-fold-handle:not(#none) { color: #f5b14c; border-color: #f5b14c; }
+  .properties-fold:is(#workspace:not([data-split="on"]) #properties)[data-folded][data-problem] > .properties-fold-handle::after { content: " ⚠"; }
+}
+.properties-fold:is(#workspace[data-split="on"] #properties) > .properties-fold-handle { display: none; }
+@media (max-width: 640px) {
+  .properties-fold > .properties-fold-handle { display: none; }
+}

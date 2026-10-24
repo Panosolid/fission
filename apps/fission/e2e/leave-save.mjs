@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4232, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4232/";
@@ -59,6 +60,7 @@ async function open(context, want = "24,000 mm³") {
   });
   await page.goto(url + "#design");
   await volume(page, want);
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 
