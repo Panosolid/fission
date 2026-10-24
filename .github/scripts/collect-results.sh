@@ -119,7 +119,7 @@ add_run() {
       rounds++; cases += $3; fails += ($4 == "FAIL"); bodies += $5; dis += $6; secs += $7
       if ($4 == "FAIL" || $6 > 0) last = $1 " (seed " $2 ($9 ? ", commit " $9 " on " $10 : "") ")"
     } END {
-      print "Panosolid random testing, all runs so far (updated " now ")"
+      print "SpindleLabs random testing, all runs so far (updated " now ")"
       print ""
       printf "hours of testing:                 %.1f\n", secs / 3600
       print  "rounds:                           " rounds

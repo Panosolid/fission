@@ -34,7 +34,7 @@ test("the outer model, by hand", () => {
   assert.equal(outerModel(p).refusal, null);
   assert.equal(outerModel([]).refusal, "expected an object");
   assert.equal(outerModel({ ...p, formatVersion: 2.5 }).refusal, "no format version");
-  assert.equal(outerModel({ ...p, formatVersion: 3 }).refusal, "saved by a newer Panosolid");
+  assert.equal(outerModel({ ...p, formatVersion: 3 }).refusal, "saved by a newer SpindleLabs");
   assert.equal(outerModel({ ...p, name: 1 }).refusal, '"name" must be text');
   assert.equal(outerModel({ ...p, units: { length: "ft" } }).refusal, '"units" must give a length unit');
   // A format 1 file has no links: they arrive, empty, with the upgrade.

@@ -87,7 +87,7 @@ async function open(browser) {
   page.on("dialog", (d) => d.dismiss().catch(() => {}));
   await page.goto(url);
   await page.waitForSelector('#timeline li[data-item]', { timeout: 20000 });
-  return { context, page, errors, saved: null, savedName: "Untitled.panosolid.json", known: new Set(), design: null, seen: new Set() };
+  return { context, page, errors, saved: null, savedName: "Untitled.spindlelabs.json", known: new Set(), design: null, seen: new Set() };
 }
 
 /** In the page: what can be clicked, typed into and right-clicked now, each with a selector a replay can find again. */

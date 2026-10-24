@@ -104,12 +104,12 @@ try {
     const page = await fresh();
     try {
       const cases = [
-        ["part.stl", "solid cube\n", "Couldn't open “part.stl”: Panosolid can't open STL meshes yet. Design will take them as mesh bodies."],
-        ["logo.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>', "Couldn't open “logo.svg”: Panosolid can't open SVG drawings yet. Vector and Laser will take them as outlines."],
-        ["plate.dxf", "  0\nSECTION\n", "Couldn't open “plate.dxf”: Panosolid can't open DXF drawings yet. Laser will take them as outlines."],
-        ["bracket.step", "ISO-10303-21;\n", "Couldn't open “bracket.step”: Panosolid can't open STEP models yet. Design will take them as exact solids."],
-        ["poster.pdf", "%PDF-1.7\n", "Couldn't open “poster.pdf”: Panosolid can't open PDF documents yet. Layout will take them as pages."],
-        ["notes.docx", "PK\x03\x04", "Couldn't open “notes.docx”: Panosolid doesn't know this type of file. It opens Panosolid projects (.panosolid.json), PNG images and JPEG images."],
+        ["part.stl", "solid cube\n", "Couldn't open “part.stl”: SpindleLabs can't open STL meshes yet. Design will take them as mesh bodies."],
+        ["logo.svg", '<svg xmlns="http://www.w3.org/2000/svg"/>', "Couldn't open “logo.svg”: SpindleLabs can't open SVG drawings yet. Vector and Laser will take them as outlines."],
+        ["plate.dxf", "  0\nSECTION\n", "Couldn't open “plate.dxf”: SpindleLabs can't open DXF drawings yet. Laser will take them as outlines."],
+        ["bracket.step", "ISO-10303-21;\n", "Couldn't open “bracket.step”: SpindleLabs can't open STEP models yet. Design will take them as exact solids."],
+        ["poster.pdf", "%PDF-1.7\n", "Couldn't open “poster.pdf”: SpindleLabs can't open PDF documents yet. Layout will take them as pages."],
+        ["notes.docx", "PK\x03\x04", "Couldn't open “notes.docx”: SpindleLabs doesn't know this type of file. It opens SpindleLabs projects (.spindlelabs.json), PNG images and JPEG images."],
         ["photo.png", "GIF89a", "Couldn't open “photo.png”: it is named like a PNG image, but its contents aren't one (it may be damaged, or renamed from another type)."],
       ];
       for (const [name, content, message] of cases) {
@@ -177,7 +177,7 @@ try {
       await page.waitForFunction(() => document.querySelector("#layer-list")?.textContent.includes("Layer 1"));
       // A refused paste says why, like a refused drop.
       assert.equal(await paste(page, "body", [{ name: "part.stl", bytes: bytes("solid x\n") }]), true);
-      await waitStatus(page, /^Couldn't open “part\.stl”: Panosolid can't open STL meshes yet\./);
+      await waitStatus(page, /^Couldn't open “part\.stl”: SpindleLabs can't open STL meshes yet\./);
       assert.equal(await page.evaluate(() => document.body.dataset.activeWorkspace), "image");
     } finally {
       await page.close();
@@ -215,7 +215,7 @@ try {
       assert.equal(await status(page), "");
       // Cut short: it starts like a project, so it is routed as one, and the reader's own message says what is wrong.
       await drop(page, "#viewport", [{ name: "half.fission.json", bytes: bytes('{"formatVersion": 2, "name": "Cut') }]);
-      await waitStatus(page, /^Couldn't open “half\.fission\.json”: not a Panosolid project: the file is not valid JSON/);
+      await waitStatus(page, /^Couldn't open “half\.fission\.json”: not a SpindleLabs project: the file is not valid JSON/);
       assert.equal(await page.textContent("#volume"), "30,000 mm³");
     } finally {
       await page.close();
@@ -246,7 +246,7 @@ try {
       await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³");
       // Refused through Open with the same words as a refused drop.
       await page.setInputFiles("#open-file", { name: "part.stl", mimeType: "model/stl", buffer: bytes("solid cube\n") });
-      await waitStatus(page, /^Couldn't open “part\.stl”: Panosolid can't open STL meshes yet\. Design will take them as mesh bodies\.$/);
+      await waitStatus(page, /^Couldn't open “part\.stl”: SpindleLabs can't open STL meshes yet\. Design will take them as mesh bodies\.$/);
       assert.equal(await page.textContent("#volume"), "30,000 mm³");
       // The picker offers images as well as projects.
       const accept = (await page.getAttribute("#open-file", "accept")).split(",");

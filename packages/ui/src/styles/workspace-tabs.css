@@ -1,0 +1,6 @@
+/* The workspace tab row at phone width: its width is rarely a whole pixel
+   but its scroll offset is, so scrolled to the end the last tab could stay
+   up to a pixel cut off; 1 px of end padding lets it show whole. */
+@media (max-width: 640px) {
+  .workspace-tabs { padding-right: 1px; }
+}

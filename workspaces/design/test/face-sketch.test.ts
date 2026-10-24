@@ -317,7 +317,7 @@ test("a sketch on a face is written to a file and read back exactly", () => {
 test("a file's sketch on a face is checked when it is opened: each way it can be broken is refused with its reason", () => {
   const n = (x: unknown) => [x, 0, 0];
   const cases: [string, (d: any) => void, RegExp][] = [
-    ["not a face's name", (d) => (d.timeline.features[1].intent.parameters.plane = "face:"), /is on face:, which is not a face's name this Panosolid makes/],
+    ["not a face's name", (d) => (d.timeline.features[1].intent.parameters.plane = "face:"), /is on face:, which is not a face's name this SpindleLabs makes/],
     ["no frame", (d) => delete d.sketches[0].face, /is on a face but has no frame it was drawn with/],
     ["frame not an object", (d) => (d.sketches[0].face.frame = "up"), /sketch-2's frame needs an origin, an xAxis and a normal, each three numbers/],
     ["origin of two numbers", (d) => (d.sketches[0].face.frame.origin = [0, 0]), /sketch-2's frame needs an origin/],
@@ -341,7 +341,7 @@ test("a file's sketch on a face is checked when it is opened: each way it can be
     ["a plane no one knows", (d) => {
       d.timeline.features[1].intent.parameters.plane = "XW";
       delete d.sketches[0].face;
-    }, /is on XW, not a plane this Panosolid knows \(XY, XZ, YZ or a face\)/],
+    }, /is on XW, not a plane this SpindleLabs knows \(XY, XZ, YZ or a face\)/],
     ["flip false", (d) => (d.timeline.features[2].intent.parameters.flip = false), /feature-5: flip must be true or left out, not false/],
     ["flip as text", (d) => (d.timeline.features[2].intent.parameters.flip = "true"), /flip must be true or left out, not true/],
     ["a kept placement that is text", (d) => (d.kept = { "feature-5": { points: [], curves: [], placement: "XZ" } }), /kept shape's placement is not an object/],

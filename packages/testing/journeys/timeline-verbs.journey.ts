@@ -94,7 +94,7 @@ test("hand-worked: a box and an extruded rectangle download as one STL of 24 tri
   assert.equal(count(file.bytes), 24);
   assert.equal(file.bytes.length, 1284);
   assert.equal(stlVolume(file.bytes), 36000);
-  assert.equal(new TextDecoder().decode(file.bytes.subarray(0, 23)), "Panosolid STL: 2 bodies");
+  assert.equal(new TextDecoder().decode(file.bytes.subarray(0, 25)), "SpindleLabs STL: 2 bodies");
   // The same as each body downloaded alone, joined: the triangles are the kernel's, unchanged.
   await a.run(DOWNLOAD_STL, [bodies[0]]);
   await a.run(DOWNLOAD_STL, [bodies[1]]);
