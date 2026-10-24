@@ -1,12 +1,12 @@
 /* At phone width the save status is one small mark at the top right corner
-   of the app's name, in the gap before the tabs (widened 2 px for it). It
-   follows the name whatever its width: a fixed offset sat on the letters
-   once the name got longer. */
+   of the app's name, small enough to fit the top bar's 8 px gap before the
+   tabs, so it takes no room from them (2 px more cost a whole tab at 375 px
+   in CI's fonts). It follows the name whatever its width: a fixed offset sat
+   on the letters once the name got longer. */
 @media (max-width: 640px) {
-  /* :not(#…) counts as an id, so the margin outweighs "#topbar h1 { margin: 0 }". */
-  .save-mark:not(#no-such-id) { position: relative; margin-right: 2px; }
+  .save-mark { position: relative; }
   .save-mark:has(~ #save-status[data-state="saved"])::after,
-  .save-mark:has(~ #save-status[data-state="saving"])::after { position: absolute; right: -9px; top: 2px; font-size: 10px; font-weight: normal; }
+  .save-mark:has(~ #save-status[data-state="saving"])::after { position: absolute; right: -8px; top: 2px; font-size: 8px; font-weight: normal; }
   .save-mark:has(~ #save-status[data-state="saved"])::after { content: "✓"; }
   .save-mark:has(~ #save-status[data-state="saving"])::after { content: "…"; }
 }
