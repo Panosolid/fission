@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { crc32, deflateSync } from "node:zlib";
 import { launch } from "./browser.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 /** A 200 × 100 RGBA PNG at 10000 px/m (254 DPI, 0.1 mm per pixel), all mid grey. */
 function plate() {
@@ -48,6 +49,7 @@ async function fresh(width = 1000) {
   });
   await page.goto(url);
   await page.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 

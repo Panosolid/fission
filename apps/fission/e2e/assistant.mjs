@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import { launch } from "./browser.mjs";
 import { clickPlane, TOP } from "./sketch-screen.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4181, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4181/";
@@ -106,6 +107,7 @@ async function fresh(answers = [], { ollama = true, builtIn = false, open = true
   });
   await page.goto(url + "#design");
   await volume(page, "24,000 mm³"); // the default box: 40 · 30 · 20
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   if (open) await page.click("#assistant-toggle");
   return { page, asked, listed, builtInAsked, builtInCreated, ollamaHits, remoteHits };
 }

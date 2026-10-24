@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { browserName, launch } from "./browser.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4180, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4180/";
@@ -28,6 +29,7 @@ async function fresh(hash = "#design") {
   });
   await page.goto(url + hash);
   if (hash === "#design") await volume(page, "24,000 mm³"); // 40 · 30 · 20
+  await pinProperties(page); // the size boxes are in the panel, folded at the start on a wide screen (U0b)
   return page;
 }
 /** Waits until the readout shows `text`, and says what it showed if it never does. */

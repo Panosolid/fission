@@ -289,8 +289,9 @@ await check("Fit and Home after zooming in; Look at turns on in a sketch and loo
     await page.click("#sketch-plane-XY");
     await page.waitForFunction(() => document.querySelector("#viewport").dataset.sketching === "true");
     await page.waitForFunction(() => !document.querySelector("[data-view=look-at]").disabled);
-    // Looking straight down, a sideways orbit only spins round Z and dragging down is already at the pole; drag up to tilt. Right of the floating browser (SF3d).
-    await drag(page, [box.x + box.width - 300, box.y + 300], [0, -60], "middle", ["Shift"]);
+    // Looking straight down, a sideways orbit only spins round Z and dragging down is already at the pole; drag up to tilt.
+    // In the middle of the view: clear of the floating browser on the left (SF3d) and the sketch's floating properties on the right (U0b).
+    await drag(page, [box.x + box.width / 2, box.y + 300], [0, -60], "middle", ["Shift"]);
     assert.ok(Math.abs(frame(await camera(page)).forward[2] + 1) > 1e-3, `orbited away from straight down: ${JSON.stringify(await camera(page))}`);
     await page.click("[data-view=look-at]");
     await settle(page);

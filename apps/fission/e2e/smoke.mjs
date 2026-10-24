@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { launch, browserName } from "./browser.mjs";
 import { decodePng } from "./png.mjs";
 import { preview } from "vite";
+import { pinProperties } from "./properties.mjs";
 
 const server = await preview({ preview: { port: 4174, strictPort: true }, logLevel: "error" });
 const url = "http://localhost:4174/";
@@ -120,6 +121,7 @@ try {
   // And for the box's first build: the panel is drawn at once and filled when the kernel's rebuild lands, later on a
   // slow runner (E2E_KERNEL_DELAY makes it late here, browser.mjs; e2e-races).
   await rebuilt();
+  await pinProperties(page); // the checks below type sizes into the panel, folded at the start on a wide screen (U0b)
 
   /**
    * The browser floats over the view's top-left corner (SF3d), where this
@@ -689,7 +691,9 @@ try {
     // The part's Timeline row selects the same body (24f6): lit with Body 1's.
     const both = ["feature-1", "body-1"];
     assert.deepEqual(await current(), both);
-    // Origin rows select nothing until sketches need them (step 21).
+    // Origin rows select nothing until sketches need them (step 21). The Origin starts folded (U0a), so it is opened first.
+    assert.equal(await page.$eval("#browser [data-node=origin]", (el) => el.open), false, "the Origin starts folded");
+    await page.click("#browser [data-node=origin] summary");
     await page.click("#browser [data-node=origin-z]");
     assert.deepEqual(await current(), both);
     // Folding a group keeps it folded when an edit rebuilds the tree.
@@ -1237,6 +1241,7 @@ try {
     try {
       await kept.goto(url + "#design");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await pinProperties(kept);
       // A new browser: the default part is stored as a new project.
       await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
       assert.equal(await kept.textContent("#save-status"), "Saved");
@@ -1279,6 +1284,7 @@ try {
     try {
       await kept.goto(url + "#design");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await pinProperties(kept);
       await kept.fill("#width", "50");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³"); // 50·30·20
       await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
@@ -1533,6 +1539,7 @@ try {
       await bare.goto(url + "#design");
       await bare.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       assert.equal(await bare.evaluate(() => typeof indexedDB), "undefined", "the test really took storage away");
+      await pinProperties(bare); // a fresh browser starts with the panel folded (U0b)
       assert.match(await bare.textContent("#file-status"), /^Projects can't be kept in this browser \(IndexedDB is not available\)\. Use Save to keep your work as a file\.$/);
       // Nothing pretends to autosave.
       await bare.fill("#width", "50");
@@ -1867,6 +1874,7 @@ try {
       const valid = () => wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
       await valid();
       const notesIn = (pane) => wide.$$eval(`${pane} .notes-strip .change-note`, (els) => els.map((e) => e.querySelector(".note-text").textContent));
+      await pinProperties(wide);
       // Today nothing outside Design reads the design, so an edit makes no note.
       await wide.fill("#width", "41");
       await valid();

@@ -15,9 +15,10 @@ import { registerDesign } from "./representations.ts";
 import { DESIGN_COMMANDS, documentFor } from "./commands.ts";
 import { buildSpec } from "./spec.ts";
 import { SHAPE_LABELS, toolbarGroups, type ToolButton } from "./toolbar.ts";
-import { browserTree, rowReferences, type BrowserNode } from "./browser.ts";
+import { browserTree, rowItem, rowReferences, type BrowserNode } from "./browser.ts";
 import { callOffDrag, showTimelineBar, timelineBarItems } from "./timeline-bar.ts";
 import { DEFAULT_SIZES, parameterRows, propertiesPanel, SIZE_KEYS, type SizeKey } from "./properties.ts";
+import { FOLDED_AT_START, propertiesFold, readPinned, type FoldState, type PropertiesFold } from "./properties-fold.ts";
 import { freshDesign, START_FRESH_STEP, startFresh } from "./start-fresh.ts";
 import { deleteAsk } from "./delete-ask.ts";
 import { itemName } from "./timeline-edits.ts";
@@ -62,6 +63,8 @@ let putAwayByRestore = false;
 let editingSketch: { id: string; grid: number; typed: string; tool: ToolKind } | null = null;
 /** Grid snap on or off (sketch feel SF1; off by default: points go where you click), kept for every sketch until the page reloads. */
 let gridSnap = DEFAULT_GRID_SNAP;
+/** The properties' fold a new mount starts with (U0b): the user's pin, kept across Undo, Redo and switching; null until the first mount reads it from storage. */
+let foldKept: FoldState | null = null;
 /** How many times Design has framed the part, read by the e2e test (an undo must not add one). */
 let fits = 0;
 
@@ -122,8 +125,9 @@ function toolbar(slot: HTMLElement, onClick: (b: ToolButton) => void, onSketch: 
 /** Whether two sets of ids hold the same ids. */
 const sameIds = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((id) => b.has(id));
 
-/** Browser groups the user folded, kept across rebuilds and workspace switches. */
-const folded = new Set<string>();
+/** Browser groups the user folded (false) or opened (true), kept across rebuilds and workspace switches; any other group starts as its node says (`startsFolded`). */
+const folding = new Map<string, boolean>();
+const isOpen = (n: { id: string; startsFolded?: boolean }) => folding.get(n.id) ?? !n.startsFolded;
 
 /** Lights the browser rows whose geometry is selected (aria-current), and only those; `failed`, the last rebuild's failed ids, select nothing. */
 function lightRows(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<string>, items: readonly GeometryReference[]) {
@@ -154,10 +158,7 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
   const document = slot.ownerDocument;
   // The toggle event fires a task after the click, so a rebuild can come
   // first: read the folding from the tree being replaced, not only events.
-  for (const d of slot.querySelectorAll<HTMLDetailsElement>("details[data-node]")) {
-    if (d.open) folded.delete(d.dataset.node!);
-    else folded.add(d.dataset.node!);
-  }
+  for (const d of slot.querySelectorAll<HTMLDetailsElement>("details[data-node]")) folding.set(d.dataset.node!, d.open);
   const list = (nodes: BrowserNode[]) => {
     const ul = document.createElement("ul");
     ul.className = "tree";
@@ -165,10 +166,10 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
       const li = document.createElement("li");
       if (n.children) {
         const details = document.createElement("details");
-        details.open = !folded.has(n.id);
+        details.open = isOpen(n);
         details.dataset.node = n.id; // read by the e2e test
         details.addEventListener("toggle", () => {
-          if (details.isConnected) details.open ? folded.delete(n.id) : folded.add(n.id);
+          if (details.isConnected) folding.set(n.id, details.open);
         });
         const summary = document.createElement("summary");
         summary.textContent = n.label;
@@ -180,9 +181,12 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
         if (ref) row.setAttribute("type", "button");
         row.className = "tree-row";
         row.textContent = n.label;
+        // One line per row (U0a): a label too long for it ends in "…", and the tooltip has it whole.
+        row.title = n.label;
+        row.dataset.label = n.label;
         row.dataset.node = n.id;
         if (ref) row.addEventListener("click", (e) => onSelect(ref, (e as MouseEvent).shiftKey));
-        if (items.has(n.id) || n.id.startsWith("sketches/")) {
+        if (items.has(n.id) || n.id.startsWith("sketches/") || n.id.startsWith("body-")) {
           row.addEventListener("dblclick", () => onOpen(n.id));
           // The row's menu: a right-click at the pointer, or the ⋯ button under itself.
           row.addEventListener("contextmenu", (e) => {
@@ -215,9 +219,9 @@ function browser(slot: HTMLElement, doc: DesignDocument, failed: ReadonlySet<str
   const fold = document.createElement("details");
   fold.className = "browser-fold";
   fold.dataset.node = "browser";
-  fold.open = !folded.has("browser");
+  fold.open = isOpen({ id: "browser" });
   fold.addEventListener("toggle", () => {
-    if (fold.isConnected) fold.open ? folded.delete("browser") : folded.add("browser");
+    if (fold.isConnected) folding.set("browser", fold.open);
   });
   const title = document.createElement("summary");
   title.textContent = "Browser";
@@ -280,7 +284,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
   /** Draws the browser for `doc` with the last rebuild's failed items (no Body row for them). */
   function drawBrowser(doc: DesignDocument) {
     rowsFailed = failedNow;
-    browser(ctx.browser, doc, failedNow, selectRow, openRowMenu, (node) => openItem(rowItem(node)));
+    browser(ctx.browser, doc, failedNow, selectRow, openRowMenu, (node) => openItem(itemOfRow(node)));
   }
 
   /** The browser's Body 1 row: a click selects the body, Shift adds or takes it out. */
@@ -289,6 +293,8 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     else ctx.selection.set([ref]);
   }
 
+  /** The properties' fold (U0b), made once the tool boxes are in the panel; a selection drawn before then folds nothing. */
+  let fold: PropertiesFold | null = null;
   /** The ids of the sketches whose outlines are selected, as the last showSelection found them. */
   let selectedSketches: ReadonlySet<string> = new Set();
   /** Draws the selection: the viewport's colours, the lit browser rows, the properties' rows. */
@@ -308,6 +314,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     );
     viewport.showSelection(highlightOf(items, lastScene));
     lightRows(ctx.browser, doc, failedNow, items);
+    fold?.update({ selected: items.length > 0 });
     panel.showSelection(selectionRows(items, lastScene, doc));
     // The Feature and Body sections describe the selected feature (else the part), with the browser's number for its body.
     const focus = panelFocus(items, lastScene, doc);
@@ -407,7 +414,7 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     for (const row of ctx.browser.querySelectorAll<HTMLElement>(".tree-row")) {
       const words = rows.get(row.dataset.node!);
       if (words !== undefined) row.title = words;
-      else if (row.classList.contains("kept")) row.removeAttribute("title");
+      else if (row.classList.contains("kept")) row.title = row.dataset.label ?? "";
       row.classList.toggle("kept", words !== undefined);
     }
   }
@@ -600,15 +607,16 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       row.classList.toggle("timeline-menu-rolled-back", grey);
       row.classList.toggle("timeline-menu-greyed", by !== undefined);
       if (by !== undefined) row.title = `Greyed: ${by} is suppressed`;
-      else if (row.title.startsWith("Greyed: ")) row.removeAttribute("title");
+      else if (row.title.startsWith("Greyed: ")) row.title = row.dataset.label ?? "";
     }
   }
 
   /** The timeline item of a browser row with a menu: "sketches/<id>" or an item's id. */
-  const rowItem = (node: string) => (node.startsWith("sketches/") ? node.slice("sketches/".length) : node);
-  /** A row's menu (24e4 for sketches, 24f3 for every timeline item). */
+  /** The item a row stands for (browser.ts rowItem), or "" for none. */
+  const itemOfRow = (node: string) => rowItem(node, designDoc(), failedNow) ?? "";
+  /** A row's menu (24e4 for sketches, 24f3 for every timeline item, U0a for bodies: their feature's). */
   function openRowMenu(node: string, at: { x: number; y: number }) {
-    openMenu(rowItem(node), at);
+    openMenu(itemOfRow(node), at);
   }
 
   /** A double-click on item `id` (25a3): its menu's Edit Sketch or Edit feature, refused with the menu's words when that is off. */
@@ -1152,6 +1160,14 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
     cancel: () => leaveEdit(),
   });
 
+  // The panel folds away until something is selected or a tool's box is in it (U0b); the user's pin is kept across mounts.
+  fold = propertiesFold(
+    ctx.properties,
+    ["sketch-panel", "extrude-panel", "feature-edit"].map((id) => ctx.properties.querySelector<HTMLElement>(`#${id}`)!),
+    foldKept ?? { ...FOLDED_AT_START, pinned: readPinned() },
+  );
+  fold.update({ selected: ctx.selection.items.length > 0 });
+
   /** Opens item `id`'s sizes in the Edit feature panel, out of any sketch or Extrude panel first. */
   function openEdit(id: string) {
     leaveExtrude();
@@ -1531,6 +1547,10 @@ function mount(ctx: WorkspaceContext): MountedWorkspace {
       viewport.showSketches([]);
       typed.element.remove();
       hint.element.remove();
+      if (fold) {
+        foldKept = { ...FOLDED_AT_START, pinned: fold.state.pinned };
+        fold.close();
+      }
       for (const slot of [ctx.toolbar, ctx.browser, ctx.properties, ctx.timeline]) slot?.replaceChildren();
     },
   };

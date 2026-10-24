@@ -28,4 +28,19 @@
   /* A sketch's row and its ⋯ sit side by side as two blocks. */
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .delete-ask-row { justify-content: flex-start; }
   .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .delete-ask-row > .tree-row:not(#none) { flex: 0 1 auto; }
+  /* Slim rows like Fusion's (U0a): one line each, 22 px tall with 2 px
+     between, smaller words; a label too long for the panel ends in "…" and
+     its tooltip (the row's title) has it whole. */
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) :is(.tree summary, .tree-row:not(#none), .delete-ask-more:not(#none)) { margin: 1px 0; font-size: 13px; line-height: 18px; }
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree-row:not(#none) { padding: 1px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .delete-ask-more:not(#none) { min-width: 24px; padding: 1px 4px; }
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .delete-ask-row { gap: 2px; }
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .tree .tree { padding-left: 12px; }
+}
+/* With a mouse, a row's ⋯ shows only while the pointer is on its row or
+   the keyboard is in it, as Fusion's row buttons do; it keeps its place, so
+   nothing moves when it shows. A touch screen keeps it shown: it is the
+   only way there to the menu a right-click opens. */
+@media (min-width: 641px) and (hover: hover) {
+  .browser-fold:is(#workspace:not([data-split="on"]) #browser > *) .delete-ask-row:not(:hover, :focus-within) > .delete-ask-more:not(#none) { opacity: 0; }
 }
