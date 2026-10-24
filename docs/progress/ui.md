@@ -2,9 +2,9 @@
 
 Progress file for one workstream (rules: root CLAUDE.md, "Workstreams and where progress lives"). Only threads working on this workstream edit this file.
 
-Done: nothing yet; the plan was designed with the owner on 2026-10-22 and 2026-10-23.
+Done: nothing yet; the plan was designed with the owner on 2026-10-22 and 2026-10-23, and step U0 added on 2026-10-24.
 
-Next: U1a, from `main`, only when the owner says to start (roadmap coding is paused after step 27 and its bug sweep until he resumes it; the UI work is styling and layout, so it can run beside the sketch work once started).
+Next: U0a (started 2026-10-24 on `claude/project-thread-nayntm`), then U0b to U0f in order, each from the branch before it; U1a after U0.
 
 ## How to work on this workstream
 
@@ -36,6 +36,15 @@ Next: U1a, from `main`, only when the owner says to start (roadmap coding is pau
 ## Steps and substeps
 
 Each later step is split further by the thread that starts it if a substep turns out too big for one PR.
+
+### U0. Compact like Fusion (the owner's ask, 2026-10-24)
+The owner compared the Design workspace with Fusion 360 and Onshape (his screenshots of 2026-10-24): ours wastes the screen. Two fat scroll bars, the right panel open all the time (about a fifth of the width), browser rows two or three lines tall, a toolbar button for every preset. His answers the same day: projects start empty with a hint that can be closed; Insert always adds a preset as a new body; rows show short names that can be renamed, the full description kept with them; the top bar goes Fusion-like (DESIGN ▾, grouped icons) now rather than later. Before screenshots: `/mnt/project-files/compact-ui/before/`.
+- [ ] U0a. Slim browser rows: one line each, 22 px tall, 13 px words; a long label ends in "…" with the whole label as its tooltip; the Timeline group (the bar along the bottom shows it) and the Origin start folded; a row's ⋯ shows only under the mouse or the keyboard (touch keeps it); the panels' scroll bars thin and seen only while the pointer is over them (Fusion's). Test: `browser.test.ts` (the groups that start folded, hand-listed); `e2e/layout.mjs`: every shown row at most 22 px (18 px line, 1 px padding and border each side, worked by hand), a cut row ends in "…" with its label as the tooltip, the golden stepped boss needs no scroll bar at 1280 × 720, the ⋯ hidden away from its row and shown on it or focused, the scroll bar's colour transparent away from the panel; each check fails with the old rows forced back (wrapping, 4 px padding, no "…", the ⋯ always shown, every group open on a 620 px window).
+- [ ] U0b. The right panel folds away by default: it opens by itself while something is selected, a tool runs (sketch, extrude, edit feature) or a rebuild fails, and folds again after; a Properties button at the right edge opens and pins it. Phones keep their toggle.
+- [ ] U0c. A new project starts empty (no box), with a hint that can be closed (✕) offering Create sketch, Insert a preset and Open a project.
+- [ ] U0d. Insert ▾ (Presets: the seven shapes, each always added as a new body at the marker; built for a "From Community" section later) and File ▾ (Start fresh as New, Open, Save, Export STL) replace the toolbar's Create, Export and Design groups.
+- [ ] U0e. Short names: each item keeps its full description and gets a short name (Box 1, Slot 1, Sketch 1, Extrude 1; presets were "Feature n (shape)" from the id counter), shown in the browser and renamable from its ⋯ menu; the description is the tooltip.
+- [ ] U0f. The top bar like Fusion's: one DESIGN ▾ workspace button instead of ten tabs, and the toolbar as groups of icons with a word and ▾ (takes U3a and U3b forward), with an icon before each browser row and an eye on each body (from U4b).
 
 ### U1. Colours as tokens, and light mode
 - [ ] U1a. Every colour in `theme.css` and the feature CSS files becomes a named token (`--surface`, `--text`, `--accent`, …) on `:root`, with the dark values unchanged; a source check refuses a raw colour outside the token file. Test: screenshots of every e2e page match the current ones pixel for pixel (a token moved, nothing changed); a deliberate break (one token's value changed) fails the comparison.
