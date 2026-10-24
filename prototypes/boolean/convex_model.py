@@ -54,7 +54,7 @@ can happen.
   (AssertionError otherwise), so the two halves keep each other honest.
 
 Tolerance, as box_model: a corner of one prism within 2 x LINEAR of a face
-plane of the other, or an edge of one passing within 2 x LINEAR of an edge
+of the other (of its plane, near the face; 30c), or an edge of one passing within 2 x LINEAR of an edge
 of the other, without touching it exactly, is the same place to the kernel
 (rule 1), which this model cannot see, so it refuses them (`ModelError`;
 30c snaps first). For axis-aligned boxes this is box_model's refusal of
@@ -373,21 +373,25 @@ class Measured:
                              and not any(all(value(r, p) >= 0 for p, _ in cell) for r in shadows[s]))
 
         owners = [{s for s, hs in enumerate(self.spaces) if any(j == jj for jj, _ in hs)} for j in range(len(self.planes))]
-        lines = list(bounds)
-        cells = [(poly, live(poly, range(len(self.solids))))]
+        # Planes meeting this one along the same line (three planes through
+        # one line) split it once, for every solid owning any of them.
+        cuts = {}
         for j, (m, c) in enumerate(self.planes):
             if j == i or not any(cross(m, n)):
                 continue
             line = line_of(m, c)
             if line[0] < 0 or (line[0] == 0 and line[1] < 0):
                 line = tuple(-x for x in line)
-            if line in lines:
-                continue
+            if line not in bounds:
+                cuts.setdefault(line, set()).update(owners[j])
+        lines = list(bounds)
+        cells = [(poly, live(poly, range(len(self.solids))))]
+        for line, owned in cuts.items():
             lines.append(line)
             lid = len(lines) - 1
             split = []
             for cell, solids in cells:
-                vals = [value(line, p) for p, _ in cell] if solids & owners[j] else [0]
+                vals = [value(line, p) for p, _ in cell] if solids & owned else [0]
                 if all(v <= 0 for v in vals) or all(v >= 0 for v in vals):
                     split.append((cell, solids))
                 else:
@@ -736,11 +740,16 @@ def on_segment(p, a, b):
 
 def refuse_close(a, b):
     """Rule 1's refusal: a corner of one prism within 2 x LINEAR of a face
-    plane of the other, or edges passing within 2 x LINEAR, without touching."""
+    of the other, or edges passing within 2 x LINEAR, without touching. A
+    corner further than that outside any plane of the other is further from
+    all its faces, so a face's plane counts only near the solid."""
     for s, t in ((a, b), (b, a)):
         for v in s.vertices:
-            for n, d in t.halfspaces:
-                gap = abs(dot(n, v) - d)
+            gaps = [dot(n, v) - d for n, d in t.halfspaces]
+            if max(gaps) > SAME:
+                continue
+            for (n, d), g in zip(t.halfspaces, gaps):
+                gap = abs(g)
                 if 0 < gap <= SAME:
                     raise ModelError(f"corner {v} is within tolerance of the plane {n} . x = {d}")
     for p0, p1 in a.segments():

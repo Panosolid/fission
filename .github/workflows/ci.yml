@@ -125,6 +125,19 @@ jobs:
       # in it skips where cadquery-ocp isn't installed (quick mode).
       - run: python3 -m unittest discover -s prototypes/boolean -p 'test_*.py'
         if: env.CODE == 'true'
+      # Step 30c: the boolean nasty-case generator's lines (every family,
+      # place and op), answered from the exact models with each family's
+      # intent checked, and with every kind of wrong answer planted in each
+      # line it fits: all must agree and every plant be caught (about 1 min).
+      # Full mode adds OpenCascade's own boolean of each snapped pair.
+      - name: The boolean nasty cases, judged from the models and with planted wrong answers
+        if: env.CODE == 'true'
+        working-directory: kernel
+        env:
+          OCC: ${{ needs.mode.outputs.full != 'false' && '--occ' || '' }}
+        run: |
+          FISSION_BOOLEAN_CASES_OUT=target/boolean-cases.jsonl cargo test -q --test boolean_cases lines_for_the_judge
+          python3 ../prototypes/boolean/judge.py target/boolean-cases.jsonl --planted $OCC
       # Step 29b2: the nightly oracle reads every body from its STEP file.
       # One round as the nightly runs it, with every file's first face
       # planted flipped (FISSION_STEP_FAULT): every body must be a finding,
