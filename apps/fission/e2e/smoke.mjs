@@ -1241,6 +1241,7 @@ try {
     try {
       await kept.goto(url + "#design");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await pinProperties(kept);
       // A new browser: the default part is stored as a new project.
       await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
       assert.equal(await kept.textContent("#save-status"), "Saved");
@@ -1283,6 +1284,7 @@ try {
     try {
       await kept.goto(url + "#design");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
+      await pinProperties(kept);
       await kept.fill("#width", "50");
       await kept.waitForFunction(() => document.querySelector("#volume")?.textContent === "30,000 mm³"); // 50·30·20
       await kept.waitForFunction(() => document.querySelector("#save-status").dataset.state === "saved");
@@ -1537,6 +1539,7 @@ try {
       await bare.goto(url + "#design");
       await bare.waitForFunction(() => document.querySelector("#volume")?.textContent === "24,000 mm³");
       assert.equal(await bare.evaluate(() => typeof indexedDB), "undefined", "the test really took storage away");
+      await pinProperties(bare); // a fresh browser starts with the panel folded (U0b)
       assert.match(await bare.textContent("#file-status"), /^Projects can't be kept in this browser \(IndexedDB is not available\)\. Use Save to keep your work as a file\.$/);
       // Nothing pretends to autosave.
       await bare.fill("#width", "50");
@@ -1871,6 +1874,7 @@ try {
       const valid = () => wide.waitForFunction(() => document.querySelector("#status")?.textContent === "valid");
       await valid();
       const notesIn = (pane) => wide.$$eval(`${pane} .notes-strip .change-note`, (els) => els.map((e) => e.querySelector(".note-text").textContent));
+      await pinProperties(wide);
       // Today nothing outside Design reads the design, so an edit makes no note.
       await wide.fill("#width", "41");
       await valid();
