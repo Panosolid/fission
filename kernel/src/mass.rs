@@ -321,7 +321,9 @@ pub(crate) mod tests {
         for (name, body) in [("slice", hand_sphere_slice(5.0, -3.0, 4.0)), ("octant", hand_sphere_octant(2.0))] {
             let unsupported =
                 crate::validate::ValidationError::Tessellation { face: 0, message: "general sphere faces are not supported yet".into() };
-            assert_eq!(crate::validate::validate(&body), Err(vec![unsupported]), "{name}");
+            assert_eq!(crate::validate::validate(&body), Err(vec![unsupported.clone()]), "{name}");
+            // A face the kernel can't mesh leaves the region unknown: solid.
+            assert_eq!(unsupported.category(), crate::validate::Category::Solid);
         }
     }
 

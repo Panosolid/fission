@@ -128,7 +128,7 @@ fn body_scene(label: &str, body: &Body) -> (String, Option<Mesh>) {
     for p in errors.iter().filter_map(ValidationError::point) {
         bad_vertices.extend(p.to_array());
     }
-    let messages: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+    let messages = crate::validate::report_lines(&errors);
     // A body with dangling references can't be tessellated or even sampled
     // safely; it is listed with its errors and nothing drawn.
     let sound = !errors
@@ -486,7 +486,7 @@ mod tests {
             ]
         );
         assert_eq!(after["errors"].as_array().unwrap().len(), 3);
-        assert!(after["errors"][0].as_str().unwrap().contains("vertex 7"));
+        assert!(after["errors"][0].as_str().unwrap().starts_with("geometry: vertex 7 "), "listed by category");
         let html = std::fs::read_to_string(out.join("index.html")).unwrap();
         assert!(html.contains("moved vertex 7"), "note missing");
         assert!(!html.contains("__SCENE__") && !html.contains("__NOTE__"));
@@ -629,7 +629,7 @@ mod tests {
         let dir = temp_dir("dangling");
         let out = dump(&dir, "x", &[("bad", &b)], "").unwrap();
         let scene = scene_of(&out);
-        assert!(scene[0]["errors"][0].as_str().unwrap().contains("dangling"));
+        assert!(scene[0]["errors"][0].as_str().unwrap().starts_with("topology: face 2: dangling"), "listed by category");
         assert_eq!(numbers(&scene[0]["positions"]).len(), 0);
         assert_eq!(scene[0]["edges"].as_array().unwrap().len(), 0);
         assert!(!out.join("bad.stl").exists());

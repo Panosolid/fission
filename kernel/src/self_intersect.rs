@@ -480,8 +480,13 @@ mod tests {
     use glam::DVec2;
     use std::f64::consts::FRAC_PI_2;
 
+    /// The body's errors, each asserted to be the solid's (B0 decision 8):
+    /// every body here is sound in topology and geometry, so whatever this
+    /// check finds is how the solid crosses itself.
     fn errors(b: &Body) -> Vec<ValidationError> {
-        validate(b).err().unwrap_or_default()
+        let errs = validate(b).err().unwrap_or_default();
+        assert!(errs.iter().all(|e| e.category() == crate::validate::Category::Solid), "{errs:?}");
+        errs
     }
 
     fn moved(b: Body, by: DVec3) -> Body {
